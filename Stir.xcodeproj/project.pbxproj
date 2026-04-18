@@ -12,27 +12,34 @@
 		0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */; };
 		106BDB46DB5D832BEE1BCC94 /* RootCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A678963101108CE2077E4BE /* RootCoordinator.swift */; };
 		13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4714D34B06C97687599F9389 /* ErrorPresenter.swift */; };
+		16A9DBA56641F2BD47913C1A /* IdentityServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */; };
 		1E091320FB07E7285F5F0AA8 /* SetupPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212DCA793F0B530B0FB3990B /* SetupPreferencesView.swift */; };
+		226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */; };
+		2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */; };
 		25CED38EE9C99F1CF78B59E1 /* CloudKitAvailabilityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C15A8E3297F5D551917C473 /* CloudKitAvailabilityStore.swift */; };
 		2653823930DD051BDD2C94A0 /* KitchenEquipmentRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */; };
 		303A289BB5A889F72B6A92EA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 20F0AF2A4DCBE0E2DAC10789 /* Supabase */; };
 		34F5BB054D4402919ED8FD1A /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */; };
 		38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61ECEB2E68886B41D1AE79C /* AppConfig.swift */; };
 		3BEB07ACCE22C955E60990BE /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F9A8184731D4338C59B314 /* PersistenceController.swift */; };
+		45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */; };
 		4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CC0200F54DD79B24299BCF /* TonightHomeView.swift */; };
 		482A2F31B55D16103EC1FA87 /* CloudKitAccountMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81FCD69FD54A65576C313EE2 /* CloudKitAccountMonitor.swift */; };
 		4AD91364516A336582E7ED4B /* Stir.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A48A76DF2DD0C28905436318 /* Stir.xcdatamodeld */; };
 		548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */; };
 		5720A76E68F5CF2CC16C823E /* Logger+Stir.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */; };
+		586AFAF4EE8826917C276FB2 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */; };
 		58E57E09864E1CFCC5191237 /* KeychainStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 374669111D98B028BEC3824D /* KeychainStorage.swift */; };
 		5E6AC0A940D710330894EB3C /* StirError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74588281F314D67EE09DCD8A /* StirError.swift */; };
 		60D5D1E54ECC9E02449692E5 /* PostHogClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBC9D4D475398EE32CA57D1F /* PostHogClient.swift */; };
 		69B7CA85BE35658ED8A3282D /* EntitlementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3A2CACA16214E11B7E592C /* EntitlementService.swift */; };
 		6ADA59C2305666FD29D964AE /* OnboardingRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41441DCBBD753CD51933B94 /* OnboardingRoot.swift */; };
 		6C296A376D410750FCA3389D /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 6B3359E0EED056E56B1889EC /* PostHog */; };
+		748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF11728D8ED6F68DAFF296E /* CoreDataRoundtripTests.swift */; };
 		795414CE1EDDCCC6B9B4241D /* CanonicalKeyHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */; };
 		8138014FAFF13F77C895A6A8 /* ConfigurationErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40092CAC050DF5BA95E9711C /* ConfigurationErrorView.swift */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
+		8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */; };
 		9399B35D14137ACD534554C4 /* OnboardingRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF4659B21B5797AE4339706 /* OnboardingRoute.swift */; };
 		9E1AAEFE1947F34FB201BDAB /* IdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9695B3F81139A97A1E549D40 /* IdentityService.swift */; };
 		9FD7CCAF1B3E98E917067C6D /* HouseholdProfile+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */; };
@@ -43,6 +50,7 @@
 		AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */; };
 		AFEB4BBD169B34228F3DB241 /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */; };
 		B364F24CB12337EA93DC300A /* EntitlementTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */; };
+		B5CE0F49437BF827C38BF730 /* EntitlementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */; };
 		B92301183E9FC07571959AE1 /* SentryReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18E8619A7FDF88B9465134C3 /* SentryReporting.swift */; };
 		C1624675C7CF760A015E0575 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0C5B327FD1EFD0788845785 /* LoadingView.swift */; };
 		CB7BE78DDBFB84E712A477A8 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 1C9FAC356602FCAFDD0E3651 /* Sentry */; };
@@ -52,6 +60,7 @@
 		F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8F639B91A0A9CC0F13DE7A /* WelcomeView.swift */; };
 		F6326373ED0BD2EF6E3A3D82 /* CurrentHouseholdStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */; };
 		F751CF25A5645B4EB4950CE3 /* HouseholdPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD287009FA0BEF2EC99BC52 /* HouseholdPreferencesView.swift */; };
+		FA5CDC3ACD39F8A27A4D69BD /* MockCloudKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 633850447A198796407ED908 /* MockCloudKit.swift */; };
 		FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */; };
 /* End PBXBuildFile section */
 
@@ -77,6 +86,7 @@
 		1A678963101108CE2077E4BE /* RootCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootCoordinator.swift; sourceTree = "<group>"; };
 		1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootView.swift; sourceTree = "<group>"; };
 		1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KitchenEquipment+Extensions.swift"; sourceTree = "<group>"; };
+		1EF11728D8ED6F68DAFF296E /* CoreDataRoundtripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataRoundtripTests.swift; sourceTree = "<group>"; };
 		212DCA793F0B530B0FB3990B /* SetupPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPreferencesView.swift; sourceTree = "<group>"; };
 		34CC0200F54DD79B24299BCF /* TonightHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightHomeView.swift; sourceTree = "<group>"; };
 		374669111D98B028BEC3824D /* KeychainStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStorage.swift; sourceTree = "<group>"; };
@@ -86,34 +96,42 @@
 		4714D34B06C97687599F9389 /* ErrorPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPresenter.swift; sourceTree = "<group>"; };
 		494C830D500C89939B57CD7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4BB49FCA03EF17C97D6C5DB9 /* Stir.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Stir.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychain.swift; sourceTree = "<group>"; };
 		547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitchenEquipmentRepository.swift; sourceTree = "<group>"; };
 		55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
+		579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
 		5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdProfileRepository.swift; sourceTree = "<group>"; };
 		5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementTypes.swift; sourceTree = "<group>"; };
 		5D8F639B91A0A9CC0F13DE7A /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		633850447A198796407ED908 /* MockCloudKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCloudKit.swift; sourceTree = "<group>"; };
 		64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDTOs.swift; sourceTree = "<group>"; };
 		68F9A8184731D4338C59B314 /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 		6FF4659B21B5797AE4339706 /* OnboardingRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRoute.swift; sourceTree = "<group>"; };
 		71194080696470F518663BA9 /* DietaryRuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietaryRuleRepository.swift; sourceTree = "<group>"; };
 		74588281F314D67EE09DCD8A /* StirError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirError.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
+		7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModelTests.swift; sourceTree = "<group>"; };
 		81FCD69FD54A65576C313EE2 /* CloudKitAccountMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitAccountMonitor.swift; sourceTree = "<group>"; };
+		837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitAccountChangeTests.swift; sourceTree = "<group>"; };
 		86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HouseholdProfile+Extensions.swift"; sourceTree = "<group>"; };
 		86D2499D3F643A0F93C7D4A8 /* StirTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StirTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityServiceTests.swift; sourceTree = "<group>"; };
 		9695B3F81139A97A1E549D40 /* IdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityService.swift; sourceTree = "<group>"; };
 		B0C5B327FD1EFD0788845785 /* LoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingView.swift; sourceTree = "<group>"; };
 		B41441DCBBD753CD51933B94 /* OnboardingRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRoot.swift; sourceTree = "<group>"; };
 		BBC9D4D475398EE32CA57D1F /* PostHogClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogClient.swift; sourceTree = "<group>"; };
 		BBD287009FA0BEF2EC99BC52 /* HouseholdPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdPreferencesView.swift; sourceTree = "<group>"; };
+		C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSessionClientTests.swift; sourceTree = "<group>"; };
 		CC4574BCB671B68DF6493BDE /* Stir.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Stir.xcdatamodel; sourceTree = "<group>"; };
 		D40A1B4A21CC6EFC11F1C3A1 /* SetupKitchenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupKitchenView.swift; sourceTree = "<group>"; };
 		D61ECEB2E68886B41D1AE79C /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryReporter.swift; sourceTree = "<group>"; };
+		EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementServiceTests.swift; sourceTree = "<group>"; };
 		EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTest.swift; sourceTree = "<group>"; };
 		F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Stir.swift"; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
-		"TEMP_D0856A93-B132-43B0-8FF6-80BBC0061358" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_2592A41B-D027-4955-AB2F-AC73EBA7A76A" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,7 +167,14 @@
 		071AE0605D7D1BFC77ED925A /* Unit */ = {
 			isa = PBXGroup;
 			children = (
+				EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */,
+				903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */,
+				633850447A198796407ED908 /* MockCloudKit.swift */,
+				4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */,
+				579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */,
+				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
+				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 			);
 			path = Unit;
 			sourceTree = "<group>";
@@ -249,6 +274,8 @@
 		8D4F77D12B54EF8995BA1595 /* Integration */ = {
 			isa = PBXGroup;
 			children = (
+				837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */,
+				1EF11728D8ED6F68DAFF296E /* CoreDataRoundtripTests.swift */,
 			);
 			path = Integration;
 			sourceTree = "<group>";
@@ -407,10 +434,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_C178E280-4E25-4FA8-A915-B42C39FB06AA" /* Stir */ = {
+		"TEMP_21BFF7AA-0797-4A82-94C3-AE994D0459A1" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_D0856A93-B132-43B0-8FF6-80BBC0061358" /* Config.xcconfig */,
+				"TEMP_2592A41B-D027-4955-AB2F-AC73EBA7A76A" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -517,7 +544,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
+				748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */,
+				B5CE0F49437BF827C38BF730 /* EntitlementServiceTests.swift in Sources */,
+				16A9DBA56641F2BD47913C1A /* IdentityServiceTests.swift in Sources */,
+				FA5CDC3ACD39F8A27A4D69BD /* MockCloudKit.swift in Sources */,
+				8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */,
+				586AFAF4EE8826917C276FB2 /* MockURLProtocol.swift in Sources */,
+				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
+				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -582,17 +618,20 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D0856A93-B132-43B0-8FF6-80BBC0061358" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_2592A41B-D027-4955-AB2F-AC73EBA7A76A" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Stir/App/Stir.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
+				ENABLE_TESTABILITY = YES;
 				INFOPLIST_FILE = Stir/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scalinity.stir;
 				PRODUCT_NAME = Stir;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
@@ -606,6 +645,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
@@ -617,17 +657,19 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D0856A93-B132-43B0-8FF6-80BBC0061358" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_2592A41B-D027-4955-AB2F-AC73EBA7A76A" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Stir/App/Stir.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
+				ENABLE_TESTABILITY = NO;
 				INFOPLIST_FILE = Stir/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scalinity.stir;
 				PRODUCT_NAME = Stir;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Release;
 		};
@@ -636,8 +678,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
+				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scalinity.stir.tests;
+				PRODUCT_NAME = StirTests;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Stir.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Stir";
 			};
 			name = Debug;
@@ -647,8 +691,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
+				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scalinity.stir.tests;
+				PRODUCT_NAME = StirTests;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Stir.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Stir";
 			};
 			name = Release;
@@ -663,6 +709,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 25H5DDPKAC;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;

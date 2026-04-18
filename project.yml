@@ -41,6 +41,10 @@ settings:
     # Reduce binary size in Release.
     DEAD_CODE_STRIPPING: YES
     ALWAYS_SEARCH_USER_PATHS: NO
+    # Apple-Silicon-only: exclude x86_64 on simulator builds so Intel-only
+    # slices don't fail package resolution on Macs where the SwiftPM
+    # vendor dropped Rosetta support.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 
 packages:
   supabase-swift:
@@ -108,6 +112,14 @@ targets:
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      configs:
+        Debug:
+          ENABLE_TESTABILITY: YES
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+        Release:
+          ENABLE_TESTABILITY: NO
+          SWIFT_OPTIMIZATION_LEVEL: -O
 
     dependencies:
       - package: supabase-swift
@@ -128,9 +140,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.scalinity.stir.tests
+        PRODUCT_NAME: StirTests
         DEVELOPMENT_TEAM: 25H5DDPKAC
         BUNDLE_LOADER: $(TEST_HOST)
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Stir.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Stir
+        GENERATE_INFOPLIST_FILE: YES
 
     dependencies:
       - target: Stir
