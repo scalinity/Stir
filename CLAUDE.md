@@ -353,34 +353,59 @@ One round trip, no race, no join. Empty return = capped.
     "tier": "free" | "premium" | "pro",
     "billing_state": "none" | "active" | "trial" | "grace" | "cancelled_active" | "expired",
     "is_trial": true | false,
-    "trial_expires_at": "2026-04-25T00:00:00Z" | null,
-    "subscription_expires_at": "2027-04-18T00:00:00Z" | null,
+    "expires_at": "2027-04-18T00:00:00Z" | null,
     "voice_enabled": true | false,
-    "show_billing_grace_banner": true | false,
+    "billing_retry_banner": true | false,
     "quotas": [
       {
         "feature_key": "dinner_solve",
-        "used_count": 3,
-        "cap_count": 6,
-        "period_start": "2026-04-17",
+        "used": 3,
+        "cap": 6,
         "period_end": "2026-05-17"
       }
     ]
   },
-  "feature_flags": { ... },
-  "prompt_versions": { "<feature_key>": "<semver>", ... }
+  "feature_flags": [
+    { "key": "disable_cook_realtime", "value": false, "is_enabled": true, "rollout_pct": 100 },
+    ...
+  ]
 }
 ```
+
+**Bootstrap does NOT return `prompt_versions`.** Prompt metadata is carried by `/v1/config/bootstrap` only, which iOS calls on foreground-after-TTL or entitlement change.
 
 Key shape rules:
 
 - `voice_enabled` is **SERVER-COMPUTED** (`tier IN ('premium','pro') AND billing_state IN ('active','trial','grace','cancelled_active')`), never derived on iOS. Single source of truth.
-- `quotas` is an **array** (iterable, uniform rendering), not a keyed object.
-- `period_end` is **always included**, never client-computed (mid-month transitions + anchor-day semantics make it non-trivial).
+- `quotas` is an **array** (iterable, uniform rendering), not a keyed object. Fields are `used` / `cap` / `period_end` — not `used_count` / `cap_count` / `period_start`.
+- `period_end` is **always included**, never client-computed (mid-month transitions + anchor-day semantics make it non-trivial). `period_start` is a backend-only detail.
+- `feature_flags` is an **array of metadata objects** (`key`, `value`, `is_enabled`, `rollout_pct`) — not a flat map. Preserves `is_enabled` kill-switch visibility and `rollout_pct` in a single wire shape for every flag.
+- Single `expires_at` field covers both trial and subscription end dates; `is_trial` disambiguates which period this is.
 - Nested `entitlements` object (not flattened) so iOS can destructure cleanly as the bootstrap response grows.
 - Trial/subscription timestamps are absolute UTC; iOS localizes for display.
 
-iOS consumption: `EntitlementService` stores this in memory + Keychain. Every feature gate reads from `EntitlementService`, never directly from the response body.
+### `/v1/config/bootstrap` response shape
+
+```json
+{
+  "entitlements": { ... same shape as bootstrap.entitlements ... },
+  "feature_flags": [ ... same shape as bootstrap.feature_flags ... ],
+  "prompts": [
+    {
+      "feature_key": "dinner_solve",
+      "version": "0.0.0",
+      "provider_model": "gemini-3-flash",
+      "schema_hash": "",
+      "is_default": true,
+      "is_enabled": false
+    }
+  ]
+}
+```
+
+`prompts` is rich-object (not simple map) so iOS can emit `prompt_version` telemetry on every AI call in step 3+ without an extra lookup.
+
+iOS consumption: `EntitlementService` stores the entitlements + quotas in memory + Keychain (24h offline fallback). Every feature gate reads from `EntitlementService`, never directly from the response body.
 
 ### Feature flags
 
