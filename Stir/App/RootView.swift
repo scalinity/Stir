@@ -1,30 +1,62 @@
 // RootView
 //
-// Placeholder top-level view. Replaced with the RootCoordinator in commit 9
-// once identity resolution, bootstrap, and entitlement hydration are wired.
-// Until then this exists so the app compiles and launches cleanly.
+// Phase-driven routing: loading → (onboarding | ready | offline | error).
+// RootCoordinator is the Observable source of truth; every branch reads from
+// coordinator.phase.
 
 import SwiftUI
 
 struct RootView: View {
+    @Bindable var coordinator: RootCoordinator
+
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "fork.knife")
-                .font(.system(size: 56, weight: .light))
-                .foregroundStyle(.tint)
-            Text("Stir")
-                .font(.largeTitle.weight(.semibold))
-            Text("Step-2 scaffold — Root coordinator lands in commit 9.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        Group {
+            switch coordinator.phase {
+            case .loading:
+                LoadingView()
+                    .task { await coordinator.bootstrap() }
+
+            case .configurationError(let message):
+                ConfigurationErrorView(message: message, onRetry: coordinator.retry)
+
+            case .onboarding:
+                if let vm = coordinator.onboardingViewModel {
+                    OnboardingRoot(
+                        viewModel: vm,
+                        onFinished: coordinator.handleOnboardingFinished,
+                    )
+                } else {
+                    LoadingView()
+                }
+
+            case .ready:
+                TonightHomeView()
+
+            case .offlineFallback:
+                VStack(spacing: 0) {
+                    OfflineBanner()
+                    TonightHomeView()
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .environment(coordinator.entitlements)
+        .environment(coordinator.cloudKit)
+        .environment(coordinator.household)
     }
 }
 
-#Preview {
-    RootView()
+private struct OfflineBanner: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(.white)
+            Text("Offline mode — using last known plan state. Pull to refresh.")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.orange)
+    }
 }

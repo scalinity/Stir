@@ -64,6 +64,14 @@ actor IdentityService {
         self.keychain = keychain
     }
 
+    /// Always-available install UUID. Read from Keychain if present,
+    /// minted if absent. The bootstrap request ALWAYS carries this value
+    /// (even when the user's canonical key is ck:<record>) so backend
+    /// alias-forward can run when a CK user first appears.
+    func installationID() -> String {
+        installUUID()
+    }
+
     /// Resolve the canonical key according to the CLAUDE.md rule.
     func resolve() async -> CanonicalUserKey {
         // --- CloudKit path ---
