@@ -814,6 +814,12 @@ Use these exact messages everywhere; each screen references applicable codes.
 | `BILL-01`       | "We couldn't confirm your subscription right now."                                          | Restore Purchases / Retry          |
 | `PAY-01`        | "Purchase didn't go through. You weren't charged."                                          | Try Again / Choose Another Plan    |
 | `ENT-VOICE-01`  | "Cook Mode voice is a Premium feature. Try it free for 7 days."                             | Start Trial / See Plans            |
+| `VAL-01`        | "Something went wrong. Please try again or contact support if this keeps happening."        | Retry / Contact Support            |
+| `AUTH-01`       | *(internal; auto-handled by iOS re-bootstrap)*                                              | Auto-refresh (silent)              |
+
+**`VAL-01` — request body validation failure.** Server returns `400 { error: "VAL-01", message, field_errors: [{ field, issue }] }`. iOS logs the full payload to Sentry at `error` severity and shows the generic user-visible copy above (one-tap Retry; Contact Support for persistent failures). iOS never retries automatically — a malformed request body is an iOS bug, not a transient failure. See `CLAUDE.md` §"VAL-01 response shape".
+
+**`AUTH-01` — session missing / expired / malformed / signature_invalid.** Server returns `401 { error: "AUTH-01", message, reason: "missing" | "expired" | "malformed" | "signature_invalid" }`. iOS auto-re-bootstraps via `/v1/session/bootstrap` and retries the original request ONCE. If the retried request also 401s, surface `NET-01` (no retry storm). `missing|expired` are routine 24h JWT lifecycle; `malformed|signature_invalid` page Sentry at alert threshold. See `CLAUDE.md` §"AUTH-01 response shape".
 
 ### Accessibility baseline
 

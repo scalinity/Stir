@@ -1,6 +1,10 @@
 # RevenueCat SDK Integration Spec — Stir
 
-**Status:** Draft
+> **⚠ DIVERGES FROM `Specs/Stir-Full-Spec.md` AND `CLAUDE.md` — NEEDS REFRESH BEFORE STEP 5**
+>
+> This document still describes a 2-product (`monthly`, `yearly`) / single-`Stir Pro` entitlement model. The authoritative product spec and `CLAUDE.md` were subsequently updated to four SKUs (`stir.premium.monthly`, `stir.premium.annual.trial7`, `stir.pro.monthly`, `stir.pro.annual`) with three tiers (Free / Premium / Pro). When RevenueCat wiring lands in **step 5**, this doc is to be rewritten against the 4-SKU / 3-tier model before any code changes. Step 1 (backend schema) uses `{free, premium, pro}` per the main spec.
+
+**Status:** Draft (stale vs main spec — see warning above)
 **Owner:** Stir iOS
 **Last updated:** 2026-04-17
 **Platforms:** iOS 15+ (iOS 16+ recommended for full Customer Center support)
