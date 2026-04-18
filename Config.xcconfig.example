@@ -1,0 +1,30 @@
+// Stir — iOS build configuration
+//
+// Copy this file to `Config.xcconfig` at the repo root (same directory as
+// Stir.xcodeproj) and fill in real values. `Config.xcconfig` is gitignored —
+// never commit real keys.
+//
+// Values flow through Info.plist ($(VAR) substitution, declared in project.yml)
+// and are read at runtime via AppConfig / Bundle.main.infoDictionary.
+
+// --- Supabase (prod backend) ------------------------------------------------
+// Project ref ktqajarcomzplnpbczfo ("Stir" in supabase.com dashboard).
+// These keys are PUBLIC — safe to ship in the iOS bundle because Supabase
+// enforces RLS on every row. Never commit them to git anyway (gitignored).
+SUPABASE_URL = https:/$()/ktqajarcomzplnpbczfo.supabase.co
+SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+// --- RevenueCat (step 5 activates) -----------------------------------------
+// Public SDK key from RevenueCat dashboard. Step 2 does NOT initialize the
+// SDK; this slot exists for step 5 and is safe to leave empty until then.
+REVENUECAT_PUBLIC_API_KEY =
+
+// --- PostHog ---------------------------------------------------------------
+// Public project API key (starts with phc_). US host default; if the Stir
+// PostHog project is EU, POSTHOG_HOST below overrides.
+POSTHOG_PUBLIC_API_KEY = phc_YOUR_POSTHOG_PROJECT_KEY_HERE
+// POSTHOG_HOST = https:/$()/us.i.posthog.com
+
+// --- Sentry ----------------------------------------------------------------
+// Public DSN for Stir Sentry project. Format: https://<hash>@o<org>.ingest.sentry.io/<project>
+SENTRY_DSN_PUBLIC = https:/$()/YOUR_SENTRY_HASH@YOUR_SENTRY_ORG.ingest.sentry.io/YOUR_PROJECT_ID
