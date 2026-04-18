@@ -16,10 +16,14 @@
 import * as jose from 'jose';
 import type { AuthReason } from './errors.ts';
 
-const JWT_SECRET = Deno.env.get('SUPABASE_JWT_SECRET');
+// Named STIR_JWT_SECRET (not SUPABASE_JWT_SECRET) because Supabase's Edge
+// Runtime filters SUPABASE_*-prefixed vars from .env to protect reserved
+// names. For RLS to work, this value MUST match the project's PostgREST
+// jwt_secret (visible via `supabase status -o json` locally).
+const JWT_SECRET = Deno.env.get('STIR_JWT_SECRET');
 if (!JWT_SECRET) {
   throw new Error(
-    'SUPABASE_JWT_SECRET missing from environment. Required for session JWT mint/verify.',
+    'STIR_JWT_SECRET missing from environment. Required for session JWT mint/verify. Must equal Supabase project jwt_secret so PostgREST validates our JWTs for RLS.',
   );
 }
 

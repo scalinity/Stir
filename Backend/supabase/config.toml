@@ -372,6 +372,21 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# -----------------------------------------------------------------------------
+# Stir functions
+# -----------------------------------------------------------------------------
+# Both bootstrap endpoints opt out of Supabase-gateway JWT verification:
+#   - session-bootstrap accepts unauthenticated calls by design (first call
+#     from a fresh install mints the session JWT).
+#   - config-bootstrap verifies the session JWT itself inside the handler
+#     using SUPABASE_JWT_SECRET; letting Kong reject it first would prevent
+#     us from returning AUTH-01 with a typed `reason` field.
+[functions.session-bootstrap]
+verify_jwt = false
+
+[functions.config-bootstrap]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
