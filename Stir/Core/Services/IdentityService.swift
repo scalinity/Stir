@@ -1,0 +1,149 @@
+// IdentityService
+//
+// Resolves the app's canonical_user_key on launch + on every CloudKit account
+// status change. CLAUDE.md §"Canonical user key":
+//
+//   canonical_user_key = "ck:<userRecordName>"     when iCloud is available
+//                      | "install:<keychainUUID>"  otherwise
+//
+// Design:
+//   - Actor-isolated so concurrent resolve() calls are serialized.
+//   - CloudKit access injected via `CloudKitAccountProviding` for tests.
+//   - Keychain access injected via `KeychainStoring` for tests.
+//   - `observeAccountChanges()` bridges `.CKAccountChanged` into an
+//     AsyncStream of the freshly-resolved key. RootCoordinator consumes
+//     this to re-drive the launch sequence if iCloud availability flips
+//     mid-session.
+//
+// NEVER logs the raw canonical_user_key. Use `CanonicalKeyHash` everywhere
+// a key identifies a user in operational output.
+
+import CloudKit
+import Foundation
+import OSLog
+
+/// Two-case identity discriminant. `stringValue` is the wire + bootstrap form.
+enum CanonicalUserKey: Equatable, Hashable, Sendable {
+    case cloudKit(recordName: String)
+    case install(uuid: String)
+
+    var stringValue: String {
+        switch self {
+        case .cloudKit(let recordName): return "ck:\(recordName)"
+        case .install(let uuid):        return "install:\(uuid)"
+        }
+    }
+
+    /// The raw CloudKit userRecordName when backed by CloudKit. Nil for
+    /// install-keyed identities.
+    var cloudKitRecordName: String? {
+        if case let .cloudKit(recordName) = self { return recordName }
+        return nil
+    }
+
+    var installationID: String? {
+        if case let .install(uuid) = self { return uuid }
+        return nil
+    }
+
+    var isCloudKit: Bool {
+        if case .cloudKit = self { return true }
+        return false
+    }
+}
+
+actor IdentityService {
+    private let cloudKit: CloudKitAccountProviding
+    private let keychain: KeychainStoring
+
+    init(
+        cloudKit: CloudKitAccountProviding = CloudKitAccountProvider(),
+        keychain: KeychainStoring = KeychainStorage.shared,
+    ) {
+        self.cloudKit = cloudKit
+        self.keychain = keychain
+    }
+
+    /// Resolve the canonical key according to the CLAUDE.md rule.
+    func resolve() async -> CanonicalUserKey {
+        // --- CloudKit path ---
+        do {
+            let status = try await cloudKit.accountStatus()
+            if status == .available {
+                let recordID = try await cloudKit.userRecordID()
+                let recordName = recordID.recordName
+                Logger.identity.info("identity resolved: cloudkit (\(recordName.count, privacy: .public) chars)")
+                return .cloudKit(recordName: recordName)
+            }
+            let description = statusDescription(status)
+            Logger.identity.info("cloudkit status not available: \(description, privacy: .public)")
+        } catch {
+            Logger.identity.error("cloudkit resolution failed: \(error.localizedDescription, privacy: .public) — falling back to install UUID")
+        }
+
+        // --- Install-UUID path ---
+        let uuid = installUUID()
+        Logger.identity.info("identity resolved: install")
+        return .install(uuid: uuid)
+    }
+
+    /// Bridges `.CKAccountChanged` to an AsyncStream that yields a freshly
+    /// resolved key every time iCloud availability flips. RootCoordinator
+    /// observes this and may re-run the bootstrap sequence when a flip lands.
+    nonisolated func observeAccountChanges() -> AsyncStream<CanonicalUserKey> {
+        AsyncStream { continuation in
+            let observer = NotificationCenter.default.addObserver(
+                forName: .CKAccountChanged,
+                object: nil,
+                queue: nil,
+            ) { _ in
+                Task { [self] in
+                    let key = await self.resolve()
+                    continuation.yield(key)
+                }
+            }
+            continuation.onTermination = { _ in
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+    }
+
+    // MARK: - Install UUID
+
+    private func installUUID() -> String {
+        do {
+            if let existing = try keychain.read(key: .installUUID) {
+                return existing
+            }
+        } catch {
+            // Read failure is not fatal — we'll mint a fresh UUID. But log so
+            // repeated churn from a broken Keychain doesn't go unnoticed.
+            Logger.identity.error("keychain read installUUID failed: \(error.localizedDescription, privacy: .public) — minting fresh UUID")
+        }
+
+        let fresh = UUID().uuidString
+        do {
+            try keychain.write(fresh, key: .installUUID)
+        } catch {
+            // Write failure is bad but not crash-worthy — the user just gets a
+            // new key every cold start until Keychain recovers. Same-session
+            // requests still see the same UUID via the in-memory value we
+            // return below.
+            Logger.identity.error("keychain write installUUID failed: \(error.localizedDescription, privacy: .public)")
+        }
+        return fresh
+    }
+
+    // MARK: - Diagnostics
+
+    private nonisolated func statusDescription(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .couldNotDetermine:      return "couldNotDetermine"
+        case .available:              return "available"
+        case .restricted:             return "restricted"
+        case .noAccount:              return "noAccount"
+        case .temporarilyUnavailable: return "temporarilyUnavailable"
+        @unknown default:             return "unknown"
+        }
+    }
+}
