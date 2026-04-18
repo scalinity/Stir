@@ -645,6 +645,31 @@ pnpm run eval:grocery
 
 ---
 
+## Deploy workflow — local and prod in lockstep
+
+**Rule:** every change that lands locally must also land on the Stir prod Supabase project, in the same session, without asking. Pre-authorized.
+
+**Prod project:** `ktqajarcomzplnpbczfo` ("Stir", West US Oregon). The shell exports `SUPABASE_URL=https://zfaucivtzfwnrijsbfug.supabase.co` — that's **MindFriend**, a separate project. Always pin via `supabase link --project-ref ktqajarcomzplnpbczfo` before pushing. Confirm via `supabase migration list` that local+remote histories align before any push.
+
+**Cadence:**
+
+| Local action | Prod follow-up (same session) |
+| --- | --- |
+| New migration written → applies cleanly via `supabase db reset` | `supabase db push` |
+| `supabase functions serve --env-file .env` passes smoke tests | `supabase functions deploy <name>` for each changed function |
+| New secret referenced via `Deno.env.get` | `supabase secrets set <KEY>=<VALUE>` on prod **before** deploying the function that reads it |
+| Prod DDL lands | `get_advisors` (security + performance) — fix WARN+ in a follow-up migration same session; INFO-level `rls_enabled_no_policy` on `app_users`/`feature_flags`/`prompt_versions` is by-design deny-all, leave it |
+
+**Auto-injected in deployed Edge Functions** (never set manually): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`. Supabase reserves the `SUPABASE_` prefix and filters it from `.env`.
+
+**Must be set manually on prod** before the first function deploy that needs them:
+- `STIR_JWT_SECRET` — equals the prod project's legacy `jwt_secret` (dashboard → Settings → API → JWT Settings). Must match so PostgREST accepts our JWTs for RLS.
+- `GEMINI_API_KEY` — real paid-tier Gemini key. Step 3+ activates.
+
+**Never push to prod:** commits that touch only docs or iOS code. Only schema + function changes trigger the lockstep rule.
+
+---
+
 ## Voice validation plan
 
 The Gemini Live spike is split into a cheap half (API-shape drift check, immediately pre-step-6) and an expensive half (UX validation, in-app at step 6). The April 2026 full spike ran the expensive half already and produced `FINDINGS.md` outside this repo — the cheap half is still pending and runs **at step 6 start**, not at step 1 start.
