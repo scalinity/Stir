@@ -7,13 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4714D34B06C97687599F9389 /* ErrorPresenter.swift */; };
+		2653823930DD051BDD2C94A0 /* KitchenEquipmentRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */; };
 		303A289BB5A889F72B6A92EA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 20F0AF2A4DCBE0E2DAC10789 /* Supabase */; };
+		38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61ECEB2E68886B41D1AE79C /* AppConfig.swift */; };
+		3BEB07ACCE22C955E60990BE /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F9A8184731D4338C59B314 /* PersistenceController.swift */; };
+		4AD91364516A336582E7ED4B /* Stir.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A48A76DF2DD0C28905436318 /* Stir.xcdatamodeld */; };
 		548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */; };
+		5720A76E68F5CF2CC16C823E /* Logger+Stir.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */; };
+		5E6AC0A940D710330894EB3C /* StirError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74588281F314D67EE09DCD8A /* StirError.swift */; };
 		6C296A376D410750FCA3389D /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 6B3359E0EED056E56B1889EC /* PostHog */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
+		9FD7CCAF1B3E98E917067C6D /* HouseholdProfile+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */; };
 		A33EDDC6FE22143B7CE44620 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392D02601EFD7683030D59D1 /* RootView.swift */; };
+		A85EEA8C2E168EBCBFEB7899 /* KitchenEquipment+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */; };
+		AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */; };
 		CB7BE78DDBFB84E712A477A8 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 1C9FAC356602FCAFDD0E3651 /* Sentry */; };
+		CD8C3CD7E5FE339ACDBBD197 /* DietaryRuleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71194080696470F518663BA9 /* DietaryRuleRepository.swift */; };
+		DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14744B65A207BA49BDB36C0A /* ErrorCode.swift */; };
 		F1C6D7813DA8274D0F34396F /* StirApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016A78A0278372166E393E65 /* StirApp.swift */; };
+		FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,14 +41,27 @@
 
 /* Begin PBXFileReference section */
 		016A78A0278372166E393E65 /* StirApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirApp.swift; sourceTree = "<group>"; };
+		1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DietaryRule+Extensions.swift"; sourceTree = "<group>"; };
+		14744B65A207BA49BDB36C0A /* ErrorCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCode.swift; sourceTree = "<group>"; };
+		1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KitchenEquipment+Extensions.swift"; sourceTree = "<group>"; };
 		392D02601EFD7683030D59D1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		4714D34B06C97687599F9389 /* ErrorPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPresenter.swift; sourceTree = "<group>"; };
 		494C830D500C89939B57CD7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4BB49FCA03EF17C97D6C5DB9 /* Stir.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Stir.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitchenEquipmentRepository.swift; sourceTree = "<group>"; };
 		55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdProfileRepository.swift; sourceTree = "<group>"; };
+		68F9A8184731D4338C59B314 /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
+		71194080696470F518663BA9 /* DietaryRuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietaryRuleRepository.swift; sourceTree = "<group>"; };
+		74588281F314D67EE09DCD8A /* StirError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirError.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
+		86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HouseholdProfile+Extensions.swift"; sourceTree = "<group>"; };
 		86D2499D3F643A0F93C7D4A8 /* StirTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StirTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC4574BCB671B68DF6493BDE /* Stir.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Stir.xcdatamodel; sourceTree = "<group>"; };
+		D61ECEB2E68886B41D1AE79C /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTest.swift; sourceTree = "<group>"; };
-		"TEMP_1738BEF4-F9ED-4B2B-AC76-419B511061B3" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Stir.swift"; sourceTree = "<group>"; };
+		"TEMP_B34F41B5-07CE-4436-A6FA-E839C22F9DA3" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +81,7 @@
 		01AD64FE3CE90272287FFAB4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				D61ECEB2E68886B41D1AE79C /* AppConfig.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -139,6 +166,10 @@
 		66E65A7D462C7E09A4A58F08 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				A48A76DF2DD0C28905436318 /* Stir.xcdatamodeld */,
+				1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */,
+				86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */,
+				1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -180,6 +211,10 @@
 		A591A16677BE57040F5C6EC1 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				14744B65A207BA49BDB36C0A /* ErrorCode.swift */,
+				4714D34B06C97687599F9389 /* ErrorPresenter.swift */,
+				F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */,
+				74588281F314D67EE09DCD8A /* StirError.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -203,6 +238,10 @@
 		B4C6C80009549ABCAF283770 /* Repositories */ = {
 			isa = PBXGroup;
 			children = (
+				71194080696470F518663BA9 /* DietaryRuleRepository.swift */,
+				5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */,
+				547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */,
+				68F9A8184731D4338C59B314 /* PersistenceController.swift */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -290,10 +329,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_12AAA463-658C-48AB-9306-97760DF3385F" /* Stir */ = {
+		"TEMP_B4631A43-E9A1-4925-A6E7-9E34155CCE13" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_1738BEF4-F9ED-4B2B-AC76-419B511061B3" /* Config.xcconfig */,
+				"TEMP_B34F41B5-07CE-4436-A6FA-E839C22F9DA3" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -408,8 +447,21 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */,
+				AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */,
+				CD8C3CD7E5FE339ACDBBD197 /* DietaryRuleRepository.swift in Sources */,
+				DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */,
+				13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */,
+				9FD7CCAF1B3E98E917067C6D /* HouseholdProfile+Extensions.swift in Sources */,
+				FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */,
+				A85EEA8C2E168EBCBFEB7899 /* KitchenEquipment+Extensions.swift in Sources */,
+				2653823930DD051BDD2C94A0 /* KitchenEquipmentRepository.swift in Sources */,
+				5720A76E68F5CF2CC16C823E /* Logger+Stir.swift in Sources */,
+				3BEB07ACCE22C955E60990BE /* PersistenceController.swift in Sources */,
 				A33EDDC6FE22143B7CE44620 /* RootView.swift in Sources */,
+				4AD91364516A336582E7ED4B /* Stir.xcdatamodeld in Sources */,
 				F1C6D7813DA8274D0F34396F /* StirApp.swift in Sources */,
+				5E6AC0A940D710330894EB3C /* StirError.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -426,7 +478,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_1738BEF4-F9ED-4B2B-AC76-419B511061B3" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B34F41B5-07CE-4436-A6FA-E839C22F9DA3" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -461,7 +513,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_1738BEF4-F9ED-4B2B-AC76-419B511061B3" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B34F41B5-07CE-4436-A6FA-E839C22F9DA3" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -592,6 +644,19 @@
 			productName = PostHog;
 		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin XCVersionGroup section */
+		A48A76DF2DD0C28905436318 /* Stir.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				CC4574BCB671B68DF6493BDE /* Stir.xcdatamodel */,
+			);
+			currentVersion = CC4574BCB671B68DF6493BDE /* Stir.xcdatamodel */;
+			path = Stir.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
 	};
 	rootObject = 311FFDD9EB1D3E0473DFA356 /* Project object */;
 }

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="24C101" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="YES" userDefinedModelVersionIdentifier="">
+    <!--
+    Step-2 entities only. PantryItem, RecipePlan, etc. from spec §4 land in
+    their respective feature-introducing steps. Do not add entities speculatively.
+
+    CloudKit compatibility rules applied across all entities:
+      * No unique constraints — CloudKit doesn't enforce them. Uniqueness of
+        (householdId, kind, value) / (householdId, code) is enforced in
+        repositories.
+      * All non-trivially-defaultable attributes are marked optional at the
+        Core Data level; repositories set them on insert. Required-ness is
+        enforced by the Swift API surface, not by the schema.
+      * Deletion rules: HouseholdProfile cascades to children.
+    -->
+    <entity name="HouseholdProfile" representedClassName="HouseholdProfile" syncable="YES" codeGenerationType="class">
+        <attribute name="canonicalUserKey" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="deletedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="locale" optional="YES" attributeType="String"/>
+        <attribute name="onboardingCompleted" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="preferredUnits" optional="YES" attributeType="String" defaultValueString="imperial"/>
+        <attribute name="servingsDefault" optional="YES" attributeType="Integer 16" defaultValueString="2" usesScalarValueType="YES"/>
+        <attribute name="timezone" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="dietaryRules" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="DietaryRule" inverseName="household" inverseEntity="DietaryRule"/>
+        <relationship name="kitchenEquipment" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="KitchenEquipment" inverseName="household" inverseEntity="KitchenEquipment"/>
+    </entity>
+    <entity name="DietaryRule" representedClassName="DietaryRule" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isActive" optional="YES" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="kind" optional="YES" attributeType="String"/>
+        <attribute name="severity" optional="YES" attributeType="String" defaultValueString="soft"/>
+        <attribute name="source" optional="YES" attributeType="String" defaultValueString="user"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="value" optional="YES" attributeType="String"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="dietaryRules" inverseEntity="HouseholdProfile"/>
+    </entity>
+    <entity name="KitchenEquipment" representedClassName="KitchenEquipment" syncable="YES" codeGenerationType="class">
+        <attribute name="code" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isAvailable" optional="YES" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="kitchenEquipment" inverseEntity="HouseholdProfile"/>
+    </entity>
+</model>
