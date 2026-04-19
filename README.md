@@ -7,7 +7,7 @@ For the product truth, read `Specs/Stir-Full-Spec.md`.
 For Cook Mode voice architecture, read `Specs/Stir-Cook-Mode-Architecture.md`.
 For the Gemini Live spike findings + step-6 drift-check plan, read `Specs/Gemini-Live-Findings.md`.
 
-Current progress: **steps 1 + 2 complete**. Step 1 = Supabase operational backend (deployed to prod `ktqajarcomzplnpbczfo`). Step 2 = iOS app scaffold + identity + entitlements + onboarding. Step 3 (scan + solve) is next.
+Current progress: **steps 1 + 2 + 3 complete**. Step 1 = Supabase operational backend. Step 2 = iOS app scaffold + identity + entitlements + onboarding. Step 3 = scan + solve end-to-end: kitchen scan via Gemini 3 Flash + structured review chips + 3-dish SSE solve stream + dish preview, backed by the hard-rule validator, per-user atomic quota, and IP-based rate limiter. All deployed to prod `ktqajarcomzplnpbczfo`. Step 4 (Cook Mode tap + Substitution) is next.
 
 ---
 
@@ -27,34 +27,39 @@ Current progress: **steps 1 + 2 complete**. Step 1 = Supabase operational backen
 │   ├── Gemini-Live-Findings.md
 │   └── RevenueCat-Integration.md   ⚠ stale; refresh before step 5
 ├── Backend/
-│   └── supabase/                   Step-1 operational backend
+│   └── supabase/                   operational backend (steps 1 + 3)
 │       ├── config.toml
 │       ├── .env.example
 │       ├── .env                    (gitignored)
-│       ├── migrations/             12 SQL files
-│       ├── functions/              session-bootstrap, config-bootstrap, _shared helpers
-│       └── tests/                  36 Deno tests
-├── Stir/                           iOS app (step 2)
+│       ├── migrations/             19 SQL files
+│       ├── functions/              session-bootstrap, config-bootstrap,
+│       │                           pantry-parse, dinner-solve, _shared helpers
+│       └── tests/                  55 Deno tests
+├── Stir/                           iOS app (steps 2 + 3)
 │   ├── App/                        StirApp, RootCoordinator, RootView, Loading, ConfigurationError
 │   ├── Core/
-│   │   ├── Models/                 HouseholdProfile / DietaryRule / KitchenEquipment + xcdatamodeld
-│   │   ├── Repositories/           PersistenceController + three Core Data repos
+│   │   ├── Models/                 9 Core Data entities + typed extensions
+│   │   ├── Repositories/           PersistenceController + 5 repos
 │   │   ├── Services/               AppConfig, IdentityService, SupabaseSessionClient,
-│   │   │                           EntitlementService, KeychainStorage, Cloud/Household stores
+│   │   │                           EntitlementService, AIDispatch, AIDispatchDTOs,
+│   │   │                           KeychainStorage, Cloud/Household stores
 │   │   └── Utilities/              ErrorCode, StirError, ErrorPresenter, Logger, CanonicalKeyHash
 │   ├── Features/
 │   │   ├── Onboarding/             Welcome + Setup 1 + Setup 2 + VM
-│   │   ├── Tonight/                TonightHomeView
+│   │   ├── Tonight/                TonightHomeView (Scan Kitchen enabled)
+│   │   ├── Scan/                   FlowRoot + Capture + Review + ViewModel
+│   │   ├── Solve/                  ConstraintsSheet + Options + DishPreview + ViewModel
 │   │   ├── Settings/               SettingsRootView, HouseholdPreferencesView
-│   │   └── [Scan|Solve|CookMode|Import|Saved|Billing]/ (empty folders for later steps)
+│   │   └── [CookMode|Import|Saved|Billing]/ (empty folders for later steps)
 │   ├── Integrations/
+│   │   ├── Camera/                 CameraService + ImageCompression
 │   │   ├── CloudKit/               CloudKitAccountMonitor
 │   │   ├── PostHog/                PostHogClient + TelemetryEvent
 │   │   ├── Sentry/                 SentryReporting + SentryReporter
-│   │   └── Supabase/               (empty; reserved for step 3+)
+│   │   └── Supabase/               (empty; reserved for later steps)
 │   └── Resources/                  Assets.xcassets (AppIcon, AccentColor, LaunchBackground)
 └── StirTests/
-    ├── Unit/                       Mocks + 26 unit tests
+    ├── Unit/                       Mocks + 38 unit tests
     └── Integration/                 7 integration tests (Core Data + CloudKit notification)
 ```
 
@@ -120,7 +125,15 @@ cd Backend/supabase && deno test --config=functions/deno.json --env-file=.env \
   --allow-env --allow-net --allow-read tests/
 ```
 
-Expected: **36/36 passed**.
+Expected: **55/55 passed**.
+
+Gemini-touching integration tests are gated on `STIR_RUN_AI_INTEGRATION_TESTS=1` (off by default) so CI runs don't burn the paid-tier budget:
+
+```bash
+cd Backend/supabase && STIR_RUN_AI_INTEGRATION_TESTS=1 \
+  deno test --config=functions/deno.json --env-file=.env \
+  --allow-env --allow-net --allow-read tests/
+```
 
 ---
 
@@ -145,26 +158,27 @@ xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17
   -skipMacroValidation -skipPackagePluginValidation
 ```
 
-Expected: **33/33 passed**.
+Expected: **45/45 passed**.
 
 First-time gotcha: if you hit "Application failed preflight checks" on the simulator, run `xcrun simctl erase all` and re-run — a stale simulator install state confuses the launcher.
 
-### Demo the step-2 behavior
+### Demo the step-3 behavior
 
-- First launch (fresh install on simulator without iCloud) → Welcome → Setup 1 → Setup 2 → Tonight Home shell with three "Coming soon" action rows. Settings shows tier=Free, billing=none, Sync=local-only.
-- Second launch → skips onboarding, lands on Tonight Home.
-- Settings → Household Preferences → edits persist across launches.
-- In Simulator: Settings app → Apple Account → sign in to an iCloud test account → kill + relaunch → Settings in Stir now shows iCloud synced (CloudKit path taken).
-- Backend: `GET /rest/v1/app_users` (via service-role) shows a row for the resolved canonical_user_key; `entitlement_snapshots` shows `tier=free, billing_state=none`.
-- PostHog dashboard: `app_opened` + `onboarding_started` + `onboarding_completed` events appear under the canonical_user_key_hash identified user.
+- First launch (fresh install on simulator) → Welcome → Setup 1 → Setup 2 → Tonight Home. "Scan Kitchen" is now a live action.
+- Tap **Scan Kitchen** → permission primer → grant access → camera preview → capture button → JPEG upload → 2-4s parse → review chips with confidence-band styling → tap chip to edit / long-press to delete / **Looks right — find dinners** CTA.
+- Constraints sheet: pick a time budget, cuisine, optional goal → **Find dinners**.
+- 3 dish cards skeleton-load, then fill card-by-card as SSE events arrive (150ms spacing).
+- Tap a card → DishPreview with ingredients + steps + missing-from-pantry callout. **Start Cooking** is a disabled placeholder (step 4 wires Cook Mode).
+- Behind the scenes: PantryItem rows persist in CloudKit; MealSolveRequest + SuggestedDish + RecipePlan + RecipeIngredient + RecipeStep commit in one save; `ai_request_log` on the backend shows input_tokens / output_tokens / cost_usd / retry_count.
+- Kill switch: flip `disable_scan_parse` to `true` in `feature_flags` on prod → next foreground the Scan Kitchen button becomes "Temporarily unavailable".
+- Quota: exhaust 6 Dinner Solves on a Free user → 7th returns RATE-01 with the period reset date populated.
 
 ---
 
-## Deferred from steps 1 + 2
+## Deferred from steps 1 + 2 + 3
 
 Tracked explicitly so nothing gets lost. Each owner-step is locked in.
 
-- **IP-based rate limiting on `/v1/session/bootstrap`** (spec §13) → step 3. Bootstrap rate-limiting protects nothing until `/v1/ai/*` exists. Ships alongside `/v1/ai/dinner-solve` with a `rate_limit_buckets` table.
 - **Gemini Live API drift re-check** (cheap-half spike) → step 6 kickoff. See `Specs/Gemini-Live-Findings.md`. Mandatory before any Cook Mode voice code.
 - **Mint-endpoint auth unresolved** from April 2026 spike → step 6. Re-test `POST /v1alpha/authTokens` from the Supabase Edge Function environment; fall back to OAuth service-account or backend-proxied WebSocket if API-key auth still 400s.
 - **`ops_flagged_outputs`, `audit_log`, `notification_jobs`** tables → step 8 (ops admin + push).
@@ -174,8 +188,31 @@ Tracked explicitly so nothing gets lost. Each owner-step is locked in.
 - **Real privacy-policy + terms-of-service URLs** → before beta (step 9). Placeholder links at `stir.app/privacy` and `stir.app/terms` live in Settings.
 - **RevenueCat SDK init in iOS** → step 5. EntitlementService hydrates from Supabase bootstrap in step 2; RC's `customerInfoStream` adds a belt-and-suspenders path alongside at step 5.
 - **App Group + Share Extension entitlement** → step 7 (imports + widgets). Keychain access group stays default until then.
+- **Multi-image scan UX** → step 7 (UI). Backend gate (`ENT-MULTI-IMAGE-01`) landed in step 3; handler currently rejects `image_count > 1` with a step-3-scope `VAL-01` on Pro users because the UI isn't there yet.
+- **`MediaAsset` entity** → **v2 backlog, probably not worth building**. Step 3 persists PantryItems with `mediaAssetId = nil`. Storing scan photos would enable "show me the photo this came from" UX but likely not worth the CKAsset complexity + storage costs.
+- **Real SSE streaming from Gemini (vs. fake-stream)** → revisit only if beta first-dish p95 exceeds 2.5s. Step 3 uses a non-streaming Gemini call with a 150ms-spaced SSE fan-out to iOS; simpler backend retry logic, same progressive-reveal UX.
 
 ---
+
+## Step-3 assumptions
+
+Backend:
+
+1. **Rate-limit policies hardcoded** in `_shared/rate_limiter.ts` rather than a `rate_limit_policies` table — simpler until the step-8 ops console lands.
+2. **pg_cron-scheduled cleanup of `ai_response_cache`** runs every 5 min, batched `DELETE ... LIMIT 1000`. Extension assumed available on Supabase hosted and local Docker.
+3. **Advisory-lock-based concurrency serialization** in `stir_rate_limit_check` — `pg_advisory_xact_lock(hashtext(scope||':'||bucket))`. Collision rare at our scale; worst case is minor over-counting for colliding buckets.
+4. **Non-streaming Gemini + SSE fan-out** on iOS side — 150ms spacing between dish events to match streaming UX without the server-side complexity of incremental JSON parsing + per-slot retries mid-stream.
+5. **Hard-rule validator keywords conservative** — dietary-keyword tables favor false positives (extra retry) over false negatives (ship an allergen). Equipment implication map only flags obvious cases (`sous vide`, `pressure cooker`, etc.).
+6. **Per-slot retry bounded at 1** — matches Daniel's cost-cap decision. Worst case 1 initial + 3 replacements = 4 Gemini calls per solve. Replacement-call token counts aggregate into the single `ai_request_log` row.
+7. **Quota refund scoped to the specific period_start** that was incremented — not blindly the current period. Refund fires only on upstream Gemini failure, never on iOS timeout.
+
+iOS:
+
+8. **Image compression at JPEG 0.85 / max 1600px long edge** → ~200-400KB base64 payloads on typical kitchen photos. Tune down to q=0.80 if p50 network upload becomes a bottleneck.
+9. **SSE parsing line-based** (not chunk-based) — `URLSession.bytes(for:).lines` gives us newline-delimited strings; blank line = event boundary. Forward-compatible with unknown event names via `decodeSSEEvent` returning nil.
+10. **`household_profile_hash` field wired in the Zod schema but not populated in step 3** — iOS sends null. Caching by `client_request_id` alone is sufficient for retry semantics. Will fill in when dietary-rule changes start affecting parse inference in step 7.
+11. **No real streaming from Gemini to iOS** — see backend assumption 4. Transparent to the view model; `SolveViewModel` consumes `AsyncThrowingStream<DinnerSolveEvent>` identically whether events come from live stream or cache replay.
+12. **Core Data relationship from `SuggestedDish` to `RecipePlan` is Nullify, not Cascade** — so saved-meal semantics in step 4 can outlive the solve that birthed them.
 
 ## Step-1 assumptions (backend)
 
