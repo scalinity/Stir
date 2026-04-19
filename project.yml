@@ -92,6 +92,8 @@ targets:
         PostHogPublicAPIKey: $(POSTHOG_PUBLIC_API_KEY)
         SentryDSNPublic: $(SENTRY_DSN_PUBLIC)
         RevenueCatPublicAPIKey: $(REVENUECAT_PUBLIC_API_KEY)
+        # Permission usage strings. Presented inside the system prompt.
+        NSCameraUsageDescription: "Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options."
 
     entitlements:
       path: Stir/App/Stir.entitlements

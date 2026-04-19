@@ -115,20 +115,117 @@ actor SupabaseSessionClient {
         return try await perform(request, attempt: 0, retriedAuth: false)
     }
 
-    /// Reserved for step 3+ AI endpoints. Shapes the same AUTH-01 silent-
-    /// retry + 5xx backoff as bootstrap; delegates to `perform` after
-    /// building an authenticated request.
+    /// Used by step 3+ AI endpoints. Shapes the same AUTH-01 silent-retry +
+    /// 5xx backoff as bootstrap; delegates to `perform` after attaching
+    /// JWT + apikey.
     func performAuthenticated<T: Decodable & Sendable>(
         _ request: URLRequest,
     ) async throws -> T {
         var mutable = request
         mutable.addValue("application/json", forHTTPHeaderField: "accept")
-        // Attach JWT + apikey. Caller is expected to have set the URL + body.
         if let jwt = cachedJWT {
             mutable.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         }
         mutable.setValue(config.supabase.anonKey, forHTTPHeaderField: "apikey")
         return try await perform(mutable, attempt: 0, retriedAuth: false)
+    }
+
+    /// Streaming variant for SSE endpoints (dinner-solve). Returns the
+    /// response headers + an AsyncBytes stream the caller consumes directly.
+    /// Status is checked ONCE at header time; AUTH-01 triggers a silent
+    /// re-bootstrap + single retry before handing off the stream.
+    ///
+    /// Non-2xx responses are fully read, JSON-parsed, and thrown as typed
+    /// StirError — same shape as the non-streaming path.
+    func performAuthenticatedStream(
+        _ request: URLRequest,
+    ) async throws -> (response: HTTPURLResponse, bytes: URLSession.AsyncBytes) {
+        return try await performStream(request: request, retriedAuth: false)
+    }
+
+    private func performStream(
+        request inRequest: URLRequest,
+        retriedAuth: Bool,
+    ) async throws -> (response: HTTPURLResponse, bytes: URLSession.AsyncBytes) {
+        var request = inRequest
+        request.addValue("text/event-stream", forHTTPHeaderField: "accept")
+        if let jwt = cachedJWT {
+            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        }
+        request.setValue(config.supabase.anonKey, forHTTPHeaderField: "apikey")
+
+        let (bytes, urlResponse): (URLSession.AsyncBytes, URLResponse)
+        do {
+            (bytes, urlResponse) = try await urlSession.bytes(for: request)
+        } catch {
+            Logger.supabase.error("stream urlsession failure: \(error.localizedDescription, privacy: .public)")
+            throw StirError.networkUnreachable(underlying: error)
+        }
+
+        guard let http = urlResponse as? HTTPURLResponse else {
+            throw StirError.malformedResponse(description: "not an HTTPURLResponse")
+        }
+
+        switch http.statusCode {
+        case 200 ..< 300:
+            return (http, bytes)
+
+        case 401:
+            // Drain the error body so we can parse reason.
+            let errData = try await readAllBytes(bytes)
+            let body = try? parseErrorBody(errData)
+            let reason = AuthReason(rawValue: body?.reason ?? "missing") ?? .missing
+            Logger.supabase.info("stream AUTH-01 reason=\(reason.rawValue, privacy: .public)")
+            if !retriedAuth, let identity = lastBootstrapIdentity {
+                _ = try await bootstrap(
+                    installationID: identity.installationID,
+                    cloudKitRecordName: identity.cloudKitRecordName,
+                )
+                return try await performStream(request: inRequest, retriedAuth: true)
+            }
+            throw StirError.auth(reason: reason, message: body?.message ?? "session missing")
+
+        case 403:
+            let errData = try await readAllBytes(bytes)
+            let body = try parseErrorBody(errData)
+            let code = ErrorCode(rawValue: body.error) ?? .bill01
+            throw StirError.entitlementRequired(code: code, message: body.message)
+
+        case 429:
+            let errData = try await readAllBytes(bytes)
+            let body = try? parseErrorBody(errData)
+            throw StirError.rateLimited(resetDate: nil, message: body?.message ?? "rate limited")
+
+        case 400:
+            let errData = try await readAllBytes(bytes)
+            let body = try parseErrorBody(errData)
+            let code = ErrorCode(rawValue: body.error) ?? .val01
+            if code == .val01 {
+                throw StirError.validation(fieldErrors: body.fieldErrors ?? [], message: body.message)
+            }
+            throw StirError.server(code: code, message: body.message, fieldErrors: body.fieldErrors ?? [])
+
+        case 500 ..< 600:
+            let errData = try await readAllBytes(bytes)
+            let body = try? parseErrorBody(errData)
+            throw StirError.server(
+                code: ErrorCode(rawValue: body?.error ?? "") ?? .ai01,
+                message: body?.message ?? "upstream error",
+                fieldErrors: body?.fieldErrors ?? [],
+            )
+
+        default:
+            throw StirError.malformedResponse(description: "unexpected stream status \(http.statusCode)")
+        }
+    }
+
+    private func readAllBytes(_ bytes: URLSession.AsyncBytes) async throws -> Data {
+        var buffer = Data()
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count > 64 * 1024 { break } // safety cap on error bodies
+        }
+        return buffer
     }
 
     /// Remove the cached JWT — called on explicit sign-out flows or when
