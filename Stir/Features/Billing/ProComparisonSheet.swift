@@ -43,9 +43,19 @@ struct ProComparisonSheet: View {
         }
     }
 
+    /// Used for the Pro column's minimum width so the column expands with
+    /// Dynamic Type instead of clipping at accessibility sizes. 48pt at
+    /// default body size; grows proportionally.
+    @ScaledMetric(relativeTo: .footnote) private var proColumnMinWidth: CGFloat = 48
+
     private var comparisonTable: some View {
         VStack(spacing: 0) {
-            row(label: "Dinner Solves / month", premium: "40", pro: "120", header: true)
+            // Column header row. Needed so a sighted user knows which
+            // number is Premium vs Pro, and so VoiceOver users can hear
+            // "Premium column" before the data rows are read.
+            headerRow
+            Divider()
+            row(label: "Dinner Solves / month", premium: "40", pro: "120")
             Divider()
             row(label: "Voice Cook Sessions / month", premium: "20", pro: "40")
             Divider()
@@ -62,16 +72,43 @@ struct ProComparisonSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private func row(label: String, premium: String, pro: String, header: Bool = false) -> some View {
+    private var headerRow: some View {
         HStack {
-            Text(label).font(header ? .footnote.bold() : .footnote)
+            Text("").font(.caption.bold())
             Spacer()
-            Text(premium).font(.footnote.monospacedDigit())
-            Text(pro).font(.footnote.monospacedDigit().bold()).foregroundStyle(.tint)
-                .frame(minWidth: 48, alignment: .trailing)
+            Text("Premium")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            Text("Pro")
+                .font(.caption.bold())
+                .foregroundStyle(.tint)
+                .frame(minWidth: proColumnMinWidth, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Feature, Premium, Pro")
+    }
+
+    private func row(label: String, premium: String, pro: String) -> some View {
+        HStack {
+            Text(label).font(.footnote)
+            Spacer()
+            Text(premium).font(.footnote.monospacedDigit())
+            Text(pro)
+                .font(.footnote.monospacedDigit().bold())
+                .foregroundStyle(.tint)
+                .frame(minWidth: proColumnMinWidth, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        // Combine children so VoiceOver reads each row as a single
+        // phrase rather than three disconnected tokens. Previously the
+        // screen reader voiced "Dinner Solves per month", silence,
+        // "40", silence, "120" — leaving the user to infer which number
+        // belongs to which column.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label). Premium: \(premium). Pro: \(pro).")
     }
 
     private var proCTAs: some View {

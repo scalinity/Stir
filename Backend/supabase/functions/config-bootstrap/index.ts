@@ -24,13 +24,16 @@ import {
 import { createServiceClient } from '../_shared/db.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import {
+  computeCurrentPeriodStart,
   effectiveTier,
   effectiveVoiceEnabled,
   ensureCurrentPeriodRows,
+  MissingQuotaRowError,
   readEntitlement,
   readQuotasForWire,
   toIsoDate,
 } from '../_shared/entitlements.ts';
+import type { QuotaWire } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
 import type { PromptWireRow } from '../_shared/prompt_versions.ts';
 
@@ -137,26 +140,56 @@ Deno.serve(async (req) => {
     const voiceEnabled = effectiveVoiceEnabled(entitlement);
     const billingRetryBanner = entitlement.billing_state === 'grace';
 
-    // Ensure current-period usage_counters exist BEFORE reading quotas. The
-    // user's period rolls over on `app_users.created_at` day-of-month; when
-    // that boundary is crossed inside the 24h JWT TTL window, this endpoint
-    // would otherwise query rows that don't exist yet and return {used:0,
-    // cap:0} for every feature — which iOS reads as "quota exhausted" and
-    // gates every metered feature. Idempotent upsert, same path as
-    // session-bootstrap step 3e.
+    // Read-first, seed-on-miss. Previous implementation unconditionally
+    // upserted the current-period rows on every call (foreground refresh
+    // fires on every scenePhase .active). That's a write on ~99.9% of
+    // calls where the period hasn't rolled over — wasted IOPS + latency
+    // on a hot path.
+    //
+    // New shape: compute period window locally, attempt to read quotas
+    // directly, and only seed rows on the rollover edge (signaled by
+    // readQuotasForWire throwing `MissingQuotaRowError`). All other
+    // reads — flags, prompts — run in parallel with the initial quota
+    // read for the common (non-rollover) case.
     const accountCreatedAt = new Date(userRow.created_at);
-    const { periodStart, periodEnd } = await ensureCurrentPeriodRows(
-      client, claims.canonical_user_key, tier, accountCreatedAt,
-    );
+    const { periodStart, periodEnd } = computeCurrentPeriodStart(accountCreatedAt);
 
-    const [quotas, flags, promptsResult] = await Promise.all([
-      readQuotasForWire(client, claims.canonical_user_key, periodStart, periodEnd),
-      readFlags(client, userLog),
-      client
-        .from('prompt_versions')
-        .select('feature_key, version, provider_model, schema_hash, is_default, is_enabled')
-        .eq('is_default', true),
+    const quotasReadPromise = readQuotasForWire(
+      client, claims.canonical_user_key, periodStart, periodEnd,
+    ).catch((err: unknown) => err);
+    const flagsPromise = readFlags(client, userLog);
+    const promptsPromiseRaw = client
+      .from('prompt_versions')
+      .select('feature_key, version, provider_model, schema_hash, is_default, is_enabled')
+      .eq('is_default', true);
+
+    const [quotasReadResult, flags, promptsResult] = await Promise.all([
+      quotasReadPromise, flagsPromise, promptsPromiseRaw,
     ]);
+
+    let quotas: QuotaWire[];
+    if (quotasReadResult instanceof MissingQuotaRowError) {
+      // Rollover edge: the user crossed their monthly anchor day inside
+      // the JWT TTL window and the new period's rows don't exist yet.
+      // Seed them now (effective tier determines cap snapshot) and
+      // re-read. This is the only path that writes.
+      userLog.info('period_rollover_seed', {
+        missing_features: quotasReadResult.missingFeatureKeys,
+        period_start: toIsoDate(periodStart),
+      });
+      await ensureCurrentPeriodRows(
+        client, claims.canonical_user_key, tier, accountCreatedAt,
+      );
+      quotas = await readQuotasForWire(
+        client, claims.canonical_user_key, periodStart, periodEnd,
+      );
+    } else if (quotasReadResult instanceof Error) {
+      // Some other DB error — bubble to the outer catch.
+      throw quotasReadResult;
+    } else {
+      // Common path: quotas present; no write needed.
+      quotas = quotasReadResult;
+    }
 
     if (promptsResult.error) throw promptsResult.error;
     const prompts = (promptsResult.data ?? []) as PromptWireRow[];

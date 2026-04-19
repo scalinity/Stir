@@ -26,8 +26,7 @@ struct SettingsRootView: View {
     @Environment(RootCoordinator.self) private var coordinator
 
     @State private var isRestoring = false
-    @State private var restoreToast: SettingsToast?
-    @State private var restoreToastID = UUID()
+    @State private var restoreToast: StirToastPayload?
 
     /// User setting for the trial reminder. Hydrated on appear from the
     /// actual pending `UNNotificationRequest` state so a user who
@@ -49,18 +48,7 @@ struct SettingsRootView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .bottom) {
-            if let toast = restoreToast {
-                Text(toast.message)
-                    .font(.footnote)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
+        .stirToast($restoreToast)
     }
 
     // MARK: - Plan & Billing
@@ -311,21 +299,24 @@ struct SettingsRootView: View {
         // no paywall_viewed event fires since we don't call load().
         let vm = coordinator.makePaywallViewModel(trigger: .settingsUpgrade)
         let outcome = await vm.restore(origin: .settings)
-        let toast: SettingsToast
+        let payload: StirToastPayload
         switch outcome {
-        case .restored:         toast = .init(message: "Restored. Welcome back.")
-        case .nothingToRestore: toast = .init(message: "No active purchase to restore.")
-        case .failed(let e):    toast = .init(message: "Couldn't restore: \(e.userFacingMessage)")
+        case .restored:
+            payload = StirToastPayload(id: UUID(), message: "Restored. Welcome back.", kind: .success)
+        case .nothingToRestore:
+            payload = StirToastPayload(id: UUID(), message: "No active purchase to restore.", kind: .info)
+        case .failed(let e):
+            payload = StirToastPayload(id: UUID(), message: "Couldn't restore: \(e.userFacingMessage)", kind: .failed)
         }
 
         // Race guard: a second tap within 2.5s would cause the first
-        // task's clear to dismiss the second toast prematurely. Track
-        // an ID; only the matching task is allowed to clear.
-        let myID = UUID()
-        restoreToastID = myID
-        restoreToast = toast
+        // task's clear to dismiss the second toast prematurely. StirToastPayload
+        // carries a UUID id — only clear if the currently-presented toast
+        // is still the one this task set.
+        let myID = payload.id
+        restoreToast = payload
         try? await Task.sleep(nanoseconds: 2_500_000_000)
-        if restoreToastID == myID {
+        if restoreToast?.id == myID {
             restoreToast = nil
         }
     }
@@ -339,10 +330,6 @@ struct SettingsRootView: View {
         let hasReminder = pending.contains { $0.identifier == "stir.trial.reminder.2d" }
         trialReminderEnabled = hasReminder
     }
-}
-
-private struct SettingsToast: Equatable {
-    let message: String
 }
 
 // MARK: - Display helpers on typed enums

@@ -12,6 +12,7 @@
 		04E5EBC3A45393DA0AD37C33 /* SessionDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */; };
 		08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */; };
 		0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */; };
+		0DBB9D4619D5040EAA57E65A /* AsyncTimeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */; };
 		0F0D935AA6828583253F4984 /* AccountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF6131D62FD6AEE89E460F0 /* AccountState.swift */; };
 		106BDB46DB5D832BEE1BCC94 /* RootCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A678963101108CE2077E4BE /* RootCoordinator.swift */; };
 		13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4714D34B06C97687599F9389 /* ErrorPresenter.swift */; };
@@ -35,6 +36,7 @@
 		38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61ECEB2E68886B41D1AE79C /* AppConfig.swift */; };
 		3AD32ADEBDCC71B2996F70D1 /* PantryItem+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */; };
 		3BEB07ACCE22C955E60990BE /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F9A8184731D4338C59B314 /* PersistenceController.swift */; };
+		40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */; };
 		45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */; };
 		472BB60F98CA43956D4ED4B1 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE194C00CBA1EC009095718F /* CookingSessionRepository.swift */; };
 		4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CC0200F54DD79B24299BCF /* TonightHomeView.swift */; };
@@ -77,6 +79,7 @@
 		A45696E727E29689E46AA055 /* RecipePlan+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */; };
 		A85EEA8C2E168EBCBFEB7899 /* KitchenEquipment+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */; };
 		A89F3E0537CD069546AB3AFB /* SupabaseSessionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */; };
+		A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBA709C30DB047605482FD3 /* StirToast.swift */; };
 		ABDC21E86265244E9D9C665C /* OnboardingOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1106B6B1903590ECC6EB7227 /* OnboardingOptions.swift */; };
 		ACE62E7B306CA106423A6288 /* OutcomeFeedback+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B22924EBC9384C320BF729 /* OutcomeFeedback+Extensions.swift */; };
 		AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */; };
@@ -132,12 +135,14 @@
 
 /* Begin PBXFileReference section */
 		016A78A0278372166E393E65 /* StirApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirApp.swift; sourceTree = "<group>"; };
+		03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncTimeout.swift; sourceTree = "<group>"; };
 		0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentHouseholdStore.swift; sourceTree = "<group>"; };
 		06DD944D757CD38D2F98B502 /* ScanReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanReviewView.swift; sourceTree = "<group>"; };
 		07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSessionClient.swift; sourceTree = "<group>"; };
 		1106B6B1903590ECC6EB7227 /* OnboardingOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOptions.swift; sourceTree = "<group>"; };
 		1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DietaryRule+Extensions.swift"; sourceTree = "<group>"; };
 		14744B65A207BA49BDB36C0A /* ErrorCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCode.swift; sourceTree = "<group>"; };
+		1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncTimeoutTests.swift; sourceTree = "<group>"; };
 		16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowRoot.swift; sourceTree = "<group>"; };
 		185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalKeyHash.swift; sourceTree = "<group>"; };
 		18E8619A7FDF88B9465134C3 /* SentryReporting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryReporting.swift; sourceTree = "<group>"; };
@@ -201,6 +206,7 @@
 		86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HouseholdProfile+Extensions.swift"; sourceTree = "<group>"; };
 		86D2499D3F643A0F93C7D4A8 /* StirTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StirTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModelTests.swift; sourceTree = "<group>"; };
+		8DBA709C30DB047605482FD3 /* StirToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirToast.swift; sourceTree = "<group>"; };
 		8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PantryItem+Extensions.swift"; sourceTree = "<group>"; };
 		903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityServiceTests.swift; sourceTree = "<group>"; };
 		948032DBA10C08623AB8E7A4 /* AccountStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStateTests.swift; sourceTree = "<group>"; };
@@ -242,7 +248,7 @@
 		F8C926703C86621AD1B481E6 /* CookingSession+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookingSession+Extensions.swift"; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
-		"TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_9BA5A3E0-474A-4A52-A2F1-7A21DE0A4C3C" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -293,6 +299,7 @@
 			children = (
 				948032DBA10C08623AB8E7A4 /* AccountStateTests.swift */,
 				71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */,
+				1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */,
 				3A9DE9C3193E73E1AE97C1CF /* CookModeViewModelTests.swift */,
 				EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */,
 				903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */,
@@ -465,6 +472,7 @@
 		A591A16677BE57040F5C6EC1 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */,
 				185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */,
 				14744B65A207BA49BDB36C0A /* ErrorCode.swift */,
 				4714D34B06C97687599F9389 /* ErrorPresenter.swift */,
@@ -610,6 +618,7 @@
 		E7D1D5AB334D13A5C1A0907D /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F0A20F47ECEBC4EEF2C98C71 /* Views */,
 				40092CAC050DF5BA95E9711C /* ConfigurationErrorView.swift */,
 				494C830D500C89939B57CD7C /* Info.plist */,
 				B0C5B327FD1EFD0788845785 /* LoadingView.swift */,
@@ -619,6 +628,14 @@
 				016A78A0278372166E393E65 /* StirApp.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		F0A20F47ECEBC4EEF2C98C71 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8DBA709C30DB047605482FD3 /* StirToast.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		FD8B4EC3DEAADA847949BC07 /* Solve */ = {
@@ -641,10 +658,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_2957C001-CA59-436D-AEEC-5F74DBF38627" /* Stir */ = {
+		"TEMP_0C8FDB31-FEB0-4842-8026-1F2CC028E4C2" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */,
+				"TEMP_9BA5A3E0-474A-4A52-A2F1-7A21DE0A4C3C" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -755,6 +772,7 @@
 			files = (
 				DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */,
 				D3B2F3B6BDD2CFDDA4FD82F4 /* AccountStateTests.swift in Sources */,
+				40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */,
 				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
 				FCF76E7B277686B408B1C983 /* CookModeViewModelTests.swift in Sources */,
 				748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */,
@@ -785,6 +803,7 @@
 				9E1E55836E5C718412EC5C8D /* AIDispatchDTOs.swift in Sources */,
 				0F0D935AA6828583253F4984 /* AccountState.swift in Sources */,
 				38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */,
+				0DBB9D4619D5040EAA57E65A /* AsyncTimeout.swift in Sources */,
 				D1E22A6F96EB022ADC2E39D2 /* BillingTelemetryProperties.swift in Sources */,
 				EBA79945C63853EDEE2A74A3 /* CameraService.swift in Sources */,
 				795414CE1EDDCCC6B9B4241D /* CanonicalKeyHash.swift in Sources */,
@@ -855,6 +874,7 @@
 				F1C6D7813DA8274D0F34396F /* StirApp.swift in Sources */,
 				5E6AC0A940D710330894EB3C /* StirError.swift in Sources */,
 				C200803A785580A86DBEE427 /* StirNotificationDelegate.swift in Sources */,
+				A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */,
 				D075C96D81CFEBE670FDFA19 /* SubstitutionEvent+Extensions.swift in Sources */,
 				513376393799D95B45714910 /* SubstitutionRepository.swift in Sources */,
 				2FC39966A071900E020F336B /* SubstitutionSheetView.swift in Sources */,
@@ -882,7 +902,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_9BA5A3E0-474A-4A52-A2F1-7A21DE0A4C3C" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -921,7 +941,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_9BA5A3E0-474A-4A52-A2F1-7A21DE0A4C3C" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

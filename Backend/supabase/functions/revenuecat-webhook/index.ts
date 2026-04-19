@@ -33,6 +33,8 @@ import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import {
   HANDLED_EVENT_TYPES,
+  isEventFresh,
+  MAX_EVENT_AGE_MS,
   RevenueCatWebhookEnvelope,
   resolveEventAction,
   verifyAuthHeader,
@@ -252,6 +254,39 @@ Deno.serve(async (req) => {
     environment: event.environment,
     product_id: event.product_id,
   });
+
+  // -----------------------------------------------------------------------
+  // 3b. Replay-window / freshness check
+  // -----------------------------------------------------------------------
+  // Defense-in-depth against secret compromise: even with a valid auth
+  // header, a captured event from >10 minutes ago won't be re-applied.
+  // RC's own retry window is much shorter than this; legitimate
+  // deliveries never trigger it.
+  if (!isEventFresh(event)) {
+    userLog.warn('event_stale', {
+      event_id: event.id,
+      event_type: event.type,
+      event_timestamp_ms: event.event_timestamp_ms,
+      max_age_ms: MAX_EVENT_AGE_MS,
+    });
+    await writeWebhookLog(client, userLog, {
+      event_id: event.id,
+      event_type: event.type,
+      canonical_user_key: event.app_user_id,
+      status: 'validation_failed',
+      raw_payload: {
+        _reason: 'stale_event',
+        event_timestamp_ms: event.event_timestamp_ms ?? null,
+        max_age_ms: MAX_EVENT_AGE_MS,
+      },
+    });
+    // 200 so RC doesn't retry-storm a legitimately-old event; the audit
+    // log captures the reject for review.
+    return new Response(
+      JSON.stringify({ received: true, status: 'stale_event' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }
 
   // -----------------------------------------------------------------------
   // 4. Resolve action from event

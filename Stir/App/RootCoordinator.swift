@@ -343,13 +343,29 @@ final class RootCoordinator {
     }
 
     private func runRefresh() async {
+        // 15-second wall-clock cap. URLSession's default resource timeout
+        // is effectively infinite (7 days) — without this wrapper, a
+        // partial-response hang (server accepted connection, never
+        // replies) would park `refreshTask` indefinitely and block every
+        // subsequent foreground transition behind the `existing.value`
+        // await in `refreshEntitlementsOnForeground`. 15s is well above
+        // the p95 for a healthy Supabase round-trip.
         do {
-            let response = try await sessionClient.configBootstrap()
+            let sessionClient = self.sessionClient
+            let response = try await withTimeout(seconds: 15, operation: "configBootstrap") {
+                try await sessionClient.configBootstrap()
+            }
             entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
             emitAccountStateChangeIfNeeded()
             await updateTrialReminder()
             Logger.coordinator.debug(
                 "foreground refresh ok tier=\(self.entitlements.tier.rawValue, privacy: .public)",
+            )
+        } catch StirError.timeout(let op, let seconds) {
+            // Timeout is a distinct, expected failure mode — log at
+            // warning, don't surface to Sentry. Next foreground retries.
+            Logger.coordinator.warning(
+                "foreground refresh timed out (\(op, privacy: .public) > \(seconds, privacy: .public)s) — keeping cached snapshot",
             )
         } catch {
             // Non-fatal: keep the cached snapshot. Retry on next

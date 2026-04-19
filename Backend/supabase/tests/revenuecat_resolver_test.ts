@@ -7,6 +7,8 @@ import './_helpers/env.ts';
 import { assertEquals } from '@std/assert';
 import {
   HANDLED_EVENT_TYPES,
+  isEventFresh,
+  MAX_EVENT_AGE_MS,
   PRODUCT_TIER_MAP,
   productIdToTier,
   resolveEventAction,
@@ -356,6 +358,40 @@ Deno.test('TRANSFER → transfer with from/to', () => {
     assertEquals(action.from, from);
     assertEquals(action.to, to);
   }
+});
+
+// ---------------------------------------------------------------------------
+// isEventFresh — replay-window / freshness check (SA2 defense-in-depth)
+// ---------------------------------------------------------------------------
+
+Deno.test('isEventFresh: missing event_timestamp_ms → allow (RC test events)', () => {
+  assertEquals(isEventFresh({ event_timestamp_ms: undefined }), true);
+});
+
+Deno.test('isEventFresh: just-received event is fresh', () => {
+  const now = 1_700_000_000_000;
+  assertEquals(isEventFresh({ event_timestamp_ms: now - 1000 }, now), true);
+});
+
+Deno.test('isEventFresh: event exactly at window boundary is accepted', () => {
+  const now = 1_700_000_000_000;
+  // Age exactly = MAX_EVENT_AGE_MS is inclusive in `age <= MAX_EVENT_AGE_MS`.
+  assertEquals(isEventFresh({ event_timestamp_ms: now - MAX_EVENT_AGE_MS }, now), true);
+});
+
+Deno.test('isEventFresh: event older than window is rejected', () => {
+  const now = 1_700_000_000_000;
+  assertEquals(isEventFresh({ event_timestamp_ms: now - MAX_EVENT_AGE_MS - 1 }, now), false);
+});
+
+Deno.test('isEventFresh: future timestamp within 60s tolerance is accepted (clock skew)', () => {
+  const now = 1_700_000_000_000;
+  assertEquals(isEventFresh({ event_timestamp_ms: now + 30_000 }, now), true);
+});
+
+Deno.test('isEventFresh: future timestamp beyond 60s tolerance is rejected (forgery)', () => {
+  const now = 1_700_000_000_000;
+  assertEquals(isEventFresh({ event_timestamp_ms: now + 120_000 }, now), false);
 });
 
 Deno.test('HANDLED_EVENT_TYPES covers every case in resolver switch', () => {

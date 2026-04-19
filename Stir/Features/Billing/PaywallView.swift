@@ -21,7 +21,12 @@ struct PaywallView: View {
     @Bindable var viewModel: PaywallViewModel
 
     @State private var showProComparison = false
-    @State private var restoreToast: RestoreToast?
+    @State private var restoreToast: StirToastPayload?
+    @State private var successIconBounce = false
+
+    /// Feature-row icon column width scales with Dynamic Type so the
+    /// icons don't crowd the text at AX sizes.
+    @ScaledMetric(relativeTo: .callout) private var featureIconWidth: CGFloat = 24
 
     var body: some View {
         NavigationStack {
@@ -40,19 +45,7 @@ struct PaywallView: View {
                 .sheet(isPresented: $showProComparison) {
                     ProComparisonSheet(viewModel: viewModel)
                 }
-                .overlay(alignment: .bottom) {
-                    if let toast = restoreToast {
-                        RestoreToastView(toast: toast)
-                            .padding(.bottom, 24)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                // Without an explicit .animation() binding, the
-                // `.transition()` above would only animate when nested
-                // in a `withAnimation` closure. Adds a short, easy-in-out
-                // curve tied to the toast's presence so it actually
-                // animates in/out.
-                .animation(.easeInOut(duration: 0.25), value: restoreToast)
+                .stirToast($restoreToast)
                 .task {
                     if case .idle = viewModel.state {
                         await viewModel.load()
@@ -60,14 +53,24 @@ struct PaywallView: View {
                 }
                 .onChange(of: viewModel.state) { _, newState in
                     if case .succeeded = newState {
-                        // Dismissed after a brief celebratory moment so the
-                        // user sees the success state before returning.
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 600_000_000)
-                            dismiss()
-                        }
+                        handleSuccess()
                     }
                 }
+        }
+    }
+
+    /// Animate the success icon with a bounce, wait for the animation to
+    /// settle, then dismiss. Duration matches `.symbolEffect(.bounce)`
+    /// animation length (~750ms) + a short pause. Replaces the previous
+    /// hardcoded `Task.sleep(600ms)` which ran regardless of whether the
+    /// user's eye could actually register the success state.
+    private func handleSuccess() {
+        withAnimation(.spring(duration: 0.4)) {
+            successIconBounce = true
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_100_000_000)  // 1.1s: bounce + breathing room
+            dismiss()
         }
     }
 
@@ -168,7 +171,7 @@ struct PaywallView: View {
     private func featureRow(icon: String, title: String, subtitle: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .frame(width: 24)
+                .frame(width: featureIconWidth)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.callout)
@@ -258,21 +261,29 @@ struct PaywallView: View {
                 .font(.footnote)
             Spacer()
             Button("Restore purchases") {
-                Task {
-                    let outcome = await viewModel.restore(origin: .paywall)
-                    switch outcome {
-                    case .restored:
-                        restoreToast = .success
-                    case .nothingToRestore:
-                        restoreToast = .empty
-                    case .failed(let err):
-                        restoreToast = .failed(err.userFacingMessage)
-                    }
-                    try? await Task.sleep(nanoseconds: 2_500_000_000)
-                    restoreToast = nil
-                }
+                Task { await handleRestoreTap() }
             }
             .font(.footnote)
+        }
+    }
+
+    private func handleRestoreTap() async {
+        let outcome = await viewModel.restore(origin: .paywall)
+        let payload: StirToastPayload
+        switch outcome {
+        case .restored:
+            payload = StirToastPayload(id: UUID(), message: "Restored. Welcome back.", kind: .success)
+        case .nothingToRestore:
+            payload = StirToastPayload(id: UUID(), message: "No active purchase to restore.", kind: .info)
+        case .failed(let err):
+            payload = StirToastPayload(id: UUID(), message: "Couldn't restore: \(err.userFacingMessage)", kind: .failed)
+        }
+        let myID = payload.id
+        restoreToast = payload
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        // Race guard: only dismiss if this task's toast is still presented.
+        if restoreToast?.id == myID {
+            restoreToast = nil
         }
     }
 
@@ -293,6 +304,7 @@ struct PaywallView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(.green)
+                .symbolEffect(.bounce, value: successIconBounce)
                 .accessibilityHidden(true)
             Text("You're all set")
                 .font(.title2.bold())
@@ -368,37 +380,12 @@ struct PaywallView: View {
     }
 }
 
-// MARK: - Restore toast
-
-private enum RestoreToast: Equatable {
-    case success
-    case empty
-    case failed(String)
-}
-
-private struct RestoreToastView: View {
-    let toast: RestoreToast
-
-    var body: some View {
-        Text(copy)
-            .font(.footnote)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color(.systemGray6))
-            .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-    }
-
-    private var copy: String {
-        switch toast {
-        case .success:       return "Restored. Welcome back."
-        case .empty:         return "No active purchase to restore."
-        case .failed(let m): return "Couldn't restore: \(m)"
-        }
-    }
-}
-
 // MARK: - PayError → user copy
+//
+// (The `RestoreToast` + `RestoreToastView` types that used to live here
+// were replaced by the shared `StirToast` component in `Stir/App/Views/
+// StirToast.swift` during the step-5 review follow-up. Settings uses the
+// same component, so a single capsule style lives in one place now.)
 
 extension PayError {
     var userFacingMessage: String {

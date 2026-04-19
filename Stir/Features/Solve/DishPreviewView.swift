@@ -18,6 +18,11 @@ struct DishPreviewView: View {
     @State private var cookModePresented = false
     @State private var localFavorite: Bool = false
 
+    /// Ingredient amount column min width — scales with Dynamic Type so
+    /// amounts like "1 1/2 cups" don't clip at AX sizes. Value at
+    /// default body is the previous hardcoded 80pt.
+    @ScaledMetric(relativeTo: .subheadline) private var amountColumnMinWidth: CGFloat = 80
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -137,7 +142,11 @@ struct DishPreviewView: View {
                         Text(ing.amountText)
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .frame(width: 80, alignment: .leading)
+                            // `minWidth`, not `width` — at AX1+ sizes the
+                            // text may legitimately need more space than
+                            // 80pt; a hard width would clip. Flexible lower
+                            // bound keeps the column aligned at body size.
+                            .frame(minWidth: amountColumnMinWidth, alignment: .leading)
                         Text(ing.displayName + (ing.isOptional ? "  (optional)" : ""))
                             .font(.subheadline)
                     }

@@ -218,6 +218,38 @@ export const HANDLED_EVENT_TYPES = new Set([
   'TRANSFER',
 ]);
 
+/**
+ * Maximum accepted delivery age, in milliseconds. An event whose
+ * `event_timestamp_ms` is older than this when the handler runs is
+ * rejected as stale. Defense-in-depth against replay of captured
+ * webhook deliveries (SA2/SA3 — the shared-secret auth model has no
+ * body signing or built-in freshness check).
+ *
+ * 10 minutes is generous: RC's own retry schedule fires within seconds;
+ * even a large regional outage rarely delays delivery beyond 5 min.
+ * Captured-and-replayed events are far outside this window.
+ */
+export const MAX_EVENT_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Returns true when the event is fresh enough to process. Events
+ * without `event_timestamp_ms` are accepted (RC test events sometimes
+ * omit it; we don't want to reject tooling flows). Events more than
+ * `MAX_EVENT_AGE_MS` in the past or with timestamps in the future (clock
+ * skew or forgery) are rejected.
+ */
+export function isEventFresh(
+  event: Pick<RevenueCatEvent, 'event_timestamp_ms'>,
+  now: number = Date.now(),
+): boolean {
+  const ts = event.event_timestamp_ms;
+  if (ts == null) return true;  // RC test events omit; allow.
+  const age = now - ts;
+  // Past: age > window → stale. Future: age < 0 → clock skew or forgery;
+  // allow up to 60s future tolerance for RC server-clock drift.
+  return age >= -60_000 && age <= MAX_EVENT_AGE_MS;
+}
+
 export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
   const type = event.type;
   const canonicalKey = event.app_user_id;

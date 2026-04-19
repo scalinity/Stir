@@ -43,6 +43,7 @@ interface RcEventPayload {
     period_type?: string;
     purchased_at_ms?: number;
     expiration_at_ms?: number | null;
+    event_timestamp_ms?: number;
     environment?: 'SANDBOX' | 'PRODUCTION';
   };
   api_version: string;
@@ -189,6 +190,30 @@ Deno.test('webhook rejects non-JSON Content-Type with 415', async () => {
   });
   await response.body?.cancel();
   assertEquals(response.status, 415);
+});
+
+Deno.test('webhook rejects stale event (event_timestamp_ms > 10 min old) with 200 + stale_event', async () => {
+  // Replay-window defense (SA2). A captured event from >10 min ago
+  // cannot be re-applied even with a valid auth header.
+  const bs = await quickBootstrap();
+  const staleTimestamp = Date.now() - 30 * 60 * 1000;  // 30 min old
+  const event = rcEvent('RENEWAL', {
+    app_user_id: bs.canonical_user_key,
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    event_timestamp_ms: staleTimestamp,
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  });
+  const res = await postWebhook(event);
+  assertEquals(res.status, 200);
+  const body = res.body as { received?: boolean; status?: string };
+  assertEquals(body.received, true);
+  assertEquals(body.status, 'stale_event');
+
+  // No entitlement mutation.
+  const row = await readEntitlement(bs.canonical_user_key);
+  // Free-default row exists from bootstrap; ensure tier didn't flip to premium.
+  assertEquals(row?.tier, 'free');
 });
 
 Deno.test('webhook rejects malformed canonical_user_key with validation_failed', async () => {
@@ -681,6 +706,12 @@ Deno.test('EXPIRATION → /v1/config/bootstrap returns tier=free voice_enabled=f
 });
 
 Deno.test('config-bootstrap response sets Cache-Control: no-store', async () => {
+  // This test is the last in the file; the step-5 review + follow-up
+  // added enough new webhook-integration tests (each performing at
+  // least one quickBootstrap) that the cumulative count pushes the
+  // shared ip:bootstrap_hourly bucket over 20/hr. Clear before this
+  // test so the final quickBootstrap succeeds.
+  await clearRateLimitBuckets();
   const bs = await quickBootstrap();
   // Call the endpoint with the raw fetch so we can inspect headers.
   const res = await fetch(

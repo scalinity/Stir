@@ -14,6 +14,12 @@ enum StirError: Error, Sendable {
     /// 5xx from backend after retry exhaustion, or URL-level network failure.
     case networkUnreachable(underlying: (any Error)?)
 
+    /// App-layer timeout wrapping a hung request. URLSession's default
+    /// `timeoutIntervalForResource` is effectively infinite (7 days), so a
+    /// partial-response hang at the TCP level would park an async call
+    /// indefinitely without this. Thrown by `withTimeout(seconds:)`.
+    case timeout(operation: String, seconds: Double)
+
     /// Structured 4xx/5xx server error with its typed code.
     case server(code: ErrorCode, message: String, fieldErrors: [FieldError])
 
@@ -51,6 +57,7 @@ extension StirError {
     var presentableCode: ErrorCode {
         switch self {
         case .networkUnreachable:          return .net01
+        case .timeout:                     return .net01
         case .server(let code, _, _):      return code
         case .malformedResponse:           return .net01
         case .auth:                        return .auth01
@@ -69,6 +76,8 @@ extension StirError: CustomStringConvertible {
         switch self {
         case .networkUnreachable(let underlying):
             return "network unreachable — \(underlying?.localizedDescription ?? "no underlying error")"
+        case .timeout(let operation, let seconds):
+            return "timeout — \(operation) exceeded \(seconds)s"
         case .server(let code, let message, _):
             return "server error \(code.rawValue): \(message)"
         case .malformedResponse(let description):

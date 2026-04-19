@@ -14,7 +14,25 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 
 - **Full spec** (product truth): `Specs/Stir-Full-Spec.md`
 - **Cook Mode research** (voice implementation reference): `Specs/Stir-Cook-Mode-Architecture.md`
-- If this file disagrees with the spec, the spec wins. Flag the discrepancy so one of them gets updated.
+- **Architecture Decision Records** (load-bearing choices + their reasoning): `docs/decisions/`
+- **Ops runbooks** (secret rotation, prod incidents, release procedures): `docs/runbooks/`
+- If this file disagrees with the spec, the spec wins. If this file or the spec disagrees with an ADR, the ADR wins for reasoning / history but any spec or this-file update required by the ADR must land in the same commit as the ADR. Flag discrepancies.
+
+## Decisions system
+
+`docs/decisions/` holds the architectural record. Read `docs/decisions/README.md` for the full rules; the TL;DR:
+
+- **Create an ADR** when: a load-bearing choice is made, a reasonable alternative is rejected, a rule is added to / retired from this file or the spec, or work is explicitly deferred with a trigger to revisit.
+- **Don't create an ADR** for day-to-day implementation choices, bug fixes, or anything fully captured by code shape.
+- **ADR naming**: `NNNN-kebab-short-name.md`, sequentially numbered, never recycled, never renumbered.
+- **Statuses**: `Proposed | Accepted | Deferred | Superseded by NNNN | Rejected`. Superseded ADRs stay in place with a forward link; rejected ADRs stay so the same idea doesn't cycle back unexamined.
+- **Template**: copy `docs/decisions/TEMPLATE.md` (Context, Decision, Alternatives considered, Consequences, Trigger to revisit, Notes). Keep each ADR readable in under 5 minutes.
+- **Claude's responsibility**:
+  - Before making a load-bearing choice, check `docs/decisions/` for a prior ADR on the topic.
+  - If the current work represents a new material decision, create the ADR BEFORE or ALONGSIDE the code change — never land one silently.
+  - If code drifts from an Accepted ADR, either amend the ADR or revert the code; silent divergence is banned.
+  - Update the index table in `docs/decisions/README.md` when adding a new ADR.
+- **Relationship to "What NOT to reopen"**: the list at the bottom of this file is the quick-reference TL;DR. Each item links to (or should link to) its ADR for the reasoning and alternatives.
 
 ## North-star constraints (invariants — never violate)
 
