@@ -178,7 +178,7 @@ Deno.serve(async (req) => {
   // 3. Idempotency cache
   // ---------------------------------------------------------------------
   try {
-    const hit = await readCache(client, body.client_request_id);
+    const hit = await readCache(client, claims.canonical_user_key, body.client_request_id);
     if (hit) {
       userLog.info('cache_replay', { age_seconds: hit.age_seconds });
       return responseFromCache(hit, requestId);
@@ -427,7 +427,7 @@ Deno.serve(async (req) => {
 
   // Best-effort cache write.
   try {
-    await writeCache(client, body.client_request_id, FEATURE_KEY, 200, wire);
+    await writeCache(client, claims.canonical_user_key, body.client_request_id, FEATURE_KEY, 200, wire);
   } catch (err) {
     userLog.warn('cache_write_failed', { err: String(err) });
   }

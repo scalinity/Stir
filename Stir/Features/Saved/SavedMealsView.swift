@@ -8,8 +8,11 @@
 //
 // Spec §5 "Saved meals / favorites" lines this up to graduate into
 // the full Saved Library in step 7 when favorites + filters land.
+//
+// Read path goes through CookingSessionRepository.savedMealEntries —
+// the view doesn't open NSFetchRequest itself (kept the layering clean
+// so step 7's favorites + filters work doesn't have to refactor it out).
 
-import CoreData
 import OSLog
 import SwiftUI
 
@@ -17,9 +20,21 @@ struct SavedMealsView: View {
     let household: HouseholdProfile
     let aiDispatch: AIDispatch
 
-    @State private var rows: [SavedMealRow] = []
+    @State private var rows: [CookingSessionRepository.SavedMealEntry] = []
     @State private var cookAgainPlan: RecipePlan?
     @State private var errorMessage: String?
+
+    private let repository: CookingSessionRepository
+
+    init(
+        household: HouseholdProfile,
+        aiDispatch: AIDispatch,
+        repository: CookingSessionRepository = CookingSessionRepository(),
+    ) {
+        self.household = household
+        self.aiDispatch = aiDispatch
+        self.repository = repository
+    }
 
     var body: some View {
         Group {
@@ -67,10 +82,12 @@ struct SavedMealsView: View {
                     Image(systemName: "flame")
                         .foregroundStyle(.orange)
                         .padding(.top, 4)
+                        .accessibilityHidden(true)
                 }
                 .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Cook this again")
         }
         .listStyle(.plain)
     }
@@ -83,8 +100,11 @@ struct SavedMealsView: View {
                     Image(systemName: index <= rating ? "star.fill" : "star")
                         .font(.caption)
                         .foregroundStyle(index <= rating ? .yellow : .secondary)
+                        .accessibilityHidden(true)
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Rated \(rating) out of 5")
         }
     }
 
@@ -109,71 +129,11 @@ struct SavedMealsView: View {
     @MainActor
     private func load() async {
         do {
-            let results = try fetchRecipePlansWithLastCook(for: household)
-            self.rows = results
+            self.rows = try repository.savedMealEntries(for: household)
             self.errorMessage = nil
         } catch {
             Logger.coreData.error("SavedMeals load failed: \(error.localizedDescription, privacy: .public)")
             self.errorMessage = "Couldn't load saved meals."
         }
     }
-
-    private func fetchRecipePlansWithLastCook(for household: HouseholdProfile) throws -> [SavedMealRow] {
-        let context = PersistenceController.shared.viewContext
-
-        let request = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
-        request.predicate = NSPredicate(
-            format: "household == %@ AND deletedAt == nil",
-            household,
-        )
-        // Fetch all, then sort in memory by most-recent cook end.
-        request.relationshipKeyPathsForPrefetching = ["cookingSessions", "cookingSessions.outcomeFeedback"]
-
-        let plans: [RecipePlan]
-        do {
-            plans = try context.fetch(request)
-        } catch {
-            throw StirError.coreData(underlying: error)
-        }
-
-        return plans.compactMap { plan in
-            let completedSessions = (plan.cookingSessions as? Set<CookingSession> ?? [])
-                .filter { $0.typedStatus == .completed }
-            let lastCompletedAt = completedSessions.compactMap { $0.endedAt }.max()
-            let lastRating: Int? = completedSessions
-                .compactMap { session -> (Date, Int)? in
-                    guard let ended = session.endedAt,
-                          let rating = session.outcomeFeedback?.rating,
-                          rating > 0 else { return nil }
-                    return (ended, Int(rating))
-                }
-                .max(by: { $0.0 < $1.0 })?
-                .1
-
-            return SavedMealRow(
-                id: plan.id ?? UUID(),
-                title: plan.title ?? "Untitled recipe",
-                plan: plan,
-                lastCookedAt: lastCompletedAt,
-                rating: lastRating,
-            )
-        }
-        .sorted { (a, b) in
-            // last-cooked-desc; un-cooked go last.
-            switch (a.lastCookedAt, b.lastCookedAt) {
-            case let (.some(l), .some(r)): return l > r
-            case (.some, .none): return true
-            case (.none, .some): return false
-            case (.none, .none): return a.title < b.title
-            }
-        }
-    }
-}
-
-private struct SavedMealRow: Identifiable {
-    let id: UUID
-    let title: String
-    let plan: RecipePlan?
-    let lastCookedAt: Date?
-    let rating: Int?
 }

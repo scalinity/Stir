@@ -14,7 +14,6 @@
 
 import CoreData
 import Foundation
-import OSLog
 
 @MainActor
 final class SubstitutionRepository {

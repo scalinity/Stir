@@ -70,6 +70,11 @@ actor AIDispatch {
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "content-type")
         request.addValue("application/json", forHTTPHeaderField: "accept")
+        // 20s is well above Gemini's p95 server latency (~4s per the
+        // April 2026 spike) and well below URLSession.shared's 60s default.
+        // Prevents the Substitution Sheet from hanging in `.requesting`
+        // on a half-open TCP connection mid-cook (CA2-R4).
+        request.timeoutInterval = 20
         do {
             request.httpBody = try JSONEncoder.stir.encode(body)
         } catch {

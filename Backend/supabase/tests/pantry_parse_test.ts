@@ -6,7 +6,12 @@
 // so CI runs don't burn the paid-tier budget.
 
 import { assertEquals } from '@std/assert';
-import { quickBootstrap, testInstallId, testSourceIP } from './_helpers/factory.ts';
+import { quickBootstrap, testInstallId, testIPHeaders } from './_helpers/factory.ts';
+import { clearRateLimitBuckets } from './_helpers/pg.ts';
+
+// Kong overrides x-real-ip; clear ip:bootstrap_hourly + ip:pantry_parse_daily
+// buckets at module load so tests don't trip RATE-01 on shared localhost.
+await clearRateLimitBuckets();
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
   ? `${Deno.env.get('SUPABASE_URL')}/functions/v1`
@@ -23,7 +28,7 @@ async function callPantryParse(
 ): Promise<HttpResult> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    'x-forwarded-for': testSourceIP(),
+    ...testIPHeaders(),
   };
   if (jwt !== null) headers['Authorization'] = `Bearer ${jwt}`;
   const res = await fetch(`${FUNCTIONS_URL}/pantry-parse`, {

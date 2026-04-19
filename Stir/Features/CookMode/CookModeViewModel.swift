@@ -112,11 +112,17 @@ final class CookModeViewModel {
         return steps[currentStepIndex]
     }
     var isFirstStep: Bool { currentStepIndex <= 0 }
-    var isLastStep: Bool { currentStepIndex >= totalSteps - 1 }
+    // Guard totalSteps == 0: without it, the `>= totalSteps - 1` check
+    // evaluates `>= -1` which is always true, so an empty recipe would
+    // immediately enter the finish flow on any Next tap (CA1 finding).
+    var isLastStep: Bool { totalSteps > 0 && currentStepIndex >= totalSteps - 1 }
 
     // MARK: - Navigation
 
     func nextStep() {
+        // Empty recipe → nowhere to go. Don't advance, don't present
+        // OutcomeFeedback for a session that never had a step.
+        guard totalSteps > 0 else { return }
         guard !isLastStep else {
             finishPresentationRequested = true
             return
@@ -150,6 +156,10 @@ final class CookModeViewModel {
     }
 
     func jumpToStep(_ index: Int) {
+        // Guard totalSteps == 0 to avoid `min(-1, index)` producing a
+        // negative upper bound (CA1 finding). With no steps there's
+        // nowhere to jump.
+        guard totalSteps > 0 else { return }
         let clamped = max(0, min(totalSteps - 1, index))
         guard clamped != currentStepIndex else { return }
         do {
@@ -244,9 +254,13 @@ final class CookModeViewModel {
 
     func requestExitConfirm() {
         // If nothing's started (no timers running, step 0), exit cleanly.
+        // Mark abandoned so the session doesn't linger as a "Resume
+        // cooking" ghost — the user never actually started cooking.
+        // Without this, every ProgressView → immediate back-tap left an
+        // active session that permanently populated the Resume banner.
         let hasRunningTimers = activeTimers.contains { $0.typedState == .running }
         if currentStepIndex == 0 && !hasRunningTimers {
-            exit(markAbandoned: false)
+            Task { await self.exit(markAbandoned: true) }
             return
         }
         exitConfirmRequested = true
@@ -256,7 +270,13 @@ final class CookModeViewModel {
     /// state; otherwise leave it active so Tonight Home's Resume card
     /// can pick it up. Either way, `shouldDismiss` flips true so the
     /// root dismisses the cover.
-    func exit(markAbandoned: Bool) {
+    ///
+    /// Cancel running timers INLINE before flipping `shouldDismiss` —
+    /// dispatching a detached Task here races with the root's onChange
+    /// dismissal, which can tear the VM down before the cancellation
+    /// runs. A dangling `UNNotificationRequest` then fires minutes
+    /// later for an abandoned session (CA2-R1).
+    func exit(markAbandoned: Bool) async {
         if markAbandoned {
             do {
                 try cookingSessionRepository.markAbandoned(session)
@@ -264,12 +284,11 @@ final class CookModeViewModel {
                 Logger.ui.error("markAbandoned failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        // Cancel any running timers so local notifications don't fire
-        // for an abandoned session.
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            for timer in activeTimers where timer.typedState == .running {
-                try? await timerService.cancel(timer, on: session)
+        for timer in activeTimers where timer.typedState == .running {
+            do {
+                try await timerService.cancel(timer, on: session)
+            } catch {
+                Logger.ui.error("exit cancelTimer failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         shouldDismiss = true
@@ -289,7 +308,7 @@ final class CookModeViewModel {
         let durationMinutes = Int(Date().timeIntervalSince(startedAtWallClock) / 60)
         analytics.capture(.cookSessionCompleted, properties: [
             "duration_min": max(0, durationMinutes),
-            "steps_completed": currentStepIndex + 1,
+            "steps_completed": totalSteps == 0 ? 0 : currentStepIndex + 1,
             "voice_enabled": false,
             "recipe_plan_id": recipePlan.id?.uuidString ?? "",
         ])

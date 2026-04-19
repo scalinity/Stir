@@ -37,10 +37,10 @@ struct StepCardView: View {
         ) {
             Button("Keep cooking", role: .cancel) {}
             Button("Pause and resume later") {
-                viewModel.exit(markAbandoned: false)
+                Task { await viewModel.exit(markAbandoned: false) }
             }
             Button("Abandon session", role: .destructive) {
-                viewModel.exit(markAbandoned: true)
+                Task { await viewModel.exit(markAbandoned: true) }
             }
         } message: {
             Text("Your progress is saved. You can resume from Tonight Home.")
@@ -108,6 +108,7 @@ struct StepCardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Timer")
                     .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
                 let matching = viewModel.activeTimers.first { $0.step?.id == step.id }
                 if let timer = matching {
                     TimerCountdownView(timer: timer)
@@ -137,14 +138,18 @@ struct StepCardView: View {
                 Button {
                     Task { await viewModel.pauseTimer(timer) }
                 } label: {
-                    Label("Pause", systemImage: "pause.fill").padding(.vertical, 4)
+                    Label("Pause", systemImage: "pause.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.bordered)
             case .paused:
                 Button {
                     Task { await viewModel.resumeTimer(timer) }
                 } label: {
-                    Label("Resume", systemImage: "play.fill").padding(.vertical, 4)
+                    Label("Resume", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderedProminent)
             case .pending, .completed, .cancelled:
@@ -153,7 +158,9 @@ struct StepCardView: View {
             Button(role: .destructive) {
                 Task { await viewModel.cancelTimer(timer) }
             } label: {
-                Label("Cancel", systemImage: "stop.fill").padding(.vertical, 4)
+                Label("Cancel", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
         }

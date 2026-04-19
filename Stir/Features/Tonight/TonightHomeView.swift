@@ -69,11 +69,30 @@ struct TonightHomeView: View {
                         household: household,
                         aiDispatch: coordinator.aiDispatch,
                         source: .saved,
+                        existingSession: session,
                         onDismiss: {
                             resumeCookMode = nil
                             Task { await refreshCookingState() }
                         },
                     )
+                } else {
+                    // Guard: a CookingSession can legitimately arrive with
+                    // nil recipePlan/household via CloudKit's Nullify
+                    // deletion rule (cross-device sync where the plan was
+                    // deleted before we received it). Without this branch,
+                    // fullScreenCover would render empty — a blank,
+                    // undismissable modal. Mirror DishPreviewView's
+                    // fallback copy + close button.
+                    VStack(spacing: 12) {
+                        Text("Couldn't load this dish")
+                            .font(.headline)
+                        Button("Close") {
+                            resumeCookMode = nil
+                            Task { await refreshCookingState() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(40)
                 }
             }
             .task { await refreshCookingState() }
@@ -191,16 +210,13 @@ struct TonightHomeView: View {
             Text("Recent meals")
                 .font(.headline)
             if recentCompleted.isEmpty {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(.secondarySystemBackground))
-                    .frame(height: 80)
-                    .overlay(
-                        Text("No recent meals yet — cook one to see it here.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(),
-                    )
+                Text("No recent meals yet — cook one to see it here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .padding()
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
             } else {
                 VStack(spacing: 10) {
                     ForEach(recentCompleted.prefix(5), id: \.id) { session in
@@ -213,8 +229,16 @@ struct TonightHomeView: View {
 
     private func recentMealRow(session: CookingSession) -> some View {
         Button {
-            // Cook Again — open a fresh Cook Mode on the same plan.
-            resumeCookMode = makeFreshSessionIfPossible(from: session)
+            // Cook Again — open a fresh Cook Mode on the same plan. If
+            // session construction fails (e.g. RecipePlan nullified by
+            // a CloudKit cross-device delete), surface a toast instead
+            // of silently no-op'ing so the user knows the tap landed
+            // (CA2-R7).
+            if let fresh = makeFreshSessionIfPossible(from: session) {
+                resumeCookMode = fresh
+            } else {
+                toastMessage = "Couldn't start this one again. Try from Saved or pick another meal."
+            }
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "fork.knife")
@@ -236,8 +260,11 @@ struct TonightHomeView: View {
                                 Image(systemName: idx <= Int(rating) ? "star.fill" : "star")
                                     .font(.caption2)
                                     .foregroundStyle(idx <= Int(rating) ? .yellow : .secondary)
+                                    .accessibilityHidden(true)
                             }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Rated \(Int(rating)) out of 5")
                     }
                 }
                 Spacer()
@@ -282,12 +309,19 @@ struct TonightHomeView: View {
 
     /// The "Cook Again" flow opens a NEW CookingSession so history is
     /// preserved. For step 4 we create it inside the repository before
-    /// presenting. Returns the new session ready to pass to CookModeRoot.
+    /// presenting. Returns nil when either relationship is missing
+    /// (CloudKit nullified it cross-device) or the insert throws —
+    /// caller surfaces a toast on nil (CA2-R7).
     private func makeFreshSessionIfPossible(from completed: CookingSession) -> CookingSession? {
         guard let plan = completed.recipePlan,
               let household = completed.household else { return nil }
         let repo = CookingSessionRepository()
-        return try? repo.createSession(on: household, for: plan, entryPoint: .saved)
+        do {
+            return try repo.createSession(on: household, for: plan, entryPoint: .saved)
+        } catch {
+            Logger.ui.error("Cook Again createSession failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     @MainActor
@@ -322,6 +356,7 @@ struct TonightHomeView: View {
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.tint)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text(text).font(.subheadline)
         }
     }

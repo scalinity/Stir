@@ -69,8 +69,10 @@ struct DishPreviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label("\(dish.totalTimeMinutes) min", systemImage: "clock")
+                    .accessibilityLabel("\(dish.totalTimeMinutes) minutes total time")
                 Spacer()
                 Label("Rank \(dish.rank)", systemImage: "trophy")
+                    .accessibilityLabel("Rank \(dish.rank)")
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -122,6 +124,7 @@ struct DishPreviewView: View {
                         Text(ing.displayName + (ing.isOptional ? "  (optional)" : ""))
                             .font(.subheadline)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
             .padding()

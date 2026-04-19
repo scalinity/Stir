@@ -9,8 +9,12 @@
 // client, then assert the handler returns RATE-01 before calling Gemini.
 
 import { assertEquals, assertNotEquals } from '@std/assert';
-import { quickBootstrap, testInstallId, testSourceIP } from './_helpers/factory.ts';
-import { serviceClient } from './_helpers/pg.ts';
+import { quickBootstrap, testInstallId, testIPHeaders } from './_helpers/factory.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+
+// Kong overrides x-real-ip; clear ip:bootstrap_hourly + ip:dinner_solve_daily
+// buckets at module load so tests don't trip RATE-01 on shared localhost.
+await clearRateLimitBuckets();
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
   ? `${Deno.env.get('SUPABASE_URL')}/functions/v1`
@@ -28,7 +32,7 @@ async function callDinnerSolve(
 ): Promise<HttpResult> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    'x-forwarded-for': testSourceIP(),
+    ...testIPHeaders(),
   };
   if (jwt !== null) headers['Authorization'] = `Bearer ${jwt}`;
   const res = await fetch(`${FUNCTIONS_URL}/dinner-solve`, {

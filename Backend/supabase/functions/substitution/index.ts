@@ -175,7 +175,7 @@ Deno.serve(async (req) => {
   // 3. Idempotency cache
   // ---------------------------------------------------------------------
   try {
-    const hit = await readCache(client, body.sub_event_id);
+    const hit = await readCache(client, claims.canonical_user_key, body.sub_event_id);
     if (hit) {
       userLog.info('cache_replay', { age_seconds: hit.age_seconds });
       return responseFromCache(hit, requestId);
@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
   });
 
   try {
-    await writeCache(client, body.sub_event_id, FEATURE_KEY, 200, wire);
+    await writeCache(client, claims.canonical_user_key, body.sub_event_id, FEATURE_KEY, 200, wire);
   } catch (err) {
     userLog.warn('cache_write_failed', { err: String(err) });
   }
@@ -452,6 +452,19 @@ function renderPromptForAttempt(
   body: SubstitutionRequest,
   amplifyNote: string | null,
 ): string {
+  // SA1-01 defense-in-depth: wrap user-controlled free text in
+  // USER_DATA markers so the model can be instructed (via the prompt
+  // template) to treat content between them as literal data rather
+  // than instructions. The hard-rule validator remains the primary
+  // defense on output; this lowers the probability of the model being
+  // steered into unsafe suggestions in the first place.
+  //   - user_problem_text: raw free text from the user
+  //   - missing_ingredient_json: display_name is user-controlled
+  //     (free-text "something else…" path)
+  // Other keys (dietary_rules_json, available_equipment_json,
+  // pantry_snapshot_json, recipe_context_json) come from server-
+  // validated CloudKit entities or prior AI output; not user-controlled
+  // in a way that would enable syntactic injection beyond JSON.stringify.
   const base = renderPrompt(template, {
     dietary_rules_json: body.household_context.dietary_rules,
     available_equipment_json: body.household_context.available_equipment,
@@ -459,6 +472,8 @@ function renderPromptForAttempt(
     recipe_context_json: body.recipe_context,
     missing_ingredient_json: body.missing_ingredient,
     user_problem_text: body.user_problem,
+  }, {
+    untrusted: new Set(['user_problem_text', 'missing_ingredient_json']),
   });
   if (!amplifyNote) return base;
   return [

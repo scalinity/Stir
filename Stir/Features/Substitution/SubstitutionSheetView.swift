@@ -18,6 +18,9 @@
 // handler and hard-rule validator that the (future) Live function-call
 // round-trip will hit. Keep the constraint_safe branching logic
 // centralized in AIDispatch.SubstitutionResult so step 6 reuses it.
+//
+// View model lives in SubstitutionSheetViewModel.swift (one VM per file
+// — matches CookModeViewModel / SolveViewModel / ScanViewModel).
 
 import OSLog
 import SwiftUI
@@ -194,13 +197,14 @@ struct SubstitutionSheetView: View {
                 }
 
                 HStack(spacing: 12) {
-                    Button(role: .destructive) {
+                    Button {
                         Task { await vm.reject() }
                     } label: {
                         Label("Reject", systemImage: "xmark")
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.bordered)
+                    .accessibilityHint("Dismiss without using this substitute")
 
                     Button {
                         Task { await vm.accept() }
@@ -209,6 +213,7 @@ struct SubstitutionSheetView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityHint("Use this substitute in the recipe")
                 }
                 .padding(.top, 8)
             }
@@ -248,11 +253,13 @@ struct SubstitutionSheetView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityHint("Dismiss and choose a different ingredient")
                 .padding(.top, 8)
             }
             .padding(20)
             .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
     }
 
@@ -261,288 +268,27 @@ struct SubstitutionSheetView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
             Text(message)
                 .font(.body)
                 .multilineTextAlignment(.center)
-            HStack {
-                Button("Close", action: onDismiss)
-                    .buttonStyle(.bordered)
+            HStack(spacing: 12) {
+                Button {
+                    onDismiss()
+                } label: {
+                    Text("Close")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
                 Button {
                     Task { await vm.submit() }
                 } label: {
                     Label("Try again", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
             }
         }
         .padding(40)
-    }
-}
-
-// MARK: - View model
-
-@MainActor
-@Observable
-final class SubstitutionSheetViewModel {
-    enum ViewState {
-        case idle
-        case requesting
-        case safe(text: String, amountConversion: String?, reasoning: String, confidence: String, promptVersion: String)
-        case unsafe(message: String, reason: String, promptVersion: String)
-        case error(message: String)
-    }
-
-    private(set) var state: ViewState = .idle
-
-    /// Nil means "free-text" path; iOS client sets missingIngredientDisplayName
-    /// on the persisted SubstitutionEvent. A non-nil UUID resolves to the
-    /// recipe's RecipeIngredient.
-    var selectedIngredientID: UUID?
-    var freeTextName: String = ""
-    var userProblem: String = ""
-
-    private let recipePlan: RecipePlan
-    private let household: HouseholdProfile
-    private let session: CookingSession
-    private let currentStep: RecipeStep?
-    private let aiDispatch: AIDispatch
-    private let repository: SubstitutionRepository
-    private let analytics: PostHogClient
-    private let onFinished: () -> Void
-
-    private var subEventID: UUID = UUID()
-    private var persistedEvent: SubstitutionEvent?
-
-    init(
-        recipePlan: RecipePlan,
-        household: HouseholdProfile,
-        session: CookingSession,
-        currentStep: RecipeStep?,
-        aiDispatch: AIDispatch,
-        repository: SubstitutionRepository? = nil,
-        analytics: PostHogClient = .shared,
-        onFinished: @escaping () -> Void,
-    ) {
-        self.recipePlan = recipePlan
-        self.household = household
-        self.session = session
-        self.currentStep = currentStep
-        self.aiDispatch = aiDispatch
-        self.repository = repository ?? SubstitutionRepository()
-        self.analytics = analytics
-        self.onFinished = onFinished
-    }
-
-    var canSubmit: Bool {
-        if selectedIngredientID != nil { return true }
-        return !freeTextName.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    // MARK: - Submit
-
-    func submit() async {
-        guard canSubmit else { return }
-        state = .requesting
-        subEventID = UUID()
-        persistedEvent = nil
-
-        let missingIngredient = resolveMissingIngredient()
-        let pickedIngredient = selectedIngredientID.flatMap(findIngredient)
-        let problemText = userProblem.trimmingCharacters(in: .whitespaces)
-
-        analytics.capture(.substitutionRequested, properties: [
-            "problem_type": pickedIngredient == nil ? "free_text" : "picker",
-            "invocation": "sheet",
-        ])
-
-        let body = SubstitutionRequest(
-            subEventID: subEventID,
-            cookingSessionID: session.id ?? UUID(),
-            recipePlanID: recipePlan.id ?? UUID(),
-            missingIngredient: missingIngredient,
-            userProblem: problemText.isEmpty ? "Need a substitute" : problemText,
-            householdContext: buildHouseholdContext(),
-            recipeContext: buildRecipeContext(),
-        )
-
-        do {
-            let result = try await aiDispatch.substitution(request: body)
-            await applyResult(result, pickedIngredient: pickedIngredient, freeTextLabel: missingIngredient.displayName)
-        } catch {
-            Logger.aiDispatch.error("substitution dispatch failed: \(error.localizedDescription, privacy: .public)")
-            let stirError = (error as? StirError) ?? .networkUnreachable(underlying: error)
-            state = .error(message: ErrorPresenter.present(stirError).message)
-        }
-    }
-
-    // MARK: - Accept / Reject
-
-    func accept() async {
-        guard case let .safe(text, _, _, _, _) = state, let event = persistedEvent else {
-            onFinished()
-            return
-        }
-        do {
-            try repository.recordDecision(event, accepted: true, acceptedAlternativeText: text)
-        } catch {
-            Logger.coreData.error("accept substitution failed: \(error.localizedDescription, privacy: .public)")
-        }
-        analytics.capture(.substitutionAccepted, properties: [
-            "accepted": true,
-            "constraint_safe": true,
-        ])
-        onFinished()
-    }
-
-    func reject() async {
-        guard let event = persistedEvent else { onFinished(); return }
-        do {
-            try repository.recordDecision(event, accepted: false, acceptedAlternativeText: nil)
-        } catch {
-            Logger.coreData.error("reject substitution failed: \(error.localizedDescription, privacy: .public)")
-        }
-        analytics.capture(.substitutionAccepted, properties: [
-            "accepted": false,
-            "constraint_safe": state.isSafe,
-        ])
-        onFinished()
-    }
-
-    func acknowledgeUnsafe() async {
-        // Unsafe results persist as accepted=nil (pending) since the user
-        // didn't pick a swap. Just dismiss.
-        analytics.capture(.substitutionAccepted, properties: [
-            "accepted": false,
-            "constraint_safe": false,
-        ])
-        onFinished()
-    }
-
-    // MARK: - Private
-
-    private func applyResult(
-        _ result: SubstitutionResult,
-        pickedIngredient: RecipeIngredient?,
-        freeTextLabel: String,
-    ) async {
-        switch result {
-        case let .safe(subEventID, text, amountConversion, reasoning, confidence, promptVersion):
-            do {
-                let event = try repository.persist(SubstitutionRepository.PersistInput(
-                    subEventId: subEventID,
-                    session: session,
-                    ingredient: pickedIngredient,
-                    freeTextName: pickedIngredient == nil ? freeTextLabel : nil,
-                    step: currentStep,
-                    userProblemText: userProblem,
-                    modelSuggestionText: text,
-                    hardConstraintCheckPassed: true,
-                ))
-                persistedEvent = event
-            } catch {
-                Logger.coreData.error("persist SubstitutionEvent (safe) failed: \(error.localizedDescription, privacy: .public)")
-            }
-            state = .safe(
-                text: text,
-                amountConversion: amountConversion,
-                reasoning: reasoning,
-                confidence: confidence.rawValue,
-                promptVersion: promptVersion,
-            )
-
-        case let .unsafe(subEventID, reason, message, promptVersion):
-            do {
-                let event = try repository.persist(SubstitutionRepository.PersistInput(
-                    subEventId: subEventID,
-                    session: session,
-                    ingredient: pickedIngredient,
-                    freeTextName: pickedIngredient == nil ? freeTextLabel : nil,
-                    step: currentStep,
-                    userProblemText: userProblem,
-                    modelSuggestionText: message,
-                    hardConstraintCheckPassed: false,
-                ))
-                persistedEvent = event
-            } catch {
-                Logger.coreData.error("persist SubstitutionEvent (unsafe) failed: \(error.localizedDescription, privacy: .public)")
-            }
-            state = .unsafe(message: message, reason: reason, promptVersion: promptVersion)
-        }
-    }
-
-    private func resolveMissingIngredient() -> SubstitutionRequest.MissingIngredient {
-        if let id = selectedIngredientID, let ing = findIngredient(id) {
-            return SubstitutionRequest.MissingIngredient(
-                displayName: ing.displayName ?? "",
-                canonicalSlug: ing.canonicalIngredientSlug,
-                amountText: ing.amountText,
-            )
-        }
-        return SubstitutionRequest.MissingIngredient(
-            displayName: freeTextName.trimmingCharacters(in: .whitespaces),
-            canonicalSlug: nil,
-            amountText: nil,
-        )
-    }
-
-    private func findIngredient(_ id: UUID) -> RecipeIngredient? {
-        recipePlan.ingredientArray.first { $0.id == id }
-    }
-
-    private func buildHouseholdContext() -> SubstitutionRequest.HouseholdContext {
-        let rules: [DinnerSolveRequest.DietaryRuleLite] = household.dietaryRuleArray
-            .filter { $0.isActive }
-            .compactMap { rule in
-                guard let kind = rule.kind, let value = rule.value else { return nil }
-                return DinnerSolveRequest.DietaryRuleLite(
-                    kind: kind,
-                    value: value,
-                    severity: rule.severity ?? "soft",
-                )
-            }
-        let equipment = household.kitchenEquipmentArray.filter { $0.isAvailable }.compactMap { $0.code }
-
-        // Step 4 doesn't hold a structured pantry snapshot for Cook Mode
-        // (not needed for most substitutions). Pass the household's
-        // remembered pantry items as the snapshot so the model can prefer
-        // pantry options.
-        let pantry: [SubstitutionRequest.HouseholdContext.PantrySnapshotItem] =
-            (household.pantryItems as? Set<PantryItem>)?.compactMap { item in
-                guard let name = item.displayName, !name.isEmpty else { return nil }
-                return SubstitutionRequest.HouseholdContext.PantrySnapshotItem(
-                    displayName: name,
-                    canonicalSlug: item.canonicalIngredientSlug,
-                )
-            } ?? []
-
-        return SubstitutionRequest.HouseholdContext(
-            dietaryRules: rules,
-            availableEquipment: equipment,
-            pantrySnapshot: pantry,
-        )
-    }
-
-    private func buildRecipeContext() -> SubstitutionRequest.RecipeContext {
-        let remaining: [SubstitutionRequest.RecipeContext.RemainingIngredient] =
-            recipePlan.ingredientArray.compactMap { ing in
-                guard let name = ing.displayName else { return nil }
-                return SubstitutionRequest.RecipeContext.RemainingIngredient(
-                    displayName: name,
-                    canonicalSlug: ing.canonicalIngredientSlug,
-                )
-            }
-        return SubstitutionRequest.RecipeContext(
-            title: recipePlan.title ?? "",
-            currentStepNumber: Int(currentStep?.stepNumber ?? 0),
-            totalSteps: recipePlan.stepArray.count,
-            remainingIngredients: remaining,
-        )
-    }
-}
-
-private extension SubstitutionSheetViewModel.ViewState {
-    var isSafe: Bool {
-        if case .safe = self { return true }
-        return false
     }
 }

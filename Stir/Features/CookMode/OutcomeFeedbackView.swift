@@ -93,8 +93,12 @@ struct OutcomeFeedbackView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(index) star\(index == 1 ? "" : "s")")
+                    .accessibilityAddTraits(index <= rating ? .isSelected : [])
+                    .accessibilityHint("Rate this meal \(index) out of 5")
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(rating == 0 ? "Rating, not set" : "Rating, \(rating) out of 5")
         }
     }
 

@@ -1,9 +1,14 @@
 // Idempotency cache helpers for /v1/ai/* endpoints.
 //
 // Client sends a stable request_id (client_request_id / solve_request_id).
-// If a non-expired cache row exists, we replay the cached response body
-// verbatim — same status code, same JSON. iOS gets a byte-identical
-// result whether or not the first attempt made it to Gemini.
+// If a non-expired cache row exists for THIS user, we replay the cached
+// response body verbatim — same status code, same JSON. iOS gets a
+// byte-identical result whether or not the first attempt made it to
+// Gemini.
+//
+// User scope: cache is keyed on (canonical_user_key, request_id). A
+// request_id leak (breadcrumb, log, misbehaving SDK) cannot be replayed
+// by a different user — their lookup returns a miss.
 //
 // TTL: 10 minutes. Enforced by pg_cron cleanup job AND by the read
 // filter here (belt-and-suspenders in case the cron missed a sweep).
@@ -19,16 +24,19 @@ export interface CacheHit {
 }
 
 /**
- * Look up a cached response by request_id. Returns null if missing or
- * past TTL. Does NOT delete stale rows — pg_cron handles cleanup.
+ * Look up a cached response for (canonicalUserKey, requestId). Returns
+ * null if missing or past TTL. Does NOT delete stale rows — pg_cron
+ * handles cleanup.
  */
 export async function readCache(
   client: SupabaseClient,
+  canonicalUserKey: string,
   requestId: string,
 ): Promise<CacheHit | null> {
   const { data, error } = await client
     .from('ai_response_cache')
     .select('response_body, status_code, created_at')
+    .eq('canonical_user_key', canonicalUserKey)
     .eq('request_id', requestId)
     .maybeSingle<{ response_body: unknown; status_code: number; created_at: string }>();
   if (error) throw error;
@@ -48,12 +56,13 @@ export async function readCache(
 /**
  * Write a response into the cache. Fire-and-forget; failures log but
  * don't propagate. ON CONFLICT DO NOTHING because first-in wins —
- * if two concurrent requests with the same request_id both completed,
- * we already have a stable body and the second writer would only
- * overwrite with something functionally identical.
+ * if two concurrent requests with the same (user, request_id) both
+ * completed, we already have a stable body and the second writer
+ * would only overwrite with something functionally identical.
  */
 export async function writeCache(
   client: SupabaseClient,
+  canonicalUserKey: string,
   requestId: string,
   featureKey: string,
   statusCode: number,
@@ -63,12 +72,13 @@ export async function writeCache(
     .from('ai_response_cache')
     .upsert(
       {
+        canonical_user_key: canonicalUserKey,
         request_id: requestId,
         response_body: responseBody,
         status_code: statusCode,
         feature_key: featureKey,
       },
-      { onConflict: 'request_id', ignoreDuplicates: true },
+      { onConflict: 'canonical_user_key,request_id', ignoreDuplicates: true },
     );
   if (error) {
     // Throw so the caller's try/catch can log. Don't surface to user.

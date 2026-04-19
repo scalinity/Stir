@@ -84,10 +84,20 @@ final class TimerService {
     /// Start a pending CookTimer. Transitions to running, schedules a
     /// local notification at startedAt + durationSec, and registers the
     /// notification id on the parent CookingSession.
+    ///
+    /// On schedule failure, roll the timer back to `.cancelled` so the
+    /// UI doesn't show a running countdown without a backing notification
+    /// (CA2-R2: user-visible timer that silently won't fire in background).
+    /// Re-throws so the caller can surface an error to the user.
     func start(_ timer: CookTimer, on session: CookingSession) async throws {
         let now = Date()
         try repository.start(timer, at: now)
-        try await scheduleNotification(for: timer, on: session)
+        do {
+            try await scheduleNotification(for: timer, on: session)
+        } catch {
+            try? repository.cancel(timer, at: now)
+            throw error
+        }
     }
 
     /// Pause a running timer. Cancels the scheduled notification (we'll
@@ -162,9 +172,10 @@ final class TimerService {
             }
         }
         if !transitioned.isEmpty {
-            // Save again to flush the session's localNotificationIds
-            // edits if any transitioned-ids were removed.
-            try sessionRepository.advanceStep(session, to: Int(session.currentStepIndex))
+            // Flush the session's localNotificationIds edits from the
+            // removeNotificationId calls above. Use saveSession, not
+            // advanceStep — no step transition happened (CA2-R5).
+            try sessionRepository.saveSession(session)
         }
         return transitioned
     }
@@ -175,8 +186,11 @@ final class TimerService {
         guard let timerId = timer.id, let fireDate = timer.fireDate else { return }
         let delay = fireDate.timeIntervalSinceNow
         guard delay > 0 else {
-            // Already overdue — skip scheduling, just mark complete
-            // on the next reconcile path.
+            // Already overdue at schedule time (pathological resume that
+            // pushed newStartedAt past the original fireDate). Mark
+            // complete immediately rather than leave `.running` dangling
+            // without a backing notification (CA2-R8).
+            try repository.markCompleted(timer, at: fireDate)
             return
         }
         let label = timer.label ?? ""
@@ -202,6 +216,10 @@ final class TimerService {
             throw error
         }
         addNotificationId(timerId, to: session)
+        // Persist the session's updated id list so a crash between here
+        // and the next user action doesn't leave us with a scheduled
+        // notification whose UUID isn't in the session's list (CA2-R6).
+        try sessionRepository.saveSession(session)
     }
 
     private func cancelScheduledNotification(for timerId: UUID) async {
@@ -211,15 +229,16 @@ final class TimerService {
     private func addNotificationId(_ id: UUID, to session: CookingSession) {
         var ids = session.localNotificationIdsArray
         let asString = id.uuidString
-        if !ids.contains(asString) {
-            ids.append(asString)
-            session.localNotificationIdsArray = ids
-        }
+        guard !ids.contains(asString) else { return }
+        ids.append(asString)
+        session.localNotificationIdsArray = ids
     }
 
     private func removeNotificationId(_ id: UUID, from session: CookingSession) {
         let asString = id.uuidString
-        let ids = session.localNotificationIdsArray.filter { $0 != asString }
+        var ids = session.localNotificationIdsArray
+        guard let idx = ids.firstIndex(of: asString) else { return }
+        ids.remove(at: idx)
         session.localNotificationIdsArray = ids
     }
 }

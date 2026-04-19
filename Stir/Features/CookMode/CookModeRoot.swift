@@ -17,10 +17,31 @@ struct CookModeRoot: View {
     let household: HouseholdProfile
     let aiDispatch: AIDispatch
     let source: CookModeViewModel.EntrySource
+    /// Existing session to reuse — drives the Tonight Home "Resume
+    /// cooking" path so resume actually resumes instead of silently
+    /// orphaning the prior session and creating a fresh one. Nil =
+    /// fresh start; create a new session in .task.
+    let existingSession: CookingSession?
     let onDismiss: () -> Void
 
     @State private var viewModel: CookModeViewModel?
     @State private var initError: String?
+
+    init(
+        recipePlan: RecipePlan,
+        household: HouseholdProfile,
+        aiDispatch: AIDispatch,
+        source: CookModeViewModel.EntrySource,
+        existingSession: CookingSession? = nil,
+        onDismiss: @escaping () -> Void,
+    ) {
+        self.recipePlan = recipePlan
+        self.household = household
+        self.aiDispatch = aiDispatch
+        self.source = source
+        self.existingSession = existingSession
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
         Group {
@@ -55,10 +76,18 @@ struct CookModeRoot: View {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.largeTitle)
+                        .accessibilityHidden(true)
                     Text(message)
                         .multilineTextAlignment(.center)
-                    Button("Close", action: onDismiss)
-                        .buttonStyle(.borderedProminent)
+                        .accessibilityAddTraits(.isHeader)
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Text("Close")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 .padding(40)
             } else {
@@ -69,11 +98,16 @@ struct CookModeRoot: View {
             guard viewModel == nil, initError == nil else { return }
             do {
                 let repo = CookingSessionRepository()
-                let session = try repo.createSession(
-                    on: household,
-                    for: recipePlan,
-                    entryPoint: entryPoint(for: source),
-                )
+                let session: CookingSession
+                if let existing = existingSession, existing.isResumable {
+                    session = existing
+                } else {
+                    session = try repo.createSession(
+                        on: household,
+                        for: recipePlan,
+                        entryPoint: entryPoint(for: source),
+                    )
+                }
                 let vm = CookModeViewModel(
                     session: session,
                     recipePlan: recipePlan,

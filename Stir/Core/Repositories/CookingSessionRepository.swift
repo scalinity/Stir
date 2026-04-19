@@ -64,6 +64,16 @@ final class CookingSessionRepository {
         try controller.save()
     }
 
+    /// Flush pending session edits (e.g. `localNotificationIdsArray`
+    /// mutations made by TimerService) without touching step state. Use
+    /// this instead of calling `advanceStep` just to force a save —
+    /// advanceStep re-dirties `currentStepIndex` and is confusing in logs
+    /// when no step transition occurred (CA2-R5).
+    func saveSession(_ session: CookingSession) throws {
+        _ = session  // callers pass the session so the call site documents intent
+        try controller.save()
+    }
+
     /// Transition to completed. Sets endedAt. OutcomeFeedback is persisted
     /// separately by OutcomeFeedbackRepository; this only touches the
     /// session state.
@@ -121,6 +131,74 @@ final class CookingSessionRepository {
             return try controller.viewContext.fetch(request)
         } catch {
             throw StirError.coreData(underlying: error)
+        }
+    }
+
+    /// One row per non-deleted RecipePlan for the household, annotated with
+    /// the most-recent completed CookingSession's endedAt + that session's
+    /// rating (if rated). Sorted last-cooked-desc; un-cooked plans last,
+    /// alphabetical by title within that bucket. Drives the Saved Meals
+    /// surface — moved here from the view so SavedMealsView doesn't reach
+    /// into NSFetchRequest directly.
+    struct SavedMealEntry: Identifiable, Sendable {
+        let id: UUID
+        let title: String
+        /// nil only if the RecipePlan row was nilled out between fetch and
+        /// projection — practically never, but the view guards the cast.
+        let plan: RecipePlan?
+        let lastCookedAt: Date?
+        let rating: Int?
+    }
+
+    func savedMealEntries(for household: HouseholdProfile) throws -> [SavedMealEntry] {
+        let request = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
+        request.predicate = NSPredicate(
+            format: "household == %@ AND deletedAt == nil",
+            household,
+        )
+        request.relationshipKeyPathsForPrefetching = ["cookingSessions", "cookingSessions.outcomeFeedback"]
+
+        let plans: [RecipePlan]
+        do {
+            plans = try controller.viewContext.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+
+        let entries: [SavedMealEntry] = plans.compactMap { plan in
+            let completedSessions = (plan.cookingSessions as? Set<CookingSession> ?? [])
+                .filter { $0.typedStatus == .completed }
+            let lastCompletedAt = completedSessions.compactMap { $0.endedAt }.max()
+            let lastRating: Int? = completedSessions
+                .compactMap { session -> (Date, Int)? in
+                    guard let ended = session.endedAt,
+                          let rating = session.outcomeFeedback?.rating,
+                          rating > 0 else { return nil }
+                    return (ended, Int(rating))
+                }
+                .max(by: { $0.0 < $1.0 })?
+                .1
+
+            return SavedMealEntry(
+                id: plan.id ?? UUID(),
+                title: plan.title ?? "Untitled recipe",
+                plan: plan,
+                lastCookedAt: lastCompletedAt,
+                rating: lastRating,
+            )
+        }
+        return entries.sorted(by: Self.sortByLastCooked)
+    }
+
+    /// Comparator extracted for unit testing. Returns true when `a` should
+    /// precede `b`. Last-cooked-desc; un-cooked entries fall to the bottom;
+    /// alphabetical title within the un-cooked tail keeps ordering stable.
+    static func sortByLastCooked(_ a: SavedMealEntry, _ b: SavedMealEntry) -> Bool {
+        switch (a.lastCookedAt, b.lastCookedAt) {
+        case let (.some(l), .some(r)): return l > r
+        case (.some, .none): return true
+        case (.none, .some): return false
+        case (.none, .none): return a.title < b.title
         }
     }
 }

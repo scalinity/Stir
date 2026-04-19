@@ -73,6 +73,27 @@ export function testSourceIP(): string {
   return `198.51.100.${Math.floor(Math.random() * 256)}`;
 }
 
+/** Standard set of IP-source headers for test requests.
+ *
+ * Kong in local dev unconditionally overrides `x-real-ip` to the docker
+ * peer address it resolves (varies by Kong/docker version — has been a
+ * private gateway historically, a public routable IP after a Kong
+ * update). Because `extractSourceIP` prefers x-real-ip, tests can't
+ * sidestep the rate limiter by setting x-real-ip themselves — Kong
+ * will clobber it.
+ *
+ * Mitigation: tests instead clear the rate_limit_buckets table at the
+ * top of the file (see `clearRateLimitBuckets` in pg.ts). This function
+ * still sets a fresh random x-forwarded-for so tests don't collide on
+ * the (now-unused for skip) XFF-rightmost fallback path and so the
+ * header is present for any future extractSourceIP changes.
+ */
+export function testIPHeaders(): Record<string, string> {
+  return {
+    'x-forwarded-for': testSourceIP(),
+  };
+}
+
 /** POST /v1/session/bootstrap — returns parsed body + status. */
 export async function callBootstrap(
   body: BootstrapBody | unknown,
@@ -82,7 +103,7 @@ export async function callBootstrap(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-forwarded-for': testSourceIP(),
+      ...testIPHeaders(),
       ...headers,
     },
     body: typeof body === 'string' ? body : JSON.stringify(body),

@@ -10,7 +10,11 @@ import './_helpers/env.ts';
 import { assertEquals, assertExists } from '@std/assert';
 import * as jose from 'jose';
 import { callConfigBootstrap, quickBootstrap } from './_helpers/factory.ts';
-import { serviceClient } from './_helpers/pg.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+
+// Rate-limit buckets are shared across the test run via Kong's x-real-ip
+// override; clear at module load so quickBootstrap doesn't trip RATE-01.
+await clearRateLimitBuckets();
 
 const JWT_SECRET = new TextEncoder().encode(
   Deno.env.get('STIR_JWT_SECRET') ?? 'super-secret-jwt-token-with-at-least-32-characters-long',

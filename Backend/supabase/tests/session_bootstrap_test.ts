@@ -11,7 +11,12 @@ import {
   testCkRecord,
   testInstallId,
 } from './_helpers/factory.ts';
-import { serviceClient } from './_helpers/pg.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+
+// Kong in local dev overrides x-real-ip unconditionally, so every test
+// in this file lands in one ip:bootstrap_hourly bucket and trips the
+// 20/hr cap. Clear the bucket table once before any Deno.test runs.
+await clearRateLimitBuckets();
 
 Deno.test('session-bootstrap: happy path install-only', async () => {
   const installId = testInstallId();

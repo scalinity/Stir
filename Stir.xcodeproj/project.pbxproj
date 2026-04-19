@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		F10001AAAAAAAA00000001 /* CookModeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10002AAAAAAAA00000001 /* CookModeViewModelTests.swift */; };
 		F10003AAAAAAAA00000002 /* TimerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10004AAAAAAAA00000002 /* TimerServiceTests.swift */; };
+		F20001AAAAAAAA00000003 /* OutcomeFeedbackRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20002AAAAAAAA00000003 /* OutcomeFeedbackRepositoryTests.swift */; };
+		F20003AAAAAAAA00000004 /* SavedMealsSortingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20004AAAAAAAA00000004 /* SavedMealsSortingTests.swift */; };
+		F20005AAAAAAAA00000005 /* TimerServiceReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20006AAAAAAAA00000005 /* TimerServiceReconcileTests.swift */; };
+		F20007AAAAAAAA00000006 /* SubstitutionSheetViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20008AAAAAAAA00000006 /* SubstitutionSheetViewModelTests.swift */; };
 		F00001AAAAAAAA00000001 /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00002AAAAAAAA00000001 /* SavedMealsView.swift */; };
 		E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00012AAAAAAAA00000001 /* CookModeViewModel.swift */; };
 		E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00014AAAAAAAA00000002 /* CookModeRoot.swift */; };
@@ -16,6 +20,7 @@
 		E00017AAAAAAAA00000004 /* TimerCountdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00018AAAAAAAA00000004 /* TimerCountdownView.swift */; };
 		E00019AAAAAAAA00000005 /* OutcomeFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00020AAAAAAAA00000005 /* OutcomeFeedbackView.swift */; };
 		E00021AAAAAAAA00000006 /* SubstitutionSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */; };
+		E00021AAAAAAAA00000007 /* SubstitutionSheetViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00022AAAAAAAA00000007 /* SubstitutionSheetViewModel.swift */; };
 		D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */; };
 		D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */; };
 		D0000005AAAAAAAA00000003 /* SubstitutionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */; };
@@ -114,6 +119,10 @@
 /* Begin PBXFileReference section */
 		F10002AAAAAAAA00000001 /* CookModeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModelTests.swift; sourceTree = "<group>"; };
 		F10004AAAAAAAA00000002 /* TimerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceTests.swift; sourceTree = "<group>"; };
+		F20002AAAAAAAA00000003 /* OutcomeFeedbackRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackRepositoryTests.swift; sourceTree = "<group>"; };
+		F20004AAAAAAAA00000004 /* SavedMealsSortingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsSortingTests.swift; sourceTree = "<group>"; };
+		F20006AAAAAAAA00000005 /* TimerServiceReconcileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceReconcileTests.swift; sourceTree = "<group>"; };
+		F20008AAAAAAAA00000006 /* SubstitutionSheetViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetViewModelTests.swift; sourceTree = "<group>"; };
 		F00002AAAAAAAA00000001 /* SavedMealsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsView.swift; sourceTree = "<group>"; };
 		E00012AAAAAAAA00000001 /* CookModeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModel.swift; sourceTree = "<group>"; };
 		E00014AAAAAAAA00000002 /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
@@ -121,6 +130,7 @@
 		E00018AAAAAAAA00000004 /* TimerCountdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerCountdownView.swift; sourceTree = "<group>"; };
 		E00020AAAAAAAA00000005 /* OutcomeFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackView.swift; sourceTree = "<group>"; };
 		E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetView.swift; sourceTree = "<group>"; };
+		E00022AAAAAAAA00000007 /* SubstitutionSheetViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetViewModel.swift; sourceTree = "<group>"; };
 		D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingSessionRepository.swift; sourceTree = "<group>"; };
 		D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
 		D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionRepository.swift; sourceTree = "<group>"; };
@@ -255,6 +265,10 @@
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 				F10004AAAAAAAA00000002 /* TimerServiceTests.swift */,
+				F20002AAAAAAAA00000003 /* OutcomeFeedbackRepositoryTests.swift */,
+				F20004AAAAAAAA00000004 /* SavedMealsSortingTests.swift */,
+				F20006AAAAAAAA00000005 /* TimerServiceReconcileTests.swift */,
+				F20008AAAAAAAA00000006 /* SubstitutionSheetViewModelTests.swift */,
 			);
 			path = Unit;
 			sourceTree = "<group>";
@@ -428,6 +442,7 @@
 			isa = PBXGroup;
 			children = (
 				E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */,
+				E00022AAAAAAAA00000007 /* SubstitutionSheetViewModel.swift */,
 			);
 			path = Substitution;
 			sourceTree = "<group>";
@@ -693,6 +708,10 @@
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
 				F10003AAAAAAAA00000002 /* TimerServiceTests.swift in Sources */,
+				F20001AAAAAAAA00000003 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
+				F20003AAAAAAAA00000004 /* SavedMealsSortingTests.swift in Sources */,
+				F20005AAAAAAAA00000005 /* TimerServiceReconcileTests.swift in Sources */,
+				F20007AAAAAAAA00000006 /* SubstitutionSheetViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -737,6 +756,7 @@
 				E00019AAAAAAAA00000005 /* OutcomeFeedbackView.swift in Sources */,
 				E00015AAAAAAAA00000003 /* StepCardView.swift in Sources */,
 				E00021AAAAAAAA00000006 /* SubstitutionSheetView.swift in Sources */,
+				E00021AAAAAAAA00000007 /* SubstitutionSheetViewModel.swift in Sources */,
 				E00017AAAAAAAA00000004 /* TimerCountdownView.swift in Sources */,
 				D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */,
 				D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */,
