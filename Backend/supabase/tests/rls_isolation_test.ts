@@ -12,7 +12,11 @@
 
 import { assertEquals } from '@std/assert';
 import { quickBootstrap, testCkRecord, testInstallId } from './_helpers/factory.ts';
-import { serviceClient, userClient } from './_helpers/pg.ts';
+import { clearRateLimitBuckets, serviceClient, userClient } from './_helpers/pg.ts';
+
+// Each test bootstraps 2 users; a full suite run blows past the
+// ip:bootstrap_hourly cap without this.
+await clearRateLimitBuckets();
 
 async function setupTwoUsers() {
   const userA = await quickBootstrap({ installation_id: testInstallId() });

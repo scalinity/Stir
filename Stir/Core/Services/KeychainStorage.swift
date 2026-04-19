@@ -57,8 +57,21 @@ extension KeychainKey {
     }
 
     /// Last-known-good entitlement snapshot (JSON). Used within a 24h grace
-    /// window when bootstrap fails, per step-2 spec.
-    static var entitlementSnapshot: KeychainKey {
+    /// window when bootstrap fails.
+    ///
+    /// v2 — step 5 bumped the shape (renamed `showBillingGraceBanner` →
+    /// `billingRetryBanner` to match the backend field). Old v1 bytes under
+    /// `entitlement_snapshot` fail to decode against the new struct, which
+    /// would silently drop the grace window on first launch after update;
+    /// bumping the account name instead gives us an explicit cutover and a
+    /// one-time delete of the legacy slot on service init (see
+    /// `EntitlementService.restoreFromCachedSnapshotIfFresh`).
+    static var entitlementSnapshotV2: KeychainKey {
+        KeychainKey(service: defaultService, account: "entitlement_snapshot_v2")
+    }
+
+    /// Legacy v1 slot. Deleted on EntitlementService init; never written.
+    static var entitlementSnapshotLegacyV1: KeychainKey {
         KeychainKey(service: defaultService, account: "entitlement_snapshot")
     }
 }

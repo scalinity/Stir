@@ -46,7 +46,7 @@ struct SettingsRootView: View {
                     )
             }
 
-            if entitlements.showBillingGraceBanner {
+            if entitlements.billingRetryBanner {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.circle.fill")
                         .foregroundStyle(.orange)

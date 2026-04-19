@@ -99,7 +99,14 @@ export async function followMergedInto(
 export interface AliasForwardResult {
   alias_performed: boolean;
   usage_rows_merged: number;
+  /** ck already had an entitlement row; install's was discarded. */
   entitlement_row_discarded: boolean;
+  /**
+   * ck had no entitlement row; install's row was renamed to ck. Added in
+   * migration 20260419000004 to preserve entitlements purchased under an
+   * install-scoped identity when the user later gains iCloud.
+   */
+  entitlement_row_promoted?: boolean;
   ai_log_rows_rewritten: number;
   device_rows_rewritten: number;
 }

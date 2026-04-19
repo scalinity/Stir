@@ -82,7 +82,10 @@ final class EntitlementService {
     private(set) var isTrial: Bool = false
     private(set) var expiresAt: Date? = nil
     private(set) var voiceEnabled: Bool = false
-    private(set) var showBillingGraceBanner: Bool = false
+    /// Matches backend `billing_retry_banner` (CLAUDE.md §bootstrap response
+    /// shape). iOS surfaces this when Apple is retrying a failed renewal and
+    /// the user still has paid access in the grace window.
+    private(set) var billingRetryBanner: Bool = false
     private(set) var quotas: [FeatureKey: QuotaSnapshot] = [:]
     private(set) var featureFlags: [String: BootstrapResponse.FeatureFlag] = [:]
     private(set) var hydrationState: HydrationState = .loading
@@ -117,7 +120,7 @@ final class EntitlementService {
         self.isTrial = entitlements.isTrial
         self.expiresAt = entitlements.expiresAt
         self.voiceEnabled = entitlements.voiceEnabled
-        self.showBillingGraceBanner = entitlements.billingRetryBanner
+        self.billingRetryBanner = entitlements.billingRetryBanner
 
         var map: [FeatureKey: QuotaSnapshot] = [:]
         for quota in entitlements.quotas {
@@ -202,13 +205,18 @@ final class EntitlementService {
     // MARK: - Cached snapshot (24h grace)
 
     /// JSON-encodable snapshot kept in Keychain for the 24h offline fallback.
+    /// v2 shape — renamed `showBillingGraceBanner` → `billingRetryBanner` in
+    /// step 5 to match the backend field. Keychain account name was bumped in
+    /// lockstep (see `.entitlementSnapshot` → `.entitlementSnapshotV2` in
+    /// `KeychainStorage`) so stale v1 snapshots are ignored rather than
+    /// decode-failing and corrupting the 24h grace window.
     private struct PersistedSnapshot: Codable, Sendable {
         let tier: Tier
         let billingState: BillingState
         let isTrial: Bool
         let expiresAt: Date?
         let voiceEnabled: Bool
-        let showBillingGraceBanner: Bool
+        let billingRetryBanner: Bool
         let quotas: [FeatureKey: QuotaSnapshot]
         let cachedAt: Date
     }
@@ -222,14 +230,14 @@ final class EntitlementService {
             isTrial: isTrial,
             expiresAt: expiresAt,
             voiceEnabled: voiceEnabled,
-            showBillingGraceBanner: showBillingGraceBanner,
+            billingRetryBanner: billingRetryBanner,
             quotas: quotas,
             cachedAt: Date(),
         )
         do {
             let data = try JSONEncoder.stir.encode(snapshot)
             guard let string = String(data: data, encoding: .utf8) else { return }
-            try keychain.write(string, key: .entitlementSnapshot)
+            try keychain.write(string, key: .entitlementSnapshotV2)
         } catch {
             Logger.entitlement.warning(
                 "failed to persist entitlement snapshot: \(error.localizedDescription, privacy: .public)",
@@ -238,8 +246,15 @@ final class EntitlementService {
     }
 
     private func restoreFromCachedSnapshotIfFresh() {
+        // Best-effort cleanup of the v1 snapshot key. Pre-launch, nothing
+        // depends on v1 data surviving — but leaving stale bytes around is
+        // sloppy and makes future key audits harder. Delete-on-startup is
+        // idempotent (errSecItemNotFound is treated as success in
+        // `KeychainStorage.delete`).
+        try? keychain.delete(key: .entitlementSnapshotLegacyV1)
+
         do {
-            guard let raw = try keychain.read(key: .entitlementSnapshot),
+            guard let raw = try keychain.read(key: .entitlementSnapshotV2),
                   let data = raw.data(using: .utf8) else {
                 return
             }
@@ -247,7 +262,7 @@ final class EntitlementService {
             let age = Date().timeIntervalSince(snapshot.cachedAt)
             guard age < Self.cacheValidity else {
                 Logger.entitlement.info("cached snapshot stale (\(Int(age), privacy: .public)s) — discarding")
-                try? keychain.delete(key: .entitlementSnapshot)
+                try? keychain.delete(key: .entitlementSnapshotV2)
                 return
             }
             self.tier = snapshot.tier
@@ -255,7 +270,7 @@ final class EntitlementService {
             self.isTrial = snapshot.isTrial
             self.expiresAt = snapshot.expiresAt
             self.voiceEnabled = snapshot.voiceEnabled
-            self.showBillingGraceBanner = snapshot.showBillingGraceBanner
+            self.billingRetryBanner = snapshot.billingRetryBanner
             self.quotas = snapshot.quotas
             self.hydrationState = .hydrated(source: .cachedSnapshot)
             Logger.entitlement.info("restored entitlement snapshot from cache (age \(Int(age), privacy: .public)s)")

@@ -315,7 +315,7 @@ RevenueCat webhook event → state mapping (implemented in step 5):
 | `EXPIRATION` | `cancelled_active|grace|trial` → `expired` |
 | `PRODUCT_CHANGE` | `active` → `active` (tier changes separately) |
 
-Bootstrap entitlement resolution: `none|expired` → Free; `active|trial|grace|cancelled_active` → paid per `tier` column; `grace` additionally returns `show_billing_grace_banner: true`.
+Bootstrap entitlement resolution: `none|expired` → Free; `active|trial|grace|cancelled_active` → paid per `tier` column; `grace` additionally returns `billing_retry_banner: true`.
 
 ### `usage_counters` feature keys and period semantics
 

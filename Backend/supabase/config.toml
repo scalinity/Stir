@@ -399,6 +399,12 @@ verify_jwt = false
 [functions.substitution]
 verify_jwt = false
 
+# RevenueCat webhook verifies its own Authorization header (shared secret,
+# not a Supabase JWT). If Kong ran its JWT check first we'd never see the
+# request — RC doesn't speak the Bearer-JWT format Kong expects.
+[functions.revenuecat-webhook]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

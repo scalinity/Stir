@@ -119,9 +119,15 @@ export function jsonError(
 }
 
 /** Build a typed JSON success Response. */
-export function jsonOk(payload: unknown, requestId?: string, status = 200): Response {
+export function jsonOk(
+  payload: unknown,
+  requestId?: string,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+): Response {
   const headers: Record<string, string> = {
     'content-type': 'application/json; charset=utf-8',
+    ...extraHeaders,
   };
   if (requestId) headers['x-request-id'] = requestId;
   return new Response(JSON.stringify(payload), { status, headers });

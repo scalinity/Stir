@@ -204,7 +204,12 @@ Deno.serve(async (req) => {
       raw_tier: entitlement.tier,
       period_end: toIsoDate(periodEnd),
     });
-    return jsonOk(body, requestId);
+    // Entitlement state must never be cached by intermediaries (CDN,
+    // proxy) — stale entitlements are the worst kind of UX bug: iOS
+    // shows features as unlocked/locked based on a snapshot that doesn't
+    // reflect the user's actual subscription. `no-store` is stricter than
+    // `no-cache` and prevents even a conditional revalidation request.
+    return jsonOk(body, requestId, 200, { 'cache-control': 'no-store' });
   } catch (err) {
     userLog.error('internal_error', err, {
       latency_ms: Math.round(performance.now() - started),
