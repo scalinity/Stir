@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */; };
+		D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */; };
+		D0000005AAAAAAAA00000003 /* SubstitutionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */; };
+		D0000007AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000008AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift */; };
+		D0000009AAAAAAAA00000005 /* TimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000010AAAAAAAA00000005 /* TimerService.swift */; };
 		C00C51C001AAAA0000000001 /* CookingSession+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C002AAAA0000000001 /* CookingSession+Extensions.swift */; };
 		C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C004AAAA0000000002 /* CookTimer+Extensions.swift */; };
 		C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C006AAAA0000000003 /* SubstitutionEvent+Extensions.swift */; };
@@ -98,6 +103,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingSessionRepository.swift; sourceTree = "<group>"; };
+		D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
+		D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionRepository.swift; sourceTree = "<group>"; };
+		D0000008AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackRepository.swift; sourceTree = "<group>"; };
+		D0000010AAAAAAAA00000005 /* TimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerService.swift; sourceTree = "<group>"; };
 		C00C51C002AAAA0000000001 /* CookingSession+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookingSession+Extensions.swift"; sourceTree = "<group>"; };
 		C00C51C004AAAA0000000002 /* CookTimer+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookTimer+Extensions.swift"; sourceTree = "<group>"; };
 		C00C51C006AAAA0000000003 /* SubstitutionEvent+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubstitutionEvent+Extensions.swift"; sourceTree = "<group>"; };
@@ -252,6 +262,7 @@
 				1DD5707B2C2746B6DE051921 /* PostHog */,
 				FFD9717D3EEF14606BA3BFE3 /* Sentry */,
 				BD370BAD2B69FC8B162DE039 /* Supabase */,
+				D0000011AAAAAAAA00000006 /* Timers */,
 			);
 			path = Integrations;
 			sourceTree = "<group>";
@@ -390,12 +401,16 @@
 		B4C6C80009549ABCAF283770 /* Repositories */ = {
 			isa = PBXGroup;
 			children = (
+				D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */,
+				D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */,
 				71194080696470F518663BA9 /* DietaryRuleRepository.swift */,
 				5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */,
 				547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */,
+				D0000008AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift */,
 				D6857735F3B85783592B1FBC /* PantryItemRepository.swift */,
 				68F9A8184731D4338C59B314 /* PersistenceController.swift */,
 				63CF6906E3F3379752C78928 /* SolveRepository.swift */,
+				D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -468,6 +483,14 @@
 				1DC5321E6BA6620E00B90593 /* CameraService.swift */,
 			);
 			path = Camera;
+			sourceTree = "<group>";
+		};
+		D0000011AAAAAAAA00000006 /* Timers */ = {
+			isa = PBXGroup;
+			children = (
+				D0000010AAAAAAAA00000005 /* TimerService.swift */,
+			);
+			path = Timers;
 			sourceTree = "<group>";
 		};
 		E7154D788470A3CDFA1AB59E /* Saved */ = {
@@ -671,6 +694,11 @@
 				C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */,
 				C00C51C007AAAA0000000004 /* OutcomeFeedback+Extensions.swift in Sources */,
 				C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */,
+				D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */,
+				D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */,
+				D0000007AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift in Sources */,
+				D0000005AAAAAAAA00000003 /* SubstitutionRepository.swift in Sources */,
+				D0000009AAAAAAAA00000005 /* TimerService.swift in Sources */,
 				6E487073CED2805BB9F1923B /* MealSolveRequest+Extensions.swift in Sources */,
 				ABDC21E86265244E9D9C665C /* OnboardingOptions.swift in Sources */,
 				6ADA59C2305666FD29D964AE /* OnboardingRoot.swift in Sources */,

@@ -44,4 +44,7 @@ extension Logger {
 
     /// Configuration loading (AppConfig).
     static let config = Logger(subsystem: subsystem, category: "config")
+
+    /// UI-layer events — Cook Mode, timers, sheets. Step 4.
+    static let ui = Logger(subsystem: subsystem, category: "ui")
 }
