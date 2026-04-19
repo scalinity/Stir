@@ -269,6 +269,144 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
   return { valid: issues.length === 0, issues };
 }
 
+// ---------------------------------------------------------------------------
+// validateSubstitution — step 4 entry point
+// ---------------------------------------------------------------------------
+//
+// The substitution endpoint gets a single free-text suggestion from Gemini
+// (substitution_text + reasoning + amount_conversion). We don't get a
+// structured ingredient list, so the validator scans the combined text
+// against the same keyword tables validateDish uses.
+//
+// Same safety bias: allergies run on plain-substring match, diets run with
+// word-boundary + exceptions. The suggestion TEXT is free-form, so we have
+// no "display_name" to check against MULTI_WORD_DIET_EXCEPTIONS (that
+// exception list filters by exact lowercased display_name match — no
+// substring safe anchor exists in a suggestion blob). In practice the
+// substitution suggestions are short and narrow — "use cashew milk" not
+// "a milk thistle infusion" — so the ambiguity window is tiny.
+//
+// Equipment check: if the model proposed a workaround that mentions
+// equipment the household doesn't have (available_equipment list), flag.
+// The user's "broken equipment" is expected to be absent from
+// available_equipment already; iOS strips it before sending.
+
+export interface SubstitutionCandidate {
+  substitution_text: string;
+  reasoning: string;
+  amount_conversion?: string | null;
+  constraint_safe: boolean;
+}
+
+export interface SubstitutionContext {
+  dietaryRules: DietaryRule[];
+  availableEquipment: string[];
+  /** Equipment the model should additionally avoid (e.g. derived from
+   *  user_problem "blender broke"). Union'd with unavailable. */
+  avoidEquipment?: string[];
+}
+
+export function validateSubstitution(
+  sub: SubstitutionCandidate,
+  ctx: SubstitutionContext,
+): ValidationResult {
+  const issues: ValidationIssue[] = [];
+
+  const combined = [
+    sub.substitution_text,
+    sub.reasoning,
+    sub.amount_conversion ?? '',
+  ].join(' ').toLowerCase();
+
+  // 1. Allergy + hard dislike + diet: keyword match on the combined text.
+  // Allergy uses plain substring (safety first); dislike likewise;
+  // diet uses word-boundary to avoid false positives on compound words.
+  const hardDietary = ctx.dietaryRules.filter((r) => r.severity === 'hard');
+  for (const rule of hardDietary) {
+    const value = rule.value.toLowerCase().trim();
+    if (!value) continue;
+
+    if (rule.kind === 'allergy') {
+      const hit = containsAnyStrict(combined, [value]);
+      if (hit) {
+        issues.push({ kind: 'allergen', value: rule.value, ingredient: sub.substitution_text });
+      }
+      continue;
+    }
+
+    if (rule.kind === 'dislike') {
+      const hit = containsAnyStrict(combined, [value]);
+      if (hit) {
+        issues.push({ kind: 'dislike_hard', value: rule.value, ingredient: sub.substitution_text });
+      }
+      continue;
+    }
+
+    if (rule.kind === 'diet') {
+      const keywords = dietKeywordsFor(value);
+      if (keywords) {
+        for (const n of keywords) {
+          if (matchesNeedleWordBoundary(combined, n)) {
+            issues.push({
+              kind: 'diet_violation',
+              diet: rule.value,
+              ingredient: sub.substitution_text,
+              keyword: n,
+            });
+            break; // one violation per rule is enough — retry will fix all
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Unavailable / avoid equipment implied by the suggestion.
+  const unavailable = new Set<string>();
+  for (const eqKey of Object.keys(EQUIPMENT_IMPLICATION)) {
+    if (!ctx.availableEquipment.includes(eqKey)) unavailable.add(eqKey);
+  }
+  for (const avoid of ctx.avoidEquipment ?? []) unavailable.add(avoid);
+  for (const eqKey of unavailable) {
+    const needles = EQUIPMENT_IMPLICATION[eqKey];
+    if (!needles) continue;
+    const hit = containsAnyStrict(combined, needles);
+    if (hit) issues.push({ kind: 'unavailable_equipment_implied', keyword: hit });
+  }
+
+  // 3. Model claimed constraint_safe=true but we found real issues.
+  if (sub.constraint_safe && issues.length > 0) {
+    issues.push({ kind: 'claims_pass_falsely' });
+  }
+
+  return { valid: issues.length === 0, issues };
+}
+
+/**
+ * Compose a compact human-readable violation summary to amplify the retry
+ * prompt. The model gets "RE-VIOLATED: <summary>" prepended to the system
+ * prompt on retry, so it understands what to avoid without us re-sending
+ * the entire ruleset. Emits PII-free labels — no user text quoted back.
+ */
+export function summarizeViolations(result: ValidationResult): string {
+  if (result.valid) return '';
+  const kinds = new Set<string>();
+  const allergens = new Set<string>();
+  const diets = new Set<string>();
+  const equipment = new Set<string>();
+  for (const issue of result.issues) {
+    kinds.add(issue.kind);
+    if (issue.kind === 'allergen') allergens.add(issue.value);
+    if (issue.kind === 'diet_violation') diets.add(issue.diet);
+    if (issue.kind === 'unavailable_equipment_implied') equipment.add(issue.keyword);
+  }
+  const parts: string[] = [];
+  if (allergens.size) parts.push(`allergens=${[...allergens].join('|')}`);
+  if (diets.size) parts.push(`diets=${[...diets].join('|')}`);
+  if (equipment.size) parts.push(`unavailable_equipment=${[...equipment].join('|')}`);
+  if (!parts.length) parts.push(`kinds=${[...kinds].join('|')}`);
+  return parts.join('; ');
+}
+
 function dietKeywordsFor(dietValue: string): string[] | null {
   const v = dietValue.toLowerCase().replace(/\s+/g, '_').trim();
   switch (v) {

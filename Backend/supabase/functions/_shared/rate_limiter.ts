@@ -23,6 +23,7 @@ import { ErrorCode } from './errors.ts';
 export type RateLimitPolicyKey =
   | 'ip:dinner_solve_daily'
   | 'ip:pantry_parse_daily'
+  | 'ip:substitution_daily'
   | 'ip:bootstrap_hourly'
   | 'user:dinner_solve_hourly';
 
@@ -35,6 +36,8 @@ export interface RateLimitPolicy {
  * Hardcoded policy table. Tuned per CLAUDE.md §Deferred:
  *   - IP dinner_solve 30/day: Apple-ID rotation defense
  *   - IP pantry_parse 100/day: generous; parse is cheap and abused less
+ *   - IP substitution 50/day: cheap ($0.00158/call) and often-used; burst
+ *     protection only — legitimate cooking sessions won't blow this
  *   - IP bootstrap 20/hour: stops JWT-farming + synthetic install DoS
  *     without interfering with legitimate re-launches on a shared NAT
  *   - user dinner_solve 10/hour: burst protection over monthly quota
@@ -42,6 +45,7 @@ export interface RateLimitPolicy {
 export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitPolicy>> = {
   'ip:dinner_solve_daily':    { windowSeconds: 86400, maxCount: 30 },
   'ip:pantry_parse_daily':    { windowSeconds: 86400, maxCount: 100 },
+  'ip:substitution_daily':    { windowSeconds: 86400, maxCount: 50 },
   'ip:bootstrap_hourly':      { windowSeconds: 3600,  maxCount: 20 },
   'user:dinner_solve_hourly': { windowSeconds: 3600,  maxCount: 10 },
 };

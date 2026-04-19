@@ -126,6 +126,80 @@ export const DinnerSolveRequest = z.object({
 export type DinnerSolveRequest = z.infer<typeof DinnerSolveRequest>;
 
 // ---------------------------------------------------------------------------
+// /v1/ai/substitution (step 4)
+// ---------------------------------------------------------------------------
+//
+// Mid-cook rescue for a missing ingredient or an equipment problem. Invoked
+// by the Substitution Sheet on all tiers; step 6 adds a second invocation
+// path (Gemini Live function-call) that hits the SAME endpoint — the wire
+// shape is deliberately stable across both.
+//
+// sub_event_id: client-generated UUID. Idempotency key (10-min cache) AND
+//   the primary key of the persisted SubstitutionEvent row in CloudKit.
+// cooking_session_id: UUID of the CookingSession currently active on iOS.
+//   Kept for telemetry / future ops lookup; server does not resolve it to
+//   a Postgres row (user content is CloudKit-only).
+// recipe_plan_id: UUID of the RecipePlan the user is cooking from. Same
+//   CloudKit-only treatment; used here only as context the model may cite.
+// missing_ingredient: either a RecipeIngredient the user picked
+//   (display_name + canonical_slug) OR a free-text claim ("my blender").
+//   The display_name is what the model will substitute for.
+// user_problem: verbatim or paraphrased user description ("I'm out of
+//   milk", "blender broke"). Max 500 chars — above that it stops being a
+//   substitution ask and starts being a general Cook Mode Q&A.
+// household_context.dietary_rules: hard-rule set to enforce. The model
+//   must respect these AND the hard_rules.ts validator re-checks
+//   server-side regardless of model adherence.
+// household_context.available_equipment: authoritative — if the user's
+//   problem is "blender broke", iOS is expected to POP blender from the
+//   list before sending. We don't parse user_problem for negations here.
+// household_context.pantry_snapshot: model uses this to prefer pantry
+//   substitutes over non-pantry suggestions.
+// recipe_context: current recipe state so the model can preserve
+//   integrity ("don't substitute an aromatic into a dessert").
+
+const MissingIngredient = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+  amount_text: z.string().min(1).max(128).optional(),
+}).strict();
+
+const PantrySnapshotItem = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+}).strict();
+
+const RemainingIngredient = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+}).strict();
+
+export const SubstitutionRequest = z.object({
+  sub_event_id: z.string().uuid(),
+  cooking_session_id: z.string().uuid(),
+  recipe_plan_id: z.string().uuid(),
+  missing_ingredient: MissingIngredient,
+  user_problem: z.string().min(1).max(500),
+  household_context: z.object({
+    dietary_rules: z.array(z.object({
+      kind: DietaryRuleKind,
+      value: z.string().min(1).max(64),
+      severity: DietaryRuleSeverity,
+    })).max(50),
+    available_equipment: z.array(z.string().min(1).max(64)).max(50),
+    pantry_snapshot: z.array(PantrySnapshotItem).max(200),
+  }).strict(),
+  recipe_context: z.object({
+    title: z.string().min(1).max(256),
+    current_step_number: z.number().int().min(0).max(100),
+    total_steps: z.number().int().min(1).max(100),
+    remaining_ingredients: z.array(RemainingIngredient).max(100),
+  }).strict(),
+}).strict();
+
+export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
+
+// ---------------------------------------------------------------------------
 // Zod → FieldError[] helper
 // ---------------------------------------------------------------------------
 
