@@ -124,32 +124,65 @@ const EQUIPMENT_IMPLICATION: Record<string, string[]> = {
   dutch_oven: ['dutch oven'],
 };
 
-// Keywords that produce substring false positives without word boundaries:
-// "egg" in eggplant, "butter" in butternut, "milk" in milk-thistle, "wheat"
-// in buckwheat/wheatgrass, "chicken" in chicken-of-the-woods (mushroom).
-// For these, require ASCII word boundaries (`a-z0-9` delimiters). Longer
-// unambiguous keywords (salmon, prosciutto, mozzarella) keep plain
-// substring matching — the conservative-false-positive intent stands for
-// them because they rarely collide with unrelated ingredient names.
+// Short, ambiguous keywords in the DIET lists that would substring-match
+// compound words: "egg" in eggplant, "butter" in butternut, "wheat" in
+// buckwheat/wheatgrass. For diet-rule matching only, require ASCII word
+// boundaries so these don't false-positive on legitimate plant names.
+//
+// Allergy + dislike rules deliberately keep plain substring matching —
+// safety-critical, prefer extra retries over ever missing an allergen.
+// CLAUDE.md: "favor false positives (extra retry) over false negatives
+// (ship an allergen)."
 const WORD_BOUNDARY_KEYWORDS: ReadonlySet<string> = new Set([
-  'egg', 'eggs', 'butter', 'milk', 'wheat', 'chicken', 'ham', 'cream',
+  'egg', 'eggs', 'butter', 'milk', 'wheat', 'ham', 'cream',
 ]);
 
-function matchesNeedle(haystack: string, needle: string): boolean {
+// Exact multi-word ingredient names where a diet-keyword substring is
+// semantically wrong (mushrooms named after animals, herbs named after
+// dairy). Diet-rule matching bails out before the keyword scan if the
+// whole (trimmed, lowercased) display_name matches one of these.
+const MULTI_WORD_DIET_EXCEPTIONS: ReadonlySet<string> = new Set([
+  'chicken of the woods',
+  'chicken-of-the-woods',
+  'hen of the woods',
+  'hen-of-the-woods',
+  'milk thistle',
+  'milk-thistle',
+]);
+
+function matchesNeedlePlain(haystack: string, needle: string): boolean {
+  return haystack.includes(needle);
+}
+
+function matchesNeedleWordBoundary(haystack: string, needle: string): boolean {
   if (WORD_BOUNDARY_KEYWORDS.has(needle)) {
-    // ASCII word boundary: no letter/digit immediately before or after.
-    // Escape characters that have regex meaning (multi-word keywords).
     const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
     return re.test(haystack);
   }
-  return haystack.toLowerCase().includes(needle);
+  return haystack.includes(needle);
 }
 
-function containsAny(haystack: string, needles: string[]): string | null {
+/** Allergy + dislike use plain substring (safety first). */
+function containsAnyStrict(haystack: string, needles: string[]): string | null {
   const lower = haystack.toLowerCase();
   for (const n of needles) {
-    if (matchesNeedle(lower, n)) return n;
+    if (matchesNeedlePlain(lower, n)) return n;
+  }
+  return null;
+}
+
+/** Diet checks use word-boundary + ingredient-name exceptions. */
+function containsDietKeyword(
+  displayName: string,
+  ingredientText: string,
+  needles: string[],
+): string | null {
+  const trimmedDisplay = displayName.toLowerCase().trim();
+  if (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay)) return null;
+  const lower = ingredientText.toLowerCase();
+  for (const n of needles) {
+    if (matchesNeedleWordBoundary(lower, n)) return n;
   }
   return null;
 }
@@ -178,7 +211,9 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
 
       if (rule.kind === 'allergy') {
         // Runs even for is_optional — allergens are never safe.
-        const hit = containsAny(text, [value]);
+        // Plain substring: safety-critical, better to retry on a false
+        // positive than ship a hidden allergen.
+        const hit = containsAnyStrict(text, [value]);
         if (hit) issues.push({ kind: 'allergen', value: rule.value, ingredient: ing.display_name });
         continue;
       }
@@ -187,14 +222,14 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
       if (ing.is_optional) continue;
 
       if (rule.kind === 'dislike') {
-        const hit = containsAny(text, [value]);
+        const hit = containsAnyStrict(text, [value]);
         if (hit) issues.push({ kind: 'dislike_hard', value: rule.value, ingredient: ing.display_name });
       }
 
       if (rule.kind === 'diet') {
         const keywords = dietKeywordsFor(value);
         if (keywords) {
-          const hit = containsAny(text, keywords);
+          const hit = containsDietKeyword(ing.display_name, text, keywords);
           if (hit) issues.push({ kind: 'diet_violation', diet: rule.value, ingredient: ing.display_name, keyword: hit });
         }
       }
@@ -222,7 +257,7 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
   for (const eqKey of unavailable) {
     const needles = EQUIPMENT_IMPLICATION[eqKey];
     if (!needles) continue;
-    const hit = containsAny(stepText, needles);
+    const hit = containsAnyStrict(stepText, needles);
     if (hit) issues.push({ kind: 'unavailable_equipment_implied', keyword: hit });
   }
 
@@ -256,7 +291,12 @@ function dietKeywordsFor(dietValue: string): string[] | null {
       return DAIRY_KEYWORDS;
     case 'gluten_free':
     case 'gluten-free':
-      return ['wheat', 'flour', 'pasta', 'noodle', 'bread', 'barley', 'rye', 'soy sauce'];
+      // 'flour', 'pasta', 'noodle', 'bread' are deliberately NOT here —
+      // buckwheat flour, rice noodles, almond flour, etc. are all
+      // gluten-free and would false-positive. 'wheat' + 'barley' + 'rye'
+      // cover the actual gluten grains; 'soy sauce' catches the common
+      // wheat-containing condiment.
+      return ['wheat', 'barley', 'rye', 'soy sauce', 'seitan'];
     default:
       return null; // unknown diet → no automated keyword check
   }

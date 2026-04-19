@@ -24,9 +24,9 @@ import {
 import { createServiceClient } from '../_shared/db.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import {
-  computeCurrentPeriodStart,
   effectiveTier,
   effectiveVoiceEnabled,
+  ensureCurrentPeriodRows,
   readEntitlement,
   readQuotasForWire,
   toIsoDate,
