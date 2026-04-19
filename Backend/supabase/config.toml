@@ -396,6 +396,9 @@ verify_jwt = false
 [functions.dinner-solve]
 verify_jwt = false
 
+[functions.substitution]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

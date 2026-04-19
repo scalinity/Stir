@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F10001AAAAAAAA00000001 /* CookModeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10002AAAAAAAA00000001 /* CookModeViewModelTests.swift */; };
+		F10003AAAAAAAA00000002 /* TimerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10004AAAAAAAA00000002 /* TimerServiceTests.swift */; };
 		F00001AAAAAAAA00000001 /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00002AAAAAAAA00000001 /* SavedMealsView.swift */; };
 		E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00012AAAAAAAA00000001 /* CookModeViewModel.swift */; };
 		E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00014AAAAAAAA00000002 /* CookModeRoot.swift */; };
@@ -110,6 +112,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F10002AAAAAAAA00000001 /* CookModeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModelTests.swift; sourceTree = "<group>"; };
+		F10004AAAAAAAA00000002 /* TimerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceTests.swift; sourceTree = "<group>"; };
 		F00002AAAAAAAA00000001 /* SavedMealsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsView.swift; sourceTree = "<group>"; };
 		E00012AAAAAAAA00000001 /* CookModeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModel.swift; sourceTree = "<group>"; };
 		E00014AAAAAAAA00000002 /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
@@ -240,6 +244,7 @@
 			isa = PBXGroup;
 			children = (
 				71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */,
+				F10002AAAAAAAA00000001 /* CookModeViewModelTests.swift */,
 				EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */,
 				903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */,
 				633850447A198796407ED908 /* MockCloudKit.swift */,
@@ -249,6 +254,7 @@
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
+				F10004AAAAAAAA00000002 /* TimerServiceTests.swift */,
 			);
 			path = Unit;
 			sourceTree = "<group>";
@@ -675,6 +681,7 @@
 			files = (
 				DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */,
 				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
+				F10001AAAAAAAA00000001 /* CookModeViewModelTests.swift in Sources */,
 				748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */,
 				B5CE0F49437BF827C38BF730 /* EntitlementServiceTests.swift in Sources */,
 				16A9DBA56641F2BD47913C1A /* IdentityServiceTests.swift in Sources */,
@@ -685,6 +692,7 @@
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
+				F10003AAAAAAAA00000002 /* TimerServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
