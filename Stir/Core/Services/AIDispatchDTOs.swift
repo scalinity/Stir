@@ -171,7 +171,7 @@ struct DinnerSolveRequest: Encodable, Sendable {
 
 // Streamed card emitted by the SSE handler. Mirrors the backend's
 // CandidateDish shape from hard_rules.ts.
-struct DishCard: Decodable, Sendable, Equatable, Identifiable {
+struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
     let rank: Int
     let title: String
     let totalTimeMinutes: Int
@@ -197,14 +197,14 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable {
         case reasoningSummary = "reasoning_summary"
     }
 
-    struct RecipePlanWire: Decodable, Sendable, Equatable {
+    struct RecipePlanWire: Decodable, Sendable, Equatable, Hashable {
         let servings: Int
         let difficulty: Int
         let cuisine: String?
         let ingredients: [IngredientWire]
         let steps: [StepWire]
 
-        struct IngredientWire: Decodable, Sendable, Equatable {
+        struct IngredientWire: Decodable, Sendable, Equatable, Hashable {
             let displayName: String
             let canonicalSlug: String?
             let amountText: String
@@ -218,7 +218,7 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable {
             }
         }
 
-        struct StepWire: Decodable, Sendable, Equatable {
+        struct StepWire: Decodable, Sendable, Equatable, Hashable {
             let stepNumber: Int
             let instructionText: String
             let timerSeconds: Int?

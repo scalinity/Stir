@@ -1,19 +1,20 @@
 // TonightHomeView
 //
-// Step-2 shell for spec §6's "Tonight Home". Three primary action buttons +
-// recent-meals empty state + "Why Stir works" strip. All three actions are
-// disabled placeholders in step 2:
-//   - Scan Kitchen  → lands in step 3
-//   - Import Recipe → lands in step 7
-//   - Cook Saved    → lands in step 4
-// Tapping any shows a "Coming soon" toast; we don't ship disabled visuals
-// because those read as broken. Instead, the button taps surface an
-// inline banner explaining when the feature arrives.
+// Step-3 iteration:
+//   - Scan Kitchen → presents ScanFlowRoot as fullScreenCover
+//   - Import Recipe + Cook Saved remain disabled (step 4 + step 7)
+//   - Respects the disable_scan_parse kill switch from the latest config
+//     bootstrap response by rendering Scan Kitchen in a disabled state
+//     with "Temporarily unavailable" copy.
 
 import SwiftUI
 
 struct TonightHomeView: View {
+    let coordinator: RootCoordinator
+
+    @Environment(EntitlementService.self) private var entitlements
     @State private var toastMessage: String?
+    @State private var showScanFlow = false
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,15 @@ struct TonightHomeView: View {
                 }
             }
             .overlay(alignment: .top) { toastOverlay }
+            .fullScreenCover(isPresented: $showScanFlow) {
+                ScanFlowRoot(
+                    aiDispatch: coordinator.aiDispatch,
+                    pantryRepo: coordinator.pantryItemRepository,
+                    solveRepo: coordinator.solveRepository,
+                    householdStore: coordinator.household,
+                    entitlements: entitlements,
+                )
+            }
         }
     }
 
@@ -54,18 +64,13 @@ struct TonightHomeView: View {
 
     private var primaryActions: some View {
         VStack(spacing: 12) {
-            primaryButton(
-                systemImage: "camera.viewfinder",
-                title: "Scan Kitchen",
-                subtitle: "Point at ingredients to get three dinner options.",
-                tint: .orange,
-                comingSoon: "Kitchen scan lands next release (step 3).",
-            )
+            scanKitchenButton
             primaryButton(
                 systemImage: "square.and.arrow.down.on.square",
                 title: "Import Recipe",
                 subtitle: "Paste a URL or share from Safari to cook someone else's recipe.",
                 tint: .purple,
+                enabled: false,
                 comingSoon: "Recipe import lands with Premium features (step 7).",
             )
             primaryButton(
@@ -73,9 +78,32 @@ struct TonightHomeView: View {
                 title: "Cook Saved",
                 subtitle: "One-tap replay for your favorites.",
                 tint: .indigo,
+                enabled: false,
                 comingSoon: "Saved meals land with Cook Mode (step 4).",
             )
         }
+    }
+
+    private var scanKitchenButton: some View {
+        let killed = scanIsKillSwitched
+        return Button {
+            if killed {
+                toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
+            } else {
+                showScanFlow = true
+            }
+        } label: {
+            buttonRow(
+                systemImage: "camera.viewfinder",
+                title: killed ? "Kitchen scan temporarily unavailable" : "Scan Kitchen",
+                subtitle: killed
+                    ? "We've paused scans while we investigate an issue."
+                    : "Point at ingredients to get three dinner options.",
+                tint: killed ? .secondary : .orange,
+                enabled: !killed,
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func primaryButton(
@@ -83,30 +111,42 @@ struct TonightHomeView: View {
         title: String,
         subtitle: String,
         tint: Color,
+        enabled: Bool,
         comingSoon: String,
     ) -> some View {
         Button {
-            toastMessage = comingSoon
+            if enabled { /* no-op (no other enabled buttons in step 3) */ }
+            else { toastMessage = comingSoon }
         } label: {
-            HStack(alignment: .top, spacing: 16) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 44, height: 44)
-                    .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            buttonRow(systemImage: systemImage, title: title, subtitle: subtitle, tint: tint, enabled: enabled)
         }
         .buttonStyle(.plain)
+    }
+
+    private func buttonRow(
+        systemImage: String,
+        title: String,
+        subtitle: String,
+        tint: Color,
+        enabled: Bool,
+    ) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: systemImage)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(enabled ? tint : .secondary)
+                .frame(width: 44, height: 44)
+                .background(enabled ? tint.opacity(0.15) : Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline).foregroundStyle(enabled ? Color.primary : .secondary)
+                Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var recentMealsSection: some View {
@@ -150,6 +190,12 @@ struct TonightHomeView: View {
         }
     }
 
+    // MARK: - Kill switch
+
+    private var scanIsKillSwitched: Bool {
+        entitlements.flagBool(forKey: "disable_scan_parse") ?? false
+    }
+
     // MARK: - Toast
 
     @ViewBuilder
@@ -169,8 +215,4 @@ struct TonightHomeView: View {
                 }
         }
     }
-}
-
-#Preview {
-    TonightHomeView()
 }

@@ -814,6 +814,7 @@ Use these exact messages everywhere; each screen references applicable codes.
 | `BILL-01`       | "We couldn't confirm your subscription right now."                                          | Restore Purchases / Retry          |
 | `PAY-01`        | "Purchase didn't go through. You weren't charged."                                          | Try Again / Choose Another Plan    |
 | `ENT-VOICE-01`  | "Cook Mode voice is a Premium feature. Try it free for 7 days."                             | Start Trial / See Plans            |
+| `ENT-MULTI-IMAGE-01` | "Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once."    | See Plans / Continue with one      |
 | `VAL-01`        | "Something went wrong. Please try again or contact support if this keeps happening."        | Retry / Contact Support            |
 | `AUTH-01`       | *(internal; auto-handled by iOS re-bootstrap)*                                              | Auto-refresh (silent)              |
 

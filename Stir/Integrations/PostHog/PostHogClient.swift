@@ -57,4 +57,16 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case screenErrorShown = "screen_error_shown"
     case syncStateChanged = "sync_state_changed"
     case entitlementStateChanged = "entitlement_state_changed"
+    // Step 3 — scan + solve
+    case cameraPermissionResult = "camera_permission_result"
+    case scanStarted = "scan_started"
+    case scanSubmitted = "scan_submitted"
+    case scanParseCompleted = "scan_parse_completed"
+    case ingredientCorrected = "ingredient_corrected"
+    case constraintsSet = "constraints_set"
+    case dinnerSolveRequested = "dinner_solve_requested"
+    case dinnerSolveCompleted = "dinner_solve_completed"
+    case suggestedDishSelected = "suggested_dish_selected"
+    case aiRequestCompleted = "ai_request_completed"
+    case aiRequestFailed = "ai_request_failed"
 }

@@ -40,6 +40,9 @@ final class RootCoordinator {
     private let sentry: any SentryReporting
     private let identityService: IdentityService
     private(set) var sessionClient: SupabaseSessionClient
+    private(set) var aiDispatch: AIDispatch
+    let pantryItemRepository: PantryItemRepository
+    let solveRepository: SolveRepository
 
     private(set) var phase: Phase = .loading
 
@@ -62,7 +65,11 @@ final class RootCoordinator {
         self.household = household
         self.sentry = sentry
         self.identityService = identityService
-        self.sessionClient = SupabaseSessionClient(config: config, sentry: sentry)
+        let client = SupabaseSessionClient(config: config, sentry: sentry)
+        self.sessionClient = client
+        self.aiDispatch = AIDispatch(session: client, config: config)
+        self.pantryItemRepository = PantryItemRepository()
+        self.solveRepository = SolveRepository()
     }
 
     /// Runs the full launch sequence. Idempotent — callable from
@@ -96,7 +103,7 @@ final class RootCoordinator {
                 installationID: installationID,
                 cloudKitRecordName: canonicalKey.cloudKitRecordName,
             )
-            entitlements.hydrate(from: response.entitlements)
+            entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
             bootstrapSucceeded = true
             Logger.coordinator.info(
                 "bootstrap ok tier=\(response.entitlements.tier.rawValue, privacy: .public) new=\(response.isNewUser, privacy: .public)",

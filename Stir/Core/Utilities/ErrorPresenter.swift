@@ -168,6 +168,15 @@ enum ErrorPresenter {
                 secondaryAction: "See Plans",
                 blocking: true,
             )
+        case .entMultiImage01:
+            return UserFacingError(
+                code: .entMultiImage01,
+                title: "Multi-image is Pro",
+                message: "Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once.",
+                primaryAction: "See Plans",
+                secondaryAction: "Continue with one",
+                blocking: true,
+            )
         case .val01:
             return UserFacingError(
                 code: .val01,

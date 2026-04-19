@@ -20,6 +20,8 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options.</string>
 	<key>PostHogPublicAPIKey</key>
 	<string>$(POSTHOG_PUBLIC_API_KEY)</string>
 	<key>RevenueCatPublicAPIKey</key>

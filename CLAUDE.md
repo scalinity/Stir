@@ -187,6 +187,7 @@ enum ErrorCode: String {
     case bill01      = "BILL-01"        // entitlement uncertain
     case pay01       = "PAY-01"         // purchase failed
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
+    case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
     case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid
                                          // iOS auto-re-bootstraps silently; invisible unless retry also fails
@@ -804,7 +805,7 @@ These aren't restrictions on creativity — they're specific wrong paths that lo
 - Don't derive `voice_enabled` on iOS. It's server-computed in the bootstrap response.
 - Don't use object-keyed `quotas` in API responses. Always an iterable array.
 - Don't add new telemetry event names without updating spec §15 and this file.
-- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, VAL-01, AUTH-01). New codes require updating both this file and spec §6.
+- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, VAL-01, AUTH-01). New codes require updating both this file and spec §6.
 - Don't return 4xx/5xx with empty body or string-only error. Always `{ error: CODE, message, ...structured_details }`.
 - Don't skip the hard-rule validator on substitution output because "the model is trustworthy on this one." Not optional.
 - Don't use UIKit unless wrapping `AVCaptureVideoPreviewLayer` via `UIViewRepresentable`. SwiftUI-first, always.

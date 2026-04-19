@@ -84,7 +84,16 @@ final class EntitlementService {
     private(set) var voiceEnabled: Bool = false
     private(set) var showBillingGraceBanner: Bool = false
     private(set) var quotas: [FeatureKey: QuotaSnapshot] = [:]
+    private(set) var featureFlags: [String: BootstrapResponse.FeatureFlag] = [:]
     private(set) var hydrationState: HydrationState = .loading
+
+    /// Convenience for bool-valued feature flags like `disable_scan_parse`.
+    /// Respects is_enabled: a disabled flag always returns nil so callers
+    /// fall back to default behavior.
+    func flagBool(forKey key: String) -> Bool? {
+        guard let flag = featureFlags[key], flag.isEnabled else { return nil }
+        return flag.value.boolValue
+    }
 
     private let keychain: any KeychainStoring
 
@@ -99,7 +108,10 @@ final class EntitlementService {
 
     // MARK: - Hydrate
 
-    func hydrate(from entitlements: BootstrapResponse.Entitlements) {
+    func hydrate(
+        from entitlements: BootstrapResponse.Entitlements,
+        flags: [BootstrapResponse.FeatureFlag] = [],
+    ) {
         self.tier = entitlements.tier
         self.billingState = entitlements.billingState
         self.isTrial = entitlements.isTrial
@@ -114,11 +126,12 @@ final class EntitlementService {
             )
         }
         self.quotas = map
+        self.featureFlags = Dictionary(uniqueKeysWithValues: flags.map { ($0.key, $0) })
         self.hydrationState = .hydrated(source: .bootstrap)
 
         persistSnapshot()
         Logger.entitlement.info(
-            "hydrated tier=\(self.tier.rawValue, privacy: .public) billing=\(self.billingState.rawValue, privacy: .public) voice=\(self.voiceEnabled, privacy: .public)",
+            "hydrated tier=\(self.tier.rawValue, privacy: .public) billing=\(self.billingState.rawValue, privacy: .public) voice=\(self.voiceEnabled, privacy: .public) flags=\(flags.count, privacy: .public)",
         )
     }
 

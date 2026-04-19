@@ -30,12 +30,12 @@ struct RootView: View {
                 }
 
             case .ready:
-                TonightHomeView()
+                TonightHomeView(coordinator: coordinator)
 
             case .offlineFallback:
                 VStack(spacing: 0) {
                     OfflineBanner()
-                    TonightHomeView()
+                    TonightHomeView(coordinator: coordinator)
                 }
             }
         }
