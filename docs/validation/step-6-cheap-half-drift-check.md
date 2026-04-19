@@ -1,87 +1,96 @@
 # Step 6 — Cheap-half Gemini Live drift check
 
-**Run date:** 2026-04-19
-**Environment:** Supabase Edge Function `spike-gemini-live-probe` on prod project `ktqajarcomzplnpbczfo` (real `GEMINI_API_KEY` from prod secrets).
+**Run date:** 2026-04-19 (multiple iterations across the day)
+**Environment:** Supabase Edge Function `spike-oauth-mint-probe` on prod project `ktqajarcomzplnpbczfo`.
+**Final status:** ✅ Passed. Mint + full voice round-trip validated.
 
-## Summary
+## TL;DR
 
-- **Model name `gemini-3.1-flash-live-preview` still exists** and appears in `models.list`.
-- **Gemini API key is valid** against `generateContent` and `models.list`.
-- **`POST /v1alpha/auth_tokens` rejects API-key auth** with `400 INVALID_ARGUMENT`. This is the same failure mode observed in the April 17 2026 spike (CLAUDE.md sharp-edge #16).
-- **Empty body, minimal body, full body all return the same opaque 400.** The server is not telling us which field is wrong; the rejection is happening at the auth layer before body validation.
-- **Every other URL variant (`authTokens` camelCase, `auth-tokens` hyphenated, `/v1beta/*`) returns 404.** `/v1alpha/auth_tokens` (snake_case) is the only reachable path — matches the `js-genai` SDK source at `src/tokens.ts`.
+- Gemini Live is reachable from the Stir backend and produces working ephemeral tokens via API-key auth.
+- Two pre-body gates had to be satisfied before mint would accept any request, and each gate masks the other by returning the same opaque `400 INVALID_ARGUMENT`: (1) paid-tier billing on the GCP project, (2) legacy `AIzaSy…` API key format. The misdiagnosis cycle consumed most of the day.
+- Recommended model for v1: `gemini-3.1-flash-live-preview` (568 ms TTFA, comfortable headroom against the 1 s p95 target).
+- CLAUDE.md sharp-edges #16, #17, #18 updated with the real facts. ADR 0006 (OAuth service-account mint) marked Rejected with full post-mortem.
 
-## Incidental docs corrections
+## Diagnosis history (short form, for future future-Claude)
 
-CLAUDE.md §"Gemini Live sharp-edges" and `Specs/Stir-Cook-Mode-Architecture.md` need correction. Actual wire facts discovered today:
+1. **Initial hypothesis (wrong):** `auth_tokens` endpoint rejects API-key auth; need OAuth service-account. Built on empirical `400 INVALID_ARGUMENT` across every body shape, while `models.list` + `generateContent` worked on the same key. Decided to build an OAuth path. Got as far as working OAuth access tokens and a clean helper (7 unit tests green).
+2. **OAuth path also returned `400 INVALID_ARGUMENT`** on `auth_tokens`. Same error. Sanity probe showed `models.list` with OAuth returning `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → OAuth fundamentally incompatible with `generativelanguage.googleapis.com`.
+3. **Tested the official `@google/genai` SDK with API-key auth directly.** Same `400 INVALID_ARGUMENT`. Even an empty body (`{}`) returned identical error. Ruled out body-shape bugs categorically.
+4. **Checked for gated-preview:** Google docs say no allowlist. Model appears in `models.list`.
+5. **Re-checked GCP project setup:** API key was on `stir-ai-dinner-copilot`, same project as the SA. Billing enabled.
+6. **Discovered model-name drift** (separate issue): `gemini-3-flash` returns 404 NOT_FOUND. Real name is `gemini-3-flash-preview`. The entire backend had been configured with phantom model names. Fixed in a separate commit.
+7. **Daniel identified billing-tier gate:** free-tier billing doesn't unlock `auth_tokens`. Flipped to paid tier. Mint still 400.
+8. **Daniel identified key-format gate:** new-format keys (`AQ.xxx`, 53 chars) fail `auth_tokens` despite working elsewhere. Legacy `AIzaSy…` format works. Google forum thread 141133 documents the bug. Generated a fresh legacy key.
+9. **Swapped prod secret to legacy key.** Mint succeeds. Full voice round-trip validates.
 
-| Fact | CLAUDE.md says | Real |
-|---|---|---|
-| Mint endpoint path | `/v1alpha/authTokens` | `/v1alpha/auth_tokens` (underscore, not camelCase) |
-| Body wrapper | `{ authToken: { … } }` | flat top level; no `authToken` wrapper |
-| Body casing | snake_case (`expire_time`, `bidi_generate_content_setup`, `response_modalities` …) | **camelCase** (`expireTime`, `bidiGenerateContentSetup`, `responseModalities` …) |
-| Body `bidiGenerateContentSetup` | single-level | per SDK converter it's wrapped as `bidiGenerateContentSetup.setup.*`, then the SDK's `convertBidiSetupToTokenSetup` unwraps it. Wire shape = flat (no inner `setup` key) |
-| `turn_coverage` field | `TURN_INCLUDES_ALL_INPUT` | **unknown** — can't validate yet (blocked by auth) |
+## Final working configuration
 
-## Verdict
-
-**API-key auth will not work for mint from the server.** Matches the April 17 spike. Two fallback designs are already in CLAUDE.md #16:
-
-### Option A — OAuth service-account credential server-side
-
-- Create a GCP service account with the `Generative Language API User` role.
-- Download the service account JSON key; store as a new Supabase secret (`GCP_SERVICE_ACCOUNT_JSON`).
-- Edge Function mints OAuth access tokens from the SA JSON on demand (1h TTL) and caches in memory.
-- Use the OAuth token as `Authorization: Bearer <access_token>` when calling `/v1alpha/auth_tokens`.
-- iOS still connects to Gemini Live directly via WebSocket with the ephemeral token (`access_token=` query param).
-
-**Cost:** ~2 hours setup. +1 secret rotation surface. No TTFA impact.
-
-### Option B — Backend-proxied WebSocket
-
-- Edge Function holds the Gemini Live WebSocket; iOS connects to the Edge Function over its own WebSocket.
-- `GEMINI_API_KEY` stays server-side (already does today).
-
-**Cost:** +100–300 ms TTFA. **Potentially blocked** by Supabase / Deno Deploy long-lived-WebSocket limits (Cook Sessions run up to 30 min; per-request HTTP handlers on Deno Deploy have ~400 s limits, but long-lived WebSocket behavior is not independently verified). Would require its own spike before committing.
-
-## Recommendation
-
-**Option A — OAuth service-account.** Rationale:
-
-1. Option B introduces a new failure mode (Edge Function lifecycle drops the session), plus needs its own spike to validate it's even feasible.
-2. Option A is the documented path the Gemini SDKs use, and keeps the key-off-client invariant cleanly.
-3. Option A's setup is small and well-documented. iOS-side architecture is unchanged.
-
-## Next step
-
-Surface to Daniel before proceeding with `/v1/ai/realtime-session`. Either:
-
-1. Confirm Option A — I'll add GCP service account setup as a step 6.0 and proceed.
-2. Direct me to pursue Option B — I'll first spike whether long-lived WebSockets work on Supabase Edge Functions.
-3. Pursue a different angle (e.g., Google Cloud Run for the mint endpoint instead of a Supabase Edge Function, keeping the rest of the backend on Supabase).
-
-## Spike artifact
-
-Final probe output captured in `/tmp/spike_final_output.json`. Reproduced here:
-
-```json
-{
-  "mint_probe": [
-    { "label": "v1alpha_full", "url": ".../v1alpha/auth_tokens", "status": 400, "body": { "error": { "code": 400, "status": "INVALID_ARGUMENT", "message": "Request contains an invalid argument." } } },
-    { "label": "v1alpha_minimal", "status": 400, "body": "same opaque 400 INVALID_ARGUMENT" },
-    { "label": "v1alpha_empty",   "status": 400, "body": "same opaque 400 INVALID_ARGUMENT" },
-    { "label": "v1beta_minimal",  "status": 404, "body": "" }
-  ],
-  "models_probe": {
-    "status": 200,
-    "live_models": [{ "name": "models/gemini-3.1-flash-live-preview", "displayName": "Gemini 3.1 Flash Live Preview" }]
+- **Mint endpoint:** `POST https://generativelanguage.googleapis.com/v1alpha/auth_tokens`
+- **Mint auth:** `x-goog-api-key: <GEMINI_API_KEY>` (same header as every other Gemini call)
+- **Mint body** (flat camelCase — NOT snake_case, NOT wrapped in `{ authToken: … }`):
+  ```json
+  {
+    "expireTime": "…",
+    "newSessionExpireTime": "…",
+    "uses": 1,
+    "bidiGenerateContentSetup": {
+      "model": "models/gemini-3.1-flash-live-preview",
+      "generationConfig": {
+        "responseModalities": ["AUDIO"],
+        "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "Aoede" } } },
+        "maxOutputTokens": 150,
+        "thinkingConfig": { "thinkingLevel": "minimal" }
+      },
+      "systemInstruction": { "parts": [{ "text": "…" }] },
+      "tools": [],
+      "realtimeInputConfig": {
+        "automaticActivityDetection": { "disabled": false },
+        "turnCoverage": "TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO"
+      }
+    }
   }
-}
-```
+  ```
+- **Mint response:** `{ "name": "auth_tokens/<hex>" }` — the `.name` IS the access token value for the WebSocket connection.
+- **WebSocket URL:** `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=<token-name>`
+- **WebSocket method:** `BidiGenerateContentConstrained` when using ephemeral token (not `BidiGenerateContent`). API version `v1alpha` in the path (not `v1beta`).
 
-## Cleanup
+## TTFA comparison (single-run observations on Supabase Edge Function → Google)
 
-- `Backend/supabase/functions/spike-gemini-live-probe/` deleted (local + prod).
-- `STIR_SPIKE_SECRET` unset from prod secrets.
-- `config.toml` `[functions.spike-gemini-live-probe]` block removed.
-- `scripts/spike/gemini_live_drift_check.ts` kept in the tree for future drift re-checks (useful when a real key is available locally).
+| Metric | `gemini-3.1-flash-live-preview` | `gemini-2.5-flash-native-audio-latest` |
+|---|---|---|
+| Setup latency (open + setupComplete) | 249 ms | 305 ms |
+| **TTFA** (client turn sent → first audio frame) | **568 ms** | 1 186 ms |
+| Total round-trip (turn sent → turnComplete) | 1 299 ms | 1 195 ms |
+| Streamed frames in response | 11 (fine-grained audio chunks) | 4 (bundled chunks) |
+| Text-injection API | `realtimeInput.text` (clientContent is history-only — sharp-edge #11) | `clientContent.turns` |
+| Thoughts tokens billed | 0 (`thinkingLevel: minimal` honored) | 42 (no equivalent suppression) |
+| Prompt tokens (observed) | not yet surfaced in usageMetadata for first-turn | 348 |
+
+**Choice for v1:** `gemini-3.1-flash-live-preview`. 568 ms TTFA comfortably clears the 1 s p95 target and leaves room for network variability. Zero thoughts-token overhead. All existing spec references (cost model, Architecture doc, system prompt) are already keyed on this model. The `realtimeInput.text` constraint is already documented in CLAUDE.md sharp-edge #11.
+
+The 2.5 native-audio family is a viable tail-risk fallback if 3.1 Flash Live Preview is ever pulled — but would require retuning the TTFA budget and the cost model.
+
+## Resulting CLAUDE.md updates
+
+- **#14** (mint endpoint): path corrected to `/v1alpha/auth_tokens` (snake_case); body documented as flat camelCase with canonical field list.
+- **#16** (mint auth): rewritten to say "API-key auth works, same `GEMINI_API_KEY`." OAuth service-account path retained in ADR 0006 as Rejected with full post-mortem.
+- **#17** (billing gate): new — paid-tier billing required on the owning GCP project; free-tier gates mint with opaque 400.
+- **#18** (key format): new — mint rejects `AQ.xxx` new-format keys; use legacy `AIzaSy…`. Links forum thread 141133.
+
+## What's still deferred to step 6 expensive-half validation gate
+
+This doc confirms the cheap-half is green. The expensive-half (CLAUDE.md Voice validation plan) runs after the iOS side is wired. All five criteria remain untested:
+
+1. TTFA p95 < 1.0 s across 20 real iPhone turns on Wi-Fi. Backend-side latency here (568 ms) is a lower bound; iPhone + network variance will add.
+2. Preamble-present rate ≥ 70 % across 50 tool calls. Not tested.
+3. Pre-recorded filler clip fires within 150 ms of `toolCall` frame. Not tested — iOS-only.
+4. Pruning via `session.update` holds input tokens at ~950/turn across 20 turns. Not tested.
+5. Session refresh silent at 10 min / 15 turn boundary. Not tested.
+
+## Cleanup state
+
+- `Backend/supabase/functions/spike-oauth-mint-probe/` — local + prod, to be deleted after this doc lands.
+- `STIR_SPIKE_SECRET` — to be unset from prod secrets after cleanup.
+- `config.toml` `[functions.spike-oauth-mint-probe]` block — to be removed.
+- GCP service account `stir-live-mint@stir-ai-dinner-copilot.iam.gserviceaccount.com` and its `aiplatform.user` binding — created during the OAuth-path misdiagnosis; now unused. **Safe to delete** via `gcloud iam service-accounts delete stir-live-mint@stir-ai-dinner-copilot.iam.gserviceaccount.com` if Daniel wants a clean GCP surface. Zero cost if retained.
+- `scripts/spike/gemini_live_drift_check.ts` — kept. Useful for re-running this drift check locally when a real `AIzaSy…` key is available in the shell env.
