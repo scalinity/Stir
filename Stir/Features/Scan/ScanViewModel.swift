@@ -223,6 +223,15 @@ final class ScanViewModel {
         overallConfidence = nil
     }
 
+    #if DEBUG
+    /// Test-only: seed the ingredient array and advance to review phase
+    /// without a live Gemini call. Compiled out of Release builds.
+    func __setIngredientsForTests(_ seeded: [Ingredient]) {
+        self.ingredients = seeded
+        self.phase = .review
+    }
+    #endif
+
     // MARK: - Helpers
 
     private func confidenceWeight(_ c: PantryParseResponse.PantryItemConfidence) -> Double {

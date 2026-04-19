@@ -69,11 +69,13 @@
 		CD8C3CD7E5FE339ACDBBD197 /* DietaryRuleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71194080696470F518663BA9 /* DietaryRuleRepository.swift */; };
 		D4B4A64FBE902DFD212E1BE8 /* ScanCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25542F9CFA67245AA2778979 /* ScanCaptureView.swift */; };
 		DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14744B65A207BA49BDB36C0A /* ErrorCode.swift */; };
+		DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */; };
 		E3E7BDB43BA459ACD8D44C08 /* ConstraintsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0D3A1CF905605DAE3309C2 /* ConstraintsSheet.swift */; };
 		EBA79945C63853EDEE2A74A3 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC5321E6BA6620E00B90593 /* CameraService.swift */; };
 		EBAFD48F13DB89C80E076752 /* SolveRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63CF6906E3F3379752C78928 /* SolveRepository.swift */; };
 		F0DEC13DB60DD7756AC99BAC /* DinnerOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F249813ED8FAA7B054BFF055 /* DinnerOptionsView.swift */; };
 		F1C6D7813DA8274D0F34396F /* StirApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016A78A0278372166E393E65 /* StirApp.swift */; };
+		F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */; };
 		F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8F639B91A0A9CC0F13DE7A /* WelcomeView.swift */; };
 		F6326373ED0BD2EF6E3A3D82 /* CurrentHouseholdStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */; };
 		F751CF25A5645B4EB4950CE3 /* HouseholdPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD287009FA0BEF2EC99BC52 /* HouseholdPreferencesView.swift */; };
@@ -135,6 +137,7 @@
 		68F32C1FC5D6A3A650A0B53D /* SuggestedDish+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SuggestedDish+Extensions.swift"; sourceTree = "<group>"; };
 		68F9A8184731D4338C59B314 /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 		6FF4659B21B5797AE4339706 /* OnboardingRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRoute.swift; sourceTree = "<group>"; };
+		71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDispatchSSETests.swift; sourceTree = "<group>"; };
 		71194080696470F518663BA9 /* DietaryRuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietaryRuleRepository.swift; sourceTree = "<group>"; };
 		74588281F314D67EE09DCD8A /* StirError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirError.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
@@ -143,6 +146,7 @@
 		837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitAccountChangeTests.swift; sourceTree = "<group>"; };
 		86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HouseholdProfile+Extensions.swift"; sourceTree = "<group>"; };
 		86D2499D3F643A0F93C7D4A8 /* StirTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StirTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModelTests.swift; sourceTree = "<group>"; };
 		8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PantryItem+Extensions.swift"; sourceTree = "<group>"; };
 		903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityServiceTests.swift; sourceTree = "<group>"; };
 		9695B3F81139A97A1E549D40 /* IdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityService.swift; sourceTree = "<group>"; };
@@ -165,7 +169,7 @@
 		F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Stir.swift"; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
-		"TEMP_63682024-BF2F-4B19-B1A6-515A4EA64514" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -203,6 +207,7 @@
 		071AE0605D7D1BFC77ED925A /* Unit */ = {
 			isa = PBXGroup;
 			children = (
+				71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */,
 				EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */,
 				903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */,
 				633850447A198796407ED908 /* MockCloudKit.swift */,
@@ -210,6 +215,7 @@
 				579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
+				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 			);
 			path = Unit;
@@ -493,10 +499,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_984503F6-68A5-46CB-A3F0-CDD02732DBB0" /* Stir */ = {
+		"TEMP_A77F2F5D-0DF2-4FF8-952B-56ACD18550E7" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_63682024-BF2F-4B19-B1A6-515A4EA64514" /* Config.xcconfig */,
+				"TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -603,6 +609,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */,
 				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
 				748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */,
 				B5CE0F49437BF827C38BF730 /* EntitlementServiceTests.swift in Sources */,
@@ -612,6 +619,7 @@
 				586AFAF4EE8826917C276FB2 /* MockURLProtocol.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
+				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -694,7 +702,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_63682024-BF2F-4B19-B1A6-515A4EA64514" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -733,7 +741,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_63682024-BF2F-4B19-B1A6-515A4EA64514" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

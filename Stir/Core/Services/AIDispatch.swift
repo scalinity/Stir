@@ -146,29 +146,42 @@ private func handleEvent(
     dataJSON: String,
     continuation: AsyncThrowingStream<DinnerSolveEvent, Error>.Continuation,
 ) throws {
+    if let evt = try decodeSSEEvent(event: event, dataJSON: dataJSON) {
+        continuation.yield(evt)
+    }
+}
+
+/// Pure SSE event decoder — given an `event:` tag and its `data:` JSON
+/// payload, decode to a DinnerSolveEvent or nil (unknown event type).
+/// Exposed internally for unit testing.
+enum SSEParseError: Error {
+    case notUTF8
+}
+
+func decodeSSEEvent(event: String, dataJSON: String) throws -> DinnerSolveEvent? {
     guard let data = dataJSON.data(using: .utf8) else {
-        throw StirError.malformedResponse(description: "SSE data not utf8")
+        throw SSEParseError.notUTF8
     }
     let decoder = JSONDecoder.stir
     switch event {
     case "dish":
         let dish = try decoder.decode(DishCard.self, from: data)
-        continuation.yield(.dish(dish))
+        return .dish(dish)
     case "error":
         let slot = try decoder.decode(DinnerSolveSlotError.self, from: data)
-        continuation.yield(.slotError(rank: slot.rank, code: slot.code))
+        return .slotError(rank: slot.rank, code: slot.code)
     case "done":
         let done = try decoder.decode(DinnerSolveDoneFrame.self, from: data)
-        continuation.yield(.done(
+        return .done(
             solveRequestID: done.solveRequestID,
             totalCostUSD: done.totalCostUSD,
             dishesReturned: done.dishesReturned,
             retryCount: done.retryCount,
             promptVersion: done.promptVersion,
-        ))
+        )
     default:
-        // Unknown event type — silently ignore (forward-compat).
         Logger.aiDispatch.warning("unknown SSE event: \(event, privacy: .public)")
+        return nil
     }
 }
 
