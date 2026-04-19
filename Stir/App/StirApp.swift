@@ -44,6 +44,23 @@ struct StirApp: App {
                 )
             }
 
+            // RevenueCat SDK: configure at launch. Actor-internal guard
+            // makes the call idempotent. If no key is configured (early
+            // dev builds before Config.xcconfig is populated), the RC
+            // service stays inert and every method returns an error the
+            // paywall surfaces as PAY-01.
+            if let revenueCat = config.revenueCat {
+                Task {
+                    await RevenueCatService.shared.configure(
+                        apiKey: revenueCat.publicAPIKey,
+                    )
+                }
+            }
+
+            // Install the local-notification delegate so the trial
+            // reminder's delivery emits `trial_reminder_sent` telemetry.
+            StirNotificationDelegate.register()
+
             _coordinator = State(wrappedValue: RootCoordinator(config: config))
             Logger.app.info("StirApp init ok build=\(config.build, privacy: .public)")
         } else if case .failure(let error) = result {

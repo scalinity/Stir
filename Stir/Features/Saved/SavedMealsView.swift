@@ -1,17 +1,21 @@
 // SavedMealsView
 //
-// Step-4 surface for "Cook Saved". Lists non-deleted RecipePlans for
-// the current household, sorted last-cooked-desc (via CookingSession
-// end dates), with each row showing title, last rating (when present),
-// and a Cook-Again affordance that starts a fresh CookingSession for
-// the same plan.
+// Lists non-deleted RecipePlans for the current household, sorted
+// last-cooked-desc (via CookingSession end dates), with each row showing
+// title, last rating (when present), and a Cook-Again affordance that
+// starts a fresh CookingSession for the same plan.
 //
-// Spec §5 "Saved meals / favorites" lines this up to graduate into
-// the full Saved Library in step 7 when favorites + filters land.
+// Step 5 additions:
+//   - Per-row favorite toggle (star). Free tier → paywall via
+//     `PaywallTrigger.savedFavoritesGate`. Premium+ persists via
+//     SolveRepository.setFavorite.
+//   - Premium users see a "Favorites only" segmented control filter at
+//     the top. Free users see the filter but its "Favorites" side is
+//     gated with a paywall tap.
 //
 // Read path goes through CookingSessionRepository.savedMealEntries —
-// the view doesn't open NSFetchRequest itself (kept the layering clean
-// so step 7's favorites + filters work doesn't have to refactor it out).
+// the view doesn't open NSFetchRequest itself (kept layering clean so
+// step 7's full favorites + filters work doesn't have to refactor).
 
 import OSLog
 import SwiftUI
@@ -20,25 +24,32 @@ struct SavedMealsView: View {
     let household: HouseholdProfile
     let aiDispatch: AIDispatch
 
+    @Environment(EntitlementService.self) private var entitlements
+    @Environment(RootCoordinator.self) private var coordinator
+
     @State private var rows: [CookingSessionRepository.SavedMealEntry] = []
     @State private var cookAgainPlan: RecipePlan?
     @State private var errorMessage: String?
+    @State private var showFavoritesOnly = false
 
     private let repository: CookingSessionRepository
+    private let solveRepository: SolveRepository
 
     init(
         household: HouseholdProfile,
         aiDispatch: AIDispatch,
         repository: CookingSessionRepository = CookingSessionRepository(),
+        solveRepository: SolveRepository = SolveRepository(),
     ) {
         self.household = household
         self.aiDispatch = aiDispatch
         self.repository = repository
+        self.solveRepository = solveRepository
     }
 
     var body: some View {
         Group {
-            if rows.isEmpty {
+            if filteredRows.isEmpty {
                 emptyState
             } else {
                 list
@@ -46,6 +57,12 @@ struct SavedMealsView: View {
         }
         .navigationTitle("Saved meals")
         .navigationBarTitleDisplayMode(.large)
+        .safeAreaInset(edge: .top) {
+            filterBar
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.bar)
+        }
         .task {
             await load()
         }
@@ -63,12 +80,41 @@ struct SavedMealsView: View {
         }
     }
 
+    // MARK: - Filter bar
+
+    private var filterBar: some View {
+        HStack {
+            Picker("Filter", selection: Binding(
+                get: { showFavoritesOnly },
+                set: { newValue in
+                    // Free tier can't view favorites-only; tap → paywall.
+                    if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
+                        coordinator.presentPaywall(.savedFavoritesGate)
+                        return
+                    }
+                    showFavoritesOnly = newValue
+                },
+            )) {
+                Text("All").tag(false)
+                Text("Favorites").tag(true)
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    // MARK: - List
+
+    private var filteredRows: [CookingSessionRepository.SavedMealEntry] {
+        guard showFavoritesOnly else { return rows }
+        return rows.filter { $0.plan?.isFavorite == true }
+    }
+
     private var list: some View {
-        List(rows) { row in
-            Button {
-                if let plan = row.plan { cookAgainPlan = plan }
-            } label: {
-                HStack(alignment: .top, spacing: 14) {
+        List(filteredRows) { row in
+            HStack(alignment: .top, spacing: 14) {
+                Button {
+                    if let plan = row.plan { cookAgainPlan = plan }
+                } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(row.title).font(.headline)
                         if let lastCooked = row.lastCookedAt {
@@ -78,18 +124,53 @@ struct SavedMealsView: View {
                         }
                         ratingLine(rating: row.rating)
                     }
-                    Spacer()
-                    Image(systemName: "flame")
-                        .foregroundStyle(.orange)
-                        .padding(.top, 4)
-                        .accessibilityHidden(true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                .accessibilityHint("Cook this again")
+
+                favoriteButton(for: row)
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Cook this again")
+            .padding(.vertical, 4)
         }
         .listStyle(.plain)
+    }
+
+    // MARK: - Favorite toggle (per row)
+
+    private func favoriteButton(for row: CookingSessionRepository.SavedMealEntry) -> some View {
+        let isFavorite = row.plan?.isFavorite ?? false
+        return Button {
+            handleFavoriteTap(row: row)
+        } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .foregroundStyle(isFavorite ? .yellow : .secondary)
+                .padding(.top, 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")
+    }
+
+    private func handleFavoriteTap(row: CookingSessionRepository.SavedMealEntry) {
+        switch entitlements.canAccess(.savedFavorites) {
+        case .allowed:
+            guard let plan = row.plan else { return }
+            let newValue = !plan.isFavorite
+            _ = solveRepository.setFavorite(newValue, on: plan)
+            if newValue {
+                PostHogClient.shared.capture(
+                    .favoriteSaved,
+                    properties: BillingTelemetryProperties.favoriteSaved(
+                        recipeOrigin: plan.typedOrigin.rawValue,
+                    ),
+                )
+            }
+            // Refresh rows so the UI picks up the new isFavorite.
+            Task { await load() }
+        case .blockedByTier, .blockedByQuota, .blockedByBilling:
+            coordinator.presentPaywall(.savedFavoritesGate)
+        }
     }
 
     @ViewBuilder
@@ -108,14 +189,18 @@ struct SavedMealsView: View {
         }
     }
 
+    // MARK: - Empty / loading
+
     private var emptyState: some View {
         VStack(spacing: 14) {
-            Image(systemName: "tray")
+            Image(systemName: showFavoritesOnly ? "star" : "tray")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
-            Text("No saved meals yet")
+            Text(showFavoritesOnly ? "No favorites yet" : "No saved meals yet")
                 .font(.headline)
-            Text("Cook a dish to see it here for one-tap replay.")
+            Text(showFavoritesOnly
+                 ? "Tap the star on a recipe to save a favorite."
+                 : "Cook a dish to see it here for one-tap replay.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

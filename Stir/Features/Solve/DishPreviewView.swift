@@ -11,8 +11,12 @@ struct DishPreviewView: View {
     @Bindable var viewModel: SolveViewModel
     let dish: DishCard
 
+    @Environment(EntitlementService.self) private var entitlements
+    @Environment(RootCoordinator.self) private var coordinator
+
     @State private var hasCapturedSelection = false
     @State private var cookModePresented = false
+    @State private var localFavorite: Bool = false
 
     var body: some View {
         ScrollView {
@@ -26,6 +30,17 @@ struct DishPreviewView: View {
         }
         .navigationTitle(dish.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    handleFavoriteTap()
+                } label: {
+                    Image(systemName: localFavorite ? "star.fill" : "star")
+                        .foregroundStyle(localFavorite ? .yellow : .secondary)
+                }
+                .accessibilityLabel(localFavorite ? "Remove from favorites" : "Save to favorites")
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             startCookingBar
                 .padding(.horizontal)
@@ -40,6 +55,8 @@ struct DishPreviewView: View {
             guard !hasCapturedSelection else { return }
             hasCapturedSelection = true
             viewModel.selectDish(dish)
+            // Initial favorite state reflects the persisted RecipePlan if any.
+            localFavorite = viewModel.persistedRecipePlan(for: dish)?.isFavorite ?? false
         }
         .fullScreenCover(isPresented: $cookModePresented) {
             if let plan = viewModel.persistedRecipePlan(for: dish),
@@ -157,6 +174,38 @@ struct DishPreviewView: View {
             }
             .padding()
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // MARK: - Favorite gate
+
+    private func handleFavoriteTap() {
+        // Gate: Free tier must resolve the paywall before a favorite
+        // persists. effectiveTier handling in EntitlementService maps
+        // "expired" → "free" so a lapsed Premium subscriber also sees
+        // the paywall (correct — they lost the feature).
+        switch entitlements.canAccess(.savedFavorites) {
+        case .allowed:
+            toggleFavoriteOptimistic()
+        case .blockedByTier:
+            coordinator.presentPaywall(.savedFavoritesGate)
+        case .blockedByQuota, .blockedByBilling:
+            coordinator.presentPaywall(.savedFavoritesGate)
+        }
+    }
+
+    private func toggleFavoriteOptimistic() {
+        guard let plan = viewModel.persistedRecipePlan(for: dish) else { return }
+        let newValue = !localFavorite
+        localFavorite = newValue
+        viewModel.setFavorite(newValue, for: plan)
+        if newValue {
+            PostHogClient.shared.capture(
+                .favoriteSaved,
+                properties: BillingTelemetryProperties.favoriteSaved(
+                    recipeOrigin: plan.typedOrigin.rawValue,
+                ),
+            )
         }
     }
 

@@ -8,6 +8,7 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var coordinator: RootCoordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -42,6 +43,29 @@ struct RootView: View {
         .environment(coordinator.entitlements)
         .environment(coordinator.cloudKit)
         .environment(coordinator.household)
+        // Expose the coordinator so any feature-level view can call
+        // `presentPaywall(_:)` without threading a callback through
+        // every viewmodel. Keep reads to `@Environment(RootCoordinator.self)`
+        // — direct mutation happens through the paywall methods, not
+        // property writes.
+        .environment(coordinator)
+        // Paywall presentation is coordinator-driven; any view can set the
+        // trigger and the overlay materializes here. `.fullScreenCover`
+        // matches the spec's hard-paywall UX (blocks the underlying flow
+        // until the user resolves the purchase decision).
+        .fullScreenCover(item: $coordinator.activePaywallTrigger) { trigger in
+            PaywallView(viewModel: coordinator.makePaywallViewModel(trigger: trigger))
+                .onDisappear {
+                    let succeeded = coordinator.entitlements.tier != .free
+                        && coordinator.entitlements.billingState != .none
+                    coordinator.dismissPaywall(wasSuccessful: succeeded)
+                }
+        }
+        .onChange(of: scenePhase) { _, new in
+            if new == .active, coordinator.phase == .ready || coordinator.phase == .offlineFallback {
+                Task { await coordinator.refreshEntitlementsOnForeground() }
+            }
+        }
     }
 }
 

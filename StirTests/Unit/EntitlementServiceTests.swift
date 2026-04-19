@@ -109,6 +109,88 @@ final class EntitlementServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Step 5 additions
+
+    func test_billingRetryBanner_reflectsBootstrapFlag() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .grace, voiceEnabled: true, billingRetryBanner: true,
+        ))
+        XCTAssertTrue(service.billingRetryBanner)
+        XCTAssertEqual(service.billingState, .grace)
+    }
+
+    func test_billingRetryBanner_falseOutsideOfGrace() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, voiceEnabled: true, billingRetryBanner: false,
+        ))
+        XCTAssertFalse(service.billingRetryBanner)
+    }
+
+    func test_graceBillingState_keepsPremiumAccess() {
+        // Regression guard: grace must NOT demote the user to Free. Apple
+        // is retrying payment — we keep the features unlocked while that
+        // happens.
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .grace, voiceEnabled: true, billingRetryBanner: true,
+        ))
+        XCTAssertEqual(service.canAccess(.savedFavorites), .allowed)
+        XCTAssertEqual(service.canAccess(.widgets), .allowed)
+        XCTAssertEqual(service.canAccess(.shortcutsAppIntents), .allowed)
+        XCTAssertEqual(service.canAccess(.leftoversMode), .allowed)
+    }
+
+    func test_cancelledActive_keepsPremiumAccess_untilPeriodEnd() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .cancelledActive, voiceEnabled: true,
+        ))
+        XCTAssertEqual(service.canAccess(.savedFavorites), .allowed)
+    }
+
+    func test_decisionMatrix_allTierAndBillingStateCombinations() {
+        // Spec §10 + CLAUDE.md table. Each (tier, billing_state) pair
+        // should produce the documented gating behavior for every gate.
+        // Condensed table: test one marquee gate (savedFavorites) across
+        // the full matrix.
+        struct Case {
+            let tier: Tier
+            let billingState: BillingState
+            let expected: EntitlementDecision
+            var label: String { "\(tier.rawValue)+\(billingState.rawValue)" }
+        }
+        let cases: [Case] = [
+            // Free, any billing_state → blocked by tier (savedFavorites is Premium+)
+            .init(tier: .free, billingState: .none, expected: .blockedByTier(required: .premium)),
+            .init(tier: .free, billingState: .expired, expected: .blockedByTier(required: .premium)),
+            // Premium, paid billing_states → allowed
+            .init(tier: .premium, billingState: .active, expected: .allowed),
+            .init(tier: .premium, billingState: .trial, expected: .allowed),
+            .init(tier: .premium, billingState: .grace, expected: .allowed),
+            .init(tier: .premium, billingState: .cancelledActive, expected: .allowed),
+            // Premium, expired/none → demoted to free equivalent
+            .init(tier: .premium, billingState: .expired, expected: .blockedByTier(required: .premium)),
+            // Pro also has access to savedFavorites
+            .init(tier: .pro, billingState: .active, expected: .allowed),
+            .init(tier: .pro, billingState: .expired, expected: .blockedByTier(required: .premium)),
+        ]
+        for c in cases {
+            let service = EntitlementService(keychain: MockKeychain())
+            service.hydrate(from: Self.entitlements(
+                tier: c.tier,
+                billingState: c.billingState,
+                voiceEnabled: true,
+            ))
+            XCTAssertEqual(
+                service.canAccess(.savedFavorites),
+                c.expected,
+                "savedFavorites gate wrong for \(c.label)",
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [
@@ -121,6 +203,7 @@ final class EntitlementServiceTests: XCTestCase {
         tier: Tier,
         billingState: BillingState,
         voiceEnabled: Bool = false,
+        billingRetryBanner: Bool = false,
         quotas: [BootstrapResponse.Quota]? = nil,
     ) -> BootstrapResponse.Entitlements {
         BootstrapResponse.Entitlements(
@@ -129,7 +212,7 @@ final class EntitlementServiceTests: XCTestCase {
             isTrial: false,
             expiresAt: nil,
             voiceEnabled: voiceEnabled,
-            billingRetryBanner: false,
+            billingRetryBanner: billingRetryBanner,
             quotas: quotas ?? Self.defaultQuotas,
         )
     }

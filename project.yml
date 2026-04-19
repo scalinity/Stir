@@ -56,6 +56,9 @@ packages:
   sentry-cocoa:
     url: https://github.com/getsentry/sentry-cocoa
     from: 8.41.0
+  purchases-ios-spm:
+    url: https://github.com/RevenueCat/purchases-ios-spm
+    from: 5.0.0
 
 targets:
   Stir:
@@ -130,6 +133,8 @@ targets:
         product: PostHog
       - package: sentry-cocoa
         product: Sentry
+      - package: purchases-ios-spm
+        product: RevenueCat
 
   StirTests:
     type: bundle.unit-test

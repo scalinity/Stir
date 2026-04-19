@@ -192,4 +192,30 @@ final class SolveRepository {
         request.relationshipKeyPathsForPrefetching = ["recipePlan"]
         return (try? controller.viewContext.fetch(request).first)?.recipePlan
     }
+
+    /// Persist a change to `RecipePlan.isFavorite`. Called from DishPreviewView
+    /// and SavedMealsView when the user toggles the star icon. Optimistic in
+    /// the UI; this catches up storage. Bumps `updatedAt` so CloudKit sync
+    /// propagates the change to other devices.
+    ///
+    /// Silent on failure: returns without raising. Core Data saves here fail
+    /// only on disk full / corruption; the UI optimistic state will desync
+    /// but user-perceptible breakage is limited. Logged at warning level
+    /// for Sentry.
+    @discardableResult
+    func setFavorite(_ isFavorite: Bool, on plan: RecipePlan) -> Bool {
+        let context = controller.viewContext
+        plan.isFavorite = isFavorite
+        plan.updatedAt = Date()
+        do {
+            try context.save()
+            return true
+        } catch {
+            Logger.coreData.warning(
+                "setFavorite save failed: \(error.localizedDescription, privacy: .public)",
+            )
+            context.rollback()
+            return false
+        }
+    }
 }

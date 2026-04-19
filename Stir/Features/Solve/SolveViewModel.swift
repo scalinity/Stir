@@ -277,6 +277,14 @@ final class SolveViewModel {
     /// launch before CurrentHouseholdStore has resolved.
     var currentHousehold: HouseholdProfile? { householdStore.profile }
 
+    /// Toggle favorite on a persisted RecipePlan. Delegates to SolveRepository;
+    /// called from DishPreviewView's favorite tap after the FeatureGate
+    /// check clears. Silent on Core Data save failure (logged).
+    @discardableResult
+    func setFavorite(_ newValue: Bool, for plan: RecipePlan) -> Bool {
+        solveRepo.setFavorite(newValue, on: plan)
+    }
+
     /// AIDispatch passthrough so Cook Mode + Substitution Sheet can call
     /// /v1/ai/substitution without re-building a separate client. Same
     /// actor instance RootCoordinator owns.

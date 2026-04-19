@@ -43,6 +43,10 @@ final class RootCoordinator {
     private(set) var aiDispatch: AIDispatch
     let pantryItemRepository: PantryItemRepository
     let solveRepository: SolveRepository
+    /// RC SDK facade. Used for logIn (keeping RC's canonical key in sync
+    /// with Supabase's) and for the paywall's offerings/purchase flows.
+    let revenueCat: any RevenueCatPurchasing
+    private let trialReminders: TrialReminderScheduler
 
     private(set) var phase: Phase = .loading
 
@@ -56,6 +60,20 @@ final class RootCoordinator {
     /// duplicate launch sequences. Nil once bootstrap finishes.
     private var bootstrapTask: Task<Void, Never>?
 
+    /// Last-known AccountState for emitting `entitlement_state_changed` when
+    /// scenePhase-driven refresh picks up a new billing state. Nil until
+    /// the first successful bootstrap.
+    private var lastEmittedAccountState: AccountState?
+
+    /// Ongoing refresh task for scenePhase .active → configBootstrap. Keeps
+    /// concurrent foreground transitions from double-firing.
+    private var refreshTask: Task<Void, Never>?
+
+    /// Currently-presented paywall trigger. Set via `presentPaywall(_:)`;
+    /// cleared when PaywallView dismisses. SwiftUI `.fullScreenCover(item:)`
+    /// drives presentation from this.
+    var activePaywallTrigger: PaywallTrigger?
+
     init(
         config: AppConfig,
         entitlements: EntitlementService = EntitlementService(),
@@ -67,6 +85,8 @@ final class RootCoordinator {
         aiDispatch: AIDispatch? = nil,
         pantryItemRepository: PantryItemRepository = PantryItemRepository(),
         solveRepository: SolveRepository = SolveRepository(),
+        revenueCat: (any RevenueCatPurchasing)? = nil,
+        trialReminders: TrialReminderScheduler = .shared,
     ) {
         self.config = config
         self.entitlements = entitlements
@@ -79,6 +99,8 @@ final class RootCoordinator {
         self.aiDispatch = aiDispatch ?? AIDispatch(session: client, config: config)
         self.pantryItemRepository = pantryItemRepository
         self.solveRepository = solveRepository
+        self.revenueCat = revenueCat ?? RevenueCatService.shared
+        self.trialReminders = trialReminders
     }
 
     /// Runs the full launch sequence. Idempotent — callable from
@@ -200,8 +222,143 @@ final class RootCoordinator {
             )
         }
 
-        // 7. Observe CloudKit account changes for the life of the app.
+        // 7. Post-bootstrap entitlement wiring: RC logIn, trial-reminder,
+        //    customerInfoStream observation. Runs only on successful
+        //    bootstrap — offline fallback skips these because iOS doesn't
+        //    know the authoritative billing state yet.
+        if bootstrapSucceeded {
+            await handlePostBootstrapEntitlement(canonicalKey: canonicalKeyString)
+        } else {
+            // Offline: still seed lastEmittedAccountState so a subsequent
+            // foreground refresh that lands the real state emits a clean
+            // transition rather than appearing as a "from=nil" event.
+            primeLastEmittedAccountState()
+        }
+
+        // 8. Observe CloudKit account changes for the life of the app.
         startAccountChangesObserver()
+    }
+
+    /// RC logIn + trial reminder + customerInfoStream observer. Called
+    /// once per successful bootstrap. Idempotent under concurrent callers
+    /// (RC logIn short-circuits when the key is unchanged; the observer
+    /// cancels its prior task before starting a new one).
+    private func handlePostBootstrapEntitlement(canonicalKey: String) async {
+        // 1. Keep RC's identity in sync with ours.
+        do {
+            try await revenueCat.logIn(canonicalUserKey: canonicalKey)
+        } catch {
+            Logger.coordinator.warning(
+                "RC logIn failed: \(error.localizedDescription, privacy: .public)",
+            )
+            // Non-fatal: paywall offerings fetch will surface the real
+            // issue if RC is actually unreachable.
+        }
+
+        // 2. Seed lastEmittedAccountState without emitting (initial-state
+        //    isn't a transition). Subsequent `emitAccountStateChangeIfNeeded`
+        //    calls compare against this seed.
+        primeLastEmittedAccountState()
+
+        // 3. Trial reminder: schedule when we're in trial; cancel otherwise.
+        await updateTrialReminder()
+
+        // 4. Start the customerInfo observer — RC informs us of purchase
+        //    events from outside our process (e.g. manage-subscription
+        //    flow in Apple ID). Every change triggers a configBootstrap
+        //    refresh from our source of truth (Supabase).
+        if let concrete = revenueCat as? RevenueCatService {
+            await concrete.startObserving { [weak self] in
+                Task { @MainActor in
+                    await self?.refreshEntitlementsOnForeground()
+                }
+            }
+        }
+    }
+
+    private func primeLastEmittedAccountState() {
+        lastEmittedAccountState = AccountState.derive(
+            tier: entitlements.tier,
+            billingState: entitlements.billingState,
+            cloudKitAvailable: cloudKit.isAvailable,
+        )
+    }
+
+    /// Compare the current derived AccountState with the last-emitted one
+    /// and emit `entitlement_state_changed` iff it changed. Idempotent under
+    /// no-op calls; safe to invoke multiple times per refresh.
+    private func emitAccountStateChangeIfNeeded() {
+        let next = AccountState.derive(
+            tier: entitlements.tier,
+            billingState: entitlements.billingState,
+            cloudKitAvailable: cloudKit.isAvailable,
+        )
+        guard let previous = lastEmittedAccountState, previous != next else {
+            // Either first-run (no previous) or no change — seed + skip.
+            lastEmittedAccountState = next
+            return
+        }
+        PostHogClient.shared.capture(
+            .entitlementStateChanged,
+            properties: BillingTelemetryProperties.entitlementStateChanged(
+                fromState: previous,
+                toState: next,
+                billingState: entitlements.billingState,
+            ),
+        )
+        Logger.coordinator.info(
+            "account state \(previous.rawValue, privacy: .public) → \(next.rawValue, privacy: .public)",
+        )
+        lastEmittedAccountState = next
+    }
+
+    private func updateTrialReminder() async {
+        if entitlements.billingState == .trial, let expires = entitlements.expiresAt {
+            await trialReminders.ensureReminder(expiresAt: expires)
+        } else {
+            trialReminders.cancel()
+        }
+    }
+
+    // MARK: - Foreground refresh (scenePhase .active)
+
+    /// Called on scenePhase transitions to `.active`. Re-reads entitlements
+    /// from Supabase (`configBootstrap` endpoint — doesn't re-mint the JWT)
+    /// and emits `entitlement_state_changed` iff the user's account state
+    /// moved. Also re-ensures the trial reminder matches the fresh state.
+    ///
+    /// Concurrent callers share the same in-flight task — foregrounding
+    /// twice within a single refresh cycle shouldn't double-fire.
+    func refreshEntitlementsOnForeground() async {
+        if let existing = refreshTask {
+            await existing.value
+            return
+        }
+        let task = Task { await self.runRefresh() }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func runRefresh() async {
+        do {
+            let response = try await sessionClient.configBootstrap()
+            entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
+            emitAccountStateChangeIfNeeded()
+            await updateTrialReminder()
+            Logger.coordinator.debug(
+                "foreground refresh ok tier=\(self.entitlements.tier.rawValue, privacy: .public)",
+            )
+        } catch {
+            // Non-fatal: keep the cached snapshot. Retry on next
+            // foreground cycle. The only time a refresh failure matters
+            // is when the user's entitlement actually changed under us;
+            // in practice the webhook-driven path catches up within a
+            // few seconds.
+            Logger.coordinator.warning(
+                "foreground refresh failed: \(error.localizedDescription, privacy: .public)",
+            )
+        }
     }
 
     /// Called by OnboardingRoot when the flow finishes (Setup 2 Continue).
@@ -218,6 +375,39 @@ final class RootCoordinator {
     /// Retry for the error-screen Retry button.
     func retry() {
         Task { await bootstrap() }
+    }
+
+    // MARK: - Paywall presentation
+
+    /// Surface the paywall from any feature gate. Idempotent — calling
+    /// with the same trigger twice is a no-op while the paywall is open.
+    func presentPaywall(_ trigger: PaywallTrigger) {
+        if activePaywallTrigger != nil { return }
+        activePaywallTrigger = trigger
+    }
+
+    /// Dismissal hook from PaywallView. Resets the trigger AND schedules
+    /// a foreground refresh so any successful purchase lands on iOS as
+    /// fast as the webhook→Supabase hop allows.
+    func dismissPaywall(wasSuccessful: Bool) {
+        activePaywallTrigger = nil
+        if wasSuccessful {
+            Task { await refreshEntitlementsOnForeground() }
+        }
+    }
+
+    /// Build a PaywallViewModel bound to this coordinator's RC + entitlement
+    /// stack. PaywallView instantiates via this so the VM wiring stays in
+    /// one place.
+    func makePaywallViewModel(trigger: PaywallTrigger) -> PaywallViewModel {
+        PaywallViewModel(
+            trigger: trigger,
+            service: revenueCat,
+            entitlements: entitlements,
+            onEntitlementRefreshRequested: { [weak self] in
+                Task { @MainActor in await self?.refreshEntitlementsOnForeground() }
+            },
+        )
     }
 
     // MARK: - CloudKit change observer

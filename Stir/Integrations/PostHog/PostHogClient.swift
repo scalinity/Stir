@@ -88,4 +88,17 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case substitutionAccepted = "substitution_accepted"
     case cookSessionCompleted = "cook_session_completed"
     case mealRated = "meal_rated"
+    // Step 5 — billing + paywall.
+    case paywallViewed = "paywall_viewed"
+    case trialStarted = "trial_started"
+    case trialReminderSent = "trial_reminder_sent"
+    case purchaseStarted = "purchase_started"
+    case purchaseCompleted = "purchase_completed"
+    case restorePurchasesTapped = "restore_purchases_tapped"
+    case favoriteSaved = "favorite_saved"
+    // Defined now so step 6 wiring doesn't re-register the enum case.
+    // No invocation path in step 5.
+    case voiceAffordanceTapped = "voice_affordance_tapped"
+    // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
+    case reactivationNotificationOpened = "reactivation_notification_opened"
 }
