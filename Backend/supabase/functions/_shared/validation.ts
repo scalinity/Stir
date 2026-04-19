@@ -4,22 +4,40 @@
 // touching the database. Failures surface as VAL-01 with structured
 // field_errors for Sentry debugging on the iOS side.
 
-import { z, ZodError } from 'zod';
+import { z, ZodError, type ZodIssue } from 'zod';
 import type { FieldError } from './errors.ts';
 
 // ---------------------------------------------------------------------------
 // /v1/session/bootstrap
 // ---------------------------------------------------------------------------
 //
-// installation_id: UUID v4 generated in iOS keychain. Required.
-// cloudkit_user_record_name: Opaque CloudKit userRecordName (e.g. `_abc...`).
-//   Optional — absent on local-only users.
+// installation_id: UUID v4 generated in iOS keychain. Required. Regex enforces
+//   RFC 4122 v4 strictly (version nibble == 4, variant nibbles ∈ {8,9,a,b}) —
+//   both upper and lower case accepted so iOS's `UUID().uuidString` (uppercase)
+//   and JS/CLI-generated UUIDs (lowercase) both pass. Rejects v1/v5/v7 shapes
+//   that happen to pass Zod's permissive `.uuid()` check. Tightens the API
+//   contract and gives clearer field_errors on malformed clients.
+// cloudkit_user_record_name: Opaque CloudKit userRecordName. Apple-issued
+//   format is `_` + 32 lowercase hex chars (spec §12, validated against real
+//   CK records April 2026). Tightening to this regex — rather than allowing
+//   any 1–256 char string — shrinks the identity-spoofing attack surface:
+//   an attacker can still claim a valid-looking canonical_user_key if they
+//   know another user's CK record name, but arbitrary-string abuse and
+//   malformed-client bugs fail at the boundary with a structured VAL-01.
+//   Full server-to-server CK verification is deferred — see spec §12 and
+//   CLAUDE.md §"Deferred". Optional — absent on local-only users.
 // build: iOS build string, e.g. "1.0.0 (42)". Required for telemetry.
 // os_version: iOS version string, e.g. "17.5.1". Required for telemetry.
 
+const UUID_V4_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+const CK_RECORD_NAME_REGEX = /^_[a-f0-9]{32}$/;
+
 export const SessionBootstrapRequest = z.object({
-  installation_id: z.string().uuid(),
-  cloudkit_user_record_name: z.string().min(1).max(256).optional(),
+  installation_id: z.string().regex(UUID_V4_REGEX, 'must be a UUID v4'),
+  cloudkit_user_record_name: z.string()
+    .regex(CK_RECORD_NAME_REGEX, 'must match `_` + 32 lowercase hex chars')
+    .optional(),
   build: z.string().min(1).max(64),
   os_version: z.string().min(1).max(64),
 }).strict();
@@ -113,7 +131,7 @@ export type DinnerSolveRequest = z.infer<typeof DinnerSolveRequest>;
 
 /** Convert a ZodError into the structured field_errors wire format. */
 export function zodToFieldErrors(err: ZodError): FieldError[] {
-  return err.issues.map((issue) => ({
+  return err.issues.map((issue: ZodIssue) => ({
     field: issue.path.length > 0 ? issue.path.map(String).join('.') : '<root>',
     issue: issue.message,
   }));

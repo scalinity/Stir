@@ -64,11 +64,12 @@ Deno.test('dinner-solve: AUTH-01 when Authorization header missing', async () =>
   assertEquals(res.body?.error, 'AUTH-01');
 });
 
-Deno.test('dinner-solve: VAL-01 405 on GET', async () => {
+Deno.test('dinner-solve: METHOD-NOT-ALLOWED-01 on GET', async () => {
   const res = await fetch(`${FUNCTIONS_URL}/dinner-solve`, { method: 'GET' });
   assertEquals(res.status, 405);
   const body = await res.json();
-  assertEquals(body.error, 'VAL-01');
+  assertEquals(body.error, 'METHOD-NOT-ALLOWED-01');
+  assertEquals(body.allowed, ['POST']);
 });
 
 Deno.test('dinner-solve: VAL-01 when ingredients missing', async () => {

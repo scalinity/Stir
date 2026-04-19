@@ -50,9 +50,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'GET') {
     log.warn('method_not_allowed', { method: req.method });
     return jsonError(
-      ErrorCode.VAL_01,
+      ErrorCode.METHOD_NOT_ALLOWED_01,
       405,
-      { message: 'Method Not Allowed; use GET.' },
+      { message: 'Method Not Allowed; use GET.', allowed: ['GET'] },
       requestId,
     );
   }
@@ -90,13 +90,19 @@ Deno.serve(async (req) => {
   try {
     const userRow = await readAppUser(client, claims.canonical_user_key);
     if (!userRow) {
-      userLog.warn('user_row_missing');
+      // JWT was validly signed by us but its canonical_user_key no longer
+      // resolves — almost always a data-reset during development; in prod
+      // implies tampering or an out-of-band row deletion. Either way iOS
+      // should silently re-bootstrap. reason=user_stale routes to `info`
+      // severity on the log pipeline so this doesn't pollute the Sentry
+      // signature_invalid alert channel.
+      userLog.info('user_row_missing');
       return jsonError(
         ErrorCode.AUTH_01,
         401,
         {
           message: 'Session references unknown user; re-bootstrap required.',
-          reason: 'signature_invalid',
+          reason: 'user_stale',
         },
         requestId,
       );
@@ -111,7 +117,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // merged_into is a TERMINAL user state — the JWT would be stale; re-bootstrap.
+    // merged_into is a TERMINAL user state — the JWT's canonical_user_key
+    // was alias-forwarded to another row, so the JWT is valid but points at
+    // a stale identity. reason=user_stale: iOS silently re-bootstraps, and
+    // the log pipeline keeps this out of the signature_invalid alert channel.
     if (userRow.merged_into != null) {
       userLog.info('merged_user_re_bootstrap_required');
       return jsonError(
@@ -119,7 +128,7 @@ Deno.serve(async (req) => {
         401,
         {
           message: 'User identity was merged; re-bootstrap required.',
-          reason: 'signature_invalid',
+          reason: 'user_stale',
         },
         requestId,
       );
@@ -128,8 +137,25 @@ Deno.serve(async (req) => {
     const entitlement = await readEntitlement(client, claims.canonical_user_key);
     if (!entitlement) throw new Error('entitlement row missing for authed user');
 
+    // `tier` on the wire is the *effective* tier: Free whenever billing_state
+    // is 'none' or 'expired'. Voice is gated identically on iOS, but we also
+    // need the tier column to match so iOS quota UI + paywall copy reflect
+    // the user's actual entitlement, not a stale RevenueCat column.
+    const tier = effectiveTier(entitlement);
+    const voiceEnabled = effectiveVoiceEnabled(entitlement);
+    const billingRetryBanner = entitlement.billing_state === 'grace';
+
+    // Ensure current-period usage_counters exist BEFORE reading quotas. The
+    // user's period rolls over on `app_users.created_at` day-of-month; when
+    // that boundary is crossed inside the 24h JWT TTL window, this endpoint
+    // would otherwise query rows that don't exist yet and return {used:0,
+    // cap:0} for every feature — which iOS reads as "quota exhausted" and
+    // gates every metered feature. Idempotent upsert, same path as
+    // session-bootstrap step 3e.
     const accountCreatedAt = new Date(userRow.created_at);
-    const { periodStart, periodEnd } = computeCurrentPeriodStart(accountCreatedAt);
+    const { periodStart, periodEnd } = await ensureCurrentPeriodRows(
+      client, claims.canonical_user_key, tier, accountCreatedAt,
+    );
 
     const [quotas, flags, promptsResult] = await Promise.all([
       readQuotasForWire(client, claims.canonical_user_key, periodStart, periodEnd),
@@ -143,13 +169,19 @@ Deno.serve(async (req) => {
     if (promptsResult.error) throw promptsResult.error;
     const prompts = (promptsResult.data ?? []) as PromptRow[];
 
-    // `tier` on the wire is the *effective* tier: Free whenever billing_state
-    // is 'none' or 'expired'. Voice is gated identically on iOS, but we also
-    // need the tier column to match so iOS quota UI + paywall copy reflect
-    // the user's actual entitlement, not a stale RevenueCat column.
-    const tier = effectiveTier(entitlement);
-    const voiceEnabled = effectiveVoiceEnabled(entitlement);
-    const billingRetryBanner = entitlement.billing_state === 'grace';
+    // Warn when an expected feature_key has no default prompt row — a bad
+    // canary rollout can leave a feature silently without a prompt, and the
+    // runtime error would be far from the root cause.
+    const expectedFeatureKeys = [
+      'pantry_parse', 'dinner_solve', 'cook_turn', 'cook_mode_realtime',
+      'substitution', 'recipe_import', 'grocery_generate',
+    ] as const;
+    const seenKeys = new Set(prompts.map((p) => p.feature_key));
+    for (const expected of expectedFeatureKeys) {
+      if (!seenKeys.has(expected)) {
+        userLog.warn('prompt_default_missing', { feature_key: expected });
+      }
+    }
 
     const body = {
       entitlements: {

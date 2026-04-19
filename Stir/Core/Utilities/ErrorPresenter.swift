@@ -201,6 +201,19 @@ enum ErrorPresenter {
                 secondaryAction: nil,
                 blocking: false,
             )
+        case .methodNotAllowed01:
+            // 405 only fires when iOS sends the wrong HTTP verb — a
+            // build-time bug that should be caught in review, not user
+            // copy. Fall back to a generic retry surface in case telemetry
+            // ever routes it to UI.
+            return UserFacingError(
+                code: .methodNotAllowed01,
+                title: "Something went wrong",
+                message: "Something went wrong. Please try again or contact support if this keeps happening.",
+                primaryAction: "Retry",
+                secondaryAction: "Contact Support",
+                blocking: false,
+            )
         }
     }
 }

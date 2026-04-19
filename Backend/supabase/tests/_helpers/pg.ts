@@ -1,5 +1,11 @@
 // Supabase clients for tests.
 //
+// Thin wrappers over the production factories in functions/_shared/db.ts so
+// tests exercise the exact client shape production handlers use (including
+// the `x-stir-client` header that surfaces in Supabase log dashboards).
+// Previously this file maintained parallel factories; the duplication
+// invited drift (e.g. one added the `x-stir-client` tag, the other didn't).
+//
 // serviceClient: bypasses RLS — used ONLY to seed rows in tests that assert
 // RLS behavior. Never mirror this pattern in production handler code.
 //
@@ -10,29 +16,18 @@
 // Side-effect import: overrides shell env with local .env values.
 import './env.ts';
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? 'http://127.0.0.1:54321';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  createServiceClient,
+  createUserClient,
+} from '../../functions/_shared/db.ts';
 
 export function serviceClient(): SupabaseClient {
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!serviceKey) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY missing from test environment.');
-  }
-  return createClient(SUPABASE_URL, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return createServiceClient();
 }
 
 export function userClient(jwt: string): SupabaseClient {
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!anonKey) {
-    throw new Error('SUPABASE_ANON_KEY missing from test environment.');
-  }
-  return createClient(SUPABASE_URL, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  });
+  return createUserClient(jwt);
 }
 
 /**

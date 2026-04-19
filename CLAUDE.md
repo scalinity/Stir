@@ -189,8 +189,10 @@ enum ErrorCode: String {
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
-    case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid
+    case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale
                                          // iOS auto-re-bootstraps silently; invisible unless retry also fails
+    case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"
+                                         // 405 — iOS sent the wrong HTTP verb (client bug, never user-visible)
 }
 ```
 
@@ -220,11 +222,11 @@ Server returns:
 {
   "error": "AUTH-01",
   "message": "Session expired or missing",
-  "reason": "expired" | "missing" | "malformed" | "signature_invalid"
+  "reason": "expired" | "missing" | "malformed" | "signature_invalid" | "user_stale"
 }
 ```
 
-`reason` is a typed enum with four distinct handling paths:
+`reason` is a typed enum with five distinct handling paths:
 
 | `reason` | Cause | iOS action | Server log level |
 | --- | --- | --- | --- |
@@ -232,6 +234,7 @@ Server returns:
 | `expired` | JWT valid but past `exp` | Silent re-bootstrap | `info` |
 | `malformed` | Header present, invalid JWT structure | Re-bootstrap + Sentry error | `error` |
 | `signature_invalid` | Structure valid, signature doesn't verify | Re-bootstrap + Sentry error + alert at threshold | `error` |
+| `user_stale` | JWT valid but `canonical_user_key` no longer resolves (alias-forwarded to another row, or row missing entirely) | Silent re-bootstrap | `info` |
 
 iOS silent-refresh pattern: clear cached JWT, re-bootstrap, retry original request **once**. If retry also 401s, surface NET-01 — never retry-storm. `reason` is a typed field on the thrown error, not parsed from `message`; log aggregators and Sentry alerts key off the typed field.
 
@@ -557,7 +560,7 @@ All `/v1/*` endpoints authenticate via session JWT from `/v1/session/bootstrap`.
 
 Shared behaviors across endpoints:
 - 400 on request body validation failure → `{ error: "VAL-01", message, field_errors: [...] }`
-- 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid" }`
+- 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale" }`
 - 403 on entitlement mismatch → `{ error: "ENT-VOICE-01" }` for voice, `{ error: "BILL-01" }` for general
 - 429 on quota exhaustion → `{ error: "RATE-01" }`
 - 502 on Gemini outage → `{ error: "AI-01" }`
@@ -751,6 +754,7 @@ Tracked explicitly so nothing gets lost. Each item has an owner-step.
 - **IP-based rate limiting on `/v1/session/bootstrap`** (spec §13): deferred from step 1 to step 3. Rationale: bootstrap rate limiting alone protects nothing until `/v1/ai/*` endpoints exist. Lands with `/v1/ai/dinner-solve` and shares infrastructure with `ai_request_log` for cost observability. Implementation sketch: Postgres `rate_limit_buckets` table, sliding window, 30 solves/day per IP across canonical keys. Supabase platform-layer rate limiting is the backstop in the meantime.
 - **Gemini Live API drift re-check** (cheap-half spike): scheduled for start of step 6. Purpose is to catch API drift between the April 2026 full spike (already complete) and step-6 kickoff. Step 6 cannot start without it.
 - **Mint endpoint auth unknown from April 2026 spike**: `POST /v1alpha/authTokens` returned `400 INVALID_ARGUMENT` on API-key auth in the spike environment. Re-test from the actual Supabase Edge Function at step 6. Fallbacks if it still fails: OAuth service-account auth, or backend-proxied WebSocket (both keep the Gemini key server-side).
+- **Server-side CloudKit identity verification** (known trust boundary): `cloudkit_user_record_name` in `/v1/session/bootstrap` is currently taken on trust from the iOS client. A modified client can claim any canonical_user_key by submitting another user's CK record name. Step-1 mitigation: Zod regex `^_[a-f0-9]{32}$` rejects malformed names at the boundary. Full mitigation (deferred to step 6+): server-to-server verification via CloudKit Web Services, or a short-lived CK-signed challenge token iOS must include in bootstrap. Risk acceptable at v1 because CK record names are opaque 32-hex strings not easily enumerable, and the attacker gains only this-user-scoped operational data (user content is CloudKit-private-DB-scoped and unreachable from Supabase).
 
 ---
 

@@ -45,7 +45,6 @@ import {
   effectiveVoiceEnabled,
   ensureCurrentPeriodRows,
   ensureEntitlementRow,
-  readEntitlement,
   readQuotasForWire,
 } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
@@ -64,9 +63,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     log.warn('method_not_allowed', { method: req.method });
     return jsonError(
-      ErrorCode.VAL_01,
+      ErrorCode.METHOD_NOT_ALLOWED_01,
       405,
-      { message: 'Method Not Allowed; use POST.' },
+      { message: 'Method Not Allowed; use POST.', allowed: ['POST'] },
       requestId,
     );
   }
@@ -162,7 +161,14 @@ Deno.serve(async (req) => {
         status: 'active',
       }).select().single();
       if (insert.error) {
-        // Race: a concurrent bootstrap may have inserted. Re-read.
+        // Only treat duplicate-key (Postgres SQLSTATE 23505) as the
+        // concurrent-bootstrap race worth recovering from. Anything else
+        // (FK violation, serialization failure, network blip) is a real
+        // problem — surface it rather than masking with a re-read that
+        // might happen to succeed because a different code path inserted
+        // a row with different attributes.
+        const pgCode = (insert.error as { code?: string }).code;
+        if (pgCode !== '23505') throw insert.error;
         userRow = await readAppUser(client, resolution.canonical_user_key);
         if (!userRow) throw insert.error;
       } else {
@@ -244,9 +250,7 @@ Deno.serve(async (req) => {
     // what RevenueCat remembers. Effective tier drives both cap snapshots and
     // the JWT `tier` claim so downstream quota checks and feature gates can't
     // be fooled by a stale premium row on an expired subscription.
-    await ensureEntitlementRow(client, winningKey);
-    const entitlement = await readEntitlement(client, winningKey);
-    if (!entitlement) throw new Error('entitlement row missing after ensure');
+    const entitlement = await ensureEntitlementRow(client, winningKey);
     const tier: UserTier = effectiveTier(entitlement);
 
     const accountCreatedAt = new Date(userRow.created_at);

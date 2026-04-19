@@ -98,12 +98,26 @@ export async function readEntitlement(
   return data;
 }
 
-/** Ensure a Free-tier entitlement row exists; no-op if already present. */
+/**
+ * Ensure a Free-tier entitlement row exists and return it in one call. For
+ * returning users (~100% of bootstraps after onboarding) this is one SELECT.
+ * For first-time users we SELECT (miss), INSERT, and SELECT again — three
+ * round-trips, which is fine because it happens exactly once per user.
+ *
+ * Previous implementation did upsert+select unconditionally (2 RT for
+ * everyone). The read-first variant is strictly better for the common path,
+ * and new-user bootstrap is not a latency-sensitive moment.
+ */
 export async function ensureEntitlementRow(
   client: SupabaseClient,
   canonicalKey: string,
-): Promise<void> {
-  const { error } = await client
+): Promise<EntitlementRow> {
+  const existing = await readEntitlement(client, canonicalKey);
+  if (existing) return existing;
+
+  // Row missing — INSERT with ON CONFLICT DO NOTHING so a concurrent
+  // bootstrap that raced us to insert doesn't trigger an error.
+  const { error: insertError } = await client
     .from('entitlement_snapshots')
     .upsert(
       {
@@ -115,7 +129,13 @@ export async function ensureEntitlementRow(
       },
       { onConflict: 'canonical_user_key', ignoreDuplicates: true },
     );
-  if (error) throw error;
+  if (insertError) throw insertError;
+
+  // Re-read: either we inserted (and need to fetch), or a racing caller
+  // inserted first (and we need their row).
+  const row = await readEntitlement(client, canonicalKey);
+  if (!row) throw new Error('entitlement row missing after ensure+upsert');
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +250,29 @@ export async function ensureCurrentPeriodRows(
   return { periodStart, periodEnd };
 }
 
-/** Read the three current-period quota rows as wire objects. */
+/**
+ * Thrown by readQuotasForWire when one or more expected usage_counters rows
+ * are missing for the requested period. The handler catches this, runs
+ * ensureCurrentPeriodRows, and retries — never returns silently because
+ * cap=0 on the wire reads as "quota exhausted" on iOS and would block
+ * every metered feature.
+ */
+export class MissingQuotaRowError extends Error {
+  readonly missingFeatureKeys: readonly UsageFeatureKey[];
+  constructor(missingFeatureKeys: readonly UsageFeatureKey[]) {
+    super(
+      `usage_counters missing rows for features: ${missingFeatureKeys.join(', ')}`,
+    );
+    this.name = 'MissingQuotaRowError';
+    this.missingFeatureKeys = missingFeatureKeys;
+  }
+}
+
+/**
+ * Read the three current-period quota rows as wire objects. Throws
+ * MissingQuotaRowError when any expected feature row is absent — callers
+ * must call ensureCurrentPeriodRows BEFORE invoking this function.
+ */
 export async function readQuotasForWire(
   client: SupabaseClient,
   canonicalKey: string,
@@ -251,12 +293,18 @@ export async function readQuotasForWire(
     rows.map((r) => [r.feature_key, { used: r.used_count, cap: r.cap_count }]),
   );
 
+  const missing = USAGE_FEATURE_KEYS.filter((k) => !byKey.has(k));
+  if (missing.length > 0) {
+    throw new MissingQuotaRowError(missing);
+  }
+
   return USAGE_FEATURE_KEYS.map((feature_key) => {
-    const row = byKey.get(feature_key);
+    // Non-null assertion justified: we just verified `missing` is empty.
+    const row = byKey.get(feature_key)!;
     return {
       feature_key,
-      used: row?.used ?? 0,
-      cap: row?.cap ?? 0,
+      used: row.used,
+      cap: row.cap,
       period_end: periodEndIso,
     };
   });

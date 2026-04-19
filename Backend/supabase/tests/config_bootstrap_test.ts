@@ -1,12 +1,16 @@
 // Integration tests for GET /v1/config/bootstrap.
 //
-// Covers the happy path + all four AUTH-01 reason codes
-// (missing | expired | malformed | signature_invalid).
+// Covers the happy path, all five AUTH-01 reason codes
+// (missing | expired | malformed | signature_invalid | user_stale), and
+// the period-rollover quota regression (config-bootstrap must materialize
+// fresh usage_counters rows when the user's anchor day rolls over inside
+// the JWT TTL window).
 
 import './_helpers/env.ts';
 import { assertEquals, assertExists } from '@std/assert';
 import * as jose from 'jose';
 import { callConfigBootstrap, quickBootstrap } from './_helpers/factory.ts';
+import { serviceClient } from './_helpers/pg.ts';
 
 const JWT_SECRET = new TextEncoder().encode(
   Deno.env.get('STIR_JWT_SECRET') ?? 'super-secret-jwt-token-with-at-least-32-characters-long',
@@ -126,4 +130,66 @@ Deno.test('config-bootstrap: response shape matches bootstrap entitlements (minu
   assertEquals(typeof body.entitlements.is_trial, 'boolean');
   assertEquals(typeof body.entitlements.voice_enabled, 'boolean');
   assertEquals(typeof body.entitlements.billing_retry_banner, 'boolean');
+});
+
+// -------------------------------------------------------------------------
+// Period-rollover regression test
+// -------------------------------------------------------------------------
+//
+// Before the fix, config-bootstrap computed the current period from
+// app_users.created_at but never materialized new usage_counters rows. After
+// the monthly anchor rolled over, the SELECT returned zero rows and the
+// handler returned `{used: 0, cap: 0}` for every feature — iOS's canAccess
+// gate reads 0 >= 0 as quota-exhausted and blocks every metered feature.
+//
+// Test approach: simulate the rollover by deleting the bootstrap-seeded
+// rows (which leaves the user in the same state as if the anchor day had
+// passed with no bootstrap in between). A subsequent config-bootstrap must
+// re-materialize the rows and return the user's tier-appropriate caps.
+
+Deno.test('config-bootstrap: materializes usage_counters after period rollover', async () => {
+  const bs = await quickBootstrap();
+  const admin = serviceClient();
+
+  // Simulate "period rolled over since last bootstrap" by deleting the
+  // rows that session-bootstrap seeded. In a real rollover the rows for
+  // the previous period would still exist at a different period_start;
+  // this approach is cleaner for a deterministic test and exercises the
+  // exact ensureCurrentPeriodRows code path the fix added.
+  await admin
+    .from('usage_counters')
+    .delete()
+    .eq('canonical_user_key', bs.canonical_user_key);
+
+  const res = await callConfigBootstrap(bs.session_jwt);
+  assertEquals(res.status, 200);
+  const body = res.body as {
+    entitlements: { quotas: Array<{ feature_key: string; used: number; cap: number }> };
+  };
+
+  // Must materialize all three feature rows with Free-tier caps (6, 0, 2).
+  assertEquals(body.entitlements.quotas.length, 3);
+  const byKey = new Map(body.entitlements.quotas.map((q) => [q.feature_key, q]));
+  assertEquals(byKey.get('dinner_solve')?.cap, 6, 'dinner_solve cap restored to Free default');
+  assertEquals(byKey.get('dinner_solve')?.used, 0);
+  assertEquals(byKey.get('voice_cook_session')?.cap, 0);
+  assertEquals(byKey.get('recipe_import')?.cap, 2);
+});
+
+Deno.test('config-bootstrap: AUTH-01 reason=user_stale when user row is deleted', async () => {
+  const bs = await quickBootstrap();
+  const admin = serviceClient();
+
+  // Hard-delete the user row (simulates a dev-env reset; cascades to
+  // device_installations, usage_counters, entitlement_snapshots).
+  await admin
+    .from('app_users')
+    .delete()
+    .eq('canonical_user_key', bs.canonical_user_key);
+
+  const res = await callConfigBootstrap(bs.session_jwt);
+  assertEquals(res.status, 401);
+  const body = res.body as { error: string; reason: string };
+  assertEquals(body.error, 'AUTH-01');
+  assertEquals(body.reason, 'user_stale');
 });

@@ -36,6 +36,11 @@ export enum ErrorCode {
   // Step-1 additions (also added to CLAUDE.md + spec §6)
   VAL_01 = 'VAL-01',
   AUTH_01 = 'AUTH-01',
+  // HTTP-405: wrong method on a known endpoint. Client bug only; never
+  // user-visible. Distinct from VAL-01 (which is body-validation failure)
+  // so dashboards can separate "iOS sent GET where POST expected" from
+  // "iOS sent malformed body".
+  METHOD_NOT_ALLOWED_01 = 'METHOD-NOT-ALLOWED-01',
 }
 
 // Default message map. Step 1 endpoints only use a subset; the rest are
@@ -61,6 +66,8 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.VAL_01]: 'Request body failed validation.',
   // AUTH-01 is internal; iOS re-bootstraps silently.
   [ErrorCode.AUTH_01]: 'Session expired or missing.',
+  // Client bug — iOS should never hit this path in a shipped build.
+  [ErrorCode.METHOD_NOT_ALLOWED_01]: 'HTTP method not allowed on this endpoint.',
 };
 
 export interface FieldError {
@@ -68,7 +75,21 @@ export interface FieldError {
   issue: string;
 }
 
-export type AuthReason = 'missing' | 'expired' | 'malformed' | 'signature_invalid';
+// AuthReason enum — iOS silent-retry path branches on this value for log
+// severity and Sentry alerting. See CLAUDE.md §"AUTH-01 response shape".
+//
+//   missing            no Authorization header (iOS: info, silent retry)
+//   expired            JWT past its `exp` (iOS: info, silent retry)
+//   malformed          header present but JWT structure invalid (iOS: error)
+//   signature_invalid  JWT structure OK, signature doesn't verify (iOS: error + alert)
+//   user_stale         JWT valid but its canonical_user_key no longer resolves
+//                      (merged forward, missing row, etc.) (iOS: info, silent retry)
+export type AuthReason =
+  | 'missing'
+  | 'expired'
+  | 'malformed'
+  | 'signature_invalid'
+  | 'user_stale';
 
 export interface ErrorExtras {
   message?: string;

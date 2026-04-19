@@ -29,6 +29,7 @@ enum ErrorCode: String, Sendable, Codable, CaseIterable {
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan is Pro-only
     case val01 = "VAL-01"          // request body validation failure
     case auth01 = "AUTH-01"        // session missing/expired/malformed/sig-invalid
+    case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"  // 405 — client bug, never user-visible
 }
 
 /// Backend field-error shape for VAL-01.
@@ -37,10 +38,19 @@ struct FieldError: Sendable, Equatable, Codable {
     let issue: String
 }
 
-/// AUTH-01 reason enum (401 response carries this).
+/// AUTH-01 reason enum (401 response carries this). See CLAUDE.md
+/// §"AUTH-01 response shape" for severity + handling per reason.
+///
+///   missing           — no Authorization header (info, silent retry)
+///   expired           — JWT past `exp` (info, silent retry)
+///   malformed         — JWT structure invalid (error + silent retry)
+///   signatureInvalid  — signature didn't verify (error + alert)
+///   userStale         — JWT valid but canonical_user_key no longer resolves
+///                       (merged forward, row missing). Info severity, silent retry.
 enum AuthReason: String, Sendable, Equatable, Codable {
     case missing
     case expired
     case malformed
     case signatureInvalid = "signature_invalid"
+    case userStale = "user_stale"
 }

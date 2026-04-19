@@ -109,7 +109,12 @@ Deno.serve(async (req) => {
 
   if (req.method !== 'POST') {
     log.warn('method_not_allowed', { method: req.method });
-    return jsonError(ErrorCode.VAL_01, 405, { message: 'Method Not Allowed; use POST.' }, requestId);
+    return jsonError(
+      ErrorCode.METHOD_NOT_ALLOWED_01,
+      405,
+      { message: 'Method Not Allowed; use POST.', allowed: ['POST'] },
+      requestId,
+    );
   }
 
   const started = performance.now();

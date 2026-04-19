@@ -6,7 +6,7 @@
 // passed through (client may still function on a malformed value) so a bad
 // seed can't hard-fail bootstrap, but the log line surfaces it in dashboards.
 
-import { z } from 'zod';
+import { z, type ZodIssue } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Logger } from './logger.ts';
 
@@ -83,9 +83,9 @@ export async function readFlags(
         log?.warn('flag_value_schema_mismatch', {
           key: row.key,
           value,
-          issues: parsed.error.issues.map((i) => ({
-            path: i.path.map(String).join('.'),
-            message: i.message,
+          issues: parsed.error.issues.map((issue: ZodIssue) => ({
+            path: issue.path.map(String).join('.'),
+            message: issue.message,
           })),
         });
       }

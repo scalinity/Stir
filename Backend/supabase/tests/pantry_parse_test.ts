@@ -52,11 +52,12 @@ Deno.test('pantry-parse: AUTH-01 malformed when header is not Bearer', async () 
   assertEquals(res.body.reason, 'malformed');
 });
 
-Deno.test('pantry-parse: VAL-01 405 on GET', async () => {
+Deno.test('pantry-parse: METHOD-NOT-ALLOWED-01 on GET', async () => {
   const res = await fetch(`${FUNCTIONS_URL}/pantry-parse`, { method: 'GET' });
   assertEquals(res.status, 405);
   const body = await res.json();
-  assertEquals(body.error, 'VAL-01');
+  assertEquals(body.error, 'METHOD-NOT-ALLOWED-01');
+  assertEquals(body.allowed, ['POST']);
 });
 
 Deno.test('pantry-parse: VAL-01 on missing client_request_id', async () => {
