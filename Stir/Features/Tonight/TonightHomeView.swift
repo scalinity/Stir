@@ -7,6 +7,7 @@
 //     bootstrap response by rendering Scan Kitchen in a disabled state
 //     with "Temporarily unavailable" copy.
 
+import OSLog
 import SwiftUI
 
 struct TonightHomeView: View {
@@ -15,11 +16,16 @@ struct TonightHomeView: View {
     @Environment(EntitlementService.self) private var entitlements
     @State private var toastMessage: String?
     @State private var showScanFlow = false
+    @State private var showSavedMeals = false
+    @State private var resumableSession: CookingSession?
+    @State private var resumeCookMode: CookingSession?
+    @State private var recentCompleted: [CookingSession] = []
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    resumableBanner
                     greeting
                     primaryActions
                     recentMealsSection
@@ -47,6 +53,30 @@ struct TonightHomeView: View {
                     entitlements: entitlements,
                 )
             }
+            .navigationDestination(isPresented: $showSavedMeals) {
+                if let household = coordinator.household.profile {
+                    SavedMealsView(
+                        household: household,
+                        aiDispatch: coordinator.aiDispatch,
+                    )
+                }
+            }
+            .fullScreenCover(item: $resumeCookMode) { session in
+                if let plan = session.recipePlan,
+                   let household = session.household {
+                    CookModeRoot(
+                        recipePlan: plan,
+                        household: household,
+                        aiDispatch: coordinator.aiDispatch,
+                        source: .saved,
+                        onDismiss: {
+                            resumeCookMode = nil
+                            Task { await refreshCookingState() }
+                        },
+                    )
+                }
+            }
+            .task { await refreshCookingState() }
         }
     }
 
@@ -73,14 +103,18 @@ struct TonightHomeView: View {
                 enabled: false,
                 comingSoon: "Recipe import lands with Premium features (step 7).",
             )
-            primaryButton(
-                systemImage: "bookmark.fill",
-                title: "Cook Saved",
-                subtitle: "One-tap replay for your favorites.",
-                tint: .indigo,
-                enabled: false,
-                comingSoon: "Saved meals land with Cook Mode (step 4).",
-            )
+            Button {
+                showSavedMeals = true
+            } label: {
+                buttonRow(
+                    systemImage: "bookmark.fill",
+                    title: "Cook Saved",
+                    subtitle: "One-tap replay for your favorites.",
+                    tint: .indigo,
+                    enabled: true,
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -156,16 +190,115 @@ struct TonightHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Recent meals")
                 .font(.headline)
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.secondarySystemBackground))
-                .frame(height: 80)
-                .overlay(
-                    Text("No recent meals yet — cook one to see it here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(),
-                )
+            if recentCompleted.isEmpty {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(.secondarySystemBackground))
+                    .frame(height: 80)
+                    .overlay(
+                        Text("No recent meals yet — cook one to see it here.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(),
+                    )
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(recentCompleted.prefix(5), id: \.id) { session in
+                        recentMealRow(session: session)
+                    }
+                }
+            }
+        }
+    }
+
+    private func recentMealRow(session: CookingSession) -> some View {
+        Button {
+            // Cook Again — open a fresh Cook Mode on the same plan.
+            resumeCookMode = makeFreshSessionIfPossible(from: session)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "fork.knife")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                    .frame(width: 40, height: 40)
+                    .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.recipePlan?.title ?? "Untitled recipe")
+                        .font(.subheadline.weight(.medium))
+                    if let endedAt = session.endedAt {
+                        Text(endedAt, format: .relative(presentation: .named))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let rating = session.outcomeFeedback?.rating, rating > 0 {
+                        HStack(spacing: 2) {
+                            ForEach(1...5, id: \.self) { idx in
+                                Image(systemName: idx <= Int(rating) ? "star.fill" : "star")
+                                    .font(.caption2)
+                                    .foregroundStyle(idx <= Int(rating) ? .yellow : .secondary)
+                            }
+                        }
+                    }
+                }
+                Spacer()
+                Image(systemName: "arrow.clockwise")
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Cook this again")
+    }
+
+    @ViewBuilder
+    private var resumableBanner: some View {
+        if let session = resumableSession, let plan = session.recipePlan {
+            Button {
+                resumeCookMode = session
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Resume cooking")
+                            .font(.subheadline.weight(.semibold))
+                        Text(plan.title ?? "In progress")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(14)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Resume cooking \(plan.title ?? "in progress")")
+        }
+    }
+
+    /// The "Cook Again" flow opens a NEW CookingSession so history is
+    /// preserved. For step 4 we create it inside the repository before
+    /// presenting. Returns the new session ready to pass to CookModeRoot.
+    private func makeFreshSessionIfPossible(from completed: CookingSession) -> CookingSession? {
+        guard let plan = completed.recipePlan,
+              let household = completed.household else { return nil }
+        let repo = CookingSessionRepository()
+        return try? repo.createSession(on: household, for: plan, entryPoint: .saved)
+    }
+
+    @MainActor
+    private func refreshCookingState() async {
+        guard let household = coordinator.household.profile else { return }
+        let repo = CookingSessionRepository()
+        do {
+            self.resumableSession = try repo.resumableSession(for: household)
+            self.recentCompleted = try repo.recentCompletedSessions(for: household, limit: 5)
+        } catch {
+            Logger.ui.error("TonightHome refresh failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

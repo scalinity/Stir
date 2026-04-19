@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F00001AAAAAAAA00000001 /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00002AAAAAAAA00000001 /* SavedMealsView.swift */; };
 		E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00012AAAAAAAA00000001 /* CookModeViewModel.swift */; };
 		E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00014AAAAAAAA00000002 /* CookModeRoot.swift */; };
 		E00015AAAAAAAA00000003 /* StepCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00016AAAAAAAA00000003 /* StepCardView.swift */; };
@@ -109,6 +110,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F00002AAAAAAAA00000001 /* SavedMealsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsView.swift; sourceTree = "<group>"; };
 		E00012AAAAAAAA00000001 /* CookModeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModel.swift; sourceTree = "<group>"; };
 		E00014AAAAAAAA00000002 /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
 		E00016AAAAAAAA00000003 /* StepCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCardView.swift; sourceTree = "<group>"; };
@@ -522,6 +524,7 @@
 		E7154D788470A3CDFA1AB59E /* Saved */ = {
 			isa = PBXGroup;
 			children = (
+				F00002AAAAAAAA00000001 /* SavedMealsView.swift */,
 			);
 			path = Saved;
 			sourceTree = "<group>";
@@ -720,6 +723,7 @@
 				C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */,
 				C00C51C007AAAA0000000004 /* OutcomeFeedback+Extensions.swift in Sources */,
 				C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */,
+				F00001AAAAAAAA00000001 /* SavedMealsView.swift in Sources */,
 				E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */,
 				E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */,
 				E00019AAAAAAAA00000005 /* OutcomeFeedbackView.swift in Sources */,
