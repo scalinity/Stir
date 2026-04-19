@@ -72,23 +72,15 @@ export STIR_SA_EMAIL="stir-live-mint@$STIR_GCP_PROJECT.iam.gserviceaccount.com"
 
 ### 4. Grant the minimum role
 
-The Generative Language API checks for the `aiplatform.user` role in v1alpha. If that role grant fails to grant mint permission (unlikely, but Google moves the cheese here), fall back to `generativelanguage.admin` and note in ADR 0006.
-
-Start with the narrow role:
-
 ```
 gcloud projects add-iam-policy-binding "$STIR_GCP_PROJECT" \
   --member="serviceAccount:$STIR_SA_EMAIL" \
   --role="roles/aiplatform.user"
 ```
 
-If later smoke test returns 403 on mint, run this too:
+GCP does NOT have a `generativelanguage.*` predefined role — all AI-related roles are under `aiplatform.*`. `aiplatform.user` covers `generativelanguage` API calls including the auth-token mint. Verified 2026-04-19 via `gcloud iam roles list --filter="name~generativelanguage OR name~aiplatform"`.
 
-```
-gcloud projects add-iam-policy-binding "$STIR_GCP_PROJECT" \
-  --member="serviceAccount:$STIR_SA_EMAIL" \
-  --role="roles/generativelanguage.admin"
-```
+If the smoke test later returns 403 on mint, escalate to `roles/aiplatform.admin` (NOT the non-existent `roles/generativelanguage.admin`) and amend ADR 0006 with the exact role that worked.
 
 ### 5. Create and download the JSON key
 
