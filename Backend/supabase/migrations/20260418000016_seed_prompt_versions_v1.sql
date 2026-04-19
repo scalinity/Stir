@@ -32,7 +32,7 @@ INSERT INTO prompt_versions (
 ) VALUES (
   'pantry_parse',
   '1.0.0',
-  'gemini-3-flash',
+  'gemini-3-flash-preview',
   $TEMPLATE$
 You are an ingredient identification engine for Stir's kitchen scan feature. You receive one photo of a kitchen, fridge, pantry, or counter and must return a structured list of cooking-relevant ingredients visible in the image.
 
@@ -73,7 +73,7 @@ INSERT INTO prompt_versions (
 ) VALUES (
   'dinner_solve',
   '1.0.0',
-  'gemini-3-flash',
+  'gemini-3-flash-preview',
   $TEMPLATE$
 You are Stir's dinner planner. Given a pantry snapshot, household preferences, and tonight's constraints, produce exactly 3 ranked dinner options — unless fewer than 3 pass hard constraints, in which case return only viable ones and mark hard_constraint_pass accurately. Never pad.
 

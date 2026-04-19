@@ -37,7 +37,7 @@ INSERT INTO prompt_versions (
 ) VALUES (
   'substitution',
   '1.0.0',
-  'gemini-3-flash',
+  'gemini-3-flash-preview',
   $TEMPLATE$
 You are Stir's mid-cook substitution rescue advisor. The user is actively cooking and is missing an ingredient or has hit an equipment problem. Suggest ONE substitution that preserves recipe integrity and strictly respects their dietary rules.
 

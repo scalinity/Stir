@@ -216,9 +216,9 @@ final class SupabaseSessionClientTests: XCTestCase {
           },
           "feature_flags": [],
           "prompts": [
-            { "feature_key": "dinner_solve", "version": "0.0.0", "provider_model": "gemini-3-flash", "schema_hash": "", "is_default": true, "is_enabled": false },
-            { "feature_key": "pantry_parse", "version": "0.0.0", "provider_model": "gemini-3-flash", "schema_hash": "", "is_default": true, "is_enabled": false },
-            { "feature_key": "cook_turn", "version": "0.0.0", "provider_model": "gemini-3-flash", "schema_hash": "", "is_default": true, "is_enabled": false }
+            { "feature_key": "dinner_solve", "version": "0.0.0", "provider_model": "gemini-3-flash-preview", "schema_hash": "", "is_default": true, "is_enabled": false },
+            { "feature_key": "pantry_parse", "version": "0.0.0", "provider_model": "gemini-3-flash-preview", "schema_hash": "", "is_default": true, "is_enabled": false },
+            { "feature_key": "cook_turn", "version": "0.0.0", "provider_model": "gemini-3-flash-preview", "schema_hash": "", "is_default": true, "is_enabled": false }
           ]
         }
         """.data(using: .utf8)!

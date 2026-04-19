@@ -36,7 +36,7 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 
 ## North-star constraints (invariants — never violate)
 
-1. **Single AI vendor: Google Gemini.** No OpenAI, no Anthropic, no cross-vendor LLM fallback. The only models that touch production are `gemini-3-flash`, `gemini-3.1-flash-lite`, and `gemini-3.1-flash-live-preview`.
+1. **Single AI vendor: Google Gemini.** No OpenAI, no Anthropic, no cross-vendor LLM fallback. The only models that touch production are `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, and `gemini-3.1-flash-live-preview`.
 2. **No provider API keys in the iOS bundle, ever.** Cook Mode voice uses ephemeral session tokens minted server-side. The main Gemini API key lives in Supabase Edge Function secrets only.
 3. **User content lives in CloudKit, not Supabase.** Supabase Postgres holds operational metadata only (quotas, entitlements, prompt versions, AI request logs). Pantry items, recipes, and cooking sessions sync via CloudKit private database. Don't mirror user content in Postgres.
 4. **RLS on every ops table in Supabase.** All rows keyed on `canonical_user_key`. No exceptions, no "temporary" bypasses.
@@ -62,8 +62,8 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 | Analytics | PostHog |
 | Errors | Sentry |
 | Push | APNs direct |
-| Text AI | `gemini-3-flash` (scan, solve, substitution, cook-turn fallback) |
-| Cheap AI | `gemini-3.1-flash-lite` (recipe import normalize, grocery list) |
+| Text AI | `gemini-3-flash-preview` (scan, solve, substitution, cook-turn fallback) |
+| Cheap AI | `gemini-3.1-flash-lite-preview` (recipe import normalize, grocery list) |
 | Voice AI | `gemini-3.1-flash-live-preview` at `thinkingLevel: minimal` |
 | On-device | Vision (OCR, barcode), Speech framework + AVSpeechSynthesizer (voice fallback only) |
 
@@ -75,8 +75,8 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 
 ```swift
 enum GeminiModel: String {
-    case flash            = "gemini-3-flash"
-    case flashLite        = "gemini-3.1-flash-lite"
+    case flash            = "gemini-3-flash-preview"
+    case flashLite        = "gemini-3.1-flash-lite-preview"
     case flashLivePreview = "gemini-3.1-flash-live-preview"
 }
 ```
@@ -85,8 +85,8 @@ Paid tier, per 1M tokens, April 2026:
 
 | Model | Text in | Audio in | Image in | Text out | Audio out | Cache |
 | --- | --- | --- | --- | --- | --- | --- |
-| gemini-3-flash | $0.50 | $1.00 | $0.50 | $3.00 | — | supported |
-| gemini-3.1-flash-lite | $0.25 | $0.50 | $0.25 | $1.50 | — | supported |
+| gemini-3-flash-preview | $0.50 | $1.00 | $0.50 | $3.00 | — | supported |
+| gemini-3.1-flash-lite-preview | $0.25 | $0.50 | $0.25 | $1.50 | — | supported |
 | gemini-3.1-flash-live-preview | $0.75 | $3.00 | $0.75 | $4.50 | $12.00 | **not supported** |
 
 Audio tokens on Live: **25 tokens/second** both directions.
@@ -178,8 +178,8 @@ POST /v1/ops/flag-output
 Google Gemini (Edge Functions call these; iOS client never does directly except for the Live WebSocket):
 
 ```
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent
 POST https://generativelanguage.googleapis.com/v1alpha/authTokens                 # Live session mint (v1alpha, not v1beta)
 WSS  wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent
 ```
@@ -416,7 +416,7 @@ Key shape rules:
     {
       "feature_key": "dinner_solve",
       "version": "0.0.0",
-      "provider_model": "gemini-3-flash",
+      "provider_model": "gemini-3-flash-preview",
       "schema_hash": "",
       "is_default": true,
       "is_enabled": false
@@ -539,14 +539,14 @@ docs/
 
 | Feature | Endpoint | Model | Streaming | Guardrail |
 | --- | --- | --- | --- | --- |
-| Pantry scan parse | `/v1/ai/pantry-parse` | gemini-3-flash | no | schema + confidence threshold |
-| Dinner solve | `/v1/ai/dinner-solve` | gemini-3-flash | yes (card-by-card) | hard-rule validator, retry on violation |
+| Pantry scan parse | `/v1/ai/pantry-parse` | gemini-3-flash-preview | no | schema + confidence threshold |
+| Dinner solve | `/v1/ai/dinner-solve` | gemini-3-flash-preview | yes (card-by-card) | hard-rule validator, retry on violation |
 | Cook Mode voice turn | Live WS via `/v1/ai/realtime-session` token | gemini-3.1-flash-live-preview (minimal) | native bidi audio | system-prompt preamble, max_output_tokens, pruning |
-| Cook Mode substitution (voice path) | Live function call → `/v1/ai/substitution` | gemini-3-flash | no | hard-rule validator (same engine as sheet) |
-| Cook Mode Q&A fallback | `/v1/ai/cook-turn` | gemini-3-flash (text) | no | schema |
-| Substitution (sheet) | `/v1/ai/substitution` | gemini-3-flash | no | hard-rule validator |
-| Recipe import | `/v1/ai/recipe-import` | gemini-3.1-flash-lite | no | sanitize HTML, treat content as untrusted |
-| Grocery generate | `/v1/ai/grocery-generate` | gemini-3.1-flash-lite | no | post-model dedupe |
+| Cook Mode substitution (voice path) | Live function call → `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator (same engine as sheet) |
+| Cook Mode Q&A fallback | `/v1/ai/cook-turn` | gemini-3-flash-preview (text) | no | schema |
+| Substitution (sheet) | `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator |
+| Recipe import | `/v1/ai/recipe-import` | gemini-3.1-flash-lite-preview | no | sanitize HTML, treat content as untrusted |
+| Grocery generate | `/v1/ai/grocery-generate` | gemini-3.1-flash-lite-preview | no | post-model dedupe |
 
 ---
 
@@ -752,7 +752,7 @@ If 1 or 4 fail materially, stop and escalate — those are architectural problem
 
 1. Supabase project + migrations + `/v1/session/bootstrap` + `/v1/config/bootstrap`.
 2. Core Data model + CloudKit container + HouseholdProfile + onboarding flow. No AI yet.
-3. Scan + Solve with `gemini-3-flash`. Aha-moment slice. **Spec §13 IP-based rate limiting lands here, not earlier** — bootstrap rate limiting alone protects nothing until `/v1/ai/*` endpoints exist.
+3. Scan + Solve with `gemini-3-flash-preview`. Aha-moment slice. **Spec §13 IP-based rate limiting lands here, not earlier** — bootstrap rate limiting alone protects nothing until `/v1/ai/*` endpoints exist.
 4. Saved meals + tap-based Cook Mode. Full Free-tier product.
 5. RevenueCat wiring + paywall + entitlements (annual trial primary CTA).
 6. Cook Mode voice (Premium+). **Cheap-half Gemini Live drift check runs first**, then in-app validation gate, before any UX polish. Productionize only after both clear.

@@ -32,8 +32,8 @@ if (!GEMINI_API_KEY) {
 // ---------------------------------------------------------------------------
 
 export enum GeminiModel {
-  Flash = 'gemini-3-flash',
-  FlashLite = 'gemini-3.1-flash-lite',
+  Flash = 'gemini-3-flash-preview',
+  FlashLite = 'gemini-3.1-flash-lite-preview',
   FlashLivePreview = 'gemini-3.1-flash-live-preview',
 }
 
