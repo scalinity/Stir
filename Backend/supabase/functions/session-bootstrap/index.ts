@@ -41,12 +41,19 @@ import {
   resolveCanonicalKey,
 } from '../_shared/identity.ts';
 import {
+  effectiveTier,
+  effectiveVoiceEnabled,
   ensureCurrentPeriodRows,
   ensureEntitlementRow,
   readEntitlement,
   readQuotasForWire,
 } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
 import { ZodError } from 'zod';
 
 Deno.serve(async (req) => {
@@ -115,6 +122,30 @@ Deno.serve(async (req) => {
   // 3. DB work — service-role client (bypasses RLS)
   // -----------------------------------------------------------------------
   const client = createServiceClient();
+
+  // -----------------------------------------------------------------------
+  // 3a. IP rate limit — 20 bootstraps per hour per source IP.
+  // Stops synthetic-install DoS + JWT-farming (per CLAUDE.md §Deferred,
+  // now lands in step 3). Runs AFTER Zod + canonical-key resolution so
+  // we have request-id + user-scoped logger available for the 429 path.
+  // -----------------------------------------------------------------------
+  const sourceIP = extractSourceIP(req);
+  try {
+    const rl = await checkAndIncrement(client, 'ip:bootstrap_hourly', sourceIP);
+    if (!rl.allowed) {
+      userLog.warn('rate_limited', { scope: 'ip:bootstrap_hourly', source_ip: sourceIP });
+      return buildRate01Response(
+        'ip:bootstrap_hourly',
+        rl.retry_after_seconds,
+        rl.reset_at,
+        requestId,
+      );
+    }
+  } catch (err) {
+    // Fail open — rate limiter DB glitch shouldn't block a legitimate
+    // first-install from ever reaching the app. Log + continue.
+    userLog.warn('rate_limiter_failed', { err: String(err) });
+  }
 
   try {
     let isNewUser = false;
@@ -207,10 +238,16 @@ Deno.serve(async (req) => {
     if (devErr) throw devErr;
 
     // 3e. Ensure entitlement + current-period usage rows.
+    //
+    // `entitlement.tier` is the raw RevenueCat column; when billing_state is
+    // 'none' or 'expired' the user's *effective* tier is Free regardless of
+    // what RevenueCat remembers. Effective tier drives both cap snapshots and
+    // the JWT `tier` claim so downstream quota checks and feature gates can't
+    // be fooled by a stale premium row on an expired subscription.
     await ensureEntitlementRow(client, winningKey);
     const entitlement = await readEntitlement(client, winningKey);
     if (!entitlement) throw new Error('entitlement row missing after ensure');
-    const tier: UserTier = entitlement.tier;
+    const tier: UserTier = effectiveTier(entitlement);
 
     const accountCreatedAt = new Date(userRow.created_at);
     const { periodStart, periodEnd } = await ensureCurrentPeriodRows(
@@ -222,7 +259,7 @@ Deno.serve(async (req) => {
 
     // 3f. Read quotas + flags for response.
     const quotas = await readQuotasForWire(client, winningKey, periodStart, periodEnd);
-    const flags = await readFlags(client);
+    const flags = await readFlags(client, userLog);
 
     // -----------------------------------------------------------------------
     // 4. Mint JWT + compose response
@@ -233,7 +270,7 @@ Deno.serve(async (req) => {
       tier,
     });
 
-    const voiceEnabled = tier !== 'free';
+    const voiceEnabled = effectiveVoiceEnabled(entitlement);
     const billingRetryBanner = entitlement.billing_state === 'grace';
 
     const body = {

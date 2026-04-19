@@ -156,7 +156,12 @@ const DishRuntimeSchema = z.object({
 });
 
 const SolveOutputSchema = z.object({
-  options: z.array(DishRuntimeSchema).length(3),
+  options: z.array(DishRuntimeSchema)
+    .length(3)
+    .refine(
+      (dishes) => new Set(dishes.map((d) => d.rank)).size === 3,
+      { message: 'Dish ranks must be unique across [1, 2, 3]' },
+    ),
 });
 
 interface CachedEvent {
@@ -484,9 +489,13 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // Redact user dietary values + LLM-generated ingredient names from
+    // the structured log metadata (SA3-2). Log issue kinds and counts
+    // only — enough for ops trending without leaking allergen PII.
     userLog.warn('slot_hard_rule_violation', {
       rank,
-      issues: check.issues,
+      issue_kinds: check.issues.map((i) => i.kind),
+      issue_count: check.issues.length,
     });
     retryCount++;
 
@@ -509,7 +518,11 @@ Deno.serve(async (req) => {
           validDishes.push(replacement.dish);
           continue;
         }
-        userLog.warn('replacement_also_invalid', { rank, issues: recheck.issues });
+        userLog.warn('replacement_also_invalid', {
+          rank,
+          issue_kinds: recheck.issues.map((i) => i.kind),
+          issue_count: recheck.issues.length,
+        });
       }
     } catch (err) {
       userLog.warn('replacement_call_failed', { rank, err: String(err) });

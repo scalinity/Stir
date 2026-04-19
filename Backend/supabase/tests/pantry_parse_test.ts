@@ -6,7 +6,7 @@
 // so CI runs don't burn the paid-tier budget.
 
 import { assertEquals } from '@std/assert';
-import { quickBootstrap, testInstallId } from './_helpers/factory.ts';
+import { quickBootstrap, testInstallId, testSourceIP } from './_helpers/factory.ts';
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
   ? `${Deno.env.get('SUPABASE_URL')}/functions/v1`
@@ -21,7 +21,10 @@ async function callPantryParse(
   body: unknown,
   jwt: string | null,
 ): Promise<HttpResult> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-forwarded-for': testSourceIP(),
+  };
   if (jwt !== null) headers['Authorization'] = `Bearer ${jwt}`;
   const res = await fetch(`${FUNCTIONS_URL}/pantry-parse`, {
     method: 'POST',

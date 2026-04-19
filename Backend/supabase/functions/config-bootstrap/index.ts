@@ -25,6 +25,8 @@ import { createServiceClient } from '../_shared/db.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import {
   computeCurrentPeriodStart,
+  effectiveTier,
+  effectiveVoiceEnabled,
   readEntitlement,
   readQuotasForWire,
   toIsoDate,
@@ -131,7 +133,7 @@ Deno.serve(async (req) => {
 
     const [quotas, flags, promptsResult] = await Promise.all([
       readQuotasForWire(client, claims.canonical_user_key, periodStart, periodEnd),
-      readFlags(client),
+      readFlags(client, userLog),
       client
         .from('prompt_versions')
         .select('feature_key, version, provider_model, schema_hash, is_default, is_enabled')
@@ -141,12 +143,17 @@ Deno.serve(async (req) => {
     if (promptsResult.error) throw promptsResult.error;
     const prompts = (promptsResult.data ?? []) as PromptRow[];
 
-    const voiceEnabled = entitlement.tier !== 'free';
+    // `tier` on the wire is the *effective* tier: Free whenever billing_state
+    // is 'none' or 'expired'. Voice is gated identically on iOS, but we also
+    // need the tier column to match so iOS quota UI + paywall copy reflect
+    // the user's actual entitlement, not a stale RevenueCat column.
+    const tier = effectiveTier(entitlement);
+    const voiceEnabled = effectiveVoiceEnabled(entitlement);
     const billingRetryBanner = entitlement.billing_state === 'grace';
 
     const body = {
       entitlements: {
-        tier: entitlement.tier,
+        tier,
         billing_state: entitlement.billing_state,
         is_trial: entitlement.is_trial,
         expires_at: entitlement.expires_at,
@@ -161,7 +168,8 @@ Deno.serve(async (req) => {
     userLog.info('request_complete', {
       status: 200,
       latency_ms: Math.round(performance.now() - started),
-      tier: entitlement.tier,
+      tier,
+      raw_tier: entitlement.tier,
       period_end: toIsoDate(periodEnd),
     });
     return jsonOk(body, requestId);

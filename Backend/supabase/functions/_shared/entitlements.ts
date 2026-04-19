@@ -36,6 +36,42 @@ export const TIER_CAPS: Record<UserTier, Record<UsageFeatureKey, number>> = {
 // Flag if wrong — alternative is cap_count NULL with separate "unlimited" branch.
 
 // ---------------------------------------------------------------------------
+// Effective-tier resolution (CLAUDE.md §"billing_state enum" bootstrap rules)
+// ---------------------------------------------------------------------------
+//
+// The raw `tier` column on entitlement_snapshots is orthogonal to
+// `billing_state`: RevenueCat may leave tier='premium' while the subscription
+// is `expired` (eligible for win-back). The *effective* tier — the one that
+// should drive both quota caps and feature gates — is Free whenever
+// billing_state is 'none' or 'expired'.
+//
+// Every code path that needs "what does this user get right now?" must go
+// through effectiveTier() / effectiveVoiceEnabled() — never read
+// entitlement.tier directly for gating or cap snapshots.
+
+const PAID_BILLING_STATES: readonly BillingState[] = [
+  'active',
+  'trial',
+  'grace',
+  'cancelled_active',
+] as const;
+
+export function effectiveTier(row: Pick<EntitlementRow, 'tier' | 'billing_state'>): UserTier {
+  if (row.billing_state === 'none' || row.billing_state === 'expired') return 'free';
+  return row.tier;
+}
+
+export function effectiveVoiceEnabled(
+  row: Pick<EntitlementRow, 'tier' | 'billing_state'>,
+): boolean {
+  const tier = effectiveTier(row);
+  return (
+    (tier === 'premium' || tier === 'pro') &&
+    PAID_BILLING_STATES.includes(row.billing_state)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // entitlement_snapshots row shape
 // ---------------------------------------------------------------------------
 

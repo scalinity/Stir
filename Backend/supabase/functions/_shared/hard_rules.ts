@@ -124,10 +124,32 @@ const EQUIPMENT_IMPLICATION: Record<string, string[]> = {
   dutch_oven: ['dutch oven'],
 };
 
+// Keywords that produce substring false positives without word boundaries:
+// "egg" in eggplant, "butter" in butternut, "milk" in milk-thistle, "wheat"
+// in buckwheat/wheatgrass, "chicken" in chicken-of-the-woods (mushroom).
+// For these, require ASCII word boundaries (`a-z0-9` delimiters). Longer
+// unambiguous keywords (salmon, prosciutto, mozzarella) keep plain
+// substring matching — the conservative-false-positive intent stands for
+// them because they rarely collide with unrelated ingredient names.
+const WORD_BOUNDARY_KEYWORDS: ReadonlySet<string> = new Set([
+  'egg', 'eggs', 'butter', 'milk', 'wheat', 'chicken', 'ham', 'cream',
+]);
+
+function matchesNeedle(haystack: string, needle: string): boolean {
+  if (WORD_BOUNDARY_KEYWORDS.has(needle)) {
+    // ASCII word boundary: no letter/digit immediately before or after.
+    // Escape characters that have regex meaning (multi-word keywords).
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
+    return re.test(haystack);
+  }
+  return haystack.toLowerCase().includes(needle);
+}
+
 function containsAny(haystack: string, needles: string[]): string | null {
   const lower = haystack.toLowerCase();
   for (const n of needles) {
-    if (lower.includes(n)) return n;
+    if (matchesNeedle(lower, n)) return n;
   }
   return null;
 }
@@ -143,19 +165,26 @@ function ingredientText(ing: DishIngredient): string {
 export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationResult {
   const issues: ValidationIssue[] = [];
 
-  // 1. Allergy + hard dislike: substring match on any ingredient.
+  // 1. Allergy + hard dislike + diet: keyword match on ingredient text.
+  // SAFETY: allergy rules run against optional ingredients too — an
+  // allergen is unsafe even if the recipe marks it "to taste". Dislike
+  // and diet rules skip optionals (user can omit safely).
   const hardDietary = ctx.dietaryRules.filter((r) => r.severity === 'hard');
   for (const ing of dish.recipe_plan.ingredients) {
-    if (ing.is_optional) continue; // optional ingredients don't violate
     const text = ingredientText(ing);
     for (const rule of hardDietary) {
       const value = rule.value.toLowerCase().trim();
       if (!value) continue;
 
       if (rule.kind === 'allergy') {
+        // Runs even for is_optional — allergens are never safe.
         const hit = containsAny(text, [value]);
         if (hit) issues.push({ kind: 'allergen', value: rule.value, ingredient: ing.display_name });
+        continue;
       }
+
+      // Dislikes + diets: skip optional ingredients; user can omit them.
+      if (ing.is_optional) continue;
 
       if (rule.kind === 'dislike') {
         const hit = containsAny(text, [value]);

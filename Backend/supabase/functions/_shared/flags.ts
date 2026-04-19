@@ -1,12 +1,14 @@
 // Feature-flag reads + per-key typed registry.
 //
 // The flag_registry binds each server-side flag to its expected value shape
-// via a Zod schema. When /v1/config/bootstrap hydrates, we verify the DB
-// row matches the registered schema and log (but don't fail) on mismatch
-// so a bad seed never silently corrupts the iOS client.
+// via a Zod schema. readFlags() validates every row's value against the
+// registered schema and logs mismatches at warn severity — the row is still
+// passed through (client may still function on a malformed value) so a bad
+// seed can't hard-fail bootstrap, but the log line surfaces it in dashboards.
 
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Logger } from './logger.ts';
 
 export interface FeatureFlagRow {
   key: string;
@@ -52,11 +54,17 @@ export const flagRegistry: Readonly<Record<string, { schema: z.ZodType; defaultV
 };
 
 /**
- * Read all feature_flags rows and convert to wire shape.
- * Validates each row's value against the registry schema; mismatches are
- * passed through (client may still function) but can be audited in logs.
+ * Read all feature_flags rows and convert to wire shape. Every row's value
+ * is validated against the registry schema when a registry entry exists;
+ * mismatches are logged at warn severity (so bad seeds surface in the
+ * logs pipeline) but still emitted on the wire so a schema drift can't
+ * hard-fail bootstrap. Unknown keys (not in the registry) are also logged
+ * but returned — they let us ship new flags without a code round-trip.
  */
-export async function readFlags(client: SupabaseClient): Promise<FeatureFlagWire[]> {
+export async function readFlags(
+  client: SupabaseClient,
+  log?: Logger,
+): Promise<FeatureFlagWire[]> {
   const { data, error } = await client
     .from('feature_flags')
     .select('key, payload_json, is_enabled, rollout_pct');
@@ -64,10 +72,29 @@ export async function readFlags(client: SupabaseClient): Promise<FeatureFlagWire
 
   type FlagPartial = Pick<FeatureFlagRow, 'key' | 'payload_json' | 'is_enabled' | 'rollout_pct'>;
   const rows = (data ?? []) as FlagPartial[];
-  return rows.map((row) => ({
-    key: row.key,
-    value: row.payload_json?.value ?? null,
-    is_enabled: row.is_enabled,
-    rollout_pct: row.rollout_pct,
-  }));
+  return rows.map((row) => {
+    const value = row.payload_json?.value ?? null;
+    const entry = flagRegistry[row.key];
+    if (!entry) {
+      log?.warn('flag_unknown_key', { key: row.key });
+    } else {
+      const parsed = entry.schema.safeParse(value);
+      if (!parsed.success) {
+        log?.warn('flag_value_schema_mismatch', {
+          key: row.key,
+          value,
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.map(String).join('.'),
+            message: i.message,
+          })),
+        });
+      }
+    }
+    return {
+      key: row.key,
+      value,
+      is_enabled: row.is_enabled,
+      rollout_pct: row.rollout_pct,
+    };
+  });
 }

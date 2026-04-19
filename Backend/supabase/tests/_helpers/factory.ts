@@ -62,13 +62,29 @@ export interface HttpResult<T> {
   body: T;
 }
 
+/** Generate a per-test unique source IP so the bootstrap rate-limit
+ * policy (ip:bootstrap_hourly 20/hr) doesn't trip across a full test
+ * suite running against localhost. Tests that specifically exercise
+ * the rate limiter pass their own header to override.
+ */
+export function testSourceIP(): string {
+  // 198.51.100.0/24 is a documentation-only range (RFC 5737), safe
+  // to use for synthetic test traffic.
+  return `198.51.100.${Math.floor(Math.random() * 256)}`;
+}
+
 /** POST /v1/session/bootstrap — returns parsed body + status. */
 export async function callBootstrap(
   body: BootstrapBody | unknown,
+  headers: Record<string, string> = {},
 ): Promise<HttpResult<BootstrapResponse | ErrorResponse>> {
   const response = await fetch(`${FUNCTIONS_URL}/session-bootstrap`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-forwarded-for': testSourceIP(),
+      ...headers,
+    },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
   const parsed = await response.json();

@@ -31,8 +31,9 @@ import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { PantryParseRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
+import { decodeAndValidateImage } from '../_shared/image_validation.ts';
 
 const FEATURE_KEY = 'pantry_parse';
 const MODEL = GeminiModel.Flash;
@@ -183,29 +184,18 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------
-  // 4. IP rate limit
+  // 4. IP rate limit (shared 429 shape via buildRate01Response)
   // ---------------------------------------------------------------------
   const sourceIP = extractSourceIP(req);
   try {
     const rl = await checkAndIncrement(client, 'ip:pantry_parse_daily', sourceIP);
     if (!rl.allowed) {
       userLog.warn('rate_limited', { scope: 'ip:pantry_parse_daily', source_ip: sourceIP });
-      return new Response(
-        JSON.stringify({
-          error: ErrorCode.RATE_01,
-          message: "You've used all of this hour's available actions.",
-          scope: 'ip:pantry_parse_daily',
-          retry_after_seconds: rl.retry_after_seconds,
-          reset_at: rl.reset_at,
-        }),
-        {
-          status: 429,
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-            'retry-after': String(rl.retry_after_seconds),
-            'x-request-id': requestId,
-          },
-        },
+      return buildRate01Response(
+        'ip:pantry_parse_daily',
+        rl.retry_after_seconds,
+        rl.reset_at,
+        requestId,
       );
     }
   } catch (err) {
@@ -231,8 +221,9 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Step-3 implements single-image only even on Pro. Multi-image UX lands
-  // in step 7; the gate above is the stable backend surface.
+  // TODO(step-7): remove this block when multi-image UX ships. Step 3 is
+  // single-image only even for Pro — the tier gate above is the stable
+  // backend surface; this block only fails safe until the UI catches up.
   if (imageCount > 1) {
     userLog.warn('multi_image_not_yet_supported', { image_count: imageCount });
     return jsonError(
@@ -241,6 +232,27 @@ Deno.serve(async (req) => {
       {
         message: 'Multi-image scan is not yet implemented in the backend. Send image_count=1.',
         field_errors: [{ field: 'image_count', issue: 'Only image_count=1 accepted in step 3.' }],
+      },
+      requestId,
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // 5a. Image bytes: decode + magic-byte validation (SA1-003)
+  // Before this check we trusted the client-declared mime_type. A request
+  // with image_mime_type="image/png" and SVG bytes would flow to Gemini
+  // verbatim, opening a narrow OCR-based prompt-injection channel and
+  // wasting Gemini quota on broken inputs.
+  // ---------------------------------------------------------------------
+  const imageBytes = decodeAndValidateImage(body.image_base64, body.image_mime_type);
+  if (imageBytes.kind === 'error') {
+    userLog.warn('image_validation_failed', { reason: imageBytes.reason });
+    return jsonError(
+      ErrorCode.VAL_01,
+      400,
+      {
+        message: 'Image bytes failed validation.',
+        field_errors: [{ field: imageBytes.field, issue: imageBytes.reason }],
       },
       requestId,
     );
@@ -344,7 +356,10 @@ Deno.serve(async (req) => {
   }
 
   if (!parsedOutput) {
-    const status = lastErr instanceof GeminiError && lastErr.status >= 500 ? 502 : 502;
+    // Both Gemini 5xx and schema-invalid output surface as 502 AI-02. The
+    // distinction would be useful (upstream vs model drift), but not
+    // different enough to warrant separate status codes in step 3.
+    const status = 502;
     userLog.error('pantry_parse_failed_after_retry', lastErr, { retry_count: retryCount });
 
     // Log failed attempt for cost observability.

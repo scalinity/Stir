@@ -9,7 +9,7 @@
 // client, then assert the handler returns RATE-01 before calling Gemini.
 
 import { assertEquals, assertNotEquals } from '@std/assert';
-import { quickBootstrap, testInstallId } from './_helpers/factory.ts';
+import { quickBootstrap, testInstallId, testSourceIP } from './_helpers/factory.ts';
 import { serviceClient } from './_helpers/pg.ts';
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
@@ -26,7 +26,10 @@ async function callDinnerSolve(
   body: unknown,
   jwt: string | null,
 ): Promise<HttpResult> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-forwarded-for': testSourceIP(),
+  };
   if (jwt !== null) headers['Authorization'] = `Bearer ${jwt}`;
   const res = await fetch(`${FUNCTIONS_URL}/dinner-solve`, {
     method: 'POST',
