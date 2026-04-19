@@ -16,13 +16,25 @@ import PostHog
 
 final class PostHogClient: @unchecked Sendable {
     static let shared = PostHogClient()
-    private var isInitialized = false
+    private let lock = NSLock()
+    private var _isInitialized = false
+
+    private var isInitialized: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _isInitialized
+    }
 
     private init() {}
 
-    /// Initialize the PostHog SDK. Idempotent.
+    /// Initialize the PostHog SDK. Idempotent under concurrent callers — the
+    /// lock + double-check prevents two racing initializers from both
+    /// getting past the guard and double-configuring the SDK.
     func initialize(apiKey: String, host: URL) {
-        guard !isInitialized else { return }
+        lock.lock()
+        if _isInitialized { lock.unlock(); return }
+        _isInitialized = true
+        lock.unlock()
+
         let config = PostHogConfig(apiKey: apiKey, host: host.absoluteString)
         config.captureApplicationLifecycleEvents = true
         config.captureScreenViews = false  // step-2 doesn't want auto screen events
@@ -30,7 +42,6 @@ final class PostHogClient: @unchecked Sendable {
         config.flushAt = 10
         config.flushIntervalSeconds = 30
         PostHogSDK.shared.setup(config)
-        isInitialized = true
         Logger.telemetry.info("posthog initialized (host=\(host.host ?? "?", privacy: .public))")
     }
 

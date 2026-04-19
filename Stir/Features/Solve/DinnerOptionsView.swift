@@ -78,8 +78,11 @@ struct DinnerOptionsView: View {
             )
     }
 
-    private func errorSlot(rank: Int, code: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func errorSlot(rank: Int, code: ErrorCode) -> some View {
+        // `code` is preserved in the signature for future per-code copy
+        // (AI-02 vs AI-01) but isn't surfaced distinctly in step-3 UI.
+        let _ = code
+        return HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {

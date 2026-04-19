@@ -71,6 +71,12 @@ final class PersistenceController {
     }
 
     /// Commit the viewContext's pending changes. Throws StirError.coreData on failure.
+    ///
+    /// On save failure: rollback before rethrowing. Without rollback, the
+    /// dirty objects from the failed transaction stay registered in
+    /// viewContext and get committed on the NEXT successful save, silently
+    /// persisting stale / partial data from an earlier operation. This was
+    /// flagged as CA2-1 during the step-3 review.
     func save() throws {
         let context = container.viewContext
         guard context.hasChanges else { return }
@@ -78,6 +84,7 @@ final class PersistenceController {
             try context.save()
         } catch {
             Logger.coreData.error("viewContext save failed: \(error.localizedDescription, privacy: .public)")
+            context.rollback()
             throw StirError.coreData(underlying: error)
         }
     }

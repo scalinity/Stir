@@ -237,7 +237,7 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
 /// SSE event the AIDispatch stream yields.
 enum DinnerSolveEvent: Sendable {
     case dish(DishCard)
-    case slotError(rank: Int, code: String)
+    case slotError(rank: Int, code: ErrorCode)
     case done(solveRequestID: UUID, totalCostUSD: Double, dishesReturned: Int, retryCount: Int, promptVersion: String)
 }
 
@@ -259,5 +259,5 @@ struct DinnerSolveDoneFrame: Decodable, Sendable {
 
 struct DinnerSolveSlotError: Decodable, Sendable {
     let rank: Int
-    let code: String
+    let code: ErrorCode
 }

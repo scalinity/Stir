@@ -115,12 +115,15 @@ struct TonightHomeView: View {
         comingSoon: String,
     ) -> some View {
         Button {
-            if enabled { /* no-op (no other enabled buttons in step 3) */ }
-            else { toastMessage = comingSoon }
+            if !enabled { toastMessage = comingSoon }
         } label: {
             buttonRow(systemImage: systemImage, title: title, subtitle: subtitle, tint: tint, enabled: enabled)
         }
         .buttonStyle(.plain)
+        // Keep the row tappable so VoiceOver/sighted users see a hint
+        // surface; the accessibility hint conveys the coming-soon state
+        // so the button isn't a bare dead control.
+        .accessibilityHint(enabled ? "" : comingSoon)
     }
 
     private func buttonRow(
@@ -209,6 +212,11 @@ struct TonightHomeView: View {
                 .background(Color.black.opacity(0.85), in: Capsule())
                 .padding(.top, 12)
                 .transition(.move(edge: .top).combined(with: .opacity))
+                // `.id(message)` forces `.task` to re-attach whenever the
+                // toast text changes; without it, the 2-second timer from
+                // the first tap would dismiss a message the user just
+                // replaced with a second tap.
+                .id(toastMessage)
                 .task {
                     try? await Task.sleep(for: .seconds(2))
                     withAnimation { self.toastMessage = nil }

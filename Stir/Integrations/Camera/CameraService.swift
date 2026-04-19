@@ -104,6 +104,15 @@ final class CameraService: NSObject {
     }
 
     func stop() async {
+        // Resolve any in-flight capture continuation first. Without this, a
+        // mid-capture dismiss leaves `captureContinuation` set; the AVFoundation
+        // photo delegate later resumes it against an orphaned Task, AND the
+        // next capture attempt throws CaptureError.captureFailed because the
+        // non-nil continuation blocks a new capture (CA2-2).
+        if let continuation = captureContinuation {
+            captureContinuation = nil
+            continuation.resume(throwing: CaptureError.captureFailed(nil))
+        }
         await withCheckedContinuation { cont in
             sessionQueue.async { [weak self] in
                 self?.session?.stopRunning()
@@ -145,9 +154,9 @@ final class CameraService: NSObject {
     // MARK: - Session configuration
 
     private func configureSession() throws {
-        let s = AVCaptureSession()
-        s.beginConfiguration()
-        s.sessionPreset = .photo
+        let captureSession = AVCaptureSession()
+        captureSession.beginConfiguration()
+        captureSession.sessionPreset = .photo
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             throw CaptureError.cameraUnavailable
@@ -159,20 +168,20 @@ final class CameraService: NSObject {
         } catch {
             throw CaptureError.configurationFailed("input: \(error.localizedDescription)")
         }
-        guard s.canAddInput(input) else {
+        guard captureSession.canAddInput(input) else {
             throw CaptureError.configurationFailed("cannot add input")
         }
-        s.addInput(input)
+        captureSession.addInput(input)
 
         let output = AVCapturePhotoOutput()
-        guard s.canAddOutput(output) else {
+        guard captureSession.canAddOutput(output) else {
             throw CaptureError.configurationFailed("cannot add photo output")
         }
-        s.addOutput(output)
+        captureSession.addOutput(output)
         output.maxPhotoQualityPrioritization = .balanced
 
-        s.commitConfiguration()
-        self.session = s
+        captureSession.commitConfiguration()
+        self.session = captureSession
         self.photoOutput = output
         Logger.camera.info("AVCaptureSession configured")
     }

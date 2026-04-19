@@ -22,12 +22,15 @@ struct ConstraintsSheet: View {
         NavigationStack {
             Form {
                 Section("Time budget") {
+                    // Menu picker rather than segmented — 5 segments clip
+                    // at Dynamic Type XL+ (spec §6 requires XXXL support).
+                    // Menu style is text-based and grows cleanly.
                     Picker("Max cook time", selection: $maxTimeIndex) {
                         ForEach(0..<maxTimeOptions.count, id: \.self) { idx in
                             Text(label(for: maxTimeOptions[idx])).tag(idx)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                 }
 
                 Section("Cuisine lean") {

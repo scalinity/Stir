@@ -13,13 +13,25 @@ import Sentry
 
 final class SentryReporter: SentryReporting, @unchecked Sendable {
     static let shared = SentryReporter()
-    private var isInitialized = false
+    private let lock = NSLock()
+    private var _isInitialized = false
+
+    private var isInitialized: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _isInitialized
+    }
 
     private init() {}
 
-    /// Initialize the Sentry SDK. Idempotent — second call is a no-op.
+    /// Initialize the Sentry SDK. Idempotent under concurrent callers —
+    /// lock + double-check prevents racing initializers from reaching
+    /// SentrySDK.start twice.
     func initialize(dsn: String, release: String, environment: String = "development") {
-        guard !isInitialized else { return }
+        lock.lock()
+        if _isInitialized { lock.unlock(); return }
+        _isInitialized = true
+        lock.unlock()
+
         SentrySDK.start { options in
             options.dsn = dsn
             options.releaseName = release
@@ -31,7 +43,6 @@ final class SentryReporter: SentryReporting, @unchecked Sendable {
             // redaction). Send only structured errors + stack traces.
             options.sendDefaultPii = false
         }
-        isInitialized = true
         Logger.telemetry.info("sentry initialized (release=\(release, privacy: .public))")
     }
 

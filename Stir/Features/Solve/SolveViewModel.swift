@@ -29,12 +29,23 @@ final class SolveViewModel {
         var useFirst: [String] = []
         var avoidEquipment: [String] = []
         var goal: String?
+
+        /// True when the user has expressed at least one explicit
+        /// preference. Used to decide whether to attach the constraints
+        /// block to the request and Core Data record.
+        var hasAnyValue: Bool {
+            maxTimeMinutes != nil
+                || cuisineLeaning != nil
+                || !useFirst.isEmpty
+                || !avoidEquipment.isEmpty
+                || goal != nil
+        }
     }
 
     struct SlotState: Identifiable, Sendable, Equatable {
         let rank: Int
         var dish: DishCard?
-        var errorCode: String?
+        var errorCode: ErrorCode?
         var id: Int { rank }
     }
 
@@ -46,11 +57,13 @@ final class SolveViewModel {
     private(set) var selectedDish: DishCard?
     private(set) var lastCostUSD: Double?
     private(set) var lastLatencyMS: Int?
+    private(set) var lastPromptVersion: String?
     private(set) var persistedSolveID: UUID?
     private(set) var persistedSuggestedDishIDs: [UUID] = []
 
     var constraints = ConstraintsInput()
     private(set) var ingredientsForSolve: [DinnerSolveRequest.IngredientLite] = []
+    private(set) var parseIDForSolve: UUID?
 
     private let aiDispatch: AIDispatch
     private let solveRepo: SolveRepository
@@ -69,13 +82,23 @@ final class SolveViewModel {
 
     // MARK: - Flow entry
 
-    func prepare(with ingredients: [DinnerSolveRequest.IngredientLite]) {
+    func prepare(
+        with ingredients: [DinnerSolveRequest.IngredientLite],
+        parseID: UUID? = nil,
+    ) {
+        // Cancel any in-flight stream from a prior solve. Without this,
+        // late .dish events from the old stream land in the reset slots
+        // array (CA2-3).
+        streamTask?.cancel()
+        streamTask = nil
         self.ingredientsForSolve = ingredients
+        self.parseIDForSolve = parseID
         self.phase = .constraints
         self.slots = [SlotState(rank: 1), SlotState(rank: 2), SlotState(rank: 3)]
         self.selectedDish = nil
         self.lastCostUSD = nil
         self.lastLatencyMS = nil
+        self.lastPromptVersion = nil
         self.persistedSolveID = nil
         self.persistedSuggestedDishIDs = []
     }
@@ -100,33 +123,27 @@ final class SolveViewModel {
         let started = Date()
 
         streamTask?.cancel()
-        streamTask = Task { [aiDispatch] in
-            let stream = aiDispatch.dinnerSolve(request: request)
+        streamTask = Task { @MainActor [weak self, aiDispatch] in
+            guard let self else { return }
+            let stream = await aiDispatch.dinnerSolve(request: request)
             do {
                 for try await event in stream {
-                    await MainActor.run { self.handle(event, startedAt: started) }
+                    self.handle(event, startedAt: started)
                 }
             } catch StirError.rateLimited(_, let message) {
-                await MainActor.run { self.phase = .error(message: message, code: "RATE-01") }
+                self.phase = .error(message: message, code: "RATE-01")
                 PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": "RATE-01", "feature": "dinner_solve"])
             } catch StirError.entitlementRequired(let code, let message) {
-                await MainActor.run { self.phase = .error(message: message, code: code.rawValue) }
+                self.phase = .error(message: message, code: code.rawValue)
                 PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": code.rawValue, "feature": "dinner_solve"])
             } catch StirError.server(let code, let message, _) {
-                await MainActor.run {
-                    self.phase = .error(
-                        message: message,
-                        code: code.rawValue,
-                    )
-                }
+                self.phase = .error(message: message, code: code.rawValue)
                 PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": code.rawValue, "feature": "dinner_solve"])
             } catch {
-                await MainActor.run {
-                    self.phase = .error(
-                        message: "Dinner planning is temporarily unavailable. Try again shortly.",
-                        code: "AI-01",
-                    )
-                }
+                self.phase = .error(
+                    message: "Dinner planning is temporarily unavailable. Try again shortly.",
+                    code: "AI-01",
+                )
                 Logger.solveFeature.error("solve stream failed: \(error.localizedDescription, privacy: .public)")
                 PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": "AI-01", "feature": "dinner_solve"])
             }
@@ -152,6 +169,7 @@ final class SolveViewModel {
         case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion):
             self.lastCostUSD = cost
             self.lastLatencyMS = Int(Date().timeIntervalSince(startedAt) * 1000)
+            self.lastPromptVersion = promptVersion
             PostHogClient.shared.capture(.dinnerSolveCompleted, properties: [
                 "dishes_returned": dishesReturned,
                 "total_cost_usd": cost,
@@ -197,7 +215,9 @@ final class SolveViewModel {
                     difficulty: d.recipePlan.difficulty,
                     estimatedMinutes: d.totalTimeMinutes,
                     cuisine: d.recipePlan.cuisine,
-                    aiVersion: "1.0.0",
+                    // Prefer the prompt version the backend actually ran
+                    // (from the .done event) over a hardcoded fallback.
+                    aiVersion: lastPromptVersion ?? "unknown",
                     ingredients: d.recipePlan.ingredients.map { ing in
                         SolveRepository.IngredientInput(
                             displayName: ing.displayName,
@@ -265,9 +285,7 @@ final class SolveViewModel {
             .compactMap { $0.code }
 
         let constraintsWire: DinnerSolveRequest.Constraints?
-        if constraints.maxTimeMinutes != nil || constraints.cuisineLeaning != nil ||
-           !constraints.useFirst.isEmpty || !constraints.avoidEquipment.isEmpty ||
-           constraints.goal != nil {
+        if constraints.hasAnyValue {
             constraintsWire = DinnerSolveRequest.Constraints(
                 maxTimeMinutes: constraints.maxTimeMinutes,
                 cuisineLeaning: constraints.cuisineLeaning,
@@ -281,7 +299,7 @@ final class SolveViewModel {
 
         return DinnerSolveRequest(
             solveRequestID: UUID(),
-            parseID: nil,
+            parseID: parseIDForSolve,
             ingredients: ingredientsForSolve,
             constraints: constraintsWire,
             householdContext: DinnerSolveRequest.HouseholdContext(
@@ -293,9 +311,7 @@ final class SolveViewModel {
     }
 
     private func toCoreDataConstraints() -> MealSolveRequest.Constraints? {
-        guard constraints.maxTimeMinutes != nil || constraints.cuisineLeaning != nil ||
-              !constraints.useFirst.isEmpty || !constraints.avoidEquipment.isEmpty ||
-              constraints.goal != nil else { return nil }
+        guard constraints.hasAnyValue else { return nil }
         return MealSolveRequest.Constraints(
             maxTimeMinutes: constraints.maxTimeMinutes,
             cuisineLeaning: constraints.cuisineLeaning,

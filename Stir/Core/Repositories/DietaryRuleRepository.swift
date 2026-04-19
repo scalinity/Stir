@@ -16,7 +16,11 @@ final class DietaryRuleRepository {
         self.controller = controller
     }
 
-    /// Add a new rule. No-op if a matching active rule already exists.
+    /// Add or reactivate a rule with the given (kind, value). If an inactive
+    /// row already exists (user toggled this rule off previously), reactivate
+    /// it in place rather than inserting a duplicate — the uniqueness
+    /// constraint is `(household, kind, value)` regardless of isActive, and
+    /// repeated off/on toggling would otherwise accumulate cruft.
     @discardableResult
     func add(
         to profile: HouseholdProfile,
@@ -30,8 +34,24 @@ final class DietaryRuleRepository {
         if let existing = profile.dietaryRuleArray.first(where: { rule in
             rule.typedKind == kind
             && rule.value?.caseInsensitiveCompare(value) == .orderedSame
-            && rule.isActive
         }) {
+            var mutated = false
+            if !existing.isActive {
+                existing.isActive = true
+                mutated = true
+            }
+            if existing.typedSeverity != severity {
+                existing.typedSeverity = severity
+                mutated = true
+            }
+            if existing.typedSource != source {
+                existing.typedSource = source
+                mutated = true
+            }
+            if mutated {
+                existing.updatedAt = Date()
+                try controller.save()
+            }
             return existing
         }
 

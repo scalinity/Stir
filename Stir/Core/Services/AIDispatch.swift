@@ -62,11 +62,18 @@ actor AIDispatch {
 
     /// Returns an AsyncThrowingStream emitting DinnerSolveEvents as they
     /// arrive from the SSE handler. Caller consumes with `for try await`.
-    nonisolated func dinnerSolve(
+    ///
+    /// Captured `session` and `config` are the actor's `let` properties;
+    /// hoisting them into local constants makes the actor-isolation intent
+    /// explicit at the capture site, so this compiles cleanly without
+    /// `nonisolated` and without risk if either property ever flips to var.
+    func dinnerSolve(
         request body: DinnerSolveRequest,
     ) -> AsyncThrowingStream<DinnerSolveEvent, Error> {
-        AsyncThrowingStream<DinnerSolveEvent, Error> { continuation in
-            let task = Task<Void, Never> { [session, config] in
+        let capturedSession = session
+        let capturedConfig = config
+        return AsyncThrowingStream<DinnerSolveEvent, Error> { continuation in
+            let task = Task<Void, Never> { [session = capturedSession, config = capturedConfig] in
                 do {
                     let url = config.supabase.url.appendingPathComponent("/functions/v1/dinner-solve")
                     var request = URLRequest(url: url)

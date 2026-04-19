@@ -45,7 +45,7 @@ final class AIDispatchSSETests: XCTestCase {
             return
         }
         XCTAssertEqual(rank, 2)
-        XCTAssertEqual(code, "AI-02")
+        XCTAssertEqual(code, .ai02)
     }
 
     func test_doneEvent_decodesFinalMetadata() throws {

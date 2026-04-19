@@ -156,7 +156,18 @@ final class SolveRepository {
 
         try controller.save()
         Logger.coreData.info("SolveRepository persisted \(dishes.count, privacy: .public)-dish solve")
-        return SolveOutcome(solveRequestId: solve.id ?? UUID(), suggestedDishIds: dishIds)
+        // solve.id was assigned unconditionally at the top of this function;
+        // force-unwrap surfaces an invariant violation loudly if Core Data
+        // ever nils it (should never happen) instead of silently generating
+        // a different UUID the persistent store doesn't know about.
+        guard let solveID = solve.id else {
+            throw StirError.coreData(underlying: NSError(
+                domain: "SolveRepository",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "post-save solve.id is nil"],
+            ))
+        }
+        return SolveOutcome(solveRequestId: solveID, suggestedDishIds: dishIds)
     }
 
     /// Mark a SuggestedDish as selected by the user. Used by DishPreview's

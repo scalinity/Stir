@@ -107,7 +107,7 @@ struct ScanReviewView: View {
             editBuffer = ingredient.displayName
         } label: {
             HStack(spacing: 6) {
-                palette.icon
+                chipIcon(for: palette)
                 Text(ingredient.displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
@@ -115,8 +115,13 @@ struct ScanReviewView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            // Enforce the spec §6 44pt minimum hit target — the chip
+            // visual stays compact; the tap region extends via the
+            // frame + contentShape combo.
+            .frame(minHeight: 44)
             .background(palette.bg, in: RoundedRectangle(cornerRadius: 10))
             .foregroundStyle(palette.fg)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -127,7 +132,7 @@ struct ScanReviewView: View {
             }
         }
         .accessibilityLabel("\(ingredient.displayName), \(ingredient.confidence.accessibilityDescription)")
-        .accessibilityHint("Double-tap to edit, long-press for more options.")
+        .accessibilityAddTraits(.isButton)
     }
 
     private var addButton: some View {
@@ -188,36 +193,29 @@ struct ScanReviewView: View {
     private struct Palette {
         var bg: Color
         var fg: Color
-        var icon: AnyView
+        var iconName: String
+        var iconColor: Color
     }
 
     private func palette(for confidence: PantryParseResponse.PantryItemConfidence) -> Palette {
         switch confidence {
         case .confirmed:
-            return Palette(
-                bg: Color(.tertiarySystemBackground),
-                fg: .primary,
-                icon: AnyView(Image(systemName: "checkmark")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.green)),
-            )
+            return Palette(bg: Color(.tertiarySystemBackground), fg: .primary,
+                           iconName: "checkmark", iconColor: .green)
         case .needsReview:
-            return Palette(
-                bg: Color.yellow.opacity(0.2),
-                fg: .primary,
-                icon: AnyView(Image(systemName: "questionmark")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.orange)),
-            )
+            return Palette(bg: Color.yellow.opacity(0.2), fg: .primary,
+                           iconName: "questionmark", iconColor: .orange)
         case .likelyStaple:
-            return Palette(
-                bg: Color(.secondarySystemBackground),
-                fg: .secondary,
-                icon: AnyView(Image(systemName: "sparkles")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)),
-            )
+            return Palette(bg: Color(.secondarySystemBackground), fg: .secondary,
+                           iconName: "sparkles", iconColor: .secondary)
         }
+    }
+
+    @ViewBuilder
+    private func chipIcon(for palette: Palette) -> some View {
+        Image(systemName: palette.iconName)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(palette.iconColor)
     }
 
     private func bindingIsPresented(forEdit: Bool) -> Binding<Bool> {

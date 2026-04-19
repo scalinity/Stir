@@ -112,9 +112,9 @@ final class ScanViewModelTests: XCTestCase {
             .init(id: UUID(), displayName: "tomato", canonicalSlug: "tomato", confidence: .confirmed),
             .init(id: UUID(), displayName: "basil", confidence: .confirmed),
         ])
-        let lite = await vm.confirmFromReview()
-        XCTAssertEqual(lite.count, 2)
-        XCTAssertEqual(lite.first?.displayName, "tomato")
+        let result = await vm.confirmFromReview()
+        XCTAssertEqual(result.ingredients.count, 2)
+        XCTAssertEqual(result.ingredients.first?.displayName, "tomato")
         XCTAssertEqual(vm.phase, .confirmed)
 
         // Verify persistence into Core Data.

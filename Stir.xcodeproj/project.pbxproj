@@ -169,7 +169,7 @@
 		F3B20CF04F913FDC64E5946B /* Logger+Stir.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+Stir.swift"; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
-		"TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_8E07916D-9795-429C-803F-975E791DB4A8" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -499,10 +499,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_A77F2F5D-0DF2-4FF8-952B-56ACD18550E7" /* Stir */ = {
+		"TEMP_C291FF54-44C6-41DF-BD07-7713FBC55E7A" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */,
+				"TEMP_8E07916D-9795-429C-803F-975E791DB4A8" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -702,7 +702,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_8E07916D-9795-429C-803F-975E791DB4A8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -741,7 +741,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_C6B39308-1D3C-48A2-A86B-4B956CEC682F" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_8E07916D-9795-429C-803F-975E791DB4A8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

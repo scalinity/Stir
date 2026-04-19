@@ -188,12 +188,15 @@ enum ErrorPresenter {
             )
         case .auth01:
             // AUTH-01 is internal — iOS auto-re-bootstraps silently. This
-            // entry exists as a fallback if re-bootstrap fails and the
-            // error surfaces anyway; in practice users should never see it.
+            // entry exists as a fallback if re-bootstrap fails and the error
+            // surfaces anyway (SupabaseSessionClient normally downgrades a
+            // failed retry to NET-01). If a user ever does see this, the
+            // silent retry already failed, so copy reflects that honestly
+            // rather than claiming the sign-in is in progress.
             return UserFacingError(
                 code: .auth01,
-                title: "Reconnecting…",
-                message: "Signing you back in.",
+                title: "Couldn't refresh session",
+                message: "We couldn't refresh your sign-in. Check your connection and try again.",
                 primaryAction: "Retry",
                 secondaryAction: nil,
                 blocking: false,

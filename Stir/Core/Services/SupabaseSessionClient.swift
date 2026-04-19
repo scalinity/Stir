@@ -109,7 +109,6 @@ actor SupabaseSessionClient {
         let request = try buildRequest(
             path: "/functions/v1/config-bootstrap",
             method: "GET",
-            body: Optional<String>.none,
             authenticated: true,
         )
         return try await perform(request, attempt: 0, retriedAuth: false)
@@ -237,10 +236,32 @@ actor SupabaseSessionClient {
 
     // MARK: - Request building
 
+    /// Build a request carrying a JSON body.
     private func buildRequest<Body: Encodable>(
         path: String,
         method: String,
         body: Body,
+        authenticated: Bool,
+    ) throws -> URLRequest {
+        var request = try buildBodylessRequest(
+            path: path, method: method, authenticated: authenticated,
+        )
+        request.httpBody = try JSONEncoder.stir.encode(body)
+        return request
+    }
+
+    /// Build a request with no body (GETs, bodiless POSTs).
+    private func buildRequest(
+        path: String,
+        method: String,
+        authenticated: Bool,
+    ) throws -> URLRequest {
+        try buildBodylessRequest(path: path, method: method, authenticated: authenticated)
+    }
+
+    private func buildBodylessRequest(
+        path: String,
+        method: String,
         authenticated: Bool,
     ) throws -> URLRequest {
         let url = config.supabase.url.appendingPathComponent(path)
@@ -261,22 +282,7 @@ actor SupabaseSessionClient {
             request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         }
 
-        // Only encode non-empty bodies. Optional<String>.none sentinel means
-        // no body (used for GETs that don't carry payload).
-        if let body = Self.unwrapOptional(body) {
-            request.httpBody = try JSONEncoder.stir.encode(body)
-        }
-
         return request
-    }
-
-    /// Unwrap `Optional<T>` used as a sentinel for empty bodies.
-    private static func unwrapOptional<Body: Encodable>(_ value: Body) -> Body? {
-        let mirror = Mirror(reflecting: value)
-        if mirror.displayStyle == .optional, mirror.children.isEmpty {
-            return nil
-        }
-        return value
     }
 
     // MARK: - Perform (retry + AUTH-01 loop)

@@ -65,30 +65,30 @@ extension MealSolveRequest {
     var typedConstraints: Constraints? {
         get {
             guard let data = constraintJSON else { return nil }
-            return try? JSONDecoder().decode(Constraints.self, from: data)
+            return try? JSONDecoder.stir.decode(Constraints.self, from: data)
         }
         set {
-            constraintJSON = (newValue.flatMap { try? JSONEncoder().encode($0) })
+            constraintJSON = (newValue.flatMap { try? JSONEncoder.stir.encode($0) })
         }
     }
 
     var typedPantrySnapshot: PantrySnapshot? {
         get {
             guard let data = pantrySnapshotJSON else { return nil }
-            return try? JSONDecoder().decode(PantrySnapshot.self, from: data)
+            return try? JSONDecoder.stir.decode(PantrySnapshot.self, from: data)
         }
         set {
-            pantrySnapshotJSON = (newValue.flatMap { try? JSONEncoder().encode($0) })
+            pantrySnapshotJSON = (newValue.flatMap { try? JSONEncoder.stir.encode($0) })
         }
     }
 
     var typedSourceAssetIds: [UUID] {
         get {
             guard let data = sourceAssetIdsJSON else { return [] }
-            return (try? JSONDecoder().decode([UUID].self, from: data)) ?? []
+            return (try? JSONDecoder.stir.decode([UUID].self, from: data)) ?? []
         }
         set {
-            sourceAssetIdsJSON = try? JSONEncoder().encode(newValue)
+            sourceAssetIdsJSON = try? JSONEncoder.stir.encode(newValue)
         }
     }
 }

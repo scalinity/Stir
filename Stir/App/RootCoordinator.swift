@@ -51,6 +51,11 @@ final class RootCoordinator {
 
     private var accountChangesTask: Task<Void, Never>?
 
+    /// In-flight bootstrap task. Concurrent callers (RootView's `.task { }`
+    /// plus a manual retry Task) await the same task instead of kicking off
+    /// duplicate launch sequences. Nil once bootstrap finishes.
+    private var bootstrapTask: Task<Void, Never>?
+
     init(
         config: AppConfig,
         entitlements: EntitlementService = EntitlementService(),
@@ -58,6 +63,10 @@ final class RootCoordinator {
         household: CurrentHouseholdStore = CurrentHouseholdStore(),
         sentry: any SentryReporting = SentryReporter.shared,
         identityService: IdentityService = IdentityService(),
+        sessionClient: SupabaseSessionClient? = nil,
+        aiDispatch: AIDispatch? = nil,
+        pantryItemRepository: PantryItemRepository = PantryItemRepository(),
+        solveRepository: SolveRepository = SolveRepository(),
     ) {
         self.config = config
         self.entitlements = entitlements
@@ -65,16 +74,29 @@ final class RootCoordinator {
         self.household = household
         self.sentry = sentry
         self.identityService = identityService
-        let client = SupabaseSessionClient(config: config, sentry: sentry)
+        let client = sessionClient ?? SupabaseSessionClient(config: config, sentry: sentry)
         self.sessionClient = client
-        self.aiDispatch = AIDispatch(session: client, config: config)
-        self.pantryItemRepository = PantryItemRepository()
-        self.solveRepository = SolveRepository()
+        self.aiDispatch = aiDispatch ?? AIDispatch(session: client, config: config)
+        self.pantryItemRepository = pantryItemRepository
+        self.solveRepository = solveRepository
     }
 
     /// Runs the full launch sequence. Idempotent — callable from
-    /// `.task { }` or an explicit retry button.
+    /// `.task { }` or an explicit retry button. Concurrent callers share the
+    /// same in-flight task so we don't double-bootstrap when retry() fires
+    /// alongside RootView's .task modifier.
     func bootstrap() async {
+        if let existing = bootstrapTask {
+            await existing.value
+            return
+        }
+        let task = Task { await self.runBootstrap() }
+        bootstrapTask = task
+        await task.value
+        bootstrapTask = nil
+    }
+
+    private func runBootstrap() async {
         Logger.coordinator.info("bootstrap start")
         self.phase = .loading
 
@@ -179,7 +201,7 @@ final class RootCoordinator {
         }
 
         // 7. Observe CloudKit account changes for the life of the app.
-        startAccountChangesObserver(initialKey: canonicalKey)
+        startAccountChangesObserver()
     }
 
     /// Called by OnboardingRoot when the flow finishes (Setup 2 Continue).
@@ -200,12 +222,17 @@ final class RootCoordinator {
 
     // MARK: - CloudKit change observer
 
-    private func startAccountChangesObserver(initialKey: CanonicalUserKey) {
+    /// Subscribe to `.CKAccountChanged` and re-run bootstrap whenever the
+    /// freshly-resolved identity differs from what CloudKitAvailabilityStore
+    /// currently holds. Comparing against the live store (rather than a
+    /// captured `initialKey` from the first bootstrap) keeps A→B→A flips
+    /// correct: the second A-flip re-resolves because the store is at B.
+    private func startAccountChangesObserver() {
         accountChangesTask?.cancel()
         accountChangesTask = Task { [weak self] in
             guard let self else { return }
             for await newKey in self.identityService.observeAccountChanges() {
-                guard newKey != initialKey else { continue }
+                if self.cloudKit.lastResolvedKey == newKey { continue }
                 Logger.coordinator.info("cloudkit account changed — re-resolving")
                 self.cloudKit.update(with: newKey)
                 PostHogClient.shared.capture(.syncStateChanged, properties: [

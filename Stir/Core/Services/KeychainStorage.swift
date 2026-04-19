@@ -38,8 +38,14 @@ extension KeychainKey {
     }
 
     /// The keychain-backed install UUID used when CloudKit identity is
-    /// unavailable. Persists across reinstalls only if iCloud Keychain sync
-    /// is active (which is generally OK — same user, same device lineage).
+    /// unavailable. Accessibility is `AfterFirstUnlockThisDeviceOnly` (see
+    /// the write path below), so the value is NOT synced via iCloud
+    /// Keychain and does NOT follow the user to a new device. A restored
+    /// iCloud backup will present as a fresh install; once the user signs
+    /// into iCloud, the ck:<record> alias-forward takes over and the
+    /// install-keyed row merges forward. Intentional — the session JWT in
+    /// this same Keychain is also ThisDeviceOnly, and bundling the two
+    /// keeps device-migration behavior consistent.
     static var installUUID: KeychainKey {
         KeychainKey(service: defaultService, account: "install_uuid")
     }

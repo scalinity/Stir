@@ -10,7 +10,7 @@ struct DishPreviewView: View {
     @Bindable var viewModel: SolveViewModel
     let dish: DishCard
 
-    @State private var toast: String?
+    @State private var hasCapturedSelection = false
 
     var body: some View {
         ScrollView {
@@ -30,8 +30,13 @@ struct DishPreviewView: View {
                 .padding(.bottom, 8)
                 .background(.bar)
         }
-        .overlay(alignment: .top) { toastView }
         .onAppear {
+            // Guard against re-capture on back-nav re-entry. NavigationStack
+            // creates a fresh DishPreviewView on each push so @State resets,
+            // meaning this fires exactly once per push — never on subsequent
+            // .onAppear calls triggered by deeper navigation returning.
+            guard !hasCapturedSelection else { return }
+            hasCapturedSelection = true
             viewModel.selectDish(dish)
         }
     }
@@ -131,33 +136,29 @@ struct DishPreviewView: View {
     }
 
     private var startCookingBar: some View {
-        Button {
-            toast = "Cook Mode lands in the next step."
-        } label: {
-            Text("Start Cooking")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.gray.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(.white)
+        // Button looks primary but step-3 can't cook — mark it truly
+        // disabled so VoiceOver doesn't announce it as an active button
+        // and sighted users can't tap a dead control. Cook Mode wires
+        // the real action in step 4.
+        HStack(spacing: 8) {
+            Image(systemName: "clock.arrow.circlepath")
+                .accessibilityHidden(true)
+            Text("Cook Mode available in the next update")
+                .font(.subheadline.weight(.medium))
         }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Cook Mode available in the next update")
+        .accessibilityHint("This dish is ready to cook once Cook Mode ships.")
     }
 
+    // Toast surface removed — the old one fired on tap of the now-disabled
+    // "Start Cooking" bar and the bar no longer has a tap action (FD1-4).
     @ViewBuilder
     private var toastView: some View {
-        if let message = toast {
-            Text(message)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.85), in: Capsule())
-                .padding(.top, 12)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .task {
-                    try? await Task.sleep(for: .seconds(2))
-                    withAnimation { self.toast = nil }
-                }
-        }
+        EmptyView()
     }
 }

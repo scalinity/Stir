@@ -102,7 +102,9 @@ final class ScanViewModel {
                 clientRequestID: clientRequestID,
                 imageData: data,
                 mimeType: mimeType,
-                householdProfileHash: householdHash(),
+                // TODO(step-4): compute household hash so cache invalidates
+                // when DietaryRule/KitchenEquipment changes mid-session.
+                householdProfileHash: nil,
             )
             let latency = Int(Date().timeIntervalSince(started) * 1000)
 
@@ -150,7 +152,12 @@ final class ScanViewModel {
     func editIngredient(id: UUID, newName: String) {
         guard let idx = ingredients.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        if trimmed.isEmpty {
+            // Clearing the field is interpreted as delete — matches the
+            // context-menu delete affordance without needing two gestures.
+            deleteIngredient(id: id)
+            return
+        }
         ingredients[idx].displayName = trimmed
         ingredients[idx].confidence = .confirmed // user typed it → confident
         PostHogClient.shared.capture(.ingredientCorrected, properties: [
@@ -177,15 +184,23 @@ final class ScanViewModel {
         ])
     }
 
+    /// Ingredients + parse_id threaded into the subsequent solve call.
+    struct ConfirmedScanResult: Sendable {
+        let ingredients: [DinnerSolveRequest.IngredientLite]
+        let parseID: UUID?
+    }
+
     /// Persist confirmed ingredients into the user's PantryItem CloudKit store.
-    /// Returns the IngredientLite array that SolveViewModel uses for the
-    /// subsequent /v1/ai/dinner-solve call.
+    /// Returns the IngredientLite array + parseID that SolveViewModel uses for
+    /// the subsequent /v1/ai/dinner-solve call. parseID is what links the
+    /// downstream solve's ai_request_log row to the original scan's row, so
+    /// cost analysis can trace scan → solve funnels.
     @discardableResult
-    func confirmFromReview() async -> [DinnerSolveRequest.IngredientLite] {
+    func confirmFromReview() async -> ConfirmedScanResult {
         guard let household = householdStore.profile else {
             Logger.scanFeature.warning("confirm called without household — dropping")
             phase = .error(message: "Household profile missing. Please restart the app.", recoverable: false)
-            return []
+            return ConfirmedScanResult(ingredients: [], parseID: nil)
         }
 
         let scanInputs = ingredients.map { ing in
@@ -206,13 +221,14 @@ final class ScanViewModel {
         }
 
         phase = .confirmed
-        return ingredients.map { ing in
+        let lite = ingredients.map { ing in
             DinnerSolveRequest.IngredientLite(
                 displayName: ing.displayName,
                 canonicalSlug: ing.canonicalSlug,
                 amountText: ing.amountText,
             )
         }
+        return ConfirmedScanResult(ingredients: lite, parseID: parseID)
     }
 
     func resetToPrimer() {
@@ -250,12 +266,6 @@ final class ScanViewModel {
         }
     }
 
-    private func householdHash() -> String? {
-        // Deferred to later step. For now, no hash — backend caches by
-        // client_request_id alone which is sufficient for iOS's
-        // retry-same-request semantics.
-        return nil
-    }
 }
 
 extension Logger {

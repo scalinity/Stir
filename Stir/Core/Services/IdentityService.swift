@@ -56,6 +56,12 @@ actor IdentityService {
     private let cloudKit: CloudKitAccountProviding
     private let keychain: KeychainStoring
 
+    /// In-memory cache for the install UUID. Primed on first read (from
+    /// Keychain or a freshly-minted value) and reused for the rest of the
+    /// session so a keychain write failure mid-launch doesn't cause each
+    /// subsequent `installationID()` call to mint a new UUID.
+    private var cachedInstallUUID: String?
+
     init(
         cloudKit: CloudKitAccountProviding = CloudKitAccountProvider(),
         keychain: KeychainStoring = KeychainStorage.shared,
@@ -119,8 +125,11 @@ actor IdentityService {
     // MARK: - Install UUID
 
     private func installUUID() -> String {
+        if let cached = cachedInstallUUID { return cached }
+
         do {
             if let existing = try keychain.read(key: .installUUID) {
+                cachedInstallUUID = existing
                 return existing
             }
         } catch {
@@ -130,13 +139,16 @@ actor IdentityService {
         }
 
         let fresh = UUID().uuidString
+        // Cache BEFORE the write so a subsequent write failure doesn't cause
+        // the next installationID() call to mint a second UUID and disagree
+        // with the one this request already sent on the wire.
+        cachedInstallUUID = fresh
         do {
             try keychain.write(fresh, key: .installUUID)
         } catch {
-            // Write failure is bad but not crash-worthy — the user just gets a
-            // new key every cold start until Keychain recovers. Same-session
-            // requests still see the same UUID via the in-memory value we
-            // return below.
+            // Write failure is bad but not crash-worthy — the in-memory cache
+            // keeps this session consistent. Next cold start will retry the
+            // write (and mint another UUID if Keychain is still broken).
             Logger.identity.error("keychain write installUUID failed: \(error.localizedDescription, privacy: .public)")
         }
         return fresh

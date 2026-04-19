@@ -61,6 +61,8 @@ struct ScanCaptureView: View {
     }
 
     private var hintBanner: some View {
+        // VoiceOver should read the actual copy, not a bare "Framing hint"
+        // noun — the text is the hint. Strip the label override.
         Text("Frame as much of your kitchen as you can — lighting matters.")
             .font(.footnote)
             .foregroundStyle(.white)
@@ -68,7 +70,6 @@ struct ScanCaptureView: View {
             .padding(.vertical, 8)
             .background(.black.opacity(0.5), in: Capsule())
             .padding(.horizontal, 24)
-            .accessibilityLabel("Framing hint")
     }
 
     private var captureButton: some View {

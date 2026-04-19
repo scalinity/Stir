@@ -26,6 +26,7 @@ struct ScanFlowRoot: View {
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
         entitlements: EntitlementService,
+        cameraService: CameraService = CameraService(),
     ) {
         self._scanViewModel = State(wrappedValue: ScanViewModel(
             aiDispatch: aiDispatch,
@@ -38,7 +39,7 @@ struct ScanFlowRoot: View {
             solveRepo: solveRepo,
             householdStore: householdStore,
         ))
-        self.cameraService = CameraService()
+        self.cameraService = cameraService
     }
 
     enum Route: Hashable {
@@ -89,8 +90,8 @@ struct ScanFlowRoot: View {
     }
 
     private func onReviewConfirmed() async {
-        let ingredients = await scanViewModel.confirmFromReview()
-        solveViewModel.prepare(with: ingredients)
+        let result = await scanViewModel.confirmFromReview()
+        solveViewModel.prepare(with: result.ingredients, parseID: result.parseID)
         showConstraintsSheet = true
     }
 }
@@ -105,13 +106,14 @@ private struct ScanPrimerBody: View {
     let onContinue: () -> Void
     let onCancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var heroIconSize: CGFloat = 64
+
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(.orange)
-                .symbolEffect(.pulse)
+            heroIcon
+                .accessibilityHidden(true)
 
             VStack(spacing: 12) {
                 Text("Point at what you've got.")
@@ -151,6 +153,21 @@ private struct ScanPrimerBody: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Cancel", action: onCancel)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var heroIcon: some View {
+        // Respect Reduce Motion — no pulse for users who've opted out.
+        // Use @ScaledMetric so the hero scales with Dynamic Type rather
+        // than clipping at XXXL or looking tiny at XS.
+        let base = Image(systemName: "camera.viewfinder")
+            .font(.system(size: heroIconSize, weight: .semibold))
+            .foregroundStyle(.orange)
+        if reduceMotion {
+            base
+        } else {
+            base.symbolEffect(.pulse)
         }
     }
 
