@@ -15,6 +15,7 @@ import SwiftUI
 struct CookModeRoot: View {
     let recipePlan: RecipePlan
     let household: HouseholdProfile
+    let aiDispatch: AIDispatch
     let source: CookModeViewModel.EntrySource
     let onDismiss: () -> Void
 
@@ -34,6 +35,7 @@ struct CookModeRoot: View {
                             household: household,
                             session: viewModel.session,
                             currentStep: viewModel.currentStep,
+                            aiDispatch: aiDispatch,
                             onDismiss: { viewModel.substitutionPresentationRequested = false },
                         )
                     }

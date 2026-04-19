@@ -47,6 +47,7 @@ struct DishPreviewView: View {
                 CookModeRoot(
                     recipePlan: plan,
                     household: household,
+                    aiDispatch: viewModel.dispatch,
                     source: .solve,
                     onDismiss: { cookModePresented = false },
                 )

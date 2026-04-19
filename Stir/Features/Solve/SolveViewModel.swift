@@ -277,6 +277,11 @@ final class SolveViewModel {
     /// launch before CurrentHouseholdStore has resolved.
     var currentHousehold: HouseholdProfile? { householdStore.profile }
 
+    /// AIDispatch passthrough so Cook Mode + Substitution Sheet can call
+    /// /v1/ai/substitution without re-building a separate client. Same
+    /// actor instance RootCoordinator owns.
+    var dispatch: AIDispatch { aiDispatch }
+
     func cancelStream() {
         streamTask?.cancel()
         streamTask = nil

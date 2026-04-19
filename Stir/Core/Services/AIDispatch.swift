@@ -58,6 +58,51 @@ actor AIDispatch {
         return response
     }
 
+    // MARK: - Substitution
+
+    /// Non-streaming single-shot substitution call. Hard-rule checks run
+    /// server-side AND we mirror the constraint_safe boolean into the
+    /// returned enum so the UI branches on a typed value, not the wire
+    /// shape.
+    func substitution(request body: SubstitutionRequest) async throws -> SubstitutionResult {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/substitution")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode substitution body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info("substitution_dispatch sub_event_id=\(body.subEventID.uuidString, privacy: .public)")
+        let response: SubstitutionResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "substitution_complete safe=\(response.constraintSafe, privacy: .public) retry=\(response.retryCount, privacy: .public) latency_ms=\(response.latencyMS, privacy: .public)",
+        )
+
+        if response.constraintSafe {
+            return .safe(
+                subEventID: response.subEventID,
+                text: response.substitutionText,
+                amountConversion: response.amountConversion,
+                reasoning: response.reasoning,
+                confidence: response.confidence,
+                promptVersion: response.promptVersion,
+            )
+        }
+        return .unsafe(
+            subEventID: response.subEventID,
+            reason: response.constraintViolationReason ?? "Hard dietary or equipment constraint",
+            message: response.substitutionText,
+            promptVersion: response.promptVersion,
+        )
+    }
+
     // MARK: - Dinner solve (SSE)
 
     /// Returns an AsyncThrowingStream emitting DinnerSolveEvents as they

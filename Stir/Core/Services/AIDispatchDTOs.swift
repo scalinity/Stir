@@ -261,3 +261,137 @@ struct DinnerSolveSlotError: Decodable, Sendable {
     let rank: Int
     let code: ErrorCode
 }
+
+// MARK: - Substitution (step 4)
+
+struct SubstitutionRequest: Encodable, Sendable {
+    let subEventID: UUID
+    let cookingSessionID: UUID
+    let recipePlanID: UUID
+    let missingIngredient: MissingIngredient
+    let userProblem: String
+    let householdContext: HouseholdContext
+    let recipeContext: RecipeContext
+
+    enum CodingKeys: String, CodingKey {
+        case subEventID = "sub_event_id"
+        case cookingSessionID = "cooking_session_id"
+        case recipePlanID = "recipe_plan_id"
+        case missingIngredient = "missing_ingredient"
+        case userProblem = "user_problem"
+        case householdContext = "household_context"
+        case recipeContext = "recipe_context"
+    }
+
+    struct MissingIngredient: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+        let amountText: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+            case amountText = "amount_text"
+        }
+    }
+
+    struct HouseholdContext: Encodable, Sendable {
+        let dietaryRules: [DinnerSolveRequest.DietaryRuleLite]
+        let availableEquipment: [String]
+        let pantrySnapshot: [PantrySnapshotItem]
+
+        enum CodingKeys: String, CodingKey {
+            case dietaryRules = "dietary_rules"
+            case availableEquipment = "available_equipment"
+            case pantrySnapshot = "pantry_snapshot"
+        }
+
+        struct PantrySnapshotItem: Encodable, Sendable {
+            let displayName: String
+            let canonicalSlug: String?
+
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+                case canonicalSlug = "canonical_slug"
+            }
+        }
+    }
+
+    struct RecipeContext: Encodable, Sendable {
+        let title: String
+        let currentStepNumber: Int
+        let totalSteps: Int
+        let remainingIngredients: [RemainingIngredient]
+
+        enum CodingKeys: String, CodingKey {
+            case title
+            case currentStepNumber = "current_step_number"
+            case totalSteps = "total_steps"
+            case remainingIngredients = "remaining_ingredients"
+        }
+
+        struct RemainingIngredient: Encodable, Sendable {
+            let displayName: String
+            let canonicalSlug: String?
+
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+                case canonicalSlug = "canonical_slug"
+            }
+        }
+    }
+}
+
+struct SubstitutionResponse: Decodable, Sendable {
+    let subEventID: UUID
+    let substitutionText: String
+    let amountConversion: String?
+    let constraintSafe: Bool
+    let constraintViolationReason: String?
+    let reasoning: String
+    let confidence: Confidence
+    let promptVersion: String
+    let latencyMS: Int
+    let retryCount: Int
+
+    enum Confidence: String, Decodable, Sendable {
+        case high
+        case medium
+        case low
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case subEventID = "sub_event_id"
+        case substitutionText = "substitution_text"
+        case amountConversion = "amount_conversion"
+        case constraintSafe = "constraint_safe"
+        case constraintViolationReason = "constraint_violation_reason"
+        case reasoning
+        case confidence
+        case promptVersion = "prompt_version"
+        case latencyMS = "latency_ms"
+        case retryCount = "retry_count"
+    }
+}
+
+/// AIDispatch-level projection of SubstitutionResponse so UI code branches
+/// on the product state, not the wire shape.
+enum SubstitutionResult: Sendable {
+    /// Model returned a safe substitution. Fields are ready to render.
+    case safe(
+        subEventID: UUID,
+        text: String,
+        amountConversion: String?,
+        reasoning: String,
+        confidence: SubstitutionResponse.Confidence,
+        promptVersion: String
+    )
+    /// Hard-rule violation after retry — server returned the canned safety
+    /// copy. UI shows a red warning card with NO Accept button.
+    case unsafe(
+        subEventID: UUID,
+        reason: String,
+        message: String,
+        promptVersion: String
+    )
+}
