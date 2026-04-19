@@ -7,7 +7,7 @@ For the product truth, read `Specs/Stir-Full-Spec.md`.
 For Cook Mode voice architecture, read `Specs/Stir-Cook-Mode-Architecture.md`.
 For the Gemini Live spike findings + step-6 drift-check plan, read `Specs/Gemini-Live-Findings.md`.
 
-Current progress: **steps 1 + 2 + 3 complete**. Step 1 = Supabase operational backend. Step 2 = iOS app scaffold + identity + entitlements + onboarding. Step 3 = scan + solve end-to-end: kitchen scan via Gemini 3 Flash + structured review chips + 3-dish SSE solve stream + dish preview, backed by the hard-rule validator, per-user atomic quota, and IP-based rate limiter. All deployed to prod `ktqajarcomzplnpbczfo`. Step 4 (Cook Mode tap + Substitution) is next.
+Current progress: **steps 1 + 2 + 3 + 4 complete**. Step 1 = Supabase operational backend. Step 2 = iOS app scaffold + identity + entitlements + onboarding. Step 3 = scan + solve end-to-end. Step 4 = tap Cook Mode + auto-timers + text Substitution Sheet + outcome feedback + Saved Meals + Tonight Home resume — the full Free tier end-to-end. All deployed to prod `ktqajarcomzplnpbczfo`. Step 5 (RevenueCat + paywall) is next.
 
 ---
 
@@ -168,14 +168,25 @@ First-time gotcha: if you hit "Application failed preflight checks" on the simul
 - Tap **Scan Kitchen** → permission primer → grant access → camera preview → capture button → JPEG upload → 2-4s parse → review chips with confidence-band styling → tap chip to edit / long-press to delete / **Looks right — find dinners** CTA.
 - Constraints sheet: pick a time budget, cuisine, optional goal → **Find dinners**.
 - 3 dish cards skeleton-load, then fill card-by-card as SSE events arrive (150ms spacing).
-- Tap a card → DishPreview with ingredients + steps + missing-from-pantry callout. **Start Cooking** is a disabled placeholder (step 4 wires Cook Mode).
+- Tap a card → DishPreview with ingredients + steps + missing-from-pantry callout. **Start Cooking** opens Cook Mode as a fullScreenCover (step 4).
 - Behind the scenes: PantryItem rows persist in CloudKit; MealSolveRequest + SuggestedDish + RecipePlan + RecipeIngredient + RecipeStep commit in one save; `ai_request_log` on the backend shows input_tokens / output_tokens / cost_usd / retry_count.
 - Kill switch: flip `disable_scan_parse` to `true` in `feature_flags` on prod → next foreground the Scan Kitchen button becomes "Temporarily unavailable".
 - Quota: exhaust 6 Dinner Solves on a Free user → 7th returns RATE-01 with the period reset date populated.
 
+### Demo the step-4 behavior
+
+- From DishPreview (step 3 output), tap **Start Cooking** → Cook Mode opens as a fullScreenCover. A fresh `CookingSession` is created with `entryPoint='solve'`, `voiceEnabled=false`.
+- StepCardView renders the current step (arm's-length `.title2` font), with step X of Y and optional timer affordances. Tap **Next** / **Previous**; `currentStepIndex` persists on every transition, so closing the app and re-opening lands on the same step (same behavior for a second iCloud device via CloudKit sync).
+- Steps with `timerSeconds > 0` show a **Start N min timer** button → creates a `CookTimer`, schedules a `UNUserNotification` at the fire date, and live-counts down via `TimelineView`. Pause shifts `startedAt` forward on resume so `startedAt + durationSec == fireDate` stays authoritative.
+- Tap **Something missing?** → Substitution Sheet. Pick a `RecipeIngredient` (or free-text "something else"), add an optional problem description, tap **Find a swap**. Server calls `gemini-3-flash` and runs the hard-rule validator; a safe result shows Accept/Reject, an unsafe result shows a red warning card with no Accept. Accept writes an `accepted=true` `SubstitutionEvent`; Reject writes `accepted=false`.
+- Last step's Next becomes **Finish** → OutcomeFeedbackView. 5-star rating required, structured taxonomy (workload / taste / spiceLevel / wouldRepeat / leftoverCount), optional notes. Save writes via `OutcomeFeedbackRepository.upsert`, dismisses Cook Mode, and returns to Tonight Home.
+- Tonight Home now shows a **Resume cooking** banner for any session that's still `active` with no `endedAt`. The **Cook Saved** button routes to `SavedMealsView`, which lists all non-deleted `RecipePlan`s sorted last-cooked-desc with their latest star rating. Tapping a row opens Cook Mode with a FRESH session (history preserved).
+- Recent meals on Tonight Home now show up to 5 completed sessions with ratings; tap a row → Cook Again on the same plan.
+- Allergen safety: create a household with a peanut allergy, start cooking a recipe that uses peanut butter, open the Substitution Sheet, pick peanut butter + problem "out of peanut butter". Server-side validator blocks any peanut-containing swap; response is the canned safety card with no Accept button.
+
 ---
 
-## Deferred from steps 1 + 2 + 3
+## Deferred from steps 1 + 2 + 3 + 4
 
 Tracked explicitly so nothing gets lost. Each owner-step is locked in.
 
@@ -191,6 +202,32 @@ Tracked explicitly so nothing gets lost. Each owner-step is locked in.
 - **Multi-image scan UX** → step 7 (UI). Backend gate (`ENT-MULTI-IMAGE-01`) landed in step 3; handler currently rejects `image_count > 1` with a step-3-scope `VAL-01` on Pro users because the UI isn't there yet.
 - **`MediaAsset` entity** → **v2 backlog, probably not worth building**. Step 3 persists PantryItems with `mediaAssetId = nil`. Storing scan photos would enable "show me the photo this came from" UX but likely not worth the CKAsset complexity + storage costs.
 - **Real SSE streaming from Gemini (vs. fake-stream)** → revisit only if beta first-dish p95 exceeds 2.5s. Step 3 uses a non-streaming Gemini call with a 150ms-spaced SSE fan-out to iOS; simpler backend retry logic, same progressive-reveal UX.
+- **ActivityKit Live Activity for timers** → step 7 (with Widget Extension). Cook Mode step-4 uses in-app `TimelineView` countdown + local notifications; Live Activity UI hosts in the Widget Extension target, which lands alongside Home Screen widgets in step 7.
+- **Persisted pause timestamp** (`CookTimer.pausedAt` column) → **NOT coming**. Decision confirmed with Daniel in scope alignment: state machine on-disk + in-memory pause tracking, no per-event column. Cross-session paused timers lose pause context; on Cook Mode re-entry, a paused timer with no in-memory pauseStartedAt will resume with zero paused-duration (documented in TimerService.swift).
+- **Structured `issues_encountered` chip picker on OutcomeFeedback** → step 7. Step 4 fires `meal_rated` with `issues_count=0`; step-7 UI adds the chips and populates it for preference memory.
+- **Cook Mode voice affordance** → step 6. Step 4 intentionally has ZERO voice code. `grep -r Microphone|Speech|AVSpeech Stir/` returns nothing.
+- **Local GEMINI_API_KEY is a placeholder** in `Backend/supabase/.env` → copy from prod (`supabase secrets` lists the digest) to run the step-4 substitution eval harness locally. Harness code is feature-complete; only the upstream model call needs a valid key.
+
+---
+
+## Step-4 assumptions
+
+Backend:
+
+1. **Rate limit `ip:substitution_daily` = 50/day** — substitution is the cheapest AI call in the system (~$0.00158/invocation); 50/day is burst-protection-only, legitimate cooks won't blow it.
+2. **Unsafe substitution returns HTTP 200** — the canned safety card is a valid product response, not an error. iOS branches on `constraint_safe`, not status code.
+3. **Validator wins over model self-report** — if the model says `constraint_safe=true` but the keyword scan catches an allergen, the server overrides with the canned safety body. Safety-first.
+4. **Retry-once with amplified prompt** — second attempt gets a PII-free violation summary ("allergens=peanut; diets=gluten-free"); if it still violates, canned safety response returns.
+5. **`ai_response_cache` keyed on `sub_event_id`** — same 10-min TTL as `client_request_id` / `solve_request_id`; retries with the same `sub_event_id` replay the cached body byte-for-byte.
+
+iOS:
+
+6. **Cook Mode is `fullScreenCover`, not NavigationStack push** — dedicated exit affordance, back-swipe can't accidentally drop the user mid-recipe.
+7. **SubstitutionEvent dual-write** — picker-selected ingredient → `recipeIngredient` FK set; free-text (`"my blender broke"`) → `missingIngredientDisplayName` column set. Never both.
+8. **OutcomeFeedback rating is required** on first cook of a RecipePlan; Skip button dismisses without writing (user can still find the meal in Saved). Spec §4.15's unique constraint on `cookingSessionId` is enforced in Swift via `upsert`, not CloudKit (CloudKit can't enforce uniqueness).
+9. **Pause state lives in memory** — cross-Cook-Mode-exit paused timers lose their pause timestamp. Re-entry + Resume will resume with zero paused-duration, which may show the timer as already overdue. Daniel acknowledged this tradeoff vs a `pausedAt` column.
+10. **`CookTimer` entity name, not `Timer`** — collides with `Foundation.Timer` at class-name level. Spec §4.13 entity heading remains "Timer"; the Core Data + Swift class is `CookTimer`.
+11. **TonightHome resume banner uses `CookingSessionRepository.resumableSession`** (active + endedAt nil + not deleted). Multiple resumable sessions simultaneously is a bug not a feature — Cook Again always creates a fresh session to preserve history.
 
 ---
 
