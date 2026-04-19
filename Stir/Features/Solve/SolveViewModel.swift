@@ -262,6 +262,21 @@ final class SolveViewModel {
         ])
     }
 
+    /// Look up the persisted RecipePlan for a DishCard the user has seen
+    /// in the options grid. Uses the rank → persistedSuggestedDishIDs
+    /// mapping populated by persistCompletedSolve (sorted by rank). Nil
+    /// if persistence hasn't completed yet or the dish row is gone.
+    func persistedRecipePlan(for dish: DishCard) -> RecipePlan? {
+        let idx = dish.rank - 1  // ranks are 1-based
+        guard idx >= 0, idx < persistedSuggestedDishIDs.count else { return nil }
+        return solveRepo.fetchRecipePlan(forSuggestedDishId: persistedSuggestedDishIDs[idx])
+    }
+
+    /// Current household — exposed for Cook Mode entry which needs the
+    /// profile for CookingSession's household FK. Nil during a cold
+    /// launch before CurrentHouseholdStore has resolved.
+    var currentHousehold: HouseholdProfile? { householdStore.profile }
+
     func cancelStream() {
         streamTask?.cancel()
         streamTask = nil

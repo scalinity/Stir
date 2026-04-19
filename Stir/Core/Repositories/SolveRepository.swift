@@ -180,4 +180,16 @@ final class SolveRepository {
         solve.selectedSuggestedDishId = dish.id
         try controller.save()
     }
+
+    /// Fetch the RecipePlan linked to a previously-persisted
+    /// SuggestedDish. Used by DishPreview when presenting Cook Mode.
+    /// Returns nil if the dish row was deleted or the relationship
+    /// was nullified (e.g. RecipePlan hard-delete).
+    func fetchRecipePlan(forSuggestedDishId id: UUID) -> RecipePlan? {
+        let request = NSFetchRequest<SuggestedDish>(entityName: "SuggestedDish")
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        request.fetchLimit = 1
+        request.relationshipKeyPathsForPrefetching = ["recipePlan"]
+        return (try? controller.viewContext.fetch(request).first)?.recipePlan
+    }
 }

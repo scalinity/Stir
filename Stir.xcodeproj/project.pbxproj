@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00012AAAAAAAA00000001 /* CookModeViewModel.swift */; };
+		E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00014AAAAAAAA00000002 /* CookModeRoot.swift */; };
+		E00015AAAAAAAA00000003 /* StepCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00016AAAAAAAA00000003 /* StepCardView.swift */; };
+		E00017AAAAAAAA00000004 /* TimerCountdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00018AAAAAAAA00000004 /* TimerCountdownView.swift */; };
+		E00019AAAAAAAA00000005 /* OutcomeFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00020AAAAAAAA00000005 /* OutcomeFeedbackView.swift */; };
+		E00021AAAAAAAA00000006 /* SubstitutionSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */; };
 		D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */; };
 		D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */; };
 		D0000005AAAAAAAA00000003 /* SubstitutionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */; };
@@ -103,6 +109,12 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E00012AAAAAAAA00000001 /* CookModeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModel.swift; sourceTree = "<group>"; };
+		E00014AAAAAAAA00000002 /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
+		E00016AAAAAAAA00000003 /* StepCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCardView.swift; sourceTree = "<group>"; };
+		E00018AAAAAAAA00000004 /* TimerCountdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerCountdownView.swift; sourceTree = "<group>"; };
+		E00020AAAAAAAA00000005 /* OutcomeFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackView.swift; sourceTree = "<group>"; };
+		E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetView.swift; sourceTree = "<group>"; };
 		D0000002AAAAAAAA00000001 /* CookingSessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingSessionRepository.swift; sourceTree = "<group>"; };
 		D0000004AAAAAAAA00000002 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
 		D0000006AAAAAAAA00000003 /* SubstitutionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionRepository.swift; sourceTree = "<group>"; };
@@ -278,6 +290,7 @@
 				C711A27F7354E963F218F7D5 /* Scan */,
 				699971EC776F51AE8DE0FFA2 /* Settings */,
 				FD8B4EC3DEAADA847949BC07 /* Solve */,
+				E00023AAAAAAAA00000007 /* Substitution */,
 				661AF668F203E2C75ECF4305 /* Tonight */,
 			);
 			path = Features;
@@ -394,8 +407,21 @@
 		AAE3826FE5C3EE26C21B0ADB /* CookMode */ = {
 			isa = PBXGroup;
 			children = (
+				E00014AAAAAAAA00000002 /* CookModeRoot.swift */,
+				E00012AAAAAAAA00000001 /* CookModeViewModel.swift */,
+				E00020AAAAAAAA00000005 /* OutcomeFeedbackView.swift */,
+				E00016AAAAAAAA00000003 /* StepCardView.swift */,
+				E00018AAAAAAAA00000004 /* TimerCountdownView.swift */,
 			);
 			path = CookMode;
+			sourceTree = "<group>";
+		};
+		E00023AAAAAAAA00000007 /* Substitution */ = {
+			isa = PBXGroup;
+			children = (
+				E00022AAAAAAAA00000006 /* SubstitutionSheetView.swift */,
+			);
+			path = Substitution;
 			sourceTree = "<group>";
 		};
 		B4C6C80009549ABCAF283770 /* Repositories */ = {
@@ -694,6 +720,12 @@
 				C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */,
 				C00C51C007AAAA0000000004 /* OutcomeFeedback+Extensions.swift in Sources */,
 				C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */,
+				E00013AAAAAAAA00000002 /* CookModeRoot.swift in Sources */,
+				E00011AAAAAAAA00000001 /* CookModeViewModel.swift in Sources */,
+				E00019AAAAAAAA00000005 /* OutcomeFeedbackView.swift in Sources */,
+				E00015AAAAAAAA00000003 /* StepCardView.swift in Sources */,
+				E00021AAAAAAAA00000006 /* SubstitutionSheetView.swift in Sources */,
+				E00017AAAAAAAA00000004 /* TimerCountdownView.swift in Sources */,
 				D0000001AAAAAAAA00000001 /* CookingSessionRepository.swift in Sources */,
 				D0000003AAAAAAAA00000002 /* CookTimerRepository.swift in Sources */,
 				D0000007AAAAAAAA00000004 /* OutcomeFeedbackRepository.swift in Sources */,

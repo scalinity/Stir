@@ -1,8 +1,9 @@
 // DishPreviewView
 //
-// End-of-step-3 landing page. Shows the chosen dish in full: ingredients,
-// steps, missing-from-pantry callouts. "Start Cooking" CTA is intentionally
-// disabled — step 4 wires it to Cook Mode.
+// Step-4 landing page. Shows the chosen dish in full: ingredients,
+// steps, missing-from-pantry callouts. "Start Cooking" now presents
+// CookModeRoot as a fullScreenCover — immersive, with dedicated exit
+// affordance so a back-swipe can't drop the user mid-recipe.
 
 import SwiftUI
 
@@ -11,6 +12,7 @@ struct DishPreviewView: View {
     let dish: DishCard
 
     @State private var hasCapturedSelection = false
+    @State private var cookModePresented = false
 
     var body: some View {
         ScrollView {
@@ -38,6 +40,25 @@ struct DishPreviewView: View {
             guard !hasCapturedSelection else { return }
             hasCapturedSelection = true
             viewModel.selectDish(dish)
+        }
+        .fullScreenCover(isPresented: $cookModePresented) {
+            if let plan = viewModel.persistedRecipePlan(for: dish),
+               let household = viewModel.currentHousehold {
+                CookModeRoot(
+                    recipePlan: plan,
+                    household: household,
+                    source: .solve,
+                    onDismiss: { cookModePresented = false },
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Text("Couldn't load this dish")
+                        .font(.headline)
+                    Button("Close") { cookModePresented = false }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(40)
+            }
         }
     }
 
@@ -136,29 +157,22 @@ struct DishPreviewView: View {
     }
 
     private var startCookingBar: some View {
-        // Button looks primary but step-3 can't cook — mark it truly
-        // disabled so VoiceOver doesn't announce it as an active button
-        // and sighted users can't tap a dead control. Cook Mode wires
-        // the real action in step 4.
-        HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath")
-                .accessibilityHidden(true)
-            Text("Cook Mode available in the next update")
-                .font(.subheadline.weight(.medium))
+        // Step 4 activates this. Button presents CookModeRoot as a
+        // fullScreenCover (not a navigation push) so a back-swipe can't
+        // accidentally drop the user mid-recipe.
+        Button {
+            cookModePresented = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "flame.fill")
+                    .accessibilityHidden(true)
+                Text("Start Cooking")
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Cook Mode available in the next update")
-        .accessibilityHint("This dish is ready to cook once Cook Mode ships.")
-    }
-
-    // Toast surface removed — the old one fired on tap of the now-disabled
-    // "Start Cooking" bar and the bar no longer has a tap action (FD1-4).
-    @ViewBuilder
-    private var toastView: some View {
-        EmptyView()
+        .buttonStyle(.borderedProminent)
+        .accessibilityHint("Opens Cook Mode step-by-step with optional timers.")
     }
 }

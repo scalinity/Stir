@@ -80,4 +80,12 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case suggestedDishSelected = "suggested_dish_selected"
     case aiRequestCompleted = "ai_request_completed"
     case aiRequestFailed = "ai_request_failed"
+    // Step 4 — tap Cook Mode + substitution + outcome feedback.
+    case cookModeStarted = "cook_mode_started"
+    case cookStepAdvanced = "cook_step_advanced"
+    case timerStarted = "timer_started"
+    case substitutionRequested = "substitution_requested"
+    case substitutionAccepted = "substitution_accepted"
+    case cookSessionCompleted = "cook_session_completed"
+    case mealRated = "meal_rated"
 }
