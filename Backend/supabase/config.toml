@@ -387,6 +387,15 @@ verify_jwt = false
 [functions.config-bootstrap]
 verify_jwt = false
 
+# /v1/ai/* endpoints verify the session JWT themselves inside the handler
+# so they can return AUTH-01 with a typed `reason` field. Letting Kong
+# reject first would prevent the typed response.
+[functions.pantry-parse]
+verify_jwt = false
+
+[functions.dinner-solve]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
