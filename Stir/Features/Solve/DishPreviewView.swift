@@ -182,14 +182,12 @@ struct DishPreviewView: View {
     private func handleFavoriteTap() {
         // Gate: Free tier must resolve the paywall before a favorite
         // persists. effectiveTier handling in EntitlementService maps
-        // "expired" → "free" so a lapsed Premium subscriber also sees
-        // the paywall (correct — they lost the feature).
+        // "expired"/"none" → "free" so a lapsed Premium subscriber also
+        // sees the paywall (correct — they lost the feature).
         switch entitlements.canAccess(.savedFavorites) {
         case .allowed:
             toggleFavoriteOptimistic()
-        case .blockedByTier:
-            coordinator.presentPaywall(.savedFavoritesGate)
-        case .blockedByQuota, .blockedByBilling:
+        case .blockedByTier, .blockedByQuota, .blockedByBilling:
             coordinator.presentPaywall(.savedFavoritesGate)
         }
     }

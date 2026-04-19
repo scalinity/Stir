@@ -42,6 +42,25 @@ import { ZodError } from 'zod';
 const WEBHOOK_SECRET = Deno.env.get('REVENUECAT_WEBHOOK_SECRET');
 
 /**
+ * Minimum webhook secret length. Raised from 16 to 32 after the step-5
+ * review: a 16-char random alphanumeric is ~96 bits of entropy, which is
+ * fine, but a shared secret protecting entitlement state warrants a wider
+ * margin. `openssl rand -hex 32` produces a 64-char hex string that's
+ * trivially rotatable via `supabase secrets set`. The runtime check here
+ * is a safety net; the operational contract is the rotation runbook.
+ */
+const WEBHOOK_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Maximum raw-body size accepted. Real RC payloads are 2–5 KB; 64 KiB is
+ * generous. Defends against post-auth body-exhaustion: attacker with the
+ * secret could send a multi-MB payload that buffers fully through
+ * `req.text()` → `JSON.parse` → Zod → JSONB write. Platform gateway cap
+ * (~6 MiB) is the upstream backstop.
+ */
+const MAX_BODY_BYTES = 64 * 1024;
+
+/**
  * webhook_log.status values. Keep in sync with the column COMMENT in
  * migration 20260419000002_init_webhook_log.sql.
  */
@@ -51,6 +70,7 @@ type WebhookLogStatus =
   | 'signature_invalid'
   | 'validation_failed'
   | 'unknown_event'
+  | 'ignored'
   | 'alias_processed'
   | 'transfer_processed'
   | 'error';
@@ -71,7 +91,7 @@ Deno.serve(async (req) => {
   // -----------------------------------------------------------------------
   // 0. Environment sanity
   // -----------------------------------------------------------------------
-  if (!WEBHOOK_SECRET || WEBHOOK_SECRET.length < 16) {
+  if (!WEBHOOK_SECRET || WEBHOOK_SECRET.length < WEBHOOK_SECRET_MIN_LENGTH) {
     // Misconfigured environment. Fail loudly rather than accept any
     // request. 500 (not 401) so RC retries if we accidentally ship without
     // the secret set — they'll keep delivering while we fix it.
@@ -96,15 +116,44 @@ Deno.serve(async (req) => {
   // -----------------------------------------------------------------------
   // 2. Authorization header verify
   // -----------------------------------------------------------------------
-  const provided = req.headers.get('authorization');
+  // Accept either `Authorization: <secret>` or `Authorization: Bearer <secret>`.
+  // RC's dashboard lets the operator enter any string; normalizing here
+  // means dashboard config + server env var don't have to agree on prefix
+  // (operational brittleness the step-5 review flagged).
+  const providedRaw = req.headers.get('authorization');
+  const provided = providedRaw?.startsWith('Bearer ')
+    ? providedRaw.slice(7)
+    : providedRaw;
   if (!verifyAuthHeader(provided, WEBHOOK_SECRET)) {
-    log.warn('signature_invalid', { has_header: Boolean(provided) });
+    log.warn('signature_invalid', { has_header: Boolean(providedRaw) });
     // DO NOT log to webhook_log here. Unauthenticated requests are
     // potentially hostile; logging their body would burn storage and
     // could leak attacker-chosen content into dashboards.
     return new Response(
       JSON.stringify({ error: 'unauthorized' }),
       { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // 2b. Content-Type + size cap (post-auth; defense in depth)
+  // -----------------------------------------------------------------------
+  const contentType = req.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('application/json')) {
+    log.warn('unsupported_media_type', { content_type: contentType });
+    return new Response(
+      JSON.stringify({ error: 'unsupported_media_type', expected: 'application/json' }),
+      { status: 415, headers: { 'content-type': 'application/json' } },
+    );
+  }
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+  // Header is attacker-forgeable; we also re-check after reading. This
+  // lets us reject early on honest oversized payloads without buffering.
+  if (contentLength > MAX_BODY_BYTES) {
+    log.warn('body_too_large_header', { content_length: contentLength, limit: MAX_BODY_BYTES });
+    return new Response(
+      JSON.stringify({ error: 'payload_too_large', limit_bytes: MAX_BODY_BYTES }),
+      { status: 413, headers: { 'content-type': 'application/json' } },
     );
   }
 
@@ -125,17 +174,34 @@ Deno.serve(async (req) => {
     );
   }
 
+  // Post-read size check: content-length is attacker-forgeable, so we
+  // re-verify after actually buffering. An undersized content-length
+  // followed by a massive body would still hit the gateway's own cap,
+  // but this gives us app-layer defense.
+  if (rawBody.length > MAX_BODY_BYTES) {
+    log.warn('body_too_large_actual', { actual: rawBody.length, limit: MAX_BODY_BYTES });
+    return new Response(
+      JSON.stringify({ error: 'payload_too_large', limit_bytes: MAX_BODY_BYTES }),
+      { status: 413, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(rawBody);
   } catch (err) {
     log.warn('json_parse_failed', { err: String(err) });
+    // Deliberately DO NOT store raw attacker-chosen bytes. The Zod
+    // `issues` payload in the logger + the `json_parse_failed` log line
+    // carry enough for debugging; persisting raw body content into the
+    // audit log risks log-injection / XSS in downstream dashboards that
+    // render the JSONB without encoding.
     await writeWebhookLog(client, log, {
       event_id: null,
       event_type: null,
       canonical_user_key: null,
       status: 'validation_failed',
-      raw_payload: { _raw_body: rawBody.slice(0, 2048) }, // cap
+      raw_payload: { _reason: 'json_parse_failed', _body_length: rawBody.length },
     });
     return new Response(
       JSON.stringify({ received: true, status: 'validation_failed' }),
@@ -156,12 +222,21 @@ Deno.serve(async (req) => {
     } else {
       log.error('envelope_validation_error', err);
     }
+    // Store only a size-bounded redacted summary on Zod failure. Full
+    // parsedJson can be arbitrarily large — previous behavior ingested
+    // the entire parsed structure into the audit log, which a secret-
+    // holder could abuse to bloat the log.
+    const payloadPreview = JSON.stringify(parsedJson).slice(0, 2048);
     await writeWebhookLog(client, log, {
       event_id: null,
       event_type: null,
       canonical_user_key: null,
       status: 'validation_failed',
-      raw_payload: parsedJson,
+      raw_payload: {
+        _reason: 'envelope_validation_failed',
+        _preview: payloadPreview,
+        _preview_truncated: payloadPreview.length === 2048,
+      },
     });
     return new Response(
       JSON.stringify({ received: true, status: 'validation_failed' }),
@@ -226,45 +301,38 @@ Deno.serve(async (req) => {
 
       case 'alias': {
         canonicalUserKey = action.to;
-        // Idempotency: if the event_id was already processed, short-circuit.
-        const dupCheck = await client
-          .from('processed_webhook_events')
-          .insert({ event_id: event.id, event_type: event.type })
-          .select('event_id');
-
-        if (dupCheck.error) {
-          // 23505 = unique violation → duplicate event.
-          const pgCode = (dupCheck.error as { code?: string }).code;
-          if (pgCode === '23505') {
-            status = 'duplicate';
-            userLog.info('idempotent_replay_alias', { event_id: event.id });
-            break;
-          }
-          throw dupCheck.error;
-        }
-
-        // Ensure both from + to rows exist in app_users. stir_alias_forward
-        // requires this — from:exist, to:exist. If RC sends an alias for
-        // an install:<uuid> we've never seen, we materialize a row for it
-        // so the merge has something to move.
-        await ensureAppUserRow(client, action.from);
-        await ensureAppUserRow(client, action.to);
-
+        // Atomic idempotency + alias-forward via stir_process_alias_webhook.
+        // The prior implementation inserted processed_webhook_events from
+        // JS land and then called stir_alias_forward separately — a
+        // TOCTOU bug: if the merge RPC threw after the idempotency row was
+        // written, RC would retry, the idempotency check would short-circuit
+        // as `duplicate`, and the alias would be silently lost. Moving both
+        // into a single plpgsql transaction eliminates the window.
         const { data: aliasData, error: aliasError } = await client.rpc(
-          'stir_alias_forward',
+          'stir_process_alias_webhook',
           {
-            p_install_key: action.from,
-            p_ck_key: action.to,
+            p_event_id: event.id,
+            p_event_type: event.type,
+            p_from: action.from,
+            p_to: action.to,
+            p_raw_payload: envelope,
           },
         );
         if (aliasError) throw aliasError;
-        userLog.info('alias_forwarded', {
-          event_id: event.id,
-          from: action.from,
-          to: action.to,
-          result: aliasData,
-        });
-        status = 'alias_processed';
+
+        const result = (aliasData ?? {}) as { status?: string };
+        if (result.status === 'duplicate') {
+          status = 'duplicate';
+          userLog.info('idempotent_replay_alias', { event_id: event.id });
+        } else {
+          status = 'alias_processed';
+          userLog.info('alias_forwarded', {
+            event_id: event.id,
+            from: action.from,
+            to: action.to,
+            result: aliasData,
+          });
+        }
         break;
       }
 
@@ -293,14 +361,29 @@ Deno.serve(async (req) => {
       case 'ignore': {
         // Record the event_id in processed_webhook_events so a retry
         // of the same ignore-path event doesn't generate duplicate
-        // webhook_log rows. Use upsert so we don't fail on duplicates.
-        await client
+        // webhook_log rows. Failure here is non-fatal — log + still
+        // return 200, accepting the tradeoff that an RC retry could
+        // produce a duplicate audit entry rather than cause a retry
+        // storm on a permanently-ignored event type.
+        const { error: upsertErr } = await client
           .from('processed_webhook_events')
           .upsert(
             { event_id: event.id, event_type: event.type },
             { onConflict: 'event_id', ignoreDuplicates: true },
           );
-        status = isHandledType ? 'accepted' : 'unknown_event';
+        if (upsertErr) {
+          userLog.warn('ignore_idempotency_upsert_failed', {
+            event_id: event.id,
+            err_message: upsertErr.message,
+          });
+        }
+        // A handled event that the resolver explicitly ignored (e.g.
+        // NON_RENEWING_PURCHASE, EXPIRATION on unknown product) is
+        // semantically different from an unknown event type. Reflect
+        // that in the audit log so dashboards can distinguish "we know
+        // about this type and chose to skip" from "this came from
+        // nowhere."
+        status = isHandledType ? 'ignored' : 'unknown_event';
         userLog.info(isHandledType ? 'event_ignored' : 'unknown_event_type', {
           event_id: event.id,
           event_type: event.type,
@@ -374,27 +457,14 @@ async function writeWebhookLog(
   }
 }
 
-/**
- * Materialize an `app_users` row for a canonical_user_key that doesn't yet
- * exist. Used by SUBSCRIBER_ALIAS when RC's original_app_user_id refers to
- * an install key the server never bootstrapped — happens if a user
- * purchases mid-state-change or during RC dashboard test events.
- */
-async function ensureAppUserRow(
-  client: ReturnType<typeof createServiceClient>,
-  canonicalKey: string,
-): Promise<void> {
-  const source = canonicalKey.startsWith('ck:') ? 'cloudkit' : 'install';
-  const { error } = await client
-    .from('app_users')
-    .upsert(
-      {
-        canonical_user_key: canonicalKey,
-        source_type: source,
-        revenuecat_app_user_id: canonicalKey,
-        status: 'active',
-      },
-      { onConflict: 'canonical_user_key', ignoreDuplicates: true },
-    );
-  if (error) throw error;
-}
+// NOTE: `ensureAppUserRow` was removed in the step-5 review.
+// - `upsert_entitlement` path: `stir_process_webhook_event` RPC ensures
+//   app_users internally.
+// - `alias` path: `stir_process_alias_webhook` RPC (migration 5) ensures
+//   both rows internally.
+// - `transfer` path: `stir_transfer_entitlement` RPC ensures the target.
+// - `ignore` path: no DB row materialization needed.
+//
+// All ensure-app-user writes now live inside the RPC transaction that
+// needs them, removing the TOCTOU window where the handler crashed
+// between materialization and RPC execution.

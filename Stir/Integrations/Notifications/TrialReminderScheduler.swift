@@ -42,17 +42,20 @@ final class TrialReminderScheduler {
         self.calendar = calendar
     }
 
-    /// Schedule a 2-day-before reminder against `expiresAt`. Cancels any
-    /// prior reminder first. No-op if expiresAt is <=48h away (the event
-    /// window has already passed) — a just-in-time user should rely on
-    /// the paywall cancel UX, not a local reminder.
+    /// Schedule a 2-day-before reminder against `expiresAt`. No-op if
+    /// expiresAt is <=48h away — a just-in-time user should rely on the
+    /// paywall cancel UX, not a local reminder.
+    ///
+    /// IMPORTANT: guard checks run BEFORE `cancel()`. Earlier version
+    /// cancelled first unconditionally, which meant a bootstrap-driven
+    /// re-schedule with a past-dated `expiresAt` (e.g. during the final
+    /// 48h) would eat the user's previously-valid reminder. Review fix:
+    /// validate first, cancel only if we're going to reschedule.
     func ensureReminder(expiresAt: Date, now: Date = .init()) async {
-        cancel()
-
         let fireDate = calendar.date(byAdding: .day, value: -2, to: expiresAt) ?? expiresAt
 
         guard fireDate > now else {
-            Logger.trialReminder.info("fireDate in the past — not scheduling")
+            Logger.trialReminder.info("fireDate in the past — not scheduling; preserving existing reminder if any")
             return
         }
 
@@ -61,6 +64,10 @@ final class TrialReminderScheduler {
             Logger.trialReminder.info("notification auth denied — skipping trial reminder")
             return
         }
+
+        // Only now that we know we can + will schedule a fresh reminder
+        // do we clear the prior pending one.
+        cancel()
 
         let content = UNMutableNotificationContent()
         content.title = "Stir Premium trial"

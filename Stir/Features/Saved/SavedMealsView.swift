@@ -146,7 +146,11 @@ struct SavedMealsView: View {
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
                 .foregroundStyle(isFavorite ? .yellow : .secondary)
-                .padding(.top, 4)
+                // HIG-minimum 44×44 hit target — previous inline padding
+                // left the effective tap region ~28pt wide, easy to miss
+                // next to the larger Cook-Again button.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")

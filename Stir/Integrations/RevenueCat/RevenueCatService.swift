@@ -40,6 +40,17 @@ protocol RevenueCatPurchasing: Sendable {
 
     /// Re-alias the RC user to the new canonical key. No-op if already that key.
     func logIn(canonicalUserKey: String) async throws
+
+    /// Start observing `customerInfoStream`. The callback runs whenever RC
+    /// reports an update. The coordinator uses this to trigger a Supabase
+    /// configBootstrap refresh — iOS never reads entitlement state out of
+    /// RC directly.
+    ///
+    /// Calling twice cancels the prior observer. Protocol-level declaration
+    /// (rather than a concrete-type cast in the coordinator) so test doubles
+    /// can participate — previously a `revenueCat as? RevenueCatService`
+    /// downcast silently skipped observation in any non-production wiring.
+    func startObserving(onChange: @escaping @Sendable () async -> Void) async
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +159,13 @@ actor RevenueCatService: RevenueCatPurchasing {
     /// by `startObserving`. Cancelled on deinit / stop.
     private var observationTask: Task<Void, Never>?
 
+    /// RC `Package` cache keyed by productID. Populated by `offerings()`;
+    /// consumed by `purchase(productID:)` so a purchase tap doesn't cost
+    /// an extra round-trip into the RC SDK to re-resolve the package.
+    /// RC's SDK caches offerings internally, but this keeps the lookup
+    /// fully in-process (matters for sandbox + offline fallbacks).
+    private var cachedPackages: [String: RevenueCat.Package] = [:]
+
     init() {}
 
     // MARK: - Configure
@@ -217,6 +235,10 @@ actor RevenueCatService: RevenueCatPurchasing {
         }
 
         var mapped: [PaywallPackage] = []
+        // Reset the cache on every offerings fetch so stale RC Packages
+        // from a prior offering (e.g. after a remote config change) don't
+        // linger. RC's own caching lives one layer down.
+        cachedPackages.removeAll(keepingCapacity: true)
         for package in current.availablePackages {
             let storeProduct = package.storeProduct
             let productID = storeProduct.productIdentifier
@@ -230,6 +252,7 @@ actor RevenueCatService: RevenueCatPurchasing {
             let periodDescription = Self.describePeriod(storeProduct)
             let introOfferDescription = Self.describeIntroOffer(storeProduct)
 
+            cachedPackages[productID] = package
             mapped.append(PaywallPackage(
                 productID: productID,
                 displayPrice: storeProduct.localizedPriceString,
@@ -245,18 +268,27 @@ actor RevenueCatService: RevenueCatPurchasing {
         guard isConfigured else {
             return .failed(.generic(description: "RC SDK not configured"))
         }
-        // Find the matching package from the current offering.
-        let offerings: Offerings
-        do { offerings = try await Purchases.shared.offerings() }
-        catch { return .failed(mapRCError(error)) }
+        // Prefer the package cached during the last `offerings()` call.
+        // Avoids an extra network round-trip on the purchase-initiation
+        // critical path. Falls back to a fresh offerings fetch for the
+        // (rare) case where `purchase` is invoked before a cache populates.
+        let package: RevenueCat.Package
+        if let cached = cachedPackages[productID] {
+            package = cached
+        } else {
+            let offerings: Offerings
+            do { offerings = try await Purchases.shared.offerings() }
+            catch { return .failed(mapRCError(error)) }
 
-        guard
-            let current = offerings.current,
-            let package = current.availablePackages.first(where: {
-                $0.storeProduct.productIdentifier == productID
-            })
-        else {
-            return .failed(.productNotAvailable(productID: productID))
+            guard
+                let current = offerings.current,
+                let resolved = current.availablePackages.first(where: {
+                    $0.storeProduct.productIdentifier == productID
+                })
+            else {
+                return .failed(.productNotAvailable(productID: productID))
+            }
+            package = resolved
         }
 
         do {
@@ -280,6 +312,11 @@ actor RevenueCatService: RevenueCatPurchasing {
             }
             let product = result.transaction?.productIdentifier ?? productID
             let price = package.storeProduct.localizedPriceString
+            // For all Stir SKUs, "intro offer" and "trial" are the same
+            // thing: the 7-day free trial on `stir.premium.annual.trial7`.
+            // If a future SKU ever ships a non-trial intro (e.g. "first
+            // month $1.99"), split these by deriving introOffer from
+            // `storeProduct.introductoryDiscount?.paymentMode` independently.
             let trial = Self.hasIntroOffer(package.storeProduct)
             return .succeeded(productID: product, trial: trial, introOffer: trial, priceDisplay: price)
         } catch let error as RevenueCat.ErrorCode where error == .purchaseCancelledError {

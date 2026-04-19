@@ -24,6 +24,7 @@
 		2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */; };
 		25CED38EE9C99F1CF78B59E1 /* CloudKitAvailabilityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C15A8E3297F5D551917C473 /* CloudKitAvailabilityStore.swift */; };
 		2653823930DD051BDD2C94A0 /* KitchenEquipmentRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */; };
+		276C68E53441F93E89E9B52A /* EntitlementService+Display.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */; };
 		2BBA8D5225EE48E18FD9158C /* SubstitutionSheetViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E5A7309F3C04509CE21E8D /* SubstitutionSheetViewModel.swift */; };
 		2D40D772E5045D1BA3973C38 /* TimerCountdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A66A56A43AFBAC2E42363C7 /* TimerCountdownView.swift */; };
 		2FC39966A071900E020F336B /* SubstitutionSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9953AC62F960A0A20087BBF2 /* SubstitutionSheetView.swift */; };
@@ -167,6 +168,7 @@
 		4BB49FCA03EF17C97D6C5DB9 /* Stir.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Stir.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychain.swift; sourceTree = "<group>"; };
 		4C6381522171782F672F7009 /* ProComparisonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProComparisonSheet.swift; sourceTree = "<group>"; };
+		4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementService+Display.swift"; sourceTree = "<group>"; };
 		547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitchenEquipmentRepository.swift; sourceTree = "<group>"; };
 		55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
@@ -240,7 +242,7 @@
 		F8C926703C86621AD1B481E6 /* CookingSession+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookingSession+Extensions.swift"; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
-		"TEMP_4F861370-B8EB-4358-9FA7-8C140B06279C" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -268,6 +270,7 @@
 				3C15A8E3297F5D551917C473 /* CloudKitAvailabilityStore.swift */,
 				0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */,
 				FA3A2CACA16214E11B7E592C /* EntitlementService.swift */,
+				4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */,
 				5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */,
 				9695B3F81139A97A1E549D40 /* IdentityService.swift */,
 				374669111D98B028BEC3824D /* KeychainStorage.swift */,
@@ -638,10 +641,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_403DCAEE-F056-4B77-8AE7-FBA541FA8D4A" /* Stir */ = {
+		"TEMP_2957C001-CA59-436D-AEEC-5F74DBF38627" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_4F861370-B8EB-4358-9FA7-8C140B06279C" /* Config.xcconfig */,
+				"TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -800,6 +803,7 @@
 				CD8C3CD7E5FE339ACDBBD197 /* DietaryRuleRepository.swift in Sources */,
 				F0DEC13DB60DD7756AC99BAC /* DinnerOptionsView.swift in Sources */,
 				60F3FBEE693BCE308CFFC95B /* DishPreviewView.swift in Sources */,
+				276C68E53441F93E89E9B52A /* EntitlementService+Display.swift in Sources */,
 				69B7CA85BE35658ED8A3282D /* EntitlementService.swift in Sources */,
 				B364F24CB12337EA93DC300A /* EntitlementTypes.swift in Sources */,
 				DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */,
@@ -878,7 +882,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_4F861370-B8EB-4358-9FA7-8C140B06279C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -917,7 +921,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_4F861370-B8EB-4358-9FA7-8C140B06279C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_9EC387AA-7CC5-44CC-89A0-9E5E628AA8AD" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

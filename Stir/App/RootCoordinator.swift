@@ -267,11 +267,13 @@ final class RootCoordinator {
         //    events from outside our process (e.g. manage-subscription
         //    flow in Apple ID). Every change triggers a configBootstrap
         //    refresh from our source of truth (Supabase).
-        if let concrete = revenueCat as? RevenueCatService {
-            await concrete.startObserving { [weak self] in
-                Task { @MainActor in
-                    await self?.refreshEntitlementsOnForeground()
-                }
+        //
+        //    Protocol-level `startObserving` so this wiring participates
+        //    in tests (mock RC services can optionally observe test
+        //    notifications; prod service hooks `Purchases.customerInfoStream`).
+        await revenueCat.startObserving { [weak self] in
+            Task { @MainActor in
+                await self?.refreshEntitlementsOnForeground()
             }
         }
     }

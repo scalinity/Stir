@@ -112,5 +112,14 @@ final class AccountStateTests: XCTestCase {
         // Every case except .banned should be reachable via derive().
         let expected = Set(AccountState.allCases).subtracting([.banned])
         XCTAssertEqual(reachable, expected)
+        // Explicit: .banned must NOT be reachable via derivation. Guards
+        // against a future refactor that accidentally routes a billing
+        // state combo to .banned — symmetric-difference equality above
+        // would pass even if reachable contained .banned but was also
+        // missing something. Spell the invariant out.
+        XCTAssertFalse(
+            reachable.contains(.banned),
+            ".banned must not be derivable from entitlement inputs (it's admin-action-only)"
+        )
     }
 }

@@ -125,6 +125,87 @@ Deno.test('webhook rejects missing Authorization header with 401', async () => {
   assertEquals(res.status, 401);
 });
 
+Deno.test('webhook rejects GET method with 405', async () => {
+  // Coverage gap flagged by DB1: non-POST should 405 before any body
+  // read or auth check — this is a client-bug signal.
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'GET',
+    headers: { 'Authorization': WEBHOOK_SECRET },
+  });
+  await response.body?.cancel();
+  assertEquals(response.status, 405);
+});
+
+Deno.test('webhook accepts Authorization with "Bearer <secret>" prefix', async () => {
+  // Operational brittleness fix (SA2 LOW): RC dashboards can be configured
+  // with or without the "Bearer " prefix; the server normalizes.
+  const bs = await quickBootstrap();
+  const res = await postWebhook(
+    rcEvent('RENEWAL', {
+      app_user_id: bs.canonical_user_key,
+      product_id: 'stir.premium.monthly',
+      period_type: 'NORMAL',
+      expiration_at_ms: Date.UTC(2026, 4, 19),
+    }),
+    { auth: `Bearer ${WEBHOOK_SECRET}` },
+  );
+  assertEquals(res.status, 200);
+});
+
+Deno.test('webhook rejects oversized request body with 413', async () => {
+  // Post-auth body-size cap (SA1 MED). 64 KiB is the app-layer limit.
+  const bs = await quickBootstrap();
+  const hugePayload = 'x'.repeat(100 * 1024);
+  // Craft a syntactically-valid JSON but with a massive unused field.
+  const body = JSON.stringify({
+    api_version: '1.0',
+    event: {
+      id: 'evt_oversized',
+      type: 'RENEWAL',
+      app_user_id: bs.canonical_user_key,
+      _padding: hugePayload,
+    },
+  });
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Authorization': WEBHOOK_SECRET,
+    },
+    body,
+  });
+  await response.body?.cancel();
+  assertEquals(response.status, 413);
+});
+
+Deno.test('webhook rejects non-JSON Content-Type with 415', async () => {
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'text/html',
+      'Authorization': WEBHOOK_SECRET,
+    },
+    body: '<html></html>',
+  });
+  await response.body?.cancel();
+  assertEquals(response.status, 415);
+});
+
+Deno.test('webhook rejects malformed canonical_user_key with validation_failed', async () => {
+  // Regression guard for SA1 X: `app_user_id` format enforced via Zod regex.
+  // A non-matching key now routes to validation_failed instead of
+  // polluting app_users with a malformed row.
+  const res = await postWebhook(rcEvent('RENEWAL', {
+    app_user_id: 'not-a-canonical-key',
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+  // Handler returns 200 on validation failure (so RC doesn't retry forever),
+  // but the log is validation_failed and no entitlement row is written.
+  assertEquals(res.status, 200);
+});
+
 Deno.test('webhook rejects wrong Authorization header with 401', async () => {
   const res = await postWebhook(rcEvent('RENEWAL'), { auth: 'wrong-secret' });
   assertEquals(res.status, 401);
@@ -259,6 +340,107 @@ Deno.test('BILLING_ISSUE sets billing_state=grace; config-bootstrap returns bill
   assertEquals(body.entitlements.voice_enabled, true);
 });
 
+Deno.test('UNCANCELLATION after CANCELLATION flips billing_state back to active', async () => {
+  // Coverage gap (DB1): UNCANCELLATION end-to-end.
+  const bs = await quickBootstrap();
+  await postWebhook(rcEvent('INITIAL_PURCHASE', {
+    app_user_id: bs.canonical_user_key,
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+  await postWebhook(rcEvent('CANCELLATION', {
+    app_user_id: bs.canonical_user_key,
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+  await postWebhook(rcEvent('UNCANCELLATION', {
+    app_user_id: bs.canonical_user_key,
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+
+  const row = await readEntitlement(bs.canonical_user_key);
+  assertExists(row);
+  assertEquals(row.billing_state, 'active');
+  // is_trial must be false even if a downstream event carried a stale
+  // period_type — the resolver hard-codes it after the step-5 review.
+  assertEquals(row.is_trial, false);
+});
+
+Deno.test('TRANSFER event reassigns entitlement from → to', async () => {
+  // Coverage gap (DB1): TRANSFER end-to-end.
+  const fromInstall = testInstallId();
+  const fromKey = `install:${fromInstall}`;
+  const toCk = testCkRecord();
+  const toKey = `ck:${toCk}`;
+
+  // Seed the source user with a purchase.
+  await quickBootstrap({ installation_id: fromInstall });
+  await postWebhook(rcEvent('INITIAL_PURCHASE', {
+    app_user_id: fromKey,
+    product_id: 'stir.pro.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+
+  // Transfer.
+  const transferRes = await postWebhook(rcEvent('TRANSFER', {
+    app_user_id: toKey,
+    transferred_from: [fromKey],
+    transferred_to: [toKey],
+  }));
+  assertEquals(transferRes.status, 200);
+
+  // After transfer: source has no entitlement row; target has it.
+  const sourceRow = await readEntitlement(fromKey);
+  assertEquals(sourceRow, null);
+  const targetRow = await readEntitlement(toKey);
+  assertExists(targetRow);
+  assertEquals(targetRow.tier, 'pro');
+  assertEquals(targetRow.billing_state, 'active');
+});
+
+Deno.test('SUBSCRIBER_ALIAS idempotent replay is atomic (retry after failure still safe)', async () => {
+  // Regression guard for CR1's TOCTOU finding. Replaying the same
+  // alias event_id should route to `duplicate` rather than re-running
+  // the merge. This is what step-5 migration 5 (stir_process_alias_webhook)
+  // guarantees atomically.
+  const installId = testInstallId();
+  const installKey = `install:${installId}`;
+  await quickBootstrap({ installation_id: installId });
+  await postWebhook(rcEvent('INITIAL_PURCHASE', {
+    app_user_id: installKey,
+    product_id: 'stir.premium.monthly',
+    period_type: 'NORMAL',
+    expiration_at_ms: Date.UTC(2026, 4, 19),
+  }));
+
+  const ckKey = `ck:${testCkRecord()}`;
+  const aliasEvent = rcEvent('SUBSCRIBER_ALIAS', {
+    app_user_id: ckKey,
+    original_app_user_id: installKey,
+  });
+
+  const first = await postWebhook(aliasEvent);
+  assertEquals(first.status, 200);
+  // Second delivery of the SAME event_id — idempotency gate short-circuits.
+  const second = await postWebhook(aliasEvent);
+  assertEquals(second.status, 200);
+
+  const logs = await countWebhookLogs(aliasEvent.event.id);
+  assertEquals(logs, 2);
+  const latest = await lastWebhookLog(aliasEvent.event.id);
+  assertEquals(latest?.status, 'duplicate');
+
+  // End state: entitlement lives on ck, install row is merged.
+  const ckRow = await readEntitlement(ckKey);
+  assertExists(ckRow);
+  assertEquals(ckRow.tier, 'premium');
+});
+
 Deno.test('PRODUCT_CHANGE premium → pro → tier flips, billing_state stays active', async () => {
   const bs = await quickBootstrap();
   await postWebhook(rcEvent('INITIAL_PURCHASE', {
@@ -370,18 +552,25 @@ Deno.test('unknown event type returns 200 and logs status=unknown_event', async 
   assertEquals(log?.status, 'unknown_event');
 });
 
-Deno.test('NON_RENEWING_PURCHASE is accepted and logged but does NOT write entitlement', async () => {
+Deno.test('NON_RENEWING_PURCHASE is ignored (no NR SKUs in spec) and does NOT write entitlement', async () => {
   const bs = await quickBootstrap();
   const beforeRow = await readEntitlement(bs.canonical_user_key);
 
-  const res = await postWebhook(rcEvent('NON_RENEWING_PURCHASE', {
+  const event = rcEvent('NON_RENEWING_PURCHASE', {
     app_user_id: bs.canonical_user_key,
-  }));
+  });
+  const res = await postWebhook(event);
   assertEquals(res.status, 200);
 
   const afterRow = await readEntitlement(bs.canonical_user_key);
   assertEquals(afterRow?.tier, beforeRow?.tier);
   assertEquals(afterRow?.billing_state, beforeRow?.billing_state);
+
+  // NON_RENEWING_PURCHASE is a handled event type (resolver knows about it);
+  // the resolver explicitly returns `ignore` because Stir has no NR SKUs.
+  // Audit log distinguishes `ignored` from `accepted` and `unknown_event`.
+  const log = await lastWebhookLog(event.event.id);
+  assertEquals(log?.status, 'ignored');
 });
 
 Deno.test('malformed JSON body returns 200 with validation_failed log', async () => {
@@ -418,11 +607,13 @@ Deno.test('INITIAL_PURCHASE with unknown product_id is ignored, no entitlement c
   assertEquals(afterRow?.tier, beforeRow?.tier);
   assertEquals(afterRow?.billing_state, beforeRow?.billing_state);
 
-  // Handler still logs the event with a useful status.
+  // Handler logs with `ignored` status (not `accepted`) so dashboards
+  // can distinguish "known event type, chose to skip" from "something
+  // actually mutated state". The event TYPE (INITIAL_PURCHASE) is
+  // handled; the resolver downstream returned `ignore` because product_id
+  // was unknown.
   const log = await lastWebhookLog(event.event.id);
-  // `accepted` because the event TYPE is known (INITIAL_PURCHASE); the
-  // ignore was downstream from resolver on unknown product_id.
-  assertEquals(log?.status, 'accepted');
+  assertEquals(log?.status, 'ignored');
 });
 
 // ---------------------------------------------------------------------------

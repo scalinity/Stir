@@ -71,16 +71,37 @@ export function verifyAuthHeader(received: string | null, expected: string): boo
 // entitlement was attached to and `app_user_id` is the new winning key.
 // For non-alias events they're the same.
 
+/**
+ * canonical_user_key shape: `ck:_<32-hex>` or `install:<uuid>`. The server
+ * (stir_alias_forward, stir_process_webhook_event) derives behavior from
+ * the prefix; an unrecognized format silently classifies as `install`
+ * source_type with no audit trail. Validate at the boundary so an RC
+ * dashboard "send test event" or a misconfigured customer import can't
+ * pollute `app_users` with malformed rows.
+ *
+ * Letters: lowercase hex for CK records (per Apple spec §12 + April 2026
+ * real-data validation); uuid dashes for install IDs (Keychain UUIDs
+ * come from iOS `UUID()` which is v4 uppercase but RC normalizes; accept
+ * both cases to be lenient).
+ */
+const CANONICAL_KEY_REGEX =
+  /^(ck:_[a-f0-9]{32}|install:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+const canonicalKey = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(CANONICAL_KEY_REGEX, "must be 'ck:_<32-hex>' or 'install:<uuid>'");
+
 const RevenueCatEvent = z.object({
   id: z.string().min(1).max(256),
   type: z.string().min(1).max(64),
   event_timestamp_ms: z.number().int().nonnegative().optional(),
-  app_user_id: z.string().min(1).max(256),
-  original_app_user_id: z.string().min(1).max(256).optional(),
+  app_user_id: canonicalKey,
+  original_app_user_id: canonicalKey.optional(),
   aliases: z.array(z.string()).optional(),
-  new_app_user_id: z.string().min(1).max(256).optional(), // SUBSCRIBER_ALIAS
-  transferred_from: z.array(z.string()).optional(),      // TRANSFER
-  transferred_to: z.array(z.string()).optional(),         // TRANSFER
+  new_app_user_id: canonicalKey.optional(), // SUBSCRIBER_ALIAS
+  transferred_from: z.array(canonicalKey).optional(),  // TRANSFER
+  transferred_to: z.array(canonicalKey).optional(),    // TRANSFER
   product_id: z.string().min(1).max(256).optional(),
   period_type: z.string().min(1).max(64).optional(),      // "NORMAL" | "INTRO" | "TRIAL" | "PROMOTIONAL"
   purchased_at_ms: z.number().int().nonnegative().optional(),
@@ -254,12 +275,21 @@ export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
       }
       // User cancelled; access continues until period_end. iOS UI shows
       // "Cancels <date>" banner with re-subscribe CTA.
+      //
+      // `is_trial: false` — the cancelled state is orthogonal to trial.
+      // Even if the user cancels mid-trial (period_type='TRIAL' on the
+      // event), the iOS UI treats cancelled_active + trial_preserved as a
+      // self-contradiction: showing "free trial in progress" next to
+      // "cancels on <date>" is confusing. Consolidate: once cancelled,
+      // we're in the cancelled_active flow regardless of prior trial
+      // status. Expiration or renewal (rare after cancel) will re-establish
+      // the truth.
       return {
         kind: 'upsert_entitlement',
         canonical_user_key: canonicalKey,
         tier,
         billing_state: 'cancelled_active',
-        is_trial: isTrial,
+        is_trial: false,
         expires_at: expiresAt,
         product_id: event.product_id!,
       };
@@ -272,12 +302,16 @@ export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
           reason: `unknown product_id '${event.product_id ?? '<null>'}'`,
         };
       }
+      // Un-cancelling implies the user is opting back in to a paid
+      // subscription. By the time this event fires the original trial
+      // has already been exited (a trial doesn't "un-cancel"; it converts
+      // or expires). Hard-code is_trial=false rather than passing through.
       return {
         kind: 'upsert_entitlement',
         canonical_user_key: canonicalKey,
         tier,
         billing_state: 'active',
-        is_trial: isTrial,
+        is_trial: false,
         expires_at: expiresAt,
         product_id: event.product_id!,
       };
@@ -387,13 +421,18 @@ export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
       //
       // RC's payload shape for TRANSFER uses `transferred_from` and
       // `transferred_to` arrays. We treat the first element of each as the
-      // canonical pair.
+      // canonical pair. No fallback to `event.app_user_id` for `to` —
+      // TRANSFER semantics require BOTH arrays to be populated; an absent
+      // `transferred_to` means the payload is malformed, and the right
+      // behavior is to ignore (and log), not silently pick a different
+      // canonical key that might re-apply the entitlement to the wrong
+      // user.
       const from = event.transferred_from?.[0];
-      const to = event.transferred_to?.[0] ?? event.app_user_id;
+      const to = event.transferred_to?.[0];
       if (!from || !to || from === to) {
         return {
           kind: 'ignore',
-          reason: `TRANSFER missing or same-value transferred_from/to (from=${from ?? '<null>'}, to=${to})`,
+          reason: `TRANSFER missing or same-value transferred_from/to (from=${from ?? '<null>'}, to=${to ?? '<null>'})`,
         };
       }
       return { kind: 'transfer', from, to };

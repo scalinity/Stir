@@ -53,12 +53,17 @@ struct RootView: View {
         // trigger and the overlay materializes here. `.fullScreenCover`
         // matches the spec's hard-paywall UX (blocks the underlying flow
         // until the user resolves the purchase decision).
+        //
+        // Success detection: we read `vm.didSucceed` (set at the moment
+        // the state machine reached `.succeeded`) instead of inspecting
+        // `coordinator.entitlements`, which lags by the webhook→Supabase
+        // round-trip and would misclassify a just-purchased user as
+        // "not succeeded" right after dismiss.
         .fullScreenCover(item: $coordinator.activePaywallTrigger) { trigger in
-            PaywallView(viewModel: coordinator.makePaywallViewModel(trigger: trigger))
+            let vm = coordinator.makePaywallViewModel(trigger: trigger)
+            PaywallView(viewModel: vm)
                 .onDisappear {
-                    let succeeded = coordinator.entitlements.tier != .free
-                        && coordinator.entitlements.billingState != .none
-                    coordinator.dismissPaywall(wasSuccessful: succeeded)
+                    coordinator.dismissPaywall(wasSuccessful: vm.didSucceed)
                 }
         }
         .onChange(of: scenePhase) { _, new in

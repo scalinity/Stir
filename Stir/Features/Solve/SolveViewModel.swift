@@ -132,20 +132,20 @@ final class SolveViewModel {
                 }
             } catch StirError.rateLimited(_, let message) {
                 self.phase = .error(message: message, code: "RATE-01")
-                PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": "RATE-01", "feature": "dinner_solve"])
+                Self.emitSolveFailed(code: "RATE-01")
             } catch StirError.entitlementRequired(let code, let message) {
                 self.phase = .error(message: message, code: code.rawValue)
-                PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": code.rawValue, "feature": "dinner_solve"])
+                Self.emitSolveFailed(code: code.rawValue)
             } catch StirError.server(let code, let message, _) {
                 self.phase = .error(message: message, code: code.rawValue)
-                PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": code.rawValue, "feature": "dinner_solve"])
+                Self.emitSolveFailed(code: code.rawValue)
             } catch {
                 self.phase = .error(
                     message: "Dinner planning is temporarily unavailable. Try again shortly.",
                     code: "AI-01",
                 )
                 Logger.solveFeature.error("solve stream failed: \(error.localizedDescription, privacy: .public)")
-                PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": "AI-01", "feature": "dinner_solve"])
+                Self.emitSolveFailed(code: "AI-01")
             }
         }
     }
@@ -283,6 +283,17 @@ final class SolveViewModel {
     @discardableResult
     func setFavorite(_ newValue: Bool, for plan: RecipePlan) -> Bool {
         solveRepo.setFavorite(newValue, on: plan)
+    }
+
+    /// Single emission point for `ai_request_failed` on the solve path.
+    /// Extracted from three inline copies in the catch arms so the property
+    /// shape (`{ code, feature: "dinner_solve" }`) lives in one place —
+    /// drift in one arm would silently misattribute the funnel bucket.
+    private static func emitSolveFailed(code: String) {
+        PostHogClient.shared.capture(
+            .aiRequestFailed,
+            properties: ["code": code, "feature": "dinner_solve"],
+        )
     }
 
     /// AIDispatch passthrough so Cook Mode + Substitution Sheet can call

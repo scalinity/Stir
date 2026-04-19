@@ -16,6 +16,14 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     static let shared = StirNotificationDelegate()
 
     private let telemetry: PostHogClient
+    /// Identifiers we've already emitted `trial_reminder_sent` for this
+    /// process lifetime. Guards against double-emission when a single
+    /// notification triggers both `willPresent` (foreground delivery) AND
+    /// `didReceive` (user subsequently taps the banner). The set stays
+    /// bounded — trial reminders use a singleton identifier so this is
+    /// a 1-entry set in practice.
+    private var emittedReminderIDs: Set<String> = []
+    private let emitLock = NSLock()
 
     init(telemetry: PostHogClient = .shared) {
         self.telemetry = telemetry
@@ -59,6 +67,18 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     private func emitTelemetryIfTrialReminder(_ notification: UNNotification) {
         let userInfo = notification.request.content.userInfo
         guard let days = TrialReminderNotification.daysRemaining(from: userInfo) else { return }
+
+        // Dedup: a foreground-delivered trial reminder fires `willPresent`
+        // at delivery AND `didReceive` on tap-through. Emitting both would
+        // double-count the "saw the reminder" event in PostHog. Track by
+        // notification identifier so a single delivery produces exactly
+        // one `trial_reminder_sent`.
+        let id = notification.request.identifier
+        emitLock.lock()
+        let shouldEmit = emittedReminderIDs.insert(id).inserted
+        emitLock.unlock()
+        guard shouldEmit else { return }
+
         telemetry.capture(
             .trialReminderSent,
             properties: BillingTelemetryProperties.trialReminderSent(daysRemaining: days),

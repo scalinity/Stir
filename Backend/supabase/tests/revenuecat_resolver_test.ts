@@ -81,21 +81,17 @@ Deno.test('productIdToTier: unknown and null return null', () => {
 });
 
 Deno.test('PRODUCT_TIER_MAP is frozen (Object.freeze applied)', () => {
-  // Deno runs in strict mode where mutating a frozen object throws; older
-  // runtimes silently fail the write. Either behavior is acceptable as
-  // long as the map stays unchanged.
-  let threw = false;
+  // The map must stay unchanged under a write attempt. In Deno strict mode
+  // the write throws; in lenient runtimes it silently fails. Only the
+  // "map unchanged" invariant is runtime-portable, so that's all we assert —
+  // whether the write threw is an incidental detail.
   try {
     // deno-lint-ignore no-explicit-any
     (PRODUCT_TIER_MAP as any)['stir.something.new'] = 'pro';
   } catch (_err) {
-    threw = true;
+    // Ignore — strict-mode throw is acceptable.
   }
   assertEquals('stir.something.new' in PRODUCT_TIER_MAP, false);
-  // At least one enforcement mechanism (throw or silent-fail-+-unchanged)
-  // has to apply. In Deno strict, `threw` is true; document it as
-  // defense-in-depth for future runtime behavior.
-  assertEquals(threw, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -163,7 +159,7 @@ Deno.test('RENEWAL → billing_state=active regardless of prior state', () => {
   }
 });
 
-Deno.test('CANCELLATION → billing_state=cancelled_active, tier preserved', () => {
+Deno.test('CANCELLATION → billing_state=cancelled_active, tier preserved, is_trial=false', () => {
   const action = resolveEventAction(event({
     type: 'CANCELLATION',
     product_id: 'stir.premium.monthly',
@@ -172,21 +168,66 @@ Deno.test('CANCELLATION → billing_state=cancelled_active, tier preserved', () 
   if (action.kind === 'upsert_entitlement') {
     assertEquals(action.tier, 'premium');
     assertEquals(action.billing_state, 'cancelled_active');
+    assertEquals(action.is_trial, false);
   } else {
     throw new Error('expected upsert_entitlement');
   }
 });
 
-Deno.test('UNCANCELLATION → billing_state=active', () => {
+Deno.test('CANCELLATION during TRIAL forces is_trial=false (cancelled state is authoritative)', () => {
+  // Regression guard: a user who cancels mid-trial should NOT produce
+  // { billing_state: 'cancelled_active', is_trial: true }. The iOS UI
+  // would show contradictory copy ("Free trial" + "Cancels on <date>").
+  const action = resolveEventAction(event({
+    type: 'CANCELLATION',
+    product_id: 'stir.premium.annual.trial7',
+    period_type: 'TRIAL',
+  }));
+  if (action.kind === 'upsert_entitlement') {
+    assertEquals(action.billing_state, 'cancelled_active');
+    assertEquals(action.is_trial, false);
+  } else {
+    throw new Error('expected upsert_entitlement');
+  }
+});
+
+Deno.test('UNCANCELLATION → billing_state=active, is_trial=false', () => {
   const action = resolveEventAction(event({
     type: 'UNCANCELLATION',
     product_id: 'stir.pro.monthly',
   }));
   if (action.kind === 'upsert_entitlement') {
     assertEquals(action.billing_state, 'active');
+    assertEquals(action.is_trial, false);
   } else {
     throw new Error('expected upsert_entitlement');
   }
+});
+
+Deno.test('UNCANCELLATION ignores a stale period_type=TRIAL (always is_trial=false)', () => {
+  const action = resolveEventAction(event({
+    type: 'UNCANCELLATION',
+    product_id: 'stir.premium.annual.trial7',
+    period_type: 'TRIAL',  // stale/defensive value
+  }));
+  if (action.kind === 'upsert_entitlement') {
+    assertEquals(action.is_trial, false);
+  } else {
+    throw new Error('expected upsert_entitlement');
+  }
+});
+
+Deno.test('TRANSFER ignores when transferred_to is empty (no fallback to app_user_id)', () => {
+  // Regression guard for CA1 F3: previous version fell back to
+  // event.app_user_id, which could silently target the wrong canonical
+  // key on a malformed payload.
+  const action = resolveEventAction(event({
+    type: 'TRANSFER',
+    app_user_id: 'ck:_abcdef1234567890abcdef1234567890ab',
+    transferred_from: ['ck:_from_record_aaaaaaaaaaaaaaaaaa'],
+    transferred_to: [],
+  }));
+  assertEquals(action.kind, 'ignore');
 });
 
 Deno.test('BILLING_ISSUE → billing_state=grace, tier preserved', () => {

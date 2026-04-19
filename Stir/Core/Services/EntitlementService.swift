@@ -149,11 +149,17 @@ final class EntitlementService {
     // MARK: - canAccess
 
     func canAccess(_ gate: FeatureGate) -> EntitlementDecision {
-        // Expired paid access → same as Free (user sees win-back paywall).
+        // Demote to free for `expired` AND `none`. Server's effectiveTier()
+        // (entitlements.ts) does the same — iOS must match so a stale
+        // Keychain snapshot with (tier=.premium, billingState=.none) can't
+        // silently hand out paid features. This is a defensive guard: in
+        // normal flow RC would never leave tier=.premium while
+        // billing_state=.none, but keychain snapshots from earlier builds
+        // or hand-edited test states could produce it.
         let effectiveTier: Tier = {
             switch billingState {
-            case .expired: return .free
-            default:       return tier
+            case .expired, .none: return .free
+            default:              return tier
             }
         }()
 

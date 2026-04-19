@@ -20,6 +20,22 @@ export interface ActivePrompt {
 }
 
 /**
+ * Wire-format row for `/v1/config/bootstrap` prompts[] response. Slimmer
+ * than ActivePrompt (no template_blob, no rollout_pct) because iOS only
+ * needs the metadata for telemetry. Moved here from `config-bootstrap/
+ * index.ts` in the step-5 review to keep prompts-table shapes in one
+ * searchable location.
+ */
+export interface PromptWireRow {
+  feature_key: string;
+  version: string;
+  provider_model: string;
+  schema_hash: string;
+  is_default: boolean;
+  is_enabled: boolean;
+}
+
+/**
  * Read the active prompt for a feature. Returns null if no enabled
  * default row exists (e.g. a feature whose prompt is still placeholder
  * at v0.0.0 with is_enabled=false).

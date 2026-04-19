@@ -85,12 +85,30 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
 
     /// Sub-headline / descriptor. Kept short; the feature list below
     /// carries the full value prop.
+    ///
+    /// Exhaustive (no `default`) so the compiler forces an update when a
+    /// new trigger is added or when step 6 replaces "voice Cook Mode
+    /// (coming soon)" with the real voice copy. A `default` arm would
+    /// silently misrepresent voice availability after step 6 ships.
     var subheadline: String {
+        // Canonical subhead pre-voice-launch. Step 6 will replace the
+        // "(coming soon)" clause with "hands-free voice Cook Mode" — at
+        // that point, `voiceAffordanceTapped` and the generic paywall
+        // text converge.
+        let voiceComingSoon = "40 Dinner Solves/mo, voice Cook Mode (coming soon), saved favorites, widgets, leftovers."
         switch self {
         case .voiceAffordanceTapped:
             return "Hands-free voice Cook Mode, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
-        default:
-            return "40 Dinner Solves/mo, voice Cook Mode (coming soon), saved favorites, widgets, leftovers."
+        case .dinnerSolveQuotaExhausted,
+             .recipeImportQuotaExhausted,
+             .savedFavoritesGate,
+             .widgetsGate,
+             .leftoversGate,
+             .settingsUpgrade:
+            return voiceComingSoon
+        case .multiImageScanGate:
+            // Pro-only feature — pitch Pro explicitly.
+            return "120 Dinner Solves/mo, multi-image scan, priority inference, 1,000 pantry items."
         }
     }
 }

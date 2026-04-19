@@ -47,6 +47,12 @@ struct PaywallView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
+                // Without an explicit .animation() binding, the
+                // `.transition()` above would only animate when nested
+                // in a `withAnimation` closure. Adds a short, easy-in-out
+                // curve tied to the toast's presence so it actually
+                // animates in/out.
+                .animation(.easeInOut(duration: 0.25), value: restoreToast)
                 .task {
                     if case .idle = viewModel.state {
                         await viewModel.load()
@@ -77,9 +83,13 @@ struct PaywallView: View {
                 displayingContent(offerings: offerings)
             }
         case .purchasing(let productID):
+            // Show the real offerings (from the VM cache) with only the
+            // in-flight button disabled. Previous version passed empty
+            // offerings here, which made every button visibly collapse
+            // to "unavailable" during purchase — jarring.
             ScrollView {
                 displayingContent(
-                    offerings: PaywallOfferings(packages: []),
+                    offerings: viewModel.currentOfferings() ?? PaywallOfferings(packages: []),
                     disablePurchaseFor: productID,
                 )
             }
@@ -128,6 +138,10 @@ struct PaywallView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.yellow)
                 .padding(.bottom, 4)
+                // Decorative — the headline carries semantic meaning for
+                // screen readers. Without this, VoiceOver reads "crown"
+                // before the actual value prop.
+                .accessibilityHidden(true)
             Text(viewModel.trigger.headline)
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
@@ -215,9 +229,11 @@ struct PaywallView: View {
     private func trialDisclosureView(package: PaywallPackage?) -> some View {
         // Apple requirement: auto-renew disclosure visible before subscribe.
         VStack(alignment: .leading, spacing: 6) {
+            // Heading uses primary + semibold so it reads as a section
+            // label rather than getting muted into the legalese body.
             Text("Trial terms")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
             Group {
                 if let package {
                     Text(
@@ -277,11 +293,13 @@ struct PaywallView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(.green)
+                .accessibilityHidden(true)
             Text("You're all set")
                 .font(.title2.bold())
             Text("Welcome to Premium.")
                 .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

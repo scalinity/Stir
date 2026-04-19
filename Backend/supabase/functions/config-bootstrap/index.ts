@@ -32,15 +32,7 @@ import {
   toIsoDate,
 } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
-
-interface PromptRow {
-  feature_key: string;
-  version: string;
-  provider_model: string;
-  schema_hash: string;
-  is_default: boolean;
-  is_enabled: boolean;
-}
+import type { PromptWireRow } from '../_shared/prompt_versions.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -167,7 +159,7 @@ Deno.serve(async (req) => {
     ]);
 
     if (promptsResult.error) throw promptsResult.error;
-    const prompts = (promptsResult.data ?? []) as PromptRow[];
+    const prompts = (promptsResult.data ?? []) as PromptWireRow[];
 
     // Warn when an expected feature_key has no default prompt row — a bad
     // canary rollout can leave a feature silently without a prompt, and the

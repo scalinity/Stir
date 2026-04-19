@@ -19,9 +19,12 @@ Secrets.swift
 Secrets.xcconfig
 
 # iOS xcconfig holding SUPABASE_URL, anon key, RevenueCat, PostHog, Sentry DSN.
-# Commit Config.example.xcconfig as the template.
+# Commit Config.xcconfig.example as the template. (Step-5 review fix: the
+# negation line previously referenced `Config.example.xcconfig` — wrong
+# filename order; harmless today because the suffix-form doesn't match
+# line 23 anyway, but the stale negation was misleading.)
 Config.xcconfig
-!Config.example.xcconfig
+!Config.xcconfig.example
 
 # -----------------------------------------------------------------------------
 # iOS / Apple signing & provisioning (NEVER commit)

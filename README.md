@@ -24,8 +24,7 @@ Current progress: **steps 1 + 2 + 3 + 4 complete**. Step 1 = Supabase operationa
 ├── Specs/
 │   ├── Stir-Full-Spec.md
 │   ├── Stir-Cook-Mode-Architecture.md
-│   ├── Gemini-Live-Findings.md
-│   └── RevenueCat-Integration.md   ⚠ stale; refresh before step 5
+│   └── Gemini-Live-Findings.md
 ├── Backend/
 │   └── supabase/                   operational backend (steps 1 + 3)
 │       ├── config.toml
@@ -195,7 +194,6 @@ Tracked explicitly so nothing gets lost. Each owner-step is locked in.
 - **`ops_flagged_outputs`, `audit_log`, `notification_jobs`** tables → step 8 (ops admin + push).
 - **RevenueCat webhook handler + `entitlement_snapshots.raw_webhook_payload` writes** → step 5.
 - **CI pipeline (GitHub Actions)** → step 8. Target: lint + unit tests on PR; `supabase db push` + `supabase functions deploy` to staging on merge to `main`; tag promotion to prod; TestFlight via fastlane.
-- **Refresh `Specs/RevenueCat-Integration.md`** → before step 5. Currently describes 2 products / single `Stir Pro` entitlement; main spec + CLAUDE.md are now 4 SKUs + Free/Premium/Pro.
 - **Real privacy-policy + terms-of-service URLs** → before beta (step 9). Placeholder links at `stir.app/privacy` and `stir.app/terms` live in Settings.
 - **RevenueCat SDK init in iOS** → step 5. EntitlementService hydrates from Supabase bootstrap in step 2; RC's `customerInfoStream` adds a belt-and-suspenders path alongside at step 5.
 - **App Group + Share Extension entitlement** → step 7 (imports + widgets). Keychain access group stays default until then.

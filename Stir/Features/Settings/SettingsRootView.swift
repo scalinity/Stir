@@ -18,6 +18,7 @@
 
 import SwiftUI
 import UIKit
+import UserNotifications
 
 struct SettingsRootView: View {
     @Environment(EntitlementService.self) private var entitlements
@@ -26,10 +27,13 @@ struct SettingsRootView: View {
 
     @State private var isRestoring = false
     @State private var restoreToast: SettingsToast?
+    @State private var restoreToastID = UUID()
 
-    /// User setting for the trial reminder. Actual scheduling is handled
-    /// by TrialReminderScheduler in the coordinator; toggling this here
-    /// just cancels/re-schedules.
+    /// User setting for the trial reminder. Hydrated on appear from the
+    /// actual pending `UNNotificationRequest` state so a user who
+    /// previously turned the toggle off sees it off again — earlier
+    /// version hardcoded `true` and silently re-scheduled on nav
+    /// return.
     @State private var trialReminderEnabled: Bool = true
 
     var body: some View {
@@ -99,7 +103,10 @@ struct SettingsRootView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: entitlements.tier == .free ? "star" : "crown.fill")
+            // Free uses `sparkles` (not `star`) to keep `star` reserved
+            // for the favorites metaphor across the app. Paid tiers get
+            // the crown.
+            Image(systemName: entitlements.tier == .free ? "sparkles" : "crown.fill")
                 .foregroundStyle(
                     entitlements.tier == .free
                         ? AnyShapeStyle(.secondary)
@@ -143,7 +150,9 @@ struct SettingsRootView: View {
         }
     }
 
-    // Cancelled but still active until period end.
+    // Cancelled but still active until period end. Single CTA —
+    // earlier version had "Keep Premium" + "Manage" both linking to the
+    // same apps.apple.com URL, which is redundant.
     private var cancelledFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let expires = entitlements.expiresAt {
@@ -151,20 +160,12 @@ struct SettingsRootView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 12) {
-                Button {
-                    openManageSubscriptions()
-                } label: {
-                    Text("Keep Premium")
-                }
-                .buttonStyle(.borderedProminent)
-                Button {
-                    openManageSubscriptions()
-                } label: {
-                    Text("Manage")
-                }
-                .buttonStyle(.bordered)
+            Button {
+                openManageSubscriptions()
+            } label: {
+                Label("Keep Premium", systemImage: "arrow.uturn.backward.circle")
             }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -218,6 +219,7 @@ struct SettingsRootView: View {
                     }
                 }
             }
+            .task { await loadTrialReminderState() }
         } header: {
             Text("Trial")
         }
@@ -278,10 +280,13 @@ struct SettingsRootView: View {
     private var versionSection: some View {
         Section {
             LabeledContent("Build") {
-                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                // Single .secondary foreground (previously mixed .secondary +
+                // .tertiary which read as two different levels of importance
+                // for what is one value).
+                let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+                Text("\(short) (\(build))")
                     .foregroundStyle(.secondary)
-                    + Text(" (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"))")
-                        .foregroundStyle(.tertiary)
             }
         }
     }
@@ -306,16 +311,33 @@ struct SettingsRootView: View {
         // no paywall_viewed event fires since we don't call load().
         let vm = coordinator.makePaywallViewModel(trigger: .settingsUpgrade)
         let outcome = await vm.restore(origin: .settings)
+        let toast: SettingsToast
         switch outcome {
-        case .restored:
-            restoreToast = .init(message: "Restored. Welcome back.")
-        case .nothingToRestore:
-            restoreToast = .init(message: "No active purchase to restore.")
-        case .failed(let error):
-            restoreToast = .init(message: "Couldn't restore: \(error.userFacingMessage)")
+        case .restored:         toast = .init(message: "Restored. Welcome back.")
+        case .nothingToRestore: toast = .init(message: "No active purchase to restore.")
+        case .failed(let e):    toast = .init(message: "Couldn't restore: \(e.userFacingMessage)")
         }
+
+        // Race guard: a second tap within 2.5s would cause the first
+        // task's clear to dismiss the second toast prematurely. Track
+        // an ID; only the matching task is allowed to clear.
+        let myID = UUID()
+        restoreToastID = myID
+        restoreToast = toast
         try? await Task.sleep(nanoseconds: 2_500_000_000)
-        restoreToast = nil
+        if restoreToastID == myID {
+            restoreToast = nil
+        }
+    }
+
+    /// Hydrate `trialReminderEnabled` from the actual pending-notification
+    /// state. Runs once on appear so a user who toggled it off previously
+    /// sees the toggle reflect that.
+    @MainActor
+    private func loadTrialReminderState() async {
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let hasReminder = pending.contains { $0.identifier == "stir.trial.reminder.2d" }
+        trialReminderEnabled = hasReminder
     }
 }
 
@@ -335,43 +357,6 @@ extension Tier {
     }
 }
 
-extension EntitlementService {
-    /// Human-friendly sentence under the tier name in the Plan & Billing card.
-    var billingStateHelpText: String {
-        switch (tier, billingState) {
-        case (.free, _):
-            return "6 Dinner Solves a month. Upgrade for hands-free Cook Mode."
-        case (_, .trial):
-            if let expires = expiresAt {
-                let daysLeft = max(0, Calendar.current.dateComponents([.day], from: Date(), to: expires).day ?? 0)
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                if daysLeft > 0 {
-                    return "Free trial — \(daysLeft) day\(daysLeft == 1 ? "" : "s") left. Renews \(formatter.string(from: expires))."
-                }
-                return "Free trial ending today."
-            }
-            return "Free trial in progress."
-        case (_, .active):
-            if let expires = expiresAt {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                return "Active — renews \(formatter.string(from: expires))."
-            }
-            return "Active."
-        case (_, .grace):
-            return "Apple is retrying your payment."
-        case (_, .cancelledActive):
-            if let expires = expiresAt {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                return "Cancels \(formatter.string(from: expires))."
-            }
-            return "Cancels at end of current period."
-        case (_, .expired):
-            return "Expired. Resubscribe to regain Premium features."
-        case (_, .none):
-            return "Free."
-        }
-    }
-}
+// `billingStateHelpText` lives in `Core/Services/EntitlementService+Display.swift`
+// per the step-5 review (SRP: EntitlementService extensions belong with the
+// service, not in feature files).
