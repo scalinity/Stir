@@ -57,3 +57,4 @@ When user or context indicates a decision-worthy moment, Claude must:
 | [0003](./0003-revenuecat-shared-secret-auth.md) | RevenueCat webhook uses shared-secret `Authorization` header, not HMAC | Accepted | webhook handler, SA2 review |
 | [0004](./0004-supabase-entitlement-source-of-truth.md) | Supabase entitlement_snapshots is source of truth; RC is a refresh trigger only | Accepted | Billing model, CLAUDE.md §Billing |
 | [0005](./0005-alias-forward-promote-entitlement.md) | stir_alias_forward promotes install→ck entitlement when ck has no row | Accepted | Migration 20260419000004 |
+| [0006](./0006-gemini-live-oauth-service-account-mint.md) | Gemini Live mint uses OAuth service-account auth, not API key | Accepted | CLAUDE.md §Gemini Live sharp-edges #14, #16 · step-6 drift check |

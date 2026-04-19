@@ -4,6 +4,20 @@ Validated reference for implementing Cook Mode voice on **Google Gemini 3.1 Flas
 
 Last validated: April 17, 2026.
 
+**Post-spike corrections (April 19, 2026 — step 6 scope-confirmation).** The April 2026 Gemini Live spike findings updated CLAUDE.md but not all sections below. Where this doc disagrees with CLAUDE.md §"Gemini Live — the sharp-edges section" or spec §10 entitlement table, **CLAUDE.md wins**. Known corrections:
+
+| Section | Doc says | Correct |
+|---|---|---|
+| §3, §8 | Mint path `/v1beta/auth-tokens` | `/v1alpha/authTokens` (CLAUDE.md #14) |
+| §3 | `Authorization: Bearer <token>` | `Authorization: Token <token>` (CLAUDE.md #13) |
+| §3 | `turn_coverage: TURN_INCLUDES_ALL_INPUT` | `TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO` (new default post-spike) |
+| §3, §8 | `voice_cook_sessions` (plural) | `voice_cook_session` (singular) — matches DB enum `usage_feature_key` |
+| §5, §8 | Pro voice cap = 60/mo | 40/mo (spec §10 entitlement table + CLAUDE.md cost model) |
+| §8 | `disable_cook_realtime` → `{ error: 'DISABLED' }` | `{ error: 'AI-VOICE-01' }` (spec §6 error-code matrix) |
+| §6 | `preamble_present: bool` as a `cook_turn_resolved` PostHog property | Not in spec §15. Track via Sentry breadcrumbs + backend audio-transcript analysis, not a wire property. |
+
+Substantive sections below are otherwise current as of the spike.
+
 ---
 
 ## 1. Model and pricing (validated)

@@ -453,7 +453,8 @@ Server (Supabase `feature_flags`):
 Backend (Supabase Edge Function secrets):
 
 ```
-GEMINI_API_KEY                  # single key for all Gemini features, including Live mint
+GEMINI_API_KEY                  # API-key auth for /v1beta/models/*:generateContent (pantry parse, dinner solve, substitution, cook-turn, recipe import, grocery generate)
+GCP_SERVICE_ACCOUNT_JSON        # compact JSON blob — OAuth auth for /v1alpha/auth_tokens (Gemini Live ephemeral-token mint). Provisioned via docs/runbooks/gemini-service-account-provisioning.md. ADR 0006.
 SUPABASE_JWT_SECRET             # HS256 signer for session JWTs
 REVENUECAT_WEBHOOK_SECRET
 APNS_AUTH_KEY_ID
@@ -568,7 +569,7 @@ Everything here is where Gemini Live differs from OpenAI Realtime. Assume OpenAI
 13. **Auth header is `Authorization: Token <value>`,** not `Bearer`. Easy to get wrong because the rest of the Google API ecosystem uses `Bearer`. Double-check before debugging 401s.
 14. **Token mint endpoint is `/v1alpha/authTokens`, not `/v1beta`.** The WebSocket endpoint IS `/v1beta`. Do not assume consistency across the two — they intentionally live in different API versions for now.
 15. **Undocumented ~200-token AUDIO-mode overhead per turn.** The April 2026 spike found that every Live turn with `response_modalities: [AUDIO]` charges ~200 extra audio-input tokens beyond the literal audio content — even on text-only input. This is not in the pricing docs but is reliably observed in `usageMetadata.prompt_tokens_details`. The cost model accounts for it. Don't be surprised; don't design flows assuming you can game it with text-only turns.
-16. **Mint endpoint auth behavior is unresolved as of April 17 2026.** The spike's raw `POST /v1alpha/authTokens` with API-key auth returned opaque `400 INVALID_ARGUMENT` while every other Gemini endpoint accepted the same key. Most likely cause: OAuth / service-account auth required on this endpoint specifically, or the request body needs SDK-level shaping. **Re-validate from the Supabase Edge Function before building `/v1/ai/realtime-session`.** If mint still fails on API-key auth from the Edge Function: use OAuth with a service-account credential server-side (keeps key off the client either way), OR fall back to backend-proxied WebSocket (Edge Function holds the Gemini connection; +100–300ms TTFA cost). Either is acceptable — the key never reaches the client either way.
+16. **Mint endpoint requires OAuth service-account auth, not API key.** Resolved by the April 19 2026 re-run of the cheap-half drift check from the Supabase Edge Function environment: every body shape (empty, minimal, full camelCase-correct) returned the same opaque `400 INVALID_ARGUMENT` with API-key auth, while `models.list` and `generateContent` accepted the same key fine. The `auth_tokens` endpoint specifically rejects API-key auth. Per ADR 0006, the iOS bundle still never sees the key — mint uses an OAuth access token exchanged server-side from a Google Cloud service account stored in Supabase secrets (`GCP_SERVICE_ACCOUNT_JSON`). Mint auth header: `Authorization: Bearer <oauth_access_token>`. WebSocket auth (from iOS with the minted ephemeral token): `Authorization: Token <ephemeral>` OR `?access_token=<ephemeral>` query param. Two different schemes; do not confuse. Drift-check artifact: `docs/validation/step-6-cheap-half-drift-check.md`.
 
 ---
 
