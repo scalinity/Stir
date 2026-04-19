@@ -5,13 +5,25 @@
     MealSolveRequest, SuggestedDish, RecipePlan, RecipeIngredient, RecipeStep.
     Shape matches spec §4.4–§4.9.
 
+    Step-4 adds four more for the full tap-based Cook Mode loop:
+      CookingSession, CookTimer, SubstitutionEvent, OutcomeFeedback.
+    Shape matches spec §4.11, §4.13–§4.15. Step 4 does NOT add VoiceTurn
+    (spec §4.12) — that lands in step 6 with the Gemini Live wiring.
+
     CloudKit compatibility rules applied across all entities (same as step 2):
       * No unique constraints.
       * All attributes optional at the schema level; required-ness enforced
         by Swift repositories + view models.
       * No custom transformers. Collections stored as JSON-encoded Binary
-        Data attributes (sourceAssetIds, constraintJSON, pantrySnapshotJSON);
-        scalar lists as newline-delimited Strings (cautionTags).
+        Data attributes (sourceAssetIds, constraintJSON, pantrySnapshotJSON,
+        localNotificationIdsJSON); scalar lists as newline-delimited Strings
+        (cautionTags).
+      * Nullable Bools (spec §4.14 accepted Bool?) are modeled as a String
+        enum with empty-default: "" = undecided, "accepted", "rejected".
+        CloudKit-safe pattern per step 2 baseline.
+      * Core Data's entity-name "Timer" would collide with Foundation.Timer.
+        Using "CookTimer" as the entity name; class name matches. Spec
+        §4.13 is the schema reference regardless of Swift class name.
       * Deletion rules cascade from HouseholdProfile → child tables.
     -->
     <entity name="HouseholdProfile" representedClassName="HouseholdProfile" syncable="YES" codeGenerationType="class">
@@ -25,6 +37,7 @@
         <attribute name="servingsDefault" optional="YES" attributeType="Integer 16" defaultValueString="2" usesScalarValueType="YES"/>
         <attribute name="timezone" optional="YES" attributeType="String"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="cookingSessions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CookingSession" inverseName="household" inverseEntity="CookingSession"/>
         <relationship name="dietaryRules" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="DietaryRule" inverseName="household" inverseEntity="DietaryRule"/>
         <relationship name="kitchenEquipment" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="KitchenEquipment" inverseName="household" inverseEntity="KitchenEquipment"/>
         <relationship name="mealSolveRequests" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MealSolveRequest" inverseName="household" inverseEntity="MealSolveRequest"/>
@@ -118,6 +131,7 @@
         <attribute name="summary" optional="YES" attributeType="String"/>
         <attribute name="title" optional="YES" attributeType="String"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="cookingSessions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="recipePlan" inverseEntity="CookingSession"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="recipePlans" inverseEntity="HouseholdProfile"/>
         <relationship name="ingredients" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipeIngredient" inverseName="recipePlan" inverseEntity="RecipeIngredient"/>
         <relationship name="steps" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipeStep" inverseName="recipePlan" inverseEntity="RecipeStep"/>
@@ -134,6 +148,7 @@
         <attribute name="sortOrder" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="source" optional="YES" attributeType="String" defaultValueString="ai"/>
         <relationship name="recipePlan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipePlan" inverseName="ingredients" inverseEntity="RecipePlan"/>
+        <relationship name="substitutionEvents" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="SubstitutionEvent" inverseName="recipeIngredient" inverseEntity="SubstitutionEvent"/>
     </entity>
     <entity name="RecipeStep" representedClassName="RecipeStep" syncable="YES" codeGenerationType="class">
         <attribute name="cautionTagsCSV" optional="YES" attributeType="String" defaultValueString=""/>
@@ -144,5 +159,60 @@
         <attribute name="timerSeconds" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
         <attribute name="title" optional="YES" attributeType="String"/>
         <relationship name="recipePlan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipePlan" inverseName="steps" inverseEntity="RecipePlan"/>
+        <relationship name="substitutionEvents" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="SubstitutionEvent" inverseName="step" inverseEntity="SubstitutionEvent"/>
+        <relationship name="timers" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CookTimer" inverseName="step" inverseEntity="CookTimer"/>
+    </entity>
+    <entity name="CookingSession" representedClassName="CookingSession" syncable="YES" codeGenerationType="class">
+        <attribute name="aiConversationVersion" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="currentStepIndex" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="deletedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="endedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="entryPoint" optional="YES" attributeType="String" defaultValueString="solve"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="localNotificationIdsJSON" optional="YES" attributeType="Binary"/>
+        <attribute name="lowConfidenceCount" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="sessionStatus" optional="YES" attributeType="String" defaultValueString="active"/>
+        <attribute name="startedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="voiceEnabled" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="cookingSessions" inverseEntity="HouseholdProfile"/>
+        <relationship name="outcomeFeedback" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="OutcomeFeedback" inverseName="cookingSession" inverseEntity="OutcomeFeedback"/>
+        <relationship name="recipePlan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipePlan" inverseName="cookingSessions" inverseEntity="RecipePlan"/>
+        <relationship name="substitutionEvents" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SubstitutionEvent" inverseName="cookingSession" inverseEntity="SubstitutionEvent"/>
+        <relationship name="timers" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CookTimer" inverseName="cookingSession" inverseEntity="CookTimer"/>
+    </entity>
+    <entity name="CookTimer" representedClassName="CookTimer" syncable="YES" codeGenerationType="class">
+        <attribute name="durationSec" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="endedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="label" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="startedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="state" optional="YES" attributeType="String" defaultValueString="pending"/>
+        <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="timers" inverseEntity="CookingSession"/>
+        <relationship name="step" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipeStep" inverseName="timers" inverseEntity="RecipeStep"/>
+    </entity>
+    <entity name="SubstitutionEvent" representedClassName="SubstitutionEvent" syncable="YES" codeGenerationType="class">
+        <attribute name="acceptance" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="acceptedAlternativeText" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="hardConstraintCheckPassed" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="missingIngredientDisplayName" optional="YES" attributeType="String"/>
+        <attribute name="modelSuggestionText" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="userProblemText" optional="YES" attributeType="String" defaultValueString=""/>
+        <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="substitutionEvents" inverseEntity="CookingSession"/>
+        <relationship name="recipeIngredient" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipeIngredient" inverseName="substitutionEvents" inverseEntity="RecipeIngredient"/>
+        <relationship name="step" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipeStep" inverseName="substitutionEvents" inverseEntity="RecipeStep"/>
+    </entity>
+    <entity name="OutcomeFeedback" representedClassName="OutcomeFeedback" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="leftoverCount" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="rating" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="spiceLevel" optional="YES" attributeType="String" defaultValueString="medium"/>
+        <attribute name="taste" optional="YES" attributeType="String" defaultValueString="good"/>
+        <attribute name="workload" optional="YES" attributeType="String" defaultValueString="medium"/>
+        <attribute name="wouldRepeat" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="outcomeFeedback" inverseEntity="CookingSession"/>
     </entity>
 </model>

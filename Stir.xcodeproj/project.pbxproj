@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C00C51C001AAAA0000000001 /* CookingSession+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C002AAAA0000000001 /* CookingSession+Extensions.swift */; };
+		C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C004AAAA0000000002 /* CookTimer+Extensions.swift */; };
+		C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C006AAAA0000000003 /* SubstitutionEvent+Extensions.swift */; };
+		C00C51C007AAAA0000000004 /* OutcomeFeedback+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00C51C008AAAA0000000004 /* OutcomeFeedback+Extensions.swift */; };
 		00EC80F4220F9AE9265AEFA5 /* ScanFlowRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */; };
 		030A9B8F543FF9B30B93941D /* SetupKitchenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40A1B4A21CC6EFC11F1C3A1 /* SetupKitchenView.swift */; };
 		04E5EBC3A45393DA0AD37C33 /* SessionDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */; };
@@ -94,6 +98,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C00C51C002AAAA0000000001 /* CookingSession+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookingSession+Extensions.swift"; sourceTree = "<group>"; };
+		C00C51C004AAAA0000000002 /* CookTimer+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookTimer+Extensions.swift"; sourceTree = "<group>"; };
+		C00C51C006AAAA0000000003 /* SubstitutionEvent+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubstitutionEvent+Extensions.swift"; sourceTree = "<group>"; };
+		C00C51C008AAAA0000000004 /* OutcomeFeedback+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OutcomeFeedback+Extensions.swift"; sourceTree = "<group>"; };
 		016A78A0278372166E393E65 /* StirApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirApp.swift; sourceTree = "<group>"; };
 		0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentHouseholdStore.swift; sourceTree = "<group>"; };
 		06DD944D757CD38D2F98B502 /* ScanReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanReviewView.swift; sourceTree = "<group>"; };
@@ -298,12 +306,16 @@
 			isa = PBXGroup;
 			children = (
 				A48A76DF2DD0C28905436318 /* Stir.xcdatamodeld */,
+				C00C51C002AAAA0000000001 /* CookingSession+Extensions.swift */,
+				C00C51C004AAAA0000000002 /* CookTimer+Extensions.swift */,
 				1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */,
 				86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */,
 				1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */,
 				3979F50C2BAFE0D716A7048E /* MealSolveRequest+Extensions.swift */,
+				C00C51C008AAAA0000000004 /* OutcomeFeedback+Extensions.swift */,
 				8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */,
 				FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */,
+				C00C51C006AAAA0000000003 /* SubstitutionEvent+Extensions.swift */,
 				68F32C1FC5D6A3A650A0B53D /* SuggestedDish+Extensions.swift */,
 			);
 			path = Models;
@@ -655,6 +667,10 @@
 				2653823930DD051BDD2C94A0 /* KitchenEquipmentRepository.swift in Sources */,
 				C1624675C7CF760A015E0575 /* LoadingView.swift in Sources */,
 				5720A76E68F5CF2CC16C823E /* Logger+Stir.swift in Sources */,
+				C00C51C001AAAA0000000001 /* CookingSession+Extensions.swift in Sources */,
+				C00C51C003AAAA0000000002 /* CookTimer+Extensions.swift in Sources */,
+				C00C51C007AAAA0000000004 /* OutcomeFeedback+Extensions.swift in Sources */,
+				C00C51C005AAAA0000000003 /* SubstitutionEvent+Extensions.swift in Sources */,
 				6E487073CED2805BB9F1923B /* MealSolveRequest+Extensions.swift in Sources */,
 				ABDC21E86265244E9D9C665C /* OnboardingOptions.swift in Sources */,
 				6ADA59C2305666FD29D964AE /* OnboardingRoot.swift in Sources */,
