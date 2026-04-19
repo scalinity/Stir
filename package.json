@@ -1,0 +1,12 @@
+{
+  "name": "stir",
+  "private": true,
+  "description": "Stir — eval harness launchers. iOS + backend sources live at Stir/ and Backend/ respectively; this package.json exists only to host eval scripts per CLAUDE.md §Verification flows.",
+  "version": "0.0.0",
+  "scripts": {
+    "eval:substitutions": "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/substitutions/run.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
