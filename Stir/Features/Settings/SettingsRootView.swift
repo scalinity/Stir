@@ -45,11 +45,27 @@ struct SettingsRootView: View {
             syncSection
             aboutSection
             versionSection
+            #if DEBUG
+            debugSection
+            #endif
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .stirToast($restoreToast)
     }
+
+    #if DEBUG
+    /// DEBUG-only surface for validation-harness flows (D.1). Hidden
+    /// from release builds via the `#if DEBUG` guard on both the
+    /// section and the destination view file.
+    private var debugSection: some View {
+        Section("Debug") {
+            NavigationLink(destination: VoiceDiagnosticsView()) {
+                Label("Voice Diagnostics", systemImage: "waveform.badge.magnifyingglass")
+            }
+        }
+    }
+    #endif
 
     // MARK: - Plan & Billing
 

@@ -45,8 +45,10 @@
         <relationship name="cookingSessions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CookingSession" inverseName="household" inverseEntity="CookingSession"/>
         <relationship name="dietaryRules" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="DietaryRule" inverseName="household" inverseEntity="DietaryRule"/>
         <relationship name="kitchenEquipment" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="KitchenEquipment" inverseName="household" inverseEntity="KitchenEquipment"/>
+        <relationship name="groceryLists" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="GroceryList" inverseName="household" inverseEntity="GroceryList"/>
         <relationship name="mealSolveRequests" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MealSolveRequest" inverseName="household" inverseEntity="MealSolveRequest"/>
         <relationship name="pantryItems" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="PantryItem" inverseName="household" inverseEntity="PantryItem"/>
+        <relationship name="recipeImports" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipeImport" inverseName="household" inverseEntity="RecipeImport"/>
         <relationship name="recipePlans" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipePlan" inverseName="household" inverseEntity="RecipePlan"/>
     </entity>
     <entity name="DietaryRule" representedClassName="DietaryRule" syncable="YES" codeGenerationType="class">
@@ -256,7 +258,6 @@
         <attribute name="aiRequestId" optional="YES" attributeType="String"/>
         <attribute name="completedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="errorCode" optional="YES" attributeType="String"/>
-        <attribute name="householdId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <!-- 0 on non-OCR paths; 1..20 on screenshot_ocr -->
         <attribute name="ocrPageCount" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
@@ -269,17 +270,18 @@
         <!-- pending | processing | completed | failed -->
         <attribute name="status" optional="YES" attributeType="String" defaultValueString="pending"/>
         <attribute name="submittedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="recipeImports" inverseEntity="HouseholdProfile"/>
     </entity>
     <entity name="GroceryList" representedClassName="GroceryList" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="exportedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
-        <attribute name="householdId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="reminderListId" optional="YES" attributeType="String"/>
         <attribute name="sourceCookingSessionId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <!-- draft | exported  (spec §4.16) -->
         <attribute name="status" optional="YES" attributeType="String" defaultValueString="draft"/>
         <attribute name="title" optional="YES" attributeType="String" defaultValueString=""/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="groceryLists" inverseEntity="HouseholdProfile"/>
         <relationship name="items" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="GroceryItem" inverseName="list" inverseEntity="GroceryItem"/>
     </entity>
     <entity name="GroceryItem" representedClassName="GroceryItem" syncable="YES" codeGenerationType="class">
