@@ -84,8 +84,14 @@ final class LiveWebSocketTransport {
         guard url.scheme == "wss" else {
             throw TransportError.openFailed(message: "non-wss scheme rejected")
         }
-        guard url.host?.hasSuffix("googleapis.com") == true else {
-            throw TransportError.openFailed(message: "host not pinned to googleapis.com")
+        // Exact host pin — `hasSuffix("googleapis.com")` alone would
+        // allow `evilgoogleapis.com`. The Gemini Live constrained
+        // WebSocket endpoint lives exclusively on this host per the
+        // mint's `WS_BASE` constant; no legitimate response should
+        // point anywhere else.
+        guard let host = url.host?.lowercased(),
+              host == "generativelanguage.googleapis.com" else {
+            throw TransportError.openFailed(message: "host not pinned to generativelanguage.googleapis.com")
         }
         var request = URLRequest(url: url)
         // Gemini Live's ephemeral-token path uses ?access_token=... in
