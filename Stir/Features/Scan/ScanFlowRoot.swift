@@ -46,6 +46,13 @@ struct ScanFlowRoot: View {
         case capture
         case review
         case options
+        /// Selected-dish detail screen. `DishCard` is Hashable (via its
+        /// own conformance on all stored fields), so the enum stays
+        /// Hashable. We wrap the dish in a Route case rather than
+        /// letting `NavigationLink` push a bare `DishCard` — the stack's
+        /// typed path is `[Route]`, and SwiftUI refuses to activate a
+        /// `NavigationLink(value:)` whose type doesn't match the path.
+        case preview(DishCard)
     }
 
     var body: some View {
@@ -71,10 +78,9 @@ struct ScanFlowRoot: View {
                     )
                 case .options:
                     DinnerOptionsView(viewModel: solveViewModel)
+                case let .preview(dish):
+                    DishPreviewView(viewModel: solveViewModel, dish: dish)
                 }
-            }
-            .navigationDestination(for: DishCard.self) { dish in
-                DishPreviewView(viewModel: solveViewModel, dish: dish)
             }
             .sheet(isPresented: $showConstraintsSheet) {
                 ConstraintsSheet(

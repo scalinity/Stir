@@ -50,7 +50,12 @@ struct DinnerOptionsView: View {
     @ViewBuilder
     private func slotCard(_ slot: SolveViewModel.SlotState) -> some View {
         if let dish = slot.dish {
-            NavigationLink(value: dish) {
+            // Wrap the dish in the parent stack's Route case — a bare
+            // `NavigationLink(value: dish)` would not activate because
+            // the stack's typed path is `[ScanFlowRoot.Route]`, not
+            // `[DishCard]`. SwiftUI silently refuses links whose value
+            // type doesn't match the path.
+            NavigationLink(value: ScanFlowRoot.Route.preview(dish)) {
                 DishCardView(dish: dish)
             }
             .buttonStyle(.plain)
