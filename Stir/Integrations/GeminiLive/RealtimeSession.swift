@@ -279,41 +279,65 @@ final class RealtimeSession: VoiceSessionDriver {
         currentStepNumber: Int,
         recipePlanId: UUID,
     ) async throws -> CookTurnResult {
-        guard stateMachine.state == .userSpeaking else {
+        // Hands-free tolerance: VAD may have auto-advanced us past
+        // .userSpeaking before the VM's endTurn landed. Accept any
+        // live turn state — handleServerContent and the turnComplete
+        // path already drive state correctly, endTurn just awaits
+        // the completion signal.
+        switch stateMachine.state {
+        case .userSpeaking, .thinking, .modelSpeaking:
+            break
+        case .ready:
+            // turnComplete already arrived before endTurn was called
+            // (common when VAD is fast and the VM's tap-end is slow).
+            // Return an empty result; VM's post-processing is a no-op
+            // in Live mode anyway (response already played).
+            return CookTurnResult(
+                transcript: "",
+                response: CookTurnResponse(
+                    spokenResponse: currentTurnInlineText ?? "",
+                    suggestedAction: .none,
+                    actionParams: nil,
+                    promptVersion: mintResponse?.promptVersion ?? "",
+                    latencyMS: 0,
+                    retryCount: 0,
+                ),
+                sttLatencyMs: 0,
+                backendLatencyMs: 0,
+            )
+        default:
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
-        // Explicit `audioStreamEnd` tells Gemini's automatic VAD that
-        // no more audio is coming. Without this, cutting the mic on a
-        // tap-to-end UX leaves VAD waiting for trailing silence it
-        // never sees, and `turnComplete` never arrives — producing the
-        // 30s `turnDrained` timeout observed 2026-04-20. Send BEFORE
-        // stopping mic forwarding so the signal actually makes it onto
-        // the wire (stopMicForwarding cancels the task that serializes
-        // outbound sends).
+        // Hands-free model: mic stays hot continuously across the
+        // session. VAD (server-side, `automaticActivityDetection` is
+        // enabled in the mint) drives turn boundaries — iOS never
+        // stops the mic mid-session and never signals "audio stream
+        // done" to the server.
         //
-        // Send is best-effort: if the WebSocket already dropped, the
-        // session is dead anyway and the mic teardown below handles
-        // cleanup. Swallow the send error so a transport glitch here
-        // doesn't mask the real issue (which would be the dropped WS).
-        if let transport {
-            do {
-                try await transport.send(.realtimeInputAudioStreamEnd)
-                #if DEBUG
-                VoiceSessionLog.log("turn.audio_stream_end_sent")
-                #endif
-            } catch {
-                Logger.voice.warning(
-                    "audio_stream_end_send_failed error=\(error.localizedDescription, privacy: .private)",
-                )
-                #if DEBUG
-                VoiceSessionLog.logError("turn.audio_stream_end_failed", error: error)
-                #endif
-            }
+        // Lessons from the two prior attempts:
+        //   1. Abruptly stopping the mic on tap-to-end (original
+        //      code) leaves VAD with no trailing silence — it sits
+        //      waiting for more audio and `turnComplete` never
+        //      arrives (30s `turnDrained` observed 2026-04-20).
+        //   2. Sending `realtimeInput.audioStreamEnd` as a "done"
+        //      signal CLOSES the WebSocket (TransportError
+        //      `connectionDropped` with "Socket is not connected"
+        //      observed immediately after the send). That frame is
+        //      a session-terminal signal, not a turn-end signal —
+        //      not usable for a multi-turn cook session.
+        //
+        // So: endTurn's job is just UI/state coordination. Advance
+        // state to `.thinking` ONLY if we're still in .userSpeaking —
+        // VAD may already have auto-advanced us through
+        // .modelSpeaking (via handleServerContent). Mic stays hot
+        // either way. Then await the server-driven `turnComplete`.
+        // If the user is still talking past the tap, VAD processes
+        // their audio normally and closes the turn on natural silence.
+        // If the user stopped before tapping, VAD already saw the
+        // silence and `turnComplete` may be near instant.
+        if stateMachine.state == .userSpeaking {
+            stateMachine.advance(to: .thinking)
         }
-        audioPipeline?.stopCapture()
-        stopMicForwarding()
-
-        stateMachine.advance(to: .thinking)
         #if DEBUG
         VoiceSessionLog.log("turn.end_submitted", ["turn": turnCount + 1])
         #endif
@@ -384,7 +408,14 @@ final class RealtimeSession: VoiceSessionDriver {
             resultType: .normal,
         ))
 
-        stateMachine.advance(to: .ready)
+        // handleServerContent's turnComplete handler already advances
+        // to .ready in the hands-free auto-loop path. Only advance
+        // here if we're still stuck at .modelSpeaking (e.g.,
+        // turnComplete arrived during an extreme race and the
+        // auto-advance hadn't applied yet).
+        if stateMachine.state == .modelSpeaking {
+            stateMachine.advance(to: .ready)
+        }
         return CookTurnResult(
             transcript: "",
             response: response,
@@ -695,13 +726,31 @@ final class RealtimeSession: VoiceSessionDriver {
                 "state": stateMachine.state.rawValue,
             ])
             #endif
-            // Audio can arrive either from the first post-thinking
-            // response OR after a toolResponse round-trip (Gemini
-            // auto-continues the turn, CLAUDE.md §sharp-edge #9). Both
-            // `.thinking → .modelSpeaking` and `.toolCalling →
-            // .modelSpeaking` are legal state-machine transitions.
-            if stateMachine.state == .thinking || stateMachine.state == .toolCalling {
+            // Hands-free: audio chunks can arrive from ANY non-terminal
+            // state because the mic is always hot and VAD drives turn
+            // transitions server-side without iOS prior notice.
+            //
+            //   .userSpeaking  → .modelSpeaking  (user paused, server
+            //                                     VAD fired, response
+            //                                     arrived — no tap)
+            //   .thinking      → .modelSpeaking  (original tap-to-end
+            //                                     path — VM advanced
+            //                                     to thinking before)
+            //   .toolCalling   → .modelSpeaking  (CLAUDE.md #9 — model
+            //                                     auto-continues after
+            //                                     toolResponse)
+            //   .ready         → .modelSpeaking  (next-turn response
+            //                                     arrived while iOS
+            //                                     was between turns)
+            //
+            // Already-.modelSpeaking is a no-op (the guard avoids a
+            // redundant .modelSpeaking → .modelSpeaking transition
+            // which canTransition disallows).
+            switch stateMachine.state {
+            case .userSpeaking, .thinking, .toolCalling, .ready:
                 stateMachine.advance(to: .modelSpeaking)
+            default:
+                break
             }
             // Break on first failure — if `enqueuePlayback` throws,
             // the audio engine is stopped and every subsequent chunk
@@ -723,21 +772,36 @@ final class RealtimeSession: VoiceSessionDriver {
             currentTurnInlineText = (currentTurnInlineText ?? "") + text
         }
         if content.turnComplete {
-            // Guard against `.thinking → .ready` illegal transition:
-            // Gemini can emit `turnComplete` with no preceding audio
-            // (text-only response or bare completion signal). Without
-            // this, `handleServerContent` leaves state in `.thinking`
-            // and endTurn's subsequent `advance(to: .ready)` crashes
-            // in debug builds / stucks state in release. Advance
-            // through `.modelSpeaking` first so the .ready transition
-            // is always legal.
-            if stateMachine.state == .thinking {
+            // Advance all the way to `.ready` so the hands-free loop
+            // is self-sustaining — the next user utterance lands on a
+            // legal `.ready → .modelSpeaking` edge without any VM
+            // intervention.
+            //
+            // Transitions handled here:
+            //   .thinking      → .modelSpeaking → (bare completion;
+            //                    audio never arrived — no continuation
+            //                    to .ready yet, so step through)
+            //   .modelSpeaking → .ready         (natural end after
+            //                    audio chunks played)
+            //   .userSpeaking  → .ready         (VAD fired with no
+            //                    server-audio response, e.g. the
+            //                    model declined to speak)
+            //   .toolCalling   → .modelSpeaking → .ready (guard
+            //                    against stuck tool states)
+            switch stateMachine.state {
+            case .thinking, .toolCalling:
                 stateMachine.advance(to: .modelSpeaking)
+                stateMachine.advance(to: .ready)
+            case .modelSpeaking, .userSpeaking:
+                stateMachine.advance(to: .ready)
+            default:
+                break
             }
             // The playback may still be queued — we resume the
-            // continuation immediately so the VM can react; audio
-            // continues playing in the background. The VM calls
-            // cancelSpeaking / next tap to interrupt if needed.
+            // continuation immediately so any waiting caller (VM
+            // tap-to-end path) can react; audio continues playing in
+            // the background. The VM calls cancelSpeaking / next tap
+            // to interrupt if needed.
             //
             // Nil-clear before resume so a re-entrant turnComplete
             // (e.g., server emits one on audio end and another on

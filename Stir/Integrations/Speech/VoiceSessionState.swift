@@ -73,14 +73,31 @@ extension VoiceSessionState {
         case .connecting:
             return next == .ready
         case .ready:
-            return next == .userSpeaking
+            // Tap-to-start-session → .userSpeaking (original path).
+            // VAD-driven next turn → .modelSpeaking directly when
+            //   server emits audio without iOS seeing a .userSpeaking
+            //   transition (hands-free mode: user speaks between turns
+            //   while mic stays hot; iOS state at that moment is
+            //   .ready and the first server frame is already model
+            //   audio).
+            return next == .userSpeaking || next == .modelSpeaking
         case .userSpeaking:
-            // C.3 → transcribing; C.2 → thinking (server VAD completes the turn)
-            return next == .transcribing || next == .thinking
+            // C.3 → transcribing.
+            // C.2 hands-free: server VAD completes the turn server-
+            //   side and iOS receives audio chunks while state is
+            //   still .userSpeaking. Allow the direct jump to
+            //   .modelSpeaking so handleServerContent can advance
+            //   without a .thinking pit stop.
+            // C.2 tap-to-end: VM advances to .thinking explicitly.
+            // .ready is the cancellation / empty-turn fallback.
+            return next == .transcribing
+                || next == .thinking
+                || next == .modelSpeaking
+                || next == .ready
         case .transcribing:
             return next == .thinking
         case .thinking:
-            return next == .modelSpeaking || next == .toolCalling
+            return next == .modelSpeaking || next == .toolCalling || next == .ready
         case .modelSpeaking:
             // Back to ready for the next turn, OR into a refresh (C.2).
             return next == .ready || next == .refreshing
