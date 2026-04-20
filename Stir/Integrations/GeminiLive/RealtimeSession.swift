@@ -45,6 +45,10 @@ enum LiveSessionBudget {
     /// user audio closes. 2× Gemini's observed ~15 s p95 for a long
     /// multi-sentence response.
     static let turnCompleteSec: Double = 30
+    /// Turn count at which we trigger a session refresh (CLAUDE.md
+    /// §Gemini Live constants `refreshAtTurnCount`). Refresh is a
+    /// log-only stub today; the threshold firing is observability.
+    static let refreshAtTurnCount: Int = 15
 }
 
 @MainActor
@@ -80,10 +84,28 @@ final class RealtimeSession: VoiceSessionDriver {
     // after preWarm succeeds.
     private var receiveDispatcherTask: Task<Void, Never>?
 
-    // Per-turn accumulator. Reset at beginTurn.
+    // Per-turn accumulator. Reset at `finalizeTurn()` so hands-free
+    // turns (which never re-enter beginTurn) get clean slate per turn.
     private var currentTurnInlineText: String?
     private var turnCompleteContinuation: CheckedContinuation<Void, Error>?
     private var lastUsageMetadata: LiveUsageMetadata?
+    /// Wall-clock when the CURRENT turn began processing server-side.
+    /// Set at beginTurn (first turn) and at each `finalizeTurn()` (next
+    /// turn starts implicitly after previous finalizes). Used to stamp
+    /// backendLatencyMs in the CookTurnResult — approximate since iOS
+    /// can't detect the server's speech-start VAD event in hands-free.
+    private var turnStartedAt: Date?
+    /// Snapshot of the most recently finalized turn. Published by
+    /// `finalizeTurn()` so `endTurn()` (when the VM's tap-to-end path
+    /// lands after the hands-free auto-loop already resolved the turn)
+    /// has something concrete to return. Nil before the first turn
+    /// completes.
+    private var lastTurnResult: CookTurnResult?
+    /// True once `refreshSession()` has been triggered for this cycle
+    /// (prevents refire at every subsequent turn past the threshold).
+    /// Reset when a real refresh lands — currently not wired because
+    /// refreshSession is a log-only stub (D.1).
+    private var refreshRequested: Bool = false
 
     // Tool-call side-effect callbacks. Set by CookModeViewModel at
     // Cook Mode entry so this actor can route advance_step / start_timer
@@ -205,10 +227,23 @@ final class RealtimeSession: VoiceSessionDriver {
             //    Backend pre-serializes the payload so iOS forwards a
             //    single JSON blob — no shape drift possible between
             //    what the token authorizes and what the client sends.
-            guard let data = response.setupFrameJSON.data(using: .utf8),
-                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                throw RealtimeSessionError.openFailed(message: "malformed setup_frame_json")
+            guard let data = response.setupFrameJSON.data(using: .utf8) else {
+                throw RealtimeSessionError.openFailed(
+                    message: "setup_frame_json not utf8",
+                )
+            }
+            let parsed: Any
+            do {
+                parsed = try JSONSerialization.jsonObject(with: data, options: [])
+            } catch {
+                throw RealtimeSessionError.openFailed(
+                    message: "setup_frame_json parse failed: \(error.localizedDescription)",
+                )
+            }
+            guard let payload = parsed as? [String: Any] else {
+                throw RealtimeSessionError.openFailed(
+                    message: "setup_frame_json root is not a JSON object",
+                )
             }
             try await transport.send(.setup(payload: payload))
             #if DEBUG
@@ -256,9 +291,11 @@ final class RealtimeSession: VoiceSessionDriver {
             throw RealtimeSessionError.notOpen
         }
 
-        // Reset per-turn accumulators
+        // Reset per-turn accumulators for the first turn; subsequent
+        // hands-free turns get the same reset via `finalizeTurn()`.
         currentTurnInlineText = nil
         lastUsageMetadata = nil
+        turnStartedAt = Date()
 
         stateMachine.advance(to: .userSpeaking)
         try pipeline.startCapture()
@@ -290,21 +327,11 @@ final class RealtimeSession: VoiceSessionDriver {
         case .ready:
             // turnComplete already arrived before endTurn was called
             // (common when VAD is fast and the VM's tap-end is slow).
-            // Return an empty result; VM's post-processing is a no-op
-            // in Live mode anyway (response already played).
-            return CookTurnResult(
-                transcript: "",
-                response: CookTurnResponse(
-                    spokenResponse: currentTurnInlineText ?? "",
-                    suggestedAction: .none,
-                    actionParams: nil,
-                    promptVersion: mintResponse?.promptVersion ?? "",
-                    latencyMS: 0,
-                    retryCount: 0,
-                ),
-                sttLatencyMs: 0,
-                backendLatencyMs: 0,
-            )
+            // Return the most recently finalized turn snapshot, or an
+            // empty result if somehow no turn ever completed. VM's
+            // post-processing is a no-op in Live mode anyway
+            // (response already played during the turn).
+            return lastTurnResult ?? makeEmptyTurnResult()
         default:
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
@@ -342,9 +369,9 @@ final class RealtimeSession: VoiceSessionDriver {
         VoiceSessionLog.log("turn.end_submitted", ["turn": turnCount + 1])
         #endif
 
-        // Wait for serverContent turnComplete (the dispatch loop
-        // advances state and fulfills the continuation).
-        let submittedAt = Date()
+        // Wait for serverContent turnComplete — handleServerContent
+        // advances state AND calls `finalizeTurn()` before resuming
+        // the continuation, so when we wake up the snapshot is ready.
         do {
             try await awaitTurnComplete()
         } catch {
@@ -354,73 +381,35 @@ final class RealtimeSession: VoiceSessionDriver {
             throw error
         }
 
-        turnCount += 1
-        #if DEBUG
-        VoiceSessionLog.log("turn.complete", [
-            "turn": turnCount,
-            "latency_ms": Int(Date().timeIntervalSince(submittedAt) * 1000),
-            "prompt_tokens": lastUsageMetadata?.promptTokenCount ?? -1,
-            "total_tokens": lastUsageMetadata?.totalTokenCount ?? -1,
-        ])
-        #endif
-
-        // Gemini Live doesn't return a structured "suggested_action"
-        // on the normal response path — tool calls are the out-of-band
-        // mechanism. The audio response itself IS the spoken response;
-        // we already played it during the turn. Build a CookTurnResult
-        // that mirrors the fallback shape but with audio transcribed
-        // as empty (we don't have a transcript on Live; the model ate
-        // the raw audio).
-        //
-        // TODO(D.1): if we need transcripts for VoiceTurn persistence,
-        // add a post-turn STT pass OR request responseModalities: [AUDIO, TEXT]
-        // in the mint. TEXT modality is cheap and gives us transcript.
-        let totalMs = Int(Date().timeIntervalSince(submittedAt) * 1000)
-        let response = CookTurnResponse(
-            spokenResponse: currentTurnInlineText ?? "",
-            suggestedAction: .none,
-            actionParams: nil,
-            promptVersion: mintResponse?.promptVersion ?? "",
-            latencyMS: totalMs,
-            retryCount: 0,
-        )
-
-        // Persist VoiceTurn rows (user + model). Transcript unknown on
-        // Live path — empty strings are fine per schema. turnIndex is
-        // 1-indexed across the session's lifetime.
-        let userIdx = voiceTurnRepository.nextTurnIndex(for: cookingSession)
-        try? voiceTurnRepository.persist(.init(
-            session: cookingSession,
-            speaker: .user,
-            turnIndex: userIdx,
-            transcriptText: "",
-            inputMode: .voice,
-            latencyMs: 0,
-            resultType: .normal,
-        ))
-        try? voiceTurnRepository.persist(.init(
-            session: cookingSession,
-            speaker: .model,
-            turnIndex: userIdx + 1,
-            transcriptText: currentTurnInlineText ?? "",
-            inputMode: .voice,
-            latencyMs: totalMs,
-            resultType: .normal,
-        ))
-
         // handleServerContent's turnComplete handler already advances
-        // to .ready in the hands-free auto-loop path. Only advance
-        // here if we're still stuck at .modelSpeaking (e.g.,
-        // turnComplete arrived during an extreme race and the
-        // auto-advance hadn't applied yet).
+        // to .ready in the hands-free auto-loop path. Defensive
+        // catch-up if we're still at .modelSpeaking (extreme race
+        // where continuation fired before the advance sequence, which
+        // shouldn't happen on the MainActor but costs nothing to
+        // guard).
         if stateMachine.state == .modelSpeaking {
             stateMachine.advance(to: .ready)
         }
-        return CookTurnResult(
+        return lastTurnResult ?? makeEmptyTurnResult()
+    }
+
+    /// Zero-valued CookTurnResult used when endTurn is called before
+    /// any turn has finalized (edge case) OR when the hands-free loop
+    /// processed the turn without populating a snapshot (also shouldn't
+    /// happen — finalizeTurn always sets lastTurnResult).
+    private func makeEmptyTurnResult() -> CookTurnResult {
+        CookTurnResult(
             transcript: "",
-            response: response,
+            response: CookTurnResponse(
+                spokenResponse: "",
+                suggestedAction: .none,
+                actionParams: nil,
+                promptVersion: mintResponse?.promptVersion ?? "",
+                latencyMS: 0,
+                retryCount: 0,
+            ),
             sttLatencyMs: 0,
-            backendLatencyMs: totalMs,
+            backendLatencyMs: 0,
         )
     }
 
@@ -513,6 +502,85 @@ final class RealtimeSession: VoiceSessionDriver {
         Logger.voice.info(
             "live_session_refresh_requested turn=\(self.turnCount, privacy: .public) TODO=D.1",
         )
+    }
+
+    /// Called at every server-driven `turnComplete`. Hands-free and
+    /// tap-to-end both route through here, so turn-boundary bookkeeping
+    /// (turnCount, VoiceTurn persistence, accumulator reset, refresh
+    /// trigger) lives in ONE place. Earlier drafts did this inline in
+    /// `endTurn()` only — which silently skipped every hands-free turn
+    /// where the VM never called endTurn, breaking turn-count-based
+    /// session refresh and leaking currentTurnInlineText across turns.
+    private func finalizeTurn() {
+        let now = Date()
+        let startedAt = turnStartedAt ?? now
+        let totalMs = Int(now.timeIntervalSince(startedAt) * 1000)
+        turnCount += 1
+
+        #if DEBUG
+        VoiceSessionLog.log("turn.complete", [
+            "turn": turnCount,
+            "latency_ms": totalMs,
+            "prompt_tokens": lastUsageMetadata?.promptTokenCount ?? -1,
+            "total_tokens": lastUsageMetadata?.totalTokenCount ?? -1,
+        ])
+        #endif
+
+        // Snapshot the per-turn result BEFORE clearing accumulators —
+        // `endTurn()` (if the VM called it) reads this via
+        // `lastTurnResult` after `awaitTurnComplete` resumes.
+        let snapshot = CookTurnResult(
+            transcript: "",
+            response: CookTurnResponse(
+                spokenResponse: currentTurnInlineText ?? "",
+                suggestedAction: .none,
+                actionParams: nil,
+                promptVersion: mintResponse?.promptVersion ?? "",
+                latencyMS: totalMs,
+                retryCount: 0,
+            ),
+            sttLatencyMs: 0,
+            backendLatencyMs: totalMs,
+        )
+        lastTurnResult = snapshot
+
+        // Persist VoiceTurn rows (user + model). Transcript unknown on
+        // Live path — empty strings are fine per schema. turnIndex is
+        // 1-indexed across the session's lifetime.
+        let userIdx = voiceTurnRepository.nextTurnIndex(for: cookingSession)
+        try? voiceTurnRepository.persist(.init(
+            session: cookingSession,
+            speaker: .user,
+            turnIndex: userIdx,
+            transcriptText: "",
+            inputMode: .voice,
+            latencyMs: 0,
+            resultType: .normal,
+        ))
+        try? voiceTurnRepository.persist(.init(
+            session: cookingSession,
+            speaker: .model,
+            turnIndex: userIdx + 1,
+            transcriptText: currentTurnInlineText ?? "",
+            inputMode: .voice,
+            latencyMs: totalMs,
+            resultType: .normal,
+        ))
+
+        // Reset per-turn accumulators now that we've snapshotted.
+        currentTurnInlineText = nil
+        lastUsageMetadata = nil
+        turnStartedAt = now
+
+        // Session refresh trigger. `refreshSession()` is a log-only
+        // stub today (D.1) — firing it here ensures the log shows up
+        // when the threshold crosses, which is the observability we
+        // actually want to see in validation. Fire-once guard keeps
+        // the log from spamming every subsequent turn.
+        if !refreshRequested && turnCount >= LiveSessionBudget.refreshAtTurnCount {
+            refreshRequested = true
+            Task { [weak self] in await self?.refreshSession() }
+        }
     }
 
     /// Send a sessionUpdate frame to prune context to the last N turns
@@ -797,6 +865,12 @@ final class RealtimeSession: VoiceSessionDriver {
             default:
                 break
             }
+            // Finalize BEFORE resuming the continuation so `endTurn()`
+            // reads a populated `lastTurnResult` when it wakes up.
+            // finalizeTurn handles persistence, turnCount increment,
+            // per-turn accumulator reset, and the refresh trigger.
+            finalizeTurn()
+
             // The playback may still be queued — we resume the
             // continuation immediately so any waiting caller (VM
             // tap-to-end path) can react; audio continues playing in

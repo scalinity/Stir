@@ -92,6 +92,54 @@ final class VoiceSessionStateTests: XCTestCase {
         XCTAssertFalse(VoiceSessionState.closed.canTransition(to: .ready))
     }
 
+    // MARK: - Hands-free (C.2) additions
+
+    func test_livePath_handsFree_readyToModelSpeakingIsLegal() {
+        // Hands-free next-turn: mic stays hot across turn boundaries,
+        // so iOS state is .ready when the server finishes processing
+        // the user's NEXT utterance and starts emitting audio. The
+        // .ready → .modelSpeaking edge is the hands-free entry into
+        // the model's response without any iOS-driven .userSpeaking
+        // transition.
+        XCTAssertTrue(VoiceSessionState.ready.canTransition(to: .modelSpeaking))
+    }
+
+    func test_livePath_handsFree_userSpeakingToModelSpeakingIsLegal() {
+        // Hands-free fast path: server VAD fires while iOS is still in
+        // .userSpeaking; the first inbound audio chunks advance state
+        // directly without a .thinking pit stop.
+        XCTAssertTrue(VoiceSessionState.userSpeaking.canTransition(to: .modelSpeaking))
+    }
+
+    func test_livePath_userSpeakingToReadyIsLegal() {
+        // Edge: server VAD fired but model chose not to respond
+        // (turnComplete with no audio). No .modelSpeaking hop needed.
+        XCTAssertTrue(VoiceSessionState.userSpeaking.canTransition(to: .ready))
+    }
+
+    func test_livePath_thinkingToReadyIsLegal() {
+        // Bare turnComplete after explicit tap-to-end: VM advanced to
+        // .thinking, server emitted empty turnComplete. handleServer-
+        // Content needs to collapse straight to .ready.
+        XCTAssertTrue(VoiceSessionState.thinking.canTransition(to: .ready))
+    }
+
+    func test_livePath_fullHandsFreeLoop_readyTurn1ToReadyTurn2() {
+        // Turn 1: tap-to-start.
+        let machine = VoiceSessionStateMachine()
+        _ = machine.advance(to: .connecting)
+        _ = machine.advance(to: .ready)
+        _ = machine.advance(to: .userSpeaking)
+        // VAD-driven turn completion: userSpeaking → modelSpeaking
+        // direct (no thinking), then → ready on turnComplete.
+        XCTAssertTrue(machine.advance(to: .modelSpeaking))
+        XCTAssertTrue(machine.advance(to: .ready))
+        // Turn 2: user speaks again, mic still hot, no beginTurn call.
+        // First server audio drives ready → modelSpeaking → ready.
+        XCTAssertTrue(machine.advance(to: .modelSpeaking))
+        XCTAssertTrue(machine.advance(to: .ready))
+    }
+
     // MARK: - Illegal transitions
 
     func test_illegal_idleToUserSpeaking() {
@@ -99,14 +147,19 @@ final class VoiceSessionStateTests: XCTestCase {
                        "must transition through ready first")
     }
 
-    func test_illegal_readyToModelSpeaking() {
-        // Can't skip userSpeaking + thinking.
-        XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .modelSpeaking))
-    }
-
     func test_illegal_transcribingToModelSpeaking() {
         // Must go through `thinking` first — backend response hasn't arrived.
         XCTAssertFalse(VoiceSessionState.transcribing.canTransition(to: .modelSpeaking))
+    }
+
+    func test_illegal_readyToUnrelatedLateStates() {
+        // .ready can only step forward into .userSpeaking (tap-start)
+        // or .modelSpeaking (hands-free next turn). Other forward
+        // states (.thinking, .transcribing, .toolCalling) still
+        // require traversal through intermediate steps.
+        XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .thinking))
+        XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .transcribing))
+        XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .toolCalling))
     }
 
     // MARK: - Callback
