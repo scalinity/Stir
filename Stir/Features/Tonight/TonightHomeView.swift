@@ -61,6 +61,26 @@ struct TonightHomeView: View {
                     )
                 }
             }
+            .fullScreenCover(item: Binding(
+                get: { coordinator.activeFreshCook },
+                set: { coordinator.activeFreshCook = $0 },
+            )) { request in
+                // Fresh Cook Mode launched from Scan → DishPreview.
+                // Presented HERE (not nested inside ScanFlow) so iOS
+                // doesn't queue the presentation behind ScanFlow's
+                // fullScreenCover. DishPreview dismisses ScanFlow
+                // first, then this cover takes over.
+                CookModeRoot(
+                    recipePlan: request.recipePlan,
+                    household: request.household,
+                    aiDispatch: coordinator.aiDispatch,
+                    source: .solve,
+                    onDismiss: {
+                        coordinator.dismissCookMode()
+                        Task { await refreshCookingState() }
+                    },
+                )
+            }
             .fullScreenCover(item: $resumeCookMode) { session in
                 if let plan = session.recipePlan,
                    let household = session.household {

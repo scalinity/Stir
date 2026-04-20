@@ -1,9 +1,12 @@
 // DishPreviewView
 //
 // Step-4 landing page. Shows the chosen dish in full: ingredients,
-// steps, missing-from-pantry callouts. "Start Cooking" now presents
-// CookModeRoot as a fullScreenCover — immersive, with dedicated exit
-// affordance so a back-swipe can't drop the user mid-recipe.
+// steps, missing-from-pantry callouts. "Start Cooking" dismisses the
+// parent ScanFlowRoot and routes Cook Mode presentation through
+// `RootCoordinator.activeFreshCook` so it presents cleanly at the
+// TonightHome layer — nested fullScreenCovers (ScanFlow + CookMode)
+// hit iOS's "only single sheet" limit and silently queue the inner
+// presentation forever.
 
 import SwiftUI
 
@@ -13,9 +16,12 @@ struct DishPreviewView: View {
 
     @Environment(EntitlementService.self) private var entitlements
     @Environment(RootCoordinator.self) private var coordinator
+    /// Dismisses the enclosing ScanFlowRoot fullScreenCover. After
+    /// it dismisses, TonightHome's `activeFreshCook` cover presents
+    /// Cook Mode — sequential, no modal collision.
+    @Environment(\.dismiss) private var dismiss
 
     @State private var hasCapturedSelection = false
-    @State private var cookModePresented = false
     @State private var localFavorite: Bool = false
 
     /// Ingredient amount column min width — scales with Dynamic Type so
@@ -66,26 +72,6 @@ struct DishPreviewView: View {
             viewModel.selectDish(dish)
             // Initial favorite state reflects the persisted RecipePlan if any.
             localFavorite = viewModel.persistedRecipePlan(for: dish)?.isFavorite ?? false
-        }
-        .fullScreenCover(isPresented: $cookModePresented) {
-            if let plan = viewModel.persistedRecipePlan(for: dish),
-               let household = viewModel.currentHousehold {
-                CookModeRoot(
-                    recipePlan: plan,
-                    household: household,
-                    aiDispatch: viewModel.dispatch,
-                    source: .solve,
-                    onDismiss: { cookModePresented = false },
-                )
-            } else {
-                VStack(spacing: 12) {
-                    Text("Couldn't load this dish")
-                        .font(.headline)
-                    Button("Close") { cookModePresented = false }
-                        .buttonStyle(.borderedProminent)
-                }
-                .padding(40)
-            }
         }
     }
 
@@ -221,11 +207,24 @@ struct DishPreviewView: View {
     }
 
     private var startCookingBar: some View {
-        // Step 4 activates this. Button presents CookModeRoot as a
-        // fullScreenCover (not a navigation push) so a back-swipe can't
-        // accidentally drop the user mid-recipe.
+        // Tap:
+        //   1. Ask coordinator to queue a fresh Cook Mode session
+        //      (recipe plan + household resolved from the VM).
+        //   2. Dismiss ScanFlowRoot (we're inside its fullScreenCover).
+        //   3. When ScanFlowRoot's dismiss animation completes,
+        //      TonightHome's `.fullScreenCover(item: $activeFreshCook)`
+        //      presents Cook Mode cleanly — no nested-modal collision.
+        //
+        // If persistedRecipePlan or currentHousehold is nil (rare CloudKit
+        // nullify case, same guard as TonightHome.resumeCookMode), fall
+        // through silently — no Cook Mode presents, no crash. Upstream
+        // error handling catches the UX gap.
         Button {
-            cookModePresented = true
+            guard let plan = viewModel.persistedRecipePlan(for: dish),
+                  let household = viewModel.currentHousehold
+            else { return }
+            coordinator.startCookMode(recipePlan: plan, household: household)
+            dismiss()
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
