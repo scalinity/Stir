@@ -1,0 +1,494 @@
+// SpeechFallbackService
+//
+// Cook Mode voice fallback path (C.3). Triggered when:
+//   - Gemini Live is unavailable (server flag `disable_cook_realtime`)
+//   - Live session fails to mint
+//   - Live session drops mid-turn and reconnect fails (C.2 transition)
+//
+// Pipeline: SFSpeechRecognizer (on-device) → /v1/ai/cook-turn → AVSpeechSynthesizer.
+//
+// ADR 0007 pre-commits honored:
+//   - Enhanced voice, NOT Premium (Premium requires download-on-demand
+//     and fails silently when absent).
+//   - Pre-warm STT + TTS on Cook Mode entry. Engagement <200 ms.
+//   - `requiresOnDeviceRecognition = true` for privacy.
+//   - Tap-to-speak — no barge-in. Barge-in is a Live-only UX.
+//   - VoiceTurn rows persisted on both paths with inputMode='voice';
+//     telemetry `path` property discriminates (`gemini_fallback` here).
+//   - Shared AVAudioSession from AVAudioSessionConfigurator.
+//   - Error paths: STT fail → inline toast; backend fail → AIDispatch
+//     mapping; TTS fail → caller renders spoken_response as visible text.
+
+import AVFoundation
+import Foundation
+import OSLog
+import Speech
+
+// MARK: - Public error type
+
+enum SpeechFallbackError: Error, Equatable, Sendable {
+    /// One of: SFSpeechRecognizer authorization denied, microphone
+    /// permission denied. Distinguish via the associated `kind`.
+    case permissionDenied(kind: PermissionKind)
+    /// Device has no speech recognizer available (e.g. unsupported
+    /// locale or no on-device model for this language).
+    case recognizerUnavailable
+    /// User ended the turn without saying anything the recognizer
+    /// could hear. Inline toast copy.
+    case emptyTranscript
+    /// STT task itself errored mid-session (hardware fault, etc.).
+    case transcriptionFailed(message: String)
+    /// Synthesizer rejected the voice / went silent. Caller falls back
+    /// to rendering `spoken_response` as visible text in the step card.
+    case synthesisFailed(message: String)
+
+    enum PermissionKind: String, Sendable, Equatable {
+        case microphone
+        case speechRecognition
+    }
+}
+
+// MARK: - Result
+
+/// The outcome of one round-trip fallback turn. Caller feeds the
+/// `spoken_response` to AVSpeechSynthesizer via `speak(_:)`, and acts
+/// on `suggestedAction` if any.
+struct CookTurnResult: Sendable {
+    let transcript: String
+    let response: CookTurnResponse
+    /// Milliseconds from turn-begin → transcript-final. Plumbed into
+    /// the user VoiceTurn row and the `cook_turn_resolved` telemetry
+    /// event's `latency_ttfa_ms`.
+    let sttLatencyMs: Int
+    /// Milliseconds from transcript-final → response-received. Pipeline's
+    /// latency_total = sttLatencyMs + backendLatencyMs.
+    let backendLatencyMs: Int
+}
+
+// MARK: - Service
+
+@MainActor
+@Observable
+final class SpeechFallbackService {
+    // MARK: Dependencies
+
+    private let aiDispatch: AIDispatch
+    private let voiceTurnRepository: VoiceTurnRepository
+    private let cookingSession: CookingSession
+
+    // MARK: Published state
+
+    /// The voice session's current state. UI observes this to render
+    /// the mic button, waveform indicator, and thinking animation.
+    /// Changes on every legal transition per VoiceSessionStateMachine.
+    private(set) var currentState: VoiceSessionState = .idle
+
+    // MARK: Private
+
+    private let stateMachine = VoiceSessionStateMachine()
+    private let speechRecognizer: SFSpeechRecognizer?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private let audioEngine = AVAudioEngine()
+    private let synthesizer = AVSpeechSynthesizer()
+    private var synthesisDelegate: SynthesisDelegate?
+    private var synthesisContinuation: CheckedContinuation<Void, Never>?
+    private var turnStartTime: Date?
+    private var sttFinalTime: Date?
+    private var currentTranscript: String = ""
+
+    // Voice selection: Enhanced Samantha per ADR 0007. Loaded lazily on
+    // pre-warm so the first speak() isn't blocked by a 200-400ms voice
+    // lookup on device.
+    // ASSUMPTION: Enhanced Samantha ships on every iOS 17+ device. If a
+    // future user's device returns nil, we fall back to any en-US voice;
+    // TTS still works, just with the default system voice.
+    private var cachedVoice: AVSpeechSynthesisVoice?
+    private static let preferredVoiceID = "com.apple.voice.enhanced.en-US.Samantha"
+
+    // MARK: Init
+
+    init(
+        aiDispatch: AIDispatch,
+        voiceTurnRepository: VoiceTurnRepository,
+        cookingSession: CookingSession,
+    ) {
+        self.aiDispatch = aiDispatch
+        self.voiceTurnRepository = voiceTurnRepository
+        self.cookingSession = cookingSession
+        // en_US locale matches CLAUDE.md's English-only v1 scope. If the
+        // system doesn't support the locale at all, `SFSpeechRecognizer(
+        // locale:)` returns nil and preWarm() surfaces .recognizerUnavailable.
+        self.speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        stateMachine.onTransition = { [weak self] _, next in
+            self?.currentState = next
+        }
+    }
+
+    // MARK: - Pre-warm
+
+    /// Eagerly load the STT recognizer + TTS voice so the first mic tap
+    /// engages in <200 ms (ADR 0007 pre-commit). Call from Cook Mode
+    /// entry on the main actor — NOT from the first mic tap.
+    ///
+    /// Does NOT request microphone permission (that's granted per-first-
+    /// tap via the system primer). Does request speech-recognition
+    /// authorization because that's a one-shot grant the user must have
+    /// accepted before the first tap.
+    ///
+    /// Throws `.recognizerUnavailable` if the device can't run the
+    /// recognizer at all (locale unsupported, etc.). Throws
+    /// `.permissionDenied(.speechRecognition)` if the user has explicitly
+    /// denied speech recognition authorization — caller should pivot to
+    /// "tap Cook Mode still works" copy.
+    func preWarm() async throws {
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            Logger.voice.warning("speech_recognizer_unavailable_on_prewarm")
+            throw SpeechFallbackError.recognizerUnavailable
+        }
+        // On-device recognition matches CLAUDE.md privacy invariant:
+        // user audio never hits Apple's servers. Devices that can't
+        // run on-device (pre-A12 / unsupported locale) return false
+        // for `supportsOnDeviceRecognition` — we hard-fail rather
+        // than silently upload.
+        guard recognizer.supportsOnDeviceRecognition else {
+            Logger.voice.warning("speech_recognizer_no_on_device_support")
+            throw SpeechFallbackError.recognizerUnavailable
+        }
+
+        // Request speech-recognition authorization. One-shot primer —
+        // async wrapper around SFSpeechRecognizer.requestAuthorization.
+        let status = await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+            SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+        }
+        switch status {
+        case .authorized:
+            break
+        case .denied, .restricted:
+            throw SpeechFallbackError.permissionDenied(kind: .speechRecognition)
+        case .notDetermined:
+            // System didn't present the primer — unusual but possible on
+            // hardware restrictions. Treat as unavailable for this
+            // session; caller falls to tap Cook Mode.
+            throw SpeechFallbackError.recognizerUnavailable
+        @unknown default:
+            throw SpeechFallbackError.recognizerUnavailable
+        }
+
+        // Load the preferred voice synchronously. Nil return means
+        // Enhanced Samantha isn't installed on this device — fall back
+        // to any en-US voice (still works, just default quality).
+        let voice = AVSpeechSynthesisVoice(identifier: Self.preferredVoiceID)
+            ?? AVSpeechSynthesisVoice(language: "en-US")
+        cachedVoice = voice
+        Logger.voice.info(
+            "speech_fallback_prewarm ok voice=\(voice?.identifier ?? "nil", privacy: .public) on_device=true",
+        )
+
+        // Transition to `ready` — mic isn't hot yet, but the service is
+        // prepared to begin a turn on the first tap.
+        stateMachine.advance(to: .ready)
+    }
+
+    // MARK: - Turn lifecycle
+
+    /// Begin listening. Call on mic-tap. Mic permission is requested
+    /// lazily via AVAudioSession — the first call will surface the iOS
+    /// system primer if not yet granted. Returns immediately after the
+    /// audio tap is installed; the caller keeps the session alive and
+    /// calls `endTurn()` when the user releases / taps again.
+    ///
+    /// Throws `.permissionDenied(.microphone)` if permission is denied.
+    /// Throws `.recognizerUnavailable` if SFSpeechRecognizer hasn't been
+    /// pre-warmed or is temporarily unavailable.
+    func beginTurn() async throws {
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            throw SpeechFallbackError.recognizerUnavailable
+        }
+        // Guard against double-tap / overlapping turns.
+        if currentState == .userSpeaking || currentState == .transcribing
+            || currentState == .thinking || currentState == .modelSpeaking
+        {
+            Logger.voice.warning("begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)")
+            return
+        }
+
+        // Mic permission primer (first-tap only).
+        let micGranted = await requestMicrophonePermission()
+        guard micGranted else {
+            throw SpeechFallbackError.permissionDenied(kind: .microphone)
+        }
+
+        // Build a fresh recognition request + task. SFSpeechRecognizer
+        // requires one per utterance — reusing mid-session causes
+        // "Recognition request failed" errors.
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+        self.recognitionRequest = request
+        self.currentTranscript = ""
+        self.turnStartTime = Date()
+        self.sttFinalTime = nil
+
+        // Install mic tap. inputFormat gives us the device's native mic
+        // format (usually 48 kHz); SFSpeechRecognizer handles its own
+        // internal resampling. We don't need 16 kHz PCM16 here — that's
+        // for Gemini Live (C.2) only.
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        // Guard: an in-flight prior session could still have a tap
+        // installed. Remove before installing a new one.
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            throw SpeechFallbackError.transcriptionFailed(
+                message: "Audio engine failed to start: \(error.localizedDescription)",
+            )
+        }
+
+        // Start the recognition task. Partial results accumulate into
+        // `currentTranscript` via the closure; endTurn() reads it.
+        self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let result {
+                    self.currentTranscript = result.bestTranscription.formattedString
+                    if result.isFinal {
+                        self.sttFinalTime = Date()
+                    }
+                }
+                if let error {
+                    Logger.voice.warning(
+                        "stt_error: \(error.localizedDescription, privacy: .public)",
+                    )
+                }
+            }
+        }
+
+        stateMachine.advance(to: .userSpeaking)
+    }
+
+    /// End the turn: stop listening, send transcript to backend, return
+    /// the result. Caller is expected to call `speak(response.spoken_response)`
+    /// immediately after. This method handles VoiceTurn persistence for
+    /// BOTH the user and model rows.
+    ///
+    /// Throws:
+    ///   - `.emptyTranscript` — user released without saying anything.
+    ///   - `StirError.*` — backend failures (NET-01 / AI-01 / AUTH-01
+    ///     / RATE-01 / ENT-VOICE-01). Presenter layer maps to user copy.
+    func endTurn(
+        recipeContext: RealtimeRecipeContext,
+        householdContext: RealtimeHouseholdContext,
+        currentStepNumber: Int,
+        recipePlanId: UUID,
+    ) async throws -> CookTurnResult {
+        // Tear down the audio engine + recognition task immediately so
+        // the mic indicator drops.
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        recognitionRequest?.endAudio()
+        recognitionTask?.finish()
+
+        let transcript = currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sttLatencyMs: Int = {
+            guard let start = turnStartTime, let final = sttFinalTime else { return 0 }
+            return Int(final.timeIntervalSince(start) * 1000)
+        }()
+        self.recognitionRequest = nil
+        self.recognitionTask = nil
+
+        guard !transcript.isEmpty else {
+            stateMachine.advance(to: .ready)
+            throw SpeechFallbackError.emptyTranscript
+        }
+
+        // Persist user VoiceTurn now — before the backend call — so a
+        // backend failure doesn't orphan the transcript. Spec §4.12:
+        // every user turn writes a row on BOTH paths.
+        let userTurnIndex = voiceTurnRepository.nextTurnIndex(for: cookingSession)
+        try? voiceTurnRepository.persist(.init(
+            session: cookingSession,
+            speaker: .user,
+            turnIndex: userTurnIndex,
+            transcriptText: transcript,
+            inputMode: .voice,
+            latencyMs: sttLatencyMs,
+            resultType: .normal,
+        ))
+
+        stateMachine.advance(to: .thinking)
+
+        // Backend call.
+        let backendStart = Date()
+        let body = CookTurnRequest(
+            clientRequestID: UUID(),
+            cookingSessionID: cookingSession.id ?? UUID(),
+            recipePlanID: recipePlanId,
+            currentStepNumber: currentStepNumber,
+            transcript: String(transcript.prefix(500)),
+            recipeContext: recipeContext,
+            householdContext: householdContext,
+        )
+
+        let response: CookTurnResponse
+        do {
+            response = try await aiDispatch.cookTurn(request: body)
+        } catch {
+            // Persist an error VoiceTurn for the model side so ops can
+            // replay exactly where the session died. resultType='error'
+            // is spec-legal (§4.12 enum).
+            try? voiceTurnRepository.persist(.init(
+                session: cookingSession,
+                speaker: .model,
+                turnIndex: userTurnIndex + 1,
+                transcriptText: "",
+                inputMode: .voice,
+                latencyMs: Int(Date().timeIntervalSince(backendStart) * 1000),
+                resultType: .error,
+            ))
+            stateMachine.advance(to: .error)
+            throw error
+        }
+
+        let backendLatencyMs = Int(Date().timeIntervalSince(backendStart) * 1000)
+
+        // Persist model VoiceTurn.
+        try? voiceTurnRepository.persist(.init(
+            session: cookingSession,
+            speaker: .model,
+            turnIndex: userTurnIndex + 1,
+            transcriptText: response.spokenResponse,
+            inputMode: .voice,
+            latencyMs: backendLatencyMs,
+            resultType: response.suggestedAction == .none ? .normal : .toolCall,
+        ))
+
+        stateMachine.advance(to: .modelSpeaking)
+
+        // Side-effect: set CookingSession.voiceEnabled on first voice
+        // turn. Idempotent — safe to set multiple times. C.2 will also
+        // set aiConversationVersion on its own Live setup path; C.3
+        // doesn't know a cook_mode_realtime prompt version, so it
+        // leaves that column alone (an all-fallback session would
+        // legitimately have an empty aiConversationVersion).
+        if cookingSession.voiceEnabled == false {
+            cookingSession.voiceEnabled = true
+            try? cookingSession.managedObjectContext?.save()
+        }
+
+        return CookTurnResult(
+            transcript: transcript,
+            response: response,
+            sttLatencyMs: sttLatencyMs,
+            backendLatencyMs: backendLatencyMs,
+        )
+    }
+
+    // MARK: - Speak
+
+    /// Render the given text via AVSpeechSynthesizer. Resolves when the
+    /// utterance is fully spoken or on synthesizer failure. On failure
+    /// the caller renders the text as visible copy (ADR 0007 pre-commit).
+    func speak(_ text: String) async {
+        let utterance = AVSpeechUtterance(string: text)
+        if let voice = cachedVoice { utterance.voice = voice }
+        // Rate tuning: .defaultSpeechRate is slightly slow for a
+        // kitchen-assistant tone. 1.05× pulls toward casual pace
+        // without over-enunciating.
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
+        utterance.pitchMultiplier = 1.0
+        utterance.postUtteranceDelay = 0.05
+
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            // Retain the delegate as a stored prop so it outlives the
+            // closure scope — AVSpeechSynthesizer weakly references
+            // its delegate, and the delegate needs to survive until
+            // didFinish fires. Last-one-wins is fine since only one
+            // speak() runs at a time per service.
+            let delegate = SynthesisDelegate { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.synthesisDelegate = nil
+                    cont.resume()
+                    // If we were modelSpeaking, fall back to ready.
+                    // Anything else (error, closed) stays put.
+                    if self?.stateMachine.state == .modelSpeaking {
+                        self?.stateMachine.advance(to: .ready)
+                    }
+                }
+            }
+            self.synthesisDelegate = delegate
+            self.synthesizer.delegate = delegate
+            self.synthesizer.speak(utterance)
+        }
+    }
+
+    /// Cancel any in-flight speech. Used when the user taps the mic
+    /// while the model is still speaking — tap-to-speak, no barge-in.
+    /// This is the "manually stop speaking before starting to listen"
+    /// path on fallback; C.2's Live path handles barge-in differently.
+    func cancelSpeaking() {
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+    }
+
+    // MARK: - Teardown
+
+    /// Stop all audio, cancel tasks, advance to `.closed`. Idempotent.
+    /// Call from Cook Mode exit regardless of current state.
+    func close() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        if currentState != .closed {
+            stateMachine.forceClose()
+        }
+    }
+
+    // MARK: - Private
+
+    private func requestMicrophonePermission() async -> Bool {
+        // iOS 17+ uses AVAudioApplication.requestRecordPermission(completionHandler:)
+        // in production code. The older AVAudioSession.requestRecordPermission
+        // is deprecated but still functional — using the new API keeps
+        // us on the supported path as iOS 18/26 evolve.
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            AVAudioApplication.requestRecordPermission { granted in
+                cont.resume(returning: granted)
+            }
+        }
+    }
+}
+
+// MARK: - Synthesis delegate
+
+/// Minimal AVSpeechSynthesizerDelegate that resolves a continuation
+/// when the utterance finishes. Bundled here so SpeechFallbackService
+/// doesn't have to expose delegate-shaped public API.
+@MainActor
+private final class SynthesisDelegate: NSObject, AVSpeechSynthesizerDelegate {
+    private let onComplete: () -> Void
+    init(onComplete: @escaping () -> Void) {
+        self.onComplete = onComplete
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.onComplete() }
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.onComplete() }
+    }
+}

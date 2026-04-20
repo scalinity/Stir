@@ -58,3 +58,4 @@ When user or context indicates a decision-worthy moment, Claude must:
 | [0004](./0004-supabase-entitlement-source-of-truth.md) | Supabase entitlement_snapshots is source of truth; RC is a refresh trigger only | Accepted | Billing model, CLAUDE.md §Billing |
 | [0005](./0005-alias-forward-promote-entitlement.md) | stir_alias_forward promotes install→ck entitlement when ck has no row | Accepted | Migration 20260419000004 |
 | [0006](./0006-gemini-live-oauth-service-account-mint.md) | Gemini Live mint uses OAuth service-account auth, not API key | **Rejected** (same day) — real blocker was paid-tier billing + legacy key format, not auth mode | CLAUDE.md §Gemini Live sharp-edges #16, #17, #18 · step-6 drift check |
+| [0007](./0007-step-6-c3-before-c2.md) | Build Speech fallback (C.3) before Gemini Live (C.2) | Accepted | Phase C.2 (deferred) · Phase C.3 (next) · CLAUDE.md §Voice validation plan |

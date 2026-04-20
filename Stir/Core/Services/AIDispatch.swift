@@ -108,6 +108,43 @@ actor AIDispatch {
         )
     }
 
+    // MARK: - Cook Turn (step 6 — Live fallback)
+
+    /// POST /v1/ai/cook-turn. Sent by SpeechFallbackService after on-device
+    /// transcription; returns a spoken response + optional suggested UI
+    /// action. Backend is gated on voice_cook_mode entitlement (Premium+);
+    /// Free users hit ENT-VOICE-01 before we ever get here because iOS
+    /// guards the mic affordance.
+    ///
+    /// Timeout matches substitution (20s) — backend p95 ~2s, and a
+    /// mid-cook voice-fallback that hangs past 20s is worse than a
+    /// quick NET-01 the user can retry.
+    func cookTurn(request body: CookTurnRequest) async throws -> CookTurnResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/cook-turn")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 20
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode cook-turn body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "cook_turn_dispatch request_id=\(body.clientRequestID.uuidString, privacy: .public)",
+        )
+        let response: CookTurnResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "cook_turn_complete action=\(response.suggestedAction.rawValue, privacy: .public) retry=\(response.retryCount, privacy: .public) latency_ms=\(response.latencyMS, privacy: .public)",
+        )
+        return response
+    }
+
     // MARK: - Dinner solve (SSE)
 
     /// Returns an AsyncThrowingStream emitting DinnerSolveEvents as they

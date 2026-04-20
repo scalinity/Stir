@@ -395,3 +395,116 @@ enum SubstitutionResult: Sendable {
         promptVersion: String
     )
 }
+
+// MARK: - Cook Turn (step 6 — Live API text fallback)
+//
+// Wire-format for /v1/ai/cook-turn. Sent by SpeechFallbackService after
+// on-device transcription; returned from the backend with a spoken
+// response + an optional suggested UI action (advance step, start timer).
+
+struct CookTurnRequest: Encodable, Sendable {
+    let clientRequestID: UUID
+    let cookingSessionID: UUID
+    let recipePlanID: UUID
+    let currentStepNumber: Int
+    /// <500 chars, enforced by backend Zod. Caller truncates if needed.
+    let transcript: String
+    let recipeContext: RealtimeRecipeContext
+    let householdContext: RealtimeHouseholdContext
+
+    enum CodingKeys: String, CodingKey {
+        case clientRequestID = "client_request_id"
+        case cookingSessionID = "cooking_session_id"
+        case recipePlanID = "recipe_plan_id"
+        case currentStepNumber = "current_step_number"
+        case transcript
+        case recipeContext = "recipe_context"
+        case householdContext = "household_context"
+    }
+}
+
+/// Mirror of the backend RealtimeRecipeContext — shared between
+/// cook-turn and realtime-session so both paths send the same shape.
+struct RealtimeRecipeContext: Encodable, Sendable {
+    let title: String
+    let servings: Int
+    let estimatedMinutes: Int
+    let totalSteps: Int
+    let currentStepText: String
+    /// Nullable — some steps have no timer. Server passes through as
+    /// zero when null (prompt template displays `0` literally in that
+    /// case; consumer reads "no timer" from a zero timerSeconds).
+    let currentStepTimerSeconds: Int?
+    let remainingIngredients: [RemainingIngredient]
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case servings
+        case estimatedMinutes = "estimated_minutes"
+        case totalSteps = "total_steps"
+        case currentStepText = "current_step_text"
+        case currentStepTimerSeconds = "current_step_timer_seconds"
+        case remainingIngredients = "remaining_ingredients"
+    }
+
+    struct RemainingIngredient: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+        }
+    }
+}
+
+struct RealtimeHouseholdContext: Encodable, Sendable {
+    let dietaryRules: [DinnerSolveRequest.DietaryRuleLite]
+    let availableEquipment: [String]
+    let pantrySnapshot: [PantrySnapshotItem]
+
+    enum CodingKeys: String, CodingKey {
+        case dietaryRules = "dietary_rules"
+        case availableEquipment = "available_equipment"
+        case pantrySnapshot = "pantry_snapshot"
+    }
+
+    struct PantrySnapshotItem: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+        }
+    }
+}
+
+struct CookTurnResponse: Decodable, Sendable {
+    let spokenResponse: String
+    let suggestedAction: SuggestedAction
+    let actionParams: ActionParams?
+    let promptVersion: String
+    let latencyMS: Int
+    let retryCount: Int
+
+    enum SuggestedAction: String, Decodable, Sendable, Equatable {
+        case advanceStep = "advance_step"
+        case startTimer = "start_timer"
+        case none
+    }
+
+    struct ActionParams: Decodable, Sendable {
+        let seconds: Int?
+        let label: String?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case spokenResponse = "spoken_response"
+        case suggestedAction = "suggested_action"
+        case actionParams = "action_params"
+        case promptVersion = "prompt_version"
+        case latencyMS = "latency_ms"
+        case retryCount = "retry_count"
+    }
+}
