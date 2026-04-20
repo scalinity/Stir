@@ -7,8 +7,13 @@
 
     Step-4 adds four more for the full tap-based Cook Mode loop:
       CookingSession, CookTimer, SubstitutionEvent, OutcomeFeedback.
-    Shape matches spec §4.11, §4.13–§4.15. Step 4 does NOT add VoiceTurn
-    (spec §4.12) — that lands in step 6 with the Gemini Live wiring.
+    Shape matches spec §4.11, §4.13–§4.15.
+
+    Step-6 adds VoiceTurn (spec §4.12) for the Gemini Live voice Cook Mode
+    path. Every user + model turn on BOTH the Live API and the text
+    fallback paths persists a row here; hard-deletes cascade from
+    CookingSession. Indexes on (cookingSessionId, turnIndex) for
+    ordered replay and cost-attribution queries.
 
     CloudKit compatibility rules applied across all entities (same as step 2):
       * No unique constraints.
@@ -179,6 +184,7 @@
         <relationship name="recipePlan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipePlan" inverseName="cookingSessions" inverseEntity="RecipePlan"/>
         <relationship name="substitutionEvents" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SubstitutionEvent" inverseName="cookingSession" inverseEntity="SubstitutionEvent"/>
         <relationship name="timers" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CookTimer" inverseName="cookingSession" inverseEntity="CookTimer"/>
+        <relationship name="voiceTurns" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="VoiceTurn" inverseName="cookingSession" inverseEntity="VoiceTurn"/>
     </entity>
     <entity name="CookTimer" representedClassName="CookTimer" syncable="YES" codeGenerationType="class">
         <attribute name="durationSec" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
@@ -202,6 +208,21 @@
         <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="substitutionEvents" inverseEntity="CookingSession"/>
         <relationship name="recipeIngredient" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipeIngredient" inverseName="substitutionEvents" inverseEntity="RecipeIngredient"/>
         <relationship name="step" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipeStep" inverseName="substitutionEvents" inverseEntity="RecipeStep"/>
+    </entity>
+    <entity name="VoiceTurn" representedClassName="VoiceTurn" syncable="YES" codeGenerationType="class">
+        <attribute name="cookingSessionId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <!-- voice | text — v1 always 'voice'. `text` reserved for future keyboard input. -->
+        <attribute name="inputMode" optional="YES" attributeType="String" defaultValueString="voice"/>
+        <attribute name="latencyMs" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <!-- normal | tool_call | error -->
+        <attribute name="resultType" optional="YES" attributeType="String" defaultValueString="normal"/>
+        <!-- user | model -->
+        <attribute name="speaker" optional="YES" attributeType="String" defaultValueString="model"/>
+        <attribute name="transcriptText" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="turnIndex" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="voiceTurns" inverseEntity="CookingSession"/>
     </entity>
     <entity name="OutcomeFeedback" representedClassName="OutcomeFeedback" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
