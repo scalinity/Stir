@@ -215,14 +215,33 @@ final class SpeechFallbackService: VoiceSessionDriver {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else {
             throw SpeechFallbackError.recognizerUnavailable
         }
-        // Guard against double-tap / overlapping turns. Throw a typed
-        // error so the VM can surface it as a toast — a silent no-op
-        // here presents as a dead mic button to the user.
-        if currentState == .userSpeaking || currentState == .transcribing
-            || currentState == .thinking || currentState == .modelSpeaking
-        {
-            Logger.voice.warning("begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)")
-            throw SpeechFallbackError.busy(state: currentState)
+        // Must be `.ready` — preWarm() is the only legal transition
+        // `idle → ready`, so `.idle` here means preWarm never completed
+        // (fail-closed cascade from the Live path, or recognizer/mic
+        // permission denial). Without this guard, the subsequent
+        // `stateMachine.advance(to: .userSpeaking)` tries the illegal
+        // `idle → userSpeaking` transition and trips the DEBUG-only
+        // assertionFailure — a cascade we hit 2026-04-20 after Live
+        // setupTimeout pushed us onto a C.3 driver whose preWarm also
+        // failed.
+        guard currentState == .ready else {
+            // Active-turn states (userSpeaking / transcribing /
+            // thinking / modelSpeaking) are "busy" — the user tapped
+            // faster than we can drain. Anything else (idle / error /
+            // closed) is recognizerUnavailable — the driver isn't
+            // primed and won't be without a full session restart.
+            switch currentState {
+            case .userSpeaking, .transcribing, .thinking, .modelSpeaking:
+                Logger.voice.warning(
+                    "begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)",
+                )
+                throw SpeechFallbackError.busy(state: currentState)
+            default:
+                Logger.voice.warning(
+                    "begin_turn_called_before_ready state=\(self.currentState.rawValue, privacy: .public)",
+                )
+                throw SpeechFallbackError.recognizerUnavailable
+            }
         }
 
         // Mic permission primer (first-tap only).

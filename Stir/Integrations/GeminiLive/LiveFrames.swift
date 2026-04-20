@@ -28,6 +28,13 @@ import Foundation
 /// The sdk prefers oneOf-style top-level keys — we encode as a plain
 /// dictionary from the struct variant to keep the wire shape exact.
 enum LiveOutboundFrame {
+    /// First frame iOS sends after `ws.open`. Payload is the entire
+    /// `{"setup": {...}}` object as the backend pre-serialized it —
+    /// forwarded verbatim so iOS doesn't risk camelCase/snake_case
+    /// drift against Gemini's wire shape. Server does NOT emit
+    /// `setupComplete` until it receives this frame even with a
+    /// Constrained ephemeral token.
+    case setup(payload: [String: Any])
     case realtimeInputAudio(base64: String, mimeType: String)
     case realtimeInputText(String)
     case toolResponse(functionResponseId: String, name: String, response: [String: Any])
@@ -42,6 +49,11 @@ enum LiveOutboundFrame {
     /// machinery for what's fundamentally a heterogeneous payload.
     func asJSONObject() -> [String: Any] {
         switch self {
+        case let .setup(payload):
+            // Payload is already shaped `{"setup": {...}}` on the
+            // wire; return as-is. Backend serialized it atomically so
+            // iOS never reaches into the inner shape.
+            return payload
         case let .realtimeInputAudio(base64, mimeType):
             return [
                 "realtimeInput": [

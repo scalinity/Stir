@@ -56,6 +56,11 @@ interface WireResponse {
   session_id: string;
   ws_url: string;
   prompt_version: string;
+  /** Pre-serialized `{"setup": {...}}` frame iOS MUST send as the first
+   * WebSocket message after `open`. Server waits for this before
+   * emitting `setupComplete`, even with a Constrained ephemeral token.
+   * See live_mint.setupFrameJSON for provenance. */
+  setup_frame_json: string;
 }
 
 Deno.serve(async (req) => {
@@ -347,6 +352,7 @@ Deno.serve(async (req) => {
     session_id: sessionId,
     ws_url: mint.wsUrl,
     prompt_version: activePrompt.version,
+    setup_frame_json: mint.setupFrameJSON,
   };
 
   userLog.info('request_complete', {

@@ -875,6 +875,16 @@ struct RealtimeSessionResponse: Decodable, Sendable {
     let wsURL: String
     /// Prompt version baked into the session (spec §15 telemetry tag).
     let promptVersion: String
+    /// Pre-serialized `{"setup": {...}}` JSON blob that MUST be sent as
+    /// the first WebSocket message after `ws.open`. Without it the
+    /// server never emits `setupComplete` — even though the
+    /// `bidiGenerateContentSetup` config was baked into the ephemeral
+    /// token at mint time. Verified against the official
+    /// google-gemini/gemini-live-api-examples reference app
+    /// (2026-04-20): client still sends `sendInitialSetupMessages()` on
+    /// the ephemeral-token path. iOS parses this blob via
+    /// JSONSerialization and forwards it verbatim.
+    let setupFrameJSON: String
 
     enum CodingKeys: String, CodingKey {
         case authToken = "auth_token"
@@ -882,5 +892,6 @@ struct RealtimeSessionResponse: Decodable, Sendable {
         case sessionID = "session_id"
         case wsURL = "ws_url"
         case promptVersion = "prompt_version"
+        case setupFrameJSON = "setup_frame_json"
     }
 }

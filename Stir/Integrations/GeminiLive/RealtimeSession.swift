@@ -189,10 +189,37 @@ final class RealtimeSession: VoiceSessionDriver {
             // 4. Start inbound receive dispatcher
             startReceiveDispatcher()
 
-            // 5. Wait for setupComplete (budget named in
+            // 5. Send the `{"setup": {...}}` frame that unblocks
+            //    `setupComplete`. Required even though the ephemeral
+            //    token bakes in a `bidiGenerateContentSetup` — the
+            //    Constrained method treats the baked-in config as the
+            //    authorization ceiling, and the server still waits for
+            //    the client to explicitly begin the session by sending
+            //    the setup frame. Verified 2026-04-20 against the
+            //    google-gemini reference app
+            //    (gemini-live-ephemeral-tokens-websocket/frontend/
+            //    geminilive.js → sendInitialSetupMessages()). Without
+            //    this send, `awaitSetupComplete` times out at 5s and
+            //    preWarm falls through to C.3.
+            //
+            //    Backend pre-serializes the payload so iOS forwards a
+            //    single JSON blob — no shape drift possible between
+            //    what the token authorizes and what the client sends.
+            guard let data = response.setupFrameJSON.data(using: .utf8),
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                throw RealtimeSessionError.openFailed(message: "malformed setup_frame_json")
+            }
+            try await transport.send(.setup(payload: payload))
+            #if DEBUG
+            VoiceSessionLog.log("ws.setup_sent")
+            #endif
+
+            // 6. Wait for setupComplete (budget named in
             //    LiveSessionBudget — server normally emits this within
-            //    200-400 ms). Any inbound frame before setupComplete
-            //    is a protocol violation and throws.
+            //    200-400 ms after receiving our setup frame). Any
+            //    inbound frame before setupComplete is a protocol
+            //    violation and throws.
             //    TODO(D.1): measure real budget and tune.
             try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
             #if DEBUG

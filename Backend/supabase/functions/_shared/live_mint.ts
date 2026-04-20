@@ -96,6 +96,14 @@ export interface LiveMintResult {
   /** Full WebSocket URL ready for iOS to open — includes the access_token
    * query param pre-populated. */
   wsUrl: string;
+  /** Serialized JSON for the FIRST WebSocket message iOS must send
+   * immediately after `ws.open`, shape: `{"setup": {...}}`. The server
+   * does NOT emit `setupComplete` until it receives this frame — tested
+   * on 2026-04-20 against the official google-gemini example. Sending
+   * the exact `bidiGenerateContentSetup` body that was baked into the
+   * mint matches the Constrained token's authorized config, so the
+   * frame is accepted and `setupComplete` returns. */
+  setupFrameJSON: string;
 }
 
 export class LiveMintError extends Error {
@@ -132,25 +140,27 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
   const maxOutputTokens = config.maxOutputTokens ?? 150;
   const turnCoverage = config.turnCoverage ?? 'TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO';
 
+  const bidiGenerateContentSetup = {
+    model: config.model,
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+      maxOutputTokens,
+      thinkingConfig: { thinkingLevel },
+    },
+    systemInstruction: { parts: [{ text: config.systemInstruction }] },
+    tools: [{ functionDeclarations: COOK_MODE_TOOLS }],
+    realtimeInputConfig: {
+      automaticActivityDetection: { disabled: false },
+      turnCoverage,
+    },
+  };
+
   const body = {
     expireTime: hardDeadline.toISOString(),
     newSessionExpireTime: openDeadline.toISOString(),
     uses: 1,
-    bidiGenerateContentSetup: {
-      model: config.model,
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-        maxOutputTokens,
-        thinkingConfig: { thinkingLevel },
-      },
-      systemInstruction: { parts: [{ text: config.systemInstruction }] },
-      tools: [{ functionDeclarations: COOK_MODE_TOOLS }],
-      realtimeInputConfig: {
-        automaticActivityDetection: { disabled: false },
-        turnCoverage,
-      },
-    },
+    bidiGenerateContentSetup,
   };
 
   const res = await fetch(MINT_URL, {
@@ -177,5 +187,6 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
     tokenName,
     expiresAt: hardDeadline.toISOString(),
     wsUrl: `${WS_BASE}?access_token=${encodeURIComponent(tokenName)}`,
+    setupFrameJSON: JSON.stringify({ setup: bidiGenerateContentSetup }),
   };
 }
