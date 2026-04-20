@@ -14,7 +14,10 @@ import Foundation
 import OSLog
 import PostHog
 
-final class PostHogClient: @unchecked Sendable {
+/// Non-final + `open capture(...)` so tests can subclass with a spy.
+/// The singleton is the only caller outside tests, so the virtual
+/// dispatch cost is irrelevant in production.
+class PostHogClient: @unchecked Sendable {
     static let shared = PostHogClient()
     private let lock = NSLock()
     private var _isInitialized = false
@@ -56,6 +59,10 @@ final class PostHogClient: @unchecked Sendable {
         guard isInitialized else { return }
         PostHogSDK.shared.capture(event.rawValue, properties: properties)
     }
+
+    /// Protected init so tests can subclass with an override of
+    /// `capture(...)`. Production code should continue to use `.shared`.
+    init(testingOnly: Bool) {}
 }
 
 /// Canonical event name allow-list. Adding one requires updating both
@@ -99,6 +106,9 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // Defined now so step 6 wiring doesn't re-register the enum case.
     // No invocation path in step 5.
     case voiceAffordanceTapped = "voice_affordance_tapped"
+    // Step 6 C.4 — voice cook-turn events. Spec §15 verbatim.
+    case cookTurnSubmitted = "cook_turn_submitted"
+    case cookTurnResolved = "cook_turn_resolved"
     // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
     case reactivationNotificationOpened = "reactivation_notification_opened"
 }

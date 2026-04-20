@@ -171,6 +171,7 @@ struct StepCardView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 12) {
+            voiceRow
             // Secondary row — "Ask" opens Substitution Sheet.
             Button {
                 viewModel.requestSubstitution()
@@ -224,4 +225,75 @@ struct StepCardView: View {
         .padding(.top, 10)
         .padding(.bottom, 10)
     }
+
+    // MARK: - Voice row
+
+    /// Mic affordance. Visible on ALL tiers (Daniel's pre-commit);
+    /// tap-behavior branches in the VM:
+    ///   Free      → paywall trigger
+    ///   Premium/Pro → voice turn
+    /// Visual state reflects voiceState: idle/ready → mic, userSpeaking
+    /// → stop (tap again to submit), thinking/modelSpeaking → disabled
+    /// spinner.
+    @ViewBuilder
+    private var voiceRow: some View {
+        let button = Button {
+            Task { await viewModel.handleMicTap() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: micIconName)
+                    .font(.headline)
+                    .accessibilityHidden(true)
+                Text(micLabel)
+                    .font(.subheadline.weight(.semibold))
+                if viewModel.voiceIsBusy {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .tint(viewModel.voiceIsListening ? .red : .accentColor)
+        .disabled(viewModel.voiceIsBusy)
+        .accessibilityLabel(micAccessibilityLabel)
+        .accessibilityHint(micAccessibilityHint)
+
+        // SwiftUI doesn't support a runtime-switched ButtonStyle via a
+        // conditional; split the branch at the buttonStyle modifier
+        // call site instead.
+        if viewModel.voiceIsListening {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    private var micIconName: String {
+        if viewModel.voiceIsListening { return "stop.circle.fill" }
+        if viewModel.voiceIsBusy { return "waveform.circle" }
+        return "mic.circle.fill"
+    }
+
+    private var micLabel: String {
+        if viewModel.voiceIsListening { return "Tap when you're done" }
+        if viewModel.voiceState == .thinking { return "Thinking…" }
+        if viewModel.voiceState == .modelSpeaking { return "Speaking" }
+        if viewModel.voiceState == .transcribing { return "Getting that…" }
+        return "Ask with voice"
+    }
+
+    private var micAccessibilityLabel: String {
+        if viewModel.voiceIsListening { return "Stop listening and send" }
+        return "Ask with voice"
+    }
+
+    private var micAccessibilityHint: String {
+        if viewModel.voiceIsListening {
+            return "Taps end your turn and sends the question."
+        }
+        return "Opens microphone for hands-free cooking questions. Premium feature."
+    }
 }
+

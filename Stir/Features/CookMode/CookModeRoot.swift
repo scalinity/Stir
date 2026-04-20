@@ -24,7 +24,11 @@ struct CookModeRoot: View {
     let existingSession: CookingSession?
     let onDismiss: () -> Void
 
+    @Environment(EntitlementService.self) private var entitlements
+    @Environment(RootCoordinator.self) private var coordinator
+
     @State private var viewModel: CookModeViewModel?
+    @State private var voiceDriver: SpeechFallbackService?
     @State private var initError: String?
 
     init(
@@ -72,6 +76,18 @@ struct CookModeRoot: View {
                             },
                         )
                     }
+                    // Transient voice-error toast (empty transcript,
+                    // mic denied, backend error). Auto-clears on tap.
+                    .overlay(alignment: .top) {
+                        if let msg = viewModel.voiceToastMessage {
+                            VoiceToastView(message: msg) {
+                                viewModel.voiceToastMessage = nil
+                            }
+                            .padding(.top, 60)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: viewModel.voiceToastMessage)
             } else if let message = initError {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
@@ -108,11 +124,73 @@ struct CookModeRoot: View {
                         entryPoint: entryPoint(for: source),
                     )
                 }
+
+                // Driver selection (C.4 plumbing for C.2, ADR 0007):
+                // `disable_cook_realtime` is the server-side kill switch.
+                // Today it has no effect because RealtimeSession (C.2)
+                // isn't implemented yet, but reading + passing the flag
+                // means C.4 doesn't need re-plumbing when C.2 lands.
+                // Once C.2 exists, the branch will be:
+                //   if killSwitch || !entitlements.voiceCookMode → fallback
+                //   else                                         → RealtimeSession
+                // For now: always fallback (the only driver).
+                let killSwitch = entitlements.flagBool(forKey: "disable_cook_realtime") ?? false
+                _ = killSwitch  // logged below; no branch yet
+                let driver: SpeechFallbackService
+                if entitlements.canAccess(.voiceCookMode) == .allowed {
+                    // Pre-warm the AVAudioSession + STT + TTS so the
+                    // first mic tap engages in <200ms. ADR 0007
+                    // pre-commit: pre-warm at Cook Mode entry, not at
+                    // first tap.
+                    let newDriver = SpeechFallbackService(
+                        aiDispatch: aiDispatch,
+                        voiceTurnRepository: VoiceTurnRepository(),
+                        cookingSession: session,
+                    )
+                    do {
+                        try AVAudioSessionConfigurator.activateForCookMode()
+                        try await newDriver.preWarm()
+                        driver = newDriver
+                        self.voiceDriver = newDriver
+                        Logger.voice.info(
+                            "cook_mode_voice_prewarmed kill_switch=\(killSwitch, privacy: .public)",
+                        )
+                    } catch {
+                        // Pre-warm failure is non-fatal — mic button
+                        // will be visible but tap will surface an
+                        // inline toast. The VM still gets the driver so
+                        // it can report "voice not available" cleanly
+                        // rather than crash.
+                        Logger.voice.warning(
+                            "cook_mode_voice_prewarm_failed: \(error.localizedDescription, privacy: .public)",
+                        )
+                        driver = newDriver
+                        self.voiceDriver = newDriver
+                    }
+                } else {
+                    // Free user — no driver initialized. The mic button
+                    // still shows (Daniel's pre-commit: visible on all
+                    // tiers) and the VM routes the tap to the paywall.
+                    driver = SpeechFallbackService(
+                        aiDispatch: aiDispatch,
+                        voiceTurnRepository: VoiceTurnRepository(),
+                        cookingSession: session,
+                    )
+                    // Intentionally not preWarm'd; voiceDriver stays nil
+                    // so `cleanup()` doesn't try to close an
+                    // un-initialized AVAudioSession on dismiss.
+                }
+
+                let capturedCoordinator = coordinator
                 let vm = CookModeViewModel(
                     session: session,
                     recipePlan: recipePlan,
                     household: household,
                     source: source,
+                    entitlements: entitlements,
+                    voiceDriver: entitlements.canAccess(.voiceCookMode) == .allowed ? driver : nil,
+                    disableCookRealtime: killSwitch,
+                    presentPaywall: { trigger in capturedCoordinator.presentPaywall(trigger) },
                 )
                 self.viewModel = vm
                 // Reconcile any leftover timers from a cross-device
@@ -137,5 +215,41 @@ struct CookModeRoot: View {
         case .imported: return .imported
         case .leftovers: return .leftovers
         }
+    }
+}
+
+// MARK: - Voice toast
+
+/// Small top-of-screen toast for voice-path errors. Tappable to dismiss;
+/// caller's onDismiss is the only way to clear the message (no auto-
+/// timeout — kitchen hands may be occupied).
+private struct VoiceToastView: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.subheadline)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
 }

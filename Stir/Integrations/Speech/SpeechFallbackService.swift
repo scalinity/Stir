@@ -69,7 +69,11 @@ struct CookTurnResult: Sendable {
 
 @MainActor
 @Observable
-final class SpeechFallbackService {
+final class SpeechFallbackService: VoiceSessionDriver {
+    /// Identifies this driver as the degraded / fallback path. Stamped
+    /// on telemetry events by CookModeViewModel per spec §15.
+    nonisolated let pathLabel: VoiceSessionPath = .geminiFallback
+
     // MARK: Dependencies
 
     private let aiDispatch: AIDispatch
@@ -361,6 +365,13 @@ final class SpeechFallbackService {
 
         let backendLatencyMs = Int(Date().timeIntervalSince(backendStart) * 1000)
 
+        // Compute resultType once: .normal when the model gave a
+        // pure conversational answer, .toolCall when it emitted a
+        // suggested action. Persisted on the model VoiceTurn row AND
+        // gates the voiceEnabled flip below.
+        let modelResultType: VoiceTurn.ResultType =
+            response.suggestedAction == .none ? .normal : .toolCall
+
         // Persist model VoiceTurn.
         try? voiceTurnRepository.persist(.init(
             session: cookingSession,
@@ -369,18 +380,21 @@ final class SpeechFallbackService {
             transcriptText: response.spokenResponse,
             inputMode: .voice,
             latencyMs: backendLatencyMs,
-            resultType: response.suggestedAction == .none ? .normal : .toolCall,
+            resultType: modelResultType,
         ))
 
         stateMachine.advance(to: .modelSpeaking)
 
-        // Side-effect: set CookingSession.voiceEnabled on first voice
-        // turn. Idempotent — safe to set multiple times. C.2 will also
-        // set aiConversationVersion on its own Live setup path; C.3
-        // doesn't know a cook_mode_realtime prompt version, so it
-        // leaves that column alone (an all-fallback session would
-        // legitimately have an empty aiConversationVersion).
-        if cookingSession.voiceEnabled == false {
+        // Set CookingSession.voiceEnabled on the first model VoiceTurn
+        // with resultType='normal' (ADR 0007 pre-commit). Gated
+        // explicitly (not on mic tap and not on tool_call turns): voice
+        // was "successfully used" only after a clean conversational
+        // response. Error turns + tool_call turns are legal but
+        // shouldn't flip the flag — an all-tool-call session could
+        // legitimately hide real voice errors otherwise.
+        //
+        // Idempotent: second+ normal turns no-op the check.
+        if modelResultType == .normal && cookingSession.voiceEnabled == false {
             cookingSession.voiceEnabled = true
             try? cookingSession.managedObjectContext?.save()
         }

@@ -13,6 +13,7 @@
 		08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */; };
 		0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */; };
 		0D973AD26FEDF6511E6580C0 /* SpeechFallbackServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */; };
+		F563C2ED742CEE4DF3F12056 /* CookModeVoiceIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3A43EAC4709DC2BBEE06F5 /* CookModeVoiceIntegrationTests.swift */; };
 		0DBB9D4619D5040EAA57E65A /* AsyncTimeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */; };
 		0F0D935AA6828583253F4984 /* AccountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF6131D62FD6AEE89E460F0 /* AccountState.swift */; };
 		106BDB46DB5D832BEE1BCC94 /* RootCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A678963101108CE2077E4BE /* RootCoordinator.swift */; };
@@ -41,6 +42,7 @@
 		3AD32ADEBDCC71B2996F70D1 /* PantryItem+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */; };
 		3BEB07ACCE22C955E60990BE /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F9A8184731D4338C59B314 /* PersistenceController.swift */; };
 		3D7402B9004272A35109EBE7 /* VoiceSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49FE6CFDD113808B37FD886C /* VoiceSessionState.swift */; };
+		8F4CBEE19E307FC4E93A27A2 /* VoiceSessionDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1CDB30DD70D1ABC50FEF5E6 /* VoiceSessionDriver.swift */; };
 		40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */; };
 		45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */; };
 		472BB60F98CA43956D4ED4B1 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE194C00CBA1EC009095718F /* CookingSessionRepository.swift */; };
@@ -186,6 +188,7 @@
 		494C830D500C89939B57CD7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4999CEF92E7CA2E35D80A0F2 /* SubstitutionEvent+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubstitutionEvent+Extensions.swift"; sourceTree = "<group>"; };
 		49FE6CFDD113808B37FD886C /* VoiceSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionState.swift; sourceTree = "<group>"; };
+		A1CDB30DD70D1ABC50FEF5E6 /* VoiceSessionDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionDriver.swift; sourceTree = "<group>"; };
 		4A3143E28ACA3B9738DFD6ED /* Icons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Icons.swift; sourceTree = "<group>"; };
 		4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialReminderScheduler.swift; sourceTree = "<group>"; };
 		4AC930B6FE46D88D0005D2DD /* SolveViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolveViewModel.swift; sourceTree = "<group>"; };
@@ -263,6 +266,7 @@
 		E1C2668CED3E5BC216628D9D /* DishPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DishPreviewView.swift; sourceTree = "<group>"; };
 		E3338AB1A72A44CB0F1EA9C1 /* SubstitutionSheetViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetViewModelTests.swift; sourceTree = "<group>"; };
 		E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackServiceTests.swift; sourceTree = "<group>"; };
+		4B3A43EAC4709DC2BBEE06F5 /* CookModeVoiceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeVoiceIntegrationTests.swift; sourceTree = "<group>"; };
 		EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryReporter.swift; sourceTree = "<group>"; };
 		EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementServiceTests.swift; sourceTree = "<group>"; };
 		EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallViewModelTests.swift; sourceTree = "<group>"; };
@@ -340,6 +344,7 @@
 				5EB0A25C9F12C9916D340A79 /* SavedMealsSortingTests.swift */,
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
 				E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */,
+				4B3A43EAC4709DC2BBEE06F5 /* CookModeVoiceIntegrationTests.swift */,
 				E3338AB1A72A44CB0F1EA9C1 /* SubstitutionSheetViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 				F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */,
@@ -575,6 +580,7 @@
 			children = (
 				3E704BD15AB6492410C269B5 /* AVAudioSessionConfigurator.swift */,
 				D10F98D2B68FE751D86384C7 /* SpeechFallbackService.swift */,
+				A1CDB30DD70D1ABC50FEF5E6 /* VoiceSessionDriver.swift */,
 				49FE6CFDD113808B37FD886C /* VoiceSessionState.swift */,
 			);
 			path = Speech;
@@ -828,6 +834,7 @@
 				71A07B871B5C0D2A4AC61668 /* SavedMealsSortingTests.swift in Sources */,
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
 				0D973AD26FEDF6511E6580C0 /* SpeechFallbackServiceTests.swift in Sources */,
+				F563C2ED742CEE4DF3F12056 /* CookModeVoiceIntegrationTests.swift in Sources */,
 				F38CDECB559E08C7C760A273 /* SubstitutionSheetViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
 				EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */,
@@ -936,6 +943,7 @@
 				08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */,
 				A1A130E9ACF8A6C394331E7E /* Typography.swift in Sources */,
 				3D7402B9004272A35109EBE7 /* VoiceSessionState.swift in Sources */,
+				8F4CBEE19E307FC4E93A27A2 /* VoiceSessionDriver.swift in Sources */,
 				DE76C4B2F34B0ACF847D5161 /* VoiceTurnRepository.swift in Sources */,
 				F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */,
 			);
