@@ -134,26 +134,57 @@ final class RealtimeSession: VoiceSessionDriver {
         guard stateMachine.state == .idle else {
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
+        #if DEBUG
+        VoiceSessionLog.sessionStart()
+        // Wire the state machine to echo every advance to the console
+        // transcript. Must go through `onTransition` (not advance())
+        // so illegal transitions also surface — the state machine
+        // logs those separately at warning but D.1 wants a unified view.
+        stateMachine.onTransition = { from, to in
+            VoiceSessionLog.log("state.advance", [
+                "from": from.rawValue,
+                "to": to.rawValue,
+            ])
+        }
+        #endif
         stateMachine.advance(to: .connecting)
 
         do {
             // 1. Mint
+            #if DEBUG
+            VoiceSessionLog.log("mint.start")
+            #endif
             let mintRequest = try buildMintRequest()
             let response = try await aiDispatch.realtimeSession(request: mintRequest)
             self.mintResponse = response
+            #if DEBUG
+            VoiceSessionLog.log("mint.complete", [
+                "session_id": response.sessionID,
+                "prompt_version": response.promptVersion,
+            ])
+            #endif
 
             // 2. Open WebSocket
             guard let wsURL = URL(string: response.wsURL) else {
+                #if DEBUG
+                VoiceSessionLog.log("mint.invalid_ws_url")
+                #endif
                 throw RealtimeSessionError.openFailed(message: "invalid ws_url")
             }
             let transport = LiveWebSocketTransport()
             self.transport = transport
             try transport.open(url: wsURL)
+            #if DEBUG
+            VoiceSessionLog.log("ws.open")
+            #endif
 
             // 3. Prepare audio pipeline (mic converter + playback node)
             let pipeline = LiveAudioPipeline()
             try pipeline.prepare()
             self.audioPipeline = pipeline
+            #if DEBUG
+            VoiceSessionLog.log("audio.prepared")
+            #endif
 
             // 4. Start inbound receive dispatcher
             startReceiveDispatcher()
@@ -164,12 +195,21 @@ final class RealtimeSession: VoiceSessionDriver {
             //    is a protocol violation and throws.
             //    TODO(D.1): measure real budget and tune.
             try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
+            #if DEBUG
+            VoiceSessionLog.log("ws.setup_complete")
+            #endif
 
             stateMachine.advance(to: .ready)
             Logger.voice.info("live_session_ready session_id=\(response.sessionID, privacy: .public)")
+            #if DEBUG
+            VoiceSessionLog.log("session.ready")
+            #endif
         } catch {
             // Any preWarm failure tears down what we started and
             // surfaces the typed error. State machine moves to error.
+            #if DEBUG
+            VoiceSessionLog.logError("prewarm.failed", error: error)
+            #endif
             stateMachine.advance(to: .error)
             close()
             throw error
@@ -180,6 +220,9 @@ final class RealtimeSession: VoiceSessionDriver {
 
     func beginTurn() async throws {
         guard stateMachine.state == .ready else {
+            #if DEBUG
+            VoiceSessionLog.log("begin_turn.busy", ["state": stateMachine.state.rawValue])
+            #endif
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
         guard let pipeline = audioPipeline else {
@@ -193,6 +236,9 @@ final class RealtimeSession: VoiceSessionDriver {
         stateMachine.advance(to: .userSpeaking)
         try pipeline.startCapture()
         startMicForwarding()
+        #if DEBUG
+        VoiceSessionLog.log("turn.begin")
+        #endif
     }
 
     // MARK: - endTurn
@@ -214,13 +260,31 @@ final class RealtimeSession: VoiceSessionDriver {
         stopMicForwarding()
 
         stateMachine.advance(to: .thinking)
+        #if DEBUG
+        VoiceSessionLog.log("turn.end_submitted", ["turn": turnCount + 1])
+        #endif
 
         // Wait for serverContent turnComplete (the dispatch loop
         // advances state and fulfills the continuation).
         let submittedAt = Date()
-        try await awaitTurnComplete()
+        do {
+            try await awaitTurnComplete()
+        } catch {
+            #if DEBUG
+            VoiceSessionLog.logError("turn.timeout_or_error", error: error)
+            #endif
+            throw error
+        }
 
         turnCount += 1
+        #if DEBUG
+        VoiceSessionLog.log("turn.complete", [
+            "turn": turnCount,
+            "latency_ms": Int(Date().timeIntervalSince(submittedAt) * 1000),
+            "prompt_tokens": lastUsageMetadata?.promptTokenCount ?? -1,
+            "total_tokens": lastUsageMetadata?.totalTokenCount ?? -1,
+        ])
+        #endif
 
         // Gemini Live doesn't return a structured "suggested_action"
         // on the normal response path — tool calls are the out-of-band
@@ -302,6 +366,9 @@ final class RealtimeSession: VoiceSessionDriver {
     // MARK: - close
 
     func close() {
+        #if DEBUG
+        VoiceSessionLog.log("close.begin", ["turn_count": turnCount])
+        #endif
         // Drain pending continuations BEFORE cancelling tasks — if we
         // cancel `receiveDispatcherTask` first, its `handleTransportError`
         // path (the normal drain site) never fires, and any caller
@@ -332,6 +399,9 @@ final class RealtimeSession: VoiceSessionDriver {
         if stateMachine.state != .closed {
             stateMachine.forceClose()
         }
+        #if DEBUG
+        VoiceSessionLog.sessionEnd()
+        #endif
     }
 
     // MARK: - Session refresh (scaffold only — D.1 gates timer wiring)
@@ -526,20 +596,42 @@ final class RealtimeSession: VoiceSessionDriver {
 
         case let .usageMetadata(usage):
             lastUsageMetadata = usage
+            #if DEBUG
+            VoiceSessionLog.log("usage.metadata", [
+                "prompt_tokens": usage.promptTokenCount,
+                "response_tokens": usage.responseTokenCount,
+                "total_tokens": usage.totalTokenCount,
+            ])
+            #endif
 
         case let .goAway(ms):
             Logger.voice.info(
                 "live_session_go_away time_before_disconnect_ms=\(ms ?? -1, privacy: .public)",
             )
+            #if DEBUG
+            VoiceSessionLog.log("server.go_away", ["time_before_disconnect_ms": ms ?? -1])
+            #endif
             await refreshSession()
 
-        case .sessionResumption, .unknown:
-            break
+        case .sessionResumption:
+            #if DEBUG
+            VoiceSessionLog.log("server.session_resumption_update")
+            #endif
+        case let .unknown(key):
+            #if DEBUG
+            VoiceSessionLog.log("server.unknown_frame", ["key": key])
+            #endif
         }
     }
 
     private func handleServerContent(_ content: LiveServerContent) async {
         if !content.audioChunks.isEmpty {
+            #if DEBUG
+            VoiceSessionLog.log("audio.chunk", [
+                "count": content.audioChunks.count,
+                "state": stateMachine.state.rawValue,
+            ])
+            #endif
             // Audio can arrive either from the first post-thinking
             // response OR after a toolResponse round-trip (Gemini
             // auto-continues the turn, CLAUDE.md §sharp-edge #9). Both
@@ -609,6 +701,12 @@ final class RealtimeSession: VoiceSessionDriver {
             Logger.voice.warning(
                 "live_tool_call_in_unexpected_state state=\(self.stateMachine.state.rawValue, privacy: .public)",
             )
+            #if DEBUG
+            VoiceSessionLog.log("tool_call.dropped_bad_state", [
+                "state": stateMachine.state.rawValue,
+                "calls": toolCall.functionCalls.map(\.name).joined(separator: ","),
+            ])
+            #endif
             if let cont = turnCompleteContinuation {
                 turnCompleteContinuation = nil
                 cont.resume(throwing: RealtimeSessionError.turnDrained)
@@ -616,6 +714,11 @@ final class RealtimeSession: VoiceSessionDriver {
             return
         }
         stateMachine.advance(to: .toolCalling)
+        #if DEBUG
+        VoiceSessionLog.log("tool_call.received", [
+            "calls": toolCall.functionCalls.map(\.name).joined(separator: ","),
+        ])
+        #endif
 
         // 3.1 Flash Live does synchronous tool calls — one in flight
         // at a time (CLAUDE.md §sharp-edge #12). So iterating the
@@ -629,10 +732,16 @@ final class RealtimeSession: VoiceSessionDriver {
             )
             do {
                 try await transport?.send(frame)
+                #if DEBUG
+                VoiceSessionLog.log("tool_response.sent", ["name": call.name])
+                #endif
             } catch {
                 Logger.voice.warning(
                     "live_tool_response_send_failed name=\(call.name, privacy: .public) error=\(error.localizedDescription, privacy: .private)",
                 )
+                #if DEBUG
+                VoiceSessionLog.logError("tool_response.send_failed", error: error, ["name": call.name])
+                #endif
             }
         }
 
@@ -680,6 +789,9 @@ final class RealtimeSession: VoiceSessionDriver {
         Logger.voice.warning(
             "live_substitution_stub tool=\(call.name, privacy: .public) — returning fail-closed result",
         )
+        #if DEBUG
+        VoiceSessionLog.log("substitution.stub_hit", ["tool": call.name])
+        #endif
         return [
             "ok": false,
             "error": "substitution_not_yet_supported",
@@ -688,6 +800,11 @@ final class RealtimeSession: VoiceSessionDriver {
     }
 
     private func handleTransportError(_ error: any Error) async {
+        #if DEBUG
+        VoiceSessionLog.logError("transport.error", error: error, [
+            "state": stateMachine.state.rawValue,
+        ])
+        #endif
         // Transport errored mid-session. Attempt refresh; if refresh
         // is a no-op (scaffold), degrade to error state so the VM
         // falls back to C.3.
@@ -729,6 +846,9 @@ final class RealtimeSession: VoiceSessionDriver {
                     ))
                 } catch {
                     Logger.voice.warning("live_mic_send_failed")
+                    #if DEBUG
+                    VoiceSessionLog.logError("mic.send_failed", error: error)
+                    #endif
                     break
                 }
             }

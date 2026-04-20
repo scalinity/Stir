@@ -165,6 +165,9 @@ struct CookModeRoot: View {
                         self.voiceDriver = liveDriver
                         driverForVM = liveDriver
                         Logger.voice.info("cook_mode_voice_live_ready")
+                        #if DEBUG
+                        VoiceSessionLog.log("cookmode.driver_selected", ["path": "live"])
+                        #endif
                     } catch {
                         // Live failed to pre-warm — fall back to C.3
                         // silently. Telemetry emits the
@@ -174,6 +177,9 @@ struct CookModeRoot: View {
                         Logger.voice.warning(
                             "cook_mode_voice_live_fallback: \(error.localizedDescription, privacy: .public)",
                         )
+                        #if DEBUG
+                        VoiceSessionLog.logError("cookmode.live_to_c3_fallback", error: error)
+                        #endif
                         driverForVM = await tryC3Fallback(session: session)
                     }
                 } else if canVoice && killSwitch {
@@ -181,6 +187,9 @@ struct CookModeRoot: View {
                     // attempting the Live mint. Fallback is still
                     // Premium+ behavior; kill switch just forces path.
                     Logger.voice.info("cook_mode_voice_kill_switch_engaged → c3")
+                    #if DEBUG
+                    VoiceSessionLog.log("cookmode.driver_selected", ["path": "c3", "reason": "kill_switch"])
+                    #endif
                     driverForVM = await tryC3Fallback(session: session)
                 }
                 // Free tier: no driver instantiated at all. The mic

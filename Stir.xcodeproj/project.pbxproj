@@ -85,6 +85,7 @@
 		795414CE1EDDCCC6B9B4241D /* CanonicalKeyHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */; };
 		8138014FAFF13F77C895A6A8 /* ConfigurationErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40092CAC050DF5BA95E9711C /* ConfigurationErrorView.swift */; };
 		82079A96A7F44851F2DBAC7C /* RealtimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37216544E460CDD56A4AFF6D /* RealtimeSession.swift */; };
+		6174C890EDE04602BD46965A /* VoiceSessionLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24D872FC11E4D9B8CE2540E /* VoiceSessionLog.swift */; };
 		8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A235A27546345C45BC15C3 /* ScanViewModel.swift */; };
 		89C550D052175C8023691845 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C97A077C3B8880A1E10D2F12 /* PaywallView.swift */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
@@ -194,6 +195,7 @@
 		34CB787B7AC60304704C39E1 /* VoiceSessionDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionDriver.swift; sourceTree = "<group>"; };
 		34CC0200F54DD79B24299BCF /* TonightHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightHomeView.swift; sourceTree = "<group>"; };
 		37216544E460CDD56A4AFF6D /* RealtimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSession.swift; sourceTree = "<group>"; };
+		D24D872FC11E4D9B8CE2540E /* VoiceSessionLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionLog.swift; sourceTree = "<group>"; };
 		374669111D98B028BEC3824D /* KeychainStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStorage.swift; sourceTree = "<group>"; };
 		392D02601EFD7683030D59D1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		3979F50C2BAFE0D716A7048E /* MealSolveRequest+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MealSolveRequest+Extensions.swift"; sourceTree = "<group>"; };
@@ -660,6 +662,7 @@
 				88F34D3B30110FEF0532AF12 /* LiveFrames.swift */,
 				D017C975A67DC24D5210451E /* LiveWebSocketTransport.swift */,
 				37216544E460CDD56A4AFF6D /* RealtimeSession.swift */,
+				D24D872FC11E4D9B8CE2540E /* VoiceSessionLog.swift */,
 			);
 			path = GeminiLive;
 			sourceTree = "<group>";
@@ -979,6 +982,7 @@
 				71D7ED7FAF8BF40972320602 /* ProComparisonSheet.swift in Sources */,
 				F34D62A1D346558843A21334 /* Radius.swift in Sources */,
 				82079A96A7F44851F2DBAC7C /* RealtimeSession.swift in Sources */,
+				6174C890EDE04602BD46965A /* VoiceSessionLog.swift in Sources */,
 				54A7F72080283D4D04C621C1 /* RecipeImport+Extensions.swift in Sources */,
 				7431743367A3C3ADE40AEA26 /* RecipeImportRepository.swift in Sources */,
 				A45696E727E29689E46AA055 /* RecipePlan+Extensions.swift in Sources */,
