@@ -1,33 +1,16 @@
 // PaywallView
 //
-// Full-sheet paywall presented from a paywall trigger. Primary CTA is the
-// 7-day trial annual (`stir.premium.annual.trial7`); monthly is secondary;
-// Pro is a tertiary "Compare plans" modal.
+// Full-sheet paywall. Primary CTA = 7-day trial annual
+// (`stir.premium.annual.trial7`); monthly Premium is secondary; Pro lives
+// in a "Compare plans" sheet.
 //
-// Apple requirements satisfied:
-//   - Trial terms visible BEFORE Subscribe CTA (auto-renew, billing date,
-//     cancel path)
-//   - Restore Purchases always visible
-//   - ToS + Privacy Policy linked
-//   - Close button allows dismiss without purchase
+// Apple surface requirements: trial terms visible before Subscribe, Restore
+// Purchases visible, ToS + Privacy linked, close button present.
 //
-// CLAUDE.md §"billing model": primary paywall CTA is always the annual
-// trial. Do not reorder without regenerating cohort-economics analysis.
-//
-// Visual tokens:
-//   - Every hex / font / spacing / radius resolved through
-//     `Color.Stir.*`, `Font.Stir.*` via `.stirFont(...)`, `CGFloat.Stir.*`.
-//   - Primary CTA is ink900 (warm near-black), NOT ember — per design
-//     mockup `stir-app-design/project/DesignMockups/16_paywall.html`
-//     `PaywallSolve` + `PaywallScan`. This is a scoped paywall override
-//     of Design-System §8.1 "PrimaryButton = ember.600"; see §3.3 color
-//     rules for the rationale (paywall uses editorial tonality vs in-flow
-//     action). Ember stays on secondary interactive elements via
-//     NavigationStack-level `.tint(Color.Stir.ember600)`.
-//
-// Mockup-to-SwiftUI translation gaps documented inline with
-// `// GAP:` comments where a CSS/React idiom has no direct SwiftUI
-// equivalent.
+// Primary CTA uses ink900 instead of the ember600 default from
+// Design-System §8.1. This is a scoped paywall override (editorial
+// tonality). Ember stays on secondary surfaces via the NavigationStack
+// `.tint(Color.Stir.ember600)` at the top.
 
 import SwiftUI
 
@@ -39,18 +22,22 @@ struct PaywallView: View {
     @State private var restoreToast: StirToastPayload?
     @State private var successIconBounce = false
 
-    /// Feature-row icon column width scales with Dynamic Type so the
-    /// icons don't crowd the text at AX sizes.
     @ScaledMetric(relativeTo: .callout) private var featureIconWidth: CGFloat = 24
+
+    /// 1.1s covers the `.bounce` symbol effect (~750ms) plus a short
+    /// breathing pause before dismiss.
+    private static let successDismissDelayNanos: UInt64 = 1_100_000_000
+    /// Toast auto-hide window.
+    private static let restoreToastVisibleNanos: UInt64 = 2_500_000_000
+    /// Modal-state error icon size (40pt). Between `.iconLg` (28) and
+    /// `.iconXl` (44) — renders smaller than the success celebration icon
+    /// but larger than inline feature-row icons.
+    private static let modalErrorIconSize: CGFloat = 40
 
     var body: some View {
         NavigationStack {
             contentView
-                .tint(Color.Stir.ember600) // Preserve ember on secondary
-                                           // interactive surfaces (links,
-                                           // nav-bar items, .bordered
-                                           // button accents). The ink900
-                                           // primary CTA overrides inline.
+                .tint(Color.Stir.ember600)
                 .background(Color.Stir.backgroundPrimary)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -80,17 +67,18 @@ struct PaywallView: View {
         }
     }
 
-    /// Animate the success icon with a bounce, wait for the animation to
-    /// settle, then dismiss. Duration matches `.symbolEffect(.bounce)`
-    /// animation length (~750ms) + a short pause. Replaces the previous
-    /// hardcoded `Task.sleep(600ms)` which ran regardless of whether the
-    /// user's eye could actually register the success state.
     private func handleSuccess() {
         withAnimation(.spring(duration: 0.4)) {
             successIconBounce = true
         }
+        // Asymmetric with `handleRestoreTap`'s race guard by design: toast
+        // presentation can be overridden by a newer tap (so the tap needs a
+        // UUID guard to avoid clearing the wrong toast), but `dismiss()` is
+        // idempotent — firing it on an already-dismissed sheet is a no-op
+        // per SwiftUI, and `.succeeded` is a terminal state the VM never
+        // revisits. No guard needed.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_100_000_000)  // 1.1s: bounce + breathing room
+            try? await Task.sleep(nanoseconds: Self.successDismissDelayNanos)
             dismiss()
         }
     }
@@ -107,10 +95,8 @@ struct PaywallView: View {
                 displayingContent(offerings: offerings)
             }
         case .purchasing(let productID):
-            // Show the real offerings (from the VM cache) with only the
-            // in-flight button disabled. Previous version passed empty
-            // offerings here, which made every button visibly collapse
-            // to "unavailable" during purchase — jarring.
+            // Keep real offerings rendered so buttons don't visually
+            // collapse to "unavailable" while one purchase is in flight.
             ScrollView {
                 displayingContent(
                     offerings: viewModel.currentOfferings() ?? PaywallOfferings(packages: []),
@@ -131,6 +117,7 @@ struct PaywallView: View {
     private var loadingContent: some View {
         VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
+                .tint(Color.Stir.ember600)
             Text("Loading plans…")
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
@@ -158,24 +145,21 @@ struct PaywallView: View {
     // MARK: - Sections
 
     private var heroHeader: some View {
-        // Mockup `16_paywall.html` replaces the generic crown hero with
-        // the system's `sparkles` upsell mark — same SF Symbol the Design
-        // System §6 pins for "Premium upsell". Ember-tinted, not yellow.
-        VStack(spacing: CGFloat.Stir.space2 + 2) { // 10pt — between space2/space3
+        VStack(spacing: CGFloat.Stir.space3) {
             Image.Stir.sparkles
                 .font(.system(size: CGFloat.Stir.iconXl))
                 .foregroundStyle(Color.Stir.ember600)
                 .padding(.bottom, CGFloat.Stir.space1)
-                // Decorative — the headline carries semantic meaning for
-                // screen readers. Without this, VoiceOver reads "sparkles"
-                // before the actual value prop.
+                // Decorative — the headline carries semantic meaning; without
+                // this, VoiceOver reads "sparkles" before the value prop.
                 .accessibilityHidden(true)
             Text(viewModel.trigger.headline)
-                .stirFont(.displayMd)
+                .stirFont(.displayLg)
                 .foregroundStyle(Color.Stir.textPrimary)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
             Text(viewModel.trigger.subheadline)
-                .stirFont(.bodyMd)
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.textTertiary)
                 .multilineTextAlignment(.center)
         }
@@ -183,13 +167,12 @@ struct PaywallView: View {
 
     private var featuresList: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-            // Step-5 copy says "Hands-free voice cooking (coming soon)" — voice
-            // UI lands step 6. Update this copy when voice ships.
-            featureRow(icon: Image(systemName: "waveform"), title: "Hands-free voice cooking", subtitle: "Coming soon")
+            // Step 6 replaces the "(coming soon)" clause with the live voice copy.
+            featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice cooking", subtitle: "Coming soon")
             featureRow(icon: Image.Stir.cook, title: "40 Dinner Solves / month")
             featureRow(icon: Image.Stir.pro, title: "Unlimited Saved Favorites")
-            featureRow(icon: Image(systemName: "square.grid.2x2.fill"), title: "Widgets + Shortcuts")
-            featureRow(icon: Image(systemName: "leaf.fill"), title: "Leftovers mode")
+            featureRow(icon: Image.Stir.widgetFill, title: "Widgets + Shortcuts")
+            featureRow(icon: Image.Stir.leaf, title: "Leftovers mode")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -199,7 +182,9 @@ struct PaywallView: View {
             icon
                 .frame(width: featureIconWidth)
                 .foregroundStyle(Color.Stir.ember600)
-            VStack(alignment: .leading, spacing: 2) {
+            // 2pt = off-scale tight pairing for title↔subtitle adjacency
+            // (4pt would visually disconnect them inside a leading-icon row).
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
                 Text(title)
                     .stirFont(.bodyMd)
                     .foregroundStyle(Color.Stir.textPrimary)
@@ -214,14 +199,6 @@ struct PaywallView: View {
     }
 
     private func primaryCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
-        // Primary CTA uses ink900 (warm near-black) per mockup, NOT ember.
-        // The CTA label uses paper50 so contrast inverts correctly across
-        // light/dark:
-        //   - Light mode: bg=ink900 (dark), label=paper50 (warm off-white)
-        //   - Dark mode:  bg=ink900 (warm off-white), label=paper50 (dark)
-        // Both tokens flip per trait, so the CTA always reads high-contrast.
-        // The mockup uses `color:c.bg` on `background:c.ink900` for the
-        // same reason.
         let package = offerings.primaryTrialPackage
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
@@ -229,6 +206,12 @@ struct PaywallView: View {
             VStack(spacing: CGFloat.Stir.space1) {
                 Text("Start 7-day free trial")
                     .stirFont(.labelLg)
+                // Subtitle uses `paper50` at 85% alpha on the solid `ink900`
+                // background for visual hierarchy inside the CTA. Spec §3.3
+                // "no transparency on text" targets opacity-over-photos (which
+                // reveals the photo through glyphs); on a flat opaque surface
+                // the rationale doesn't apply, and the inverse ink/paper
+                // scale offers no 85%-equivalent step to use instead.
                 if let package {
                     Text("then \(package.displayPrice)/\(package.periodDescription)")
                         .stirFont(.bodySm)
@@ -243,7 +226,7 @@ struct PaywallView: View {
             .padding(.vertical, CGFloat.Stir.controlVerticalPadding)
             .background(Color.Stir.ink900)
             .foregroundStyle(Color.Stir.paper50)
-            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard))
         }
         .disabled(package == nil || disablePurchaseFor == package?.productID)
         .overlay(alignment: .center) {
@@ -254,15 +237,11 @@ struct PaywallView: View {
     }
 
     private func secondaryCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
-        // Secondary CTA style follows the mockup's "subtle outlined" idiom:
-        // paper100 fill + ink100 hairline border + ink900 label. Cannot use
-        // `.buttonStyle(.bordered)` cleanly because that style picks up the
-        // NavigationStack `.tint` and renders an ember-tinted fill, which
-        // fights the paywall's ink900 primary CTA.
-        // GAP: mockup uses a 1.5pt border on some surfaces; SwiftUI
-        // `RoundedRectangle.stroke(lineWidth:)` is pixel-ideal here, so
-        // 1pt reads identically.
+        // `.buttonStyle(.bordered)` would inherit the NavigationStack ember
+        // tint and fight the ink primary CTA, so this composes the outline
+        // explicitly.
         let package = offerings.premiumMonthlyPackage
+        let isDisabled = package == nil || disablePurchaseFor == package?.productID
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
@@ -277,16 +256,23 @@ struct PaywallView: View {
                     RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
                         .stroke(Color.Stir.divider, lineWidth: 1),
                 )
+                .opacity(isDisabled ? 0.5 : 1)
         }
-        .disabled(package == nil || disablePurchaseFor == package?.productID)
+        .disabled(isDisabled)
         .buttonStyle(.plain)
+        .overlay(alignment: .center) {
+            if case .purchasing(let id) = viewModel.state, id == package?.productID {
+                ProgressView().tint(Color.Stir.textPrimary)
+            }
+        }
     }
 
     private func trialDisclosureView(package: PaywallPackage?) -> some View {
         // Apple requirement: auto-renew disclosure visible before subscribe.
-        VStack(alignment: .leading, spacing: 6) { // 6pt: sub-scale, between space1/space2 — deliberate tight label→body pairing
-            // Heading uses `labelEyebrow` (uppercase, tracked) to match
-            // the mockup's section-label tonality.
+        // 6pt = off-scale tight eyebrow↔body pairing (space2=8pt visually
+        // detaches the uppercase label from its body copy; space1=4pt is
+        // too tight against the eyebrow's baked line height).
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2 - 2) {
             Text("Trial terms")
                 .stirFont(.labelEyebrow)
                 .foregroundStyle(Color.Stir.textTertiary)
@@ -333,17 +319,15 @@ struct PaywallView: View {
         }
         let myID = payload.id
         restoreToast = payload
-        try? await Task.sleep(nanoseconds: 2_500_000_000)
-        // Race guard: only dismiss if this task's toast is still presented.
+        try? await Task.sleep(nanoseconds: Self.restoreToastVisibleNanos)
+        // Race guard: only dismiss this task's toast, not a newer one.
         if restoreToast?.id == myID {
             restoreToast = nil
         }
     }
 
     private var legalLinks: some View {
-        // Apple requirement: ToS + Privacy Policy must be reachable from
-        // the paywall before subscribe. Placeholder URLs; hosted pages
-        // land before beta (step 9).
+        // Placeholder URLs; hosted pages land before beta (step 9).
         HStack(spacing: CGFloat.Stir.space4) {
             Link("Terms of Service", destination: URL(string: "https://stir.app/terms")!)
             Link("Privacy Policy", destination: URL(string: "https://stir.app/privacy")!)
@@ -354,18 +338,17 @@ struct PaywallView: View {
 
     private var successContent: some View {
         VStack(spacing: CGFloat.Stir.space4) {
+            // Paywall success icon is the single exception to §6 icon.xl
+            // (44pt) — 56pt reads as a celebration rather than chrome.
             Image.Stir.success
-                .font(.system(size: 56)) // Hero success icon — spec §6
-                                          // icon.xl is 44; this is the
-                                          // paywall's single exception,
-                                          // rendering the confirmation
-                                          // as a larger celebration.
+                .font(.system(size: CGFloat.Stir.iconXl + 12))
                 .foregroundStyle(Color.Stir.sage600)
                 .symbolEffect(.bounce, value: successIconBounce)
                 .accessibilityHidden(true)
             Text("You're all set")
                 .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.textPrimary)
+                .accessibilityAddTraits(.isHeader)
             Text("Welcome to Premium.")
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
@@ -377,9 +360,11 @@ struct PaywallView: View {
     private func pendingContent(productID: String) -> some View {
         VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
+                .tint(Color.Stir.ember600)
             Text("Purchase pending approval")
                 .stirFont(.displaySm)
                 .foregroundStyle(Color.Stir.textPrimary)
+                .accessibilityAddTraits(.isHeader)
             Text(
                 "Your purchase is waiting for approval. You'll unlock Premium once it's approved. You can close this screen; Stir will catch up automatically."
             )
@@ -397,15 +382,16 @@ struct PaywallView: View {
     private func purchaseFailedContent(productID: String, error: PayError) -> some View {
         VStack(spacing: CGFloat.Stir.space4) {
             Image.Stir.softError
-                // Soft error SF Symbol (non-fill), colored `rust.600`
-                // per Design-System §3.1 (soft recoverable AI/store failure).
-                .font(.system(size: CGFloat.Stir.iconXl - 4)) // 40pt — matches mockup error illustration scale
+                .font(.system(size: Self.modalErrorIconSize))
                 .foregroundStyle(Color.Stir.rust600)
+                // Decorative — the headline carries the PAY-01 semantic.
+                .accessibilityHidden(true)
             // PAY-01 copy from spec §6.
             Text("Purchase didn't go through. You weren't charged.")
                 .stirFont(.displaySm)
                 .foregroundStyle(Color.Stir.textPrimary)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
             Text(error.userFacingMessage)
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
@@ -414,9 +400,7 @@ struct PaywallView: View {
                 Button("Try Again") {
                     Task { await viewModel.purchase(productID: productID) }
                 }
-                .buttonStyle(.borderedProminent) // Inherits NavigationStack
-                                                  // .tint ember600 for the
-                                                  // filled action.
+                .buttonStyle(.borderedProminent)
                 Button("Choose Another Plan") { viewModel.dismissError() }
                     .buttonStyle(.bordered)
             }
@@ -428,13 +412,15 @@ struct PaywallView: View {
     private func loadFailureContent(error: PayError) -> some View {
         VStack(spacing: CGFloat.Stir.space4) {
             Image.Stir.networkOff
-                // NET-01 icon — wifi.slash.
-                .font(.system(size: CGFloat.Stir.iconXl - 4))
+                .font(.system(size: Self.modalErrorIconSize))
                 .foregroundStyle(Color.Stir.rust600)
+                // Decorative — the headline carries the network-failure semantic.
+                .accessibilityHidden(true)
             Text("We couldn't reach the store right now.")
                 .stirFont(.displaySm)
                 .foregroundStyle(Color.Stir.textPrimary)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
             Text(error.userFacingMessage)
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
@@ -450,11 +436,6 @@ struct PaywallView: View {
 }
 
 // MARK: - PayError → user copy
-//
-// (The `RestoreToast` + `RestoreToastView` types that used to live here
-// were replaced by the shared `StirToast` component in `Stir/App/Views/
-// StirToast.swift` during the step-5 review follow-up. Settings uses the
-// same component, so a single capsule style lives in one place now.)
 
 extension PayError {
     var userFacingMessage: String {

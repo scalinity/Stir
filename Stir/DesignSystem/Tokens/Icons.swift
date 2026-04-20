@@ -52,6 +52,10 @@ extension Image.Stir {
     static let micActive = Image(systemName: "mic.fill")
     /// Mic — disabled / muted.
     static let micDisabled = Image(systemName: "mic.slash")
+    /// Voice / hands-free feature marker (paywall, voice settings).
+    /// Distinct from `.micIdle` — `voiceWave` is the abstract "voice" concept,
+    /// `.micIdle` is the concrete recording device.
+    static let voiceWave = Image(systemName: "waveform")
 
     // MARK: - Time
 
@@ -110,8 +114,10 @@ extension Image.Stir {
     static let cart = grocery
     /// Reminders export.
     static let reminders = Image(systemName: "checklist")
-    /// Home Screen widget.
+    /// Home Screen widget (outline).
     static let widget = Image(systemName: "square.grid.2x2")
+    /// Home Screen widget (filled) — paywall feature badges, tier lists.
+    static let widgetFill = Image(systemName: "square.grid.2x2.fill")
 
     // MARK: - Tier / upsell badges
 
@@ -173,6 +179,8 @@ extension Image.Stir {
     static let heat = Image(systemName: "flame")
     /// Quick action / fast.
     static let quick = Image(systemName: "bolt.fill")
+    /// Leftovers mode — the "use-what's-left" feature mark.
+    static let leaf = Image(systemName: "leaf.fill")
 
     // MARK: - Media controls
 

@@ -239,6 +239,7 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Voice mic (idle) | `mic` | `.micIdle` |
 | Voice mic (active) | `mic.fill` with `voice.600` glow ring | `.micActive` |
 | Voice mic (disabled) | `mic.slash` | `.micDisabled` |
+| Voice feature mark (abstract, non-mic) | `waveform` | `.voiceWave` |
 | Timer | `timer` | `.timer` |
 | Total cook time (inline) | `clock` | `.clock` |
 | Substitution | `arrow.triangle.2.circlepath` | `.substitute` (alias `.swap`) |
@@ -249,7 +250,8 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Share | `square.and.arrow.up` | `.share` |
 | Grocery | `cart` | `.grocery` (alias `.cart`) |
 | Reminders | `checklist` | `.reminders` |
-| Widget | `square.grid.2x2` | `.widget` |
+| Widget (outline) | `square.grid.2x2` | `.widget` |
+| Widget (filled) — paywall feature badges | `square.grid.2x2.fill` | `.widgetFill` |
 | Premium upsell | `sparkles` (ONLY in paywall + tier badges) | `.premium` (alias `.sparkles`) |
 | Pro upsell | `star.fill` | `.pro` (alias `.star`) |
 | Allergen/dietary hard-rule violation | `exclamationmark.triangle.fill` in `crimson.600` | `.allergen` |
@@ -273,6 +275,7 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Cookbook / recipe source | `book.closed` | `.cookbook` |
 | Spiciness / heat | `flame` | `.heat` |
 | Quick action | `bolt.fill` | `.quick` |
+| Leftovers mode | `leaf.fill` | `.leaf` |
 | Photo picker | `photo` | `.photo` |
 | Link (external) | `link` | `.link` |
 | Play / resume | `play.fill` | `.play` |
