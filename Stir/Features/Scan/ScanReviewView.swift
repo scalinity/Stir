@@ -37,11 +37,20 @@ struct ScanReviewView: View {
         .navigationTitle("Review ingredients")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            if case .review = viewModel.phase {
+            // Show the confirm bar whenever the user is on this
+            // screen with ingredients available — that includes
+            // `.review` (first visit) AND `.confirmed` (user went
+            // forward, then tapped back to edit). The bar is hidden
+            // only during `.parsing` (skeleton has its own layout)
+            // and `.error` (error card owns the screen).
+            switch viewModel.phase {
+            case .review, .confirmed:
                 confirmBar
                     .padding(.horizontal)
                     .padding(.bottom, 8)
                     .background(.bar)
+            default:
+                EmptyView()
             }
         }
         .alert("Edit ingredient", isPresented: bindingIsPresented(forEdit: true)) {
