@@ -508,3 +508,56 @@ struct CookTurnResponse: Decodable, Sendable {
         case retryCount = "retry_count"
     }
 }
+
+// MARK: - Realtime Session (step 6 C.2 — Gemini Live mint)
+//
+// Wire-format for /v1/ai/realtime-session. Called by RealtimeSession
+// actor at Cook Mode entry on the Premium+ voice path. Backend mints a
+// single-use ephemeral Gemini Live token and returns a ready-to-open
+// WebSocket URL (access_token query param already embedded).
+//
+// Contract pinned here so a backend drift is a build break, not a
+// runtime surprise. See Backend/supabase/functions/realtime-session/.
+
+struct RealtimeSessionRequest: Encodable, Sendable {
+    let clientRequestID: UUID
+    let cookingSessionID: UUID
+    let recipePlanID: UUID
+    let currentStepNumber: Int
+    let recipeContext: RealtimeRecipeContext
+    let householdContext: RealtimeHouseholdContext
+
+    enum CodingKeys: String, CodingKey {
+        case clientRequestID = "client_request_id"
+        case cookingSessionID = "cooking_session_id"
+        case recipePlanID = "recipe_plan_id"
+        case currentStepNumber = "current_step_number"
+        case recipeContext = "recipe_context"
+        case householdContext = "household_context"
+    }
+}
+
+struct RealtimeSessionResponse: Decodable, Sendable {
+    /// `auth_tokens/<hex>` — opaque value iOS passes unchanged as the
+    /// WebSocket `access_token` query param. NOT an OAuth token.
+    let authToken: String
+    /// ISO-8601 hard session deadline (35 min past mint). The WebSocket
+    /// MUST be closed and a new one opened before this expires.
+    let expiresAt: String
+    /// Server-minted correlation id for telemetry. Matches
+    /// ai_request_log.id on the backend for this mint.
+    let sessionID: String
+    /// Full WebSocket URL ready to open. Already has
+    /// `?access_token=<auth_token>` embedded.
+    let wsURL: String
+    /// Prompt version baked into the session (spec §15 telemetry tag).
+    let promptVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case authToken = "auth_token"
+        case expiresAt = "expires_at"
+        case sessionID = "session_id"
+        case wsURL = "ws_url"
+        case promptVersion = "prompt_version"
+    }
+}

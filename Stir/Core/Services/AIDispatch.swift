@@ -108,6 +108,47 @@ actor AIDispatch {
         )
     }
 
+    // MARK: - Realtime Session mint (step 6 C.2 — Gemini Live)
+
+    /// POST /v1/ai/realtime-session. Mints a single-use Gemini Live
+    /// ephemeral token for one Cook Session. Backend handles the actual
+    /// mint to Google's `/v1alpha/auth_tokens` using the paid-tier
+    /// GEMINI_API_KEY (never leaves Supabase). Response includes a
+    /// ready-to-open `ws_url` with `access_token` pre-embedded.
+    ///
+    /// Timeout is 15s — slightly tighter than cook-turn because mint
+    /// p95 measured ~1.2s against paid tier, and a mid-session refresh
+    /// hanging 15s would leak audibly past the seamless-handoff budget.
+    ///
+    /// Throws `StirError.server(code: .aiVoice01)` on upstream Gemini
+    /// outage (backend maps mint 5xx to AI-VOICE-01) so iOS can trigger
+    /// the fall-back to C.3 path cleanly.
+    func realtimeSession(request body: RealtimeSessionRequest) async throws -> RealtimeSessionResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/realtime-session")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 15
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode realtime-session body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "realtime_session_mint request_id=\(body.clientRequestID.uuidString, privacy: .public)",
+        )
+        let response: RealtimeSessionResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "realtime_session_minted session_id=\(response.sessionID, privacy: .public) expires_at=\(response.expiresAt, privacy: .public)",
+        )
+        return response
+    }
+
     // MARK: - Cook Turn (step 6 — Live fallback)
 
     /// POST /v1/ai/cook-turn. Sent by SpeechFallbackService after on-device

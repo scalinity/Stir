@@ -236,4 +236,64 @@
         <attribute name="wouldRepeat" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="outcomeFeedback" inverseEntity="CookingSession"/>
     </entity>
+    <!--
+    Step-7 additions (spec §4.10, §4.16, §4.17):
+      * RecipeImport — audit + correlation trail for every URL / share-sheet
+        / screenshot-OCR / pasted-text import attempt. Every attempt
+        persists a row regardless of success/failure; step-7 verification
+        depends on this ("failed import leaves trace").
+      * GroceryList — status enum {draft | exported}; FK to CookingSession
+        for session-originated groceries; reminderListId captured on
+        successful EventKit export.
+      * GroceryItem — priority is REQUIRED per spec §4.17; default "normal"
+        enforced at repository layer; reminderId populated per-item after
+        EventKit insertion.
+    CloudKit rules (same as step-2 baseline): no unique constraints; all
+    attributes optional at schema level; CSV / JSON-encoded collection
+    fields (no custom transformers).
+    -->
+    <entity name="RecipeImport" representedClassName="RecipeImport" syncable="YES" codeGenerationType="class">
+        <attribute name="aiRequestId" optional="YES" attributeType="String"/>
+        <attribute name="completedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="errorCode" optional="YES" attributeType="String"/>
+        <attribute name="householdId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <!-- 0 on non-OCR paths; 1..20 on screenshot_ocr -->
+        <attribute name="ocrPageCount" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <!-- SHA-256 hex of raw input (URL content or OCR/pasted text); dedupe + retention -->
+        <attribute name="rawTextHash" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="recipePlanId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <!-- url | share_sheet | screenshot_ocr | pasted_text -->
+        <attribute name="sourceType" optional="YES" attributeType="String" defaultValueString="url"/>
+        <attribute name="sourceURL" optional="YES" attributeType="String"/>
+        <!-- pending | processing | completed | failed -->
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="pending"/>
+        <attribute name="submittedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="GroceryList" representedClassName="GroceryList" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="exportedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="householdId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="reminderListId" optional="YES" attributeType="String"/>
+        <attribute name="sourceCookingSessionId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <!-- draft | exported  (spec §4.16) -->
+        <attribute name="status" optional="YES" attributeType="String" defaultValueString="draft"/>
+        <attribute name="title" optional="YES" attributeType="String" defaultValueString=""/>
+        <relationship name="items" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="GroceryItem" inverseName="list" inverseEntity="GroceryItem"/>
+    </entity>
+    <entity name="GroceryItem" representedClassName="GroceryItem" syncable="YES" codeGenerationType="class">
+        <attribute name="canonicalIngredientSlug" optional="YES" attributeType="String"/>
+        <attribute name="displayName" optional="YES" attributeType="String" defaultValueString=""/>
+        <!-- produce | dairy | meat | pantry | frozen | other -->
+        <attribute name="groceryCategory" optional="YES" attributeType="String" defaultValueString="other"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isChecked" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <!-- normal | low | high  (REQUIRED per spec §4.17; default normal) -->
+        <attribute name="priority" optional="YES" attributeType="String" defaultValueString="normal"/>
+        <attribute name="quantityText" optional="YES" attributeType="String"/>
+        <attribute name="reminderId" optional="YES" attributeType="String"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="list" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="GroceryList" inverseName="items" inverseEntity="GroceryList"/>
+    </entity>
 </model>

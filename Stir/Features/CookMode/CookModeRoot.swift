@@ -28,7 +28,12 @@ struct CookModeRoot: View {
     @Environment(RootCoordinator.self) private var coordinator
 
     @State private var viewModel: CookModeViewModel?
-    @State private var voiceDriver: SpeechFallbackService?
+    /// Retained reference to the concrete voice driver so the view
+    /// owns its lifetime for the duration of Cook Mode. May be either
+    /// a `RealtimeSession` (C.2 Live path) or a `SpeechFallbackService`
+    /// (C.3 fallback) — typed as the protocol existential so the view
+    /// doesn't branch on driver type.
+    @State private var voiceDriver: (any VoiceSessionDriver)?
     @State private var initError: String?
 
     init(
@@ -125,15 +130,18 @@ struct CookModeRoot: View {
                     )
                 }
 
-                // Driver selection (C.4 plumbing for C.2, ADR 0007):
-                // `disable_cook_realtime` is the server-side kill switch.
-                // Today it has no effect because RealtimeSession (C.2)
-                // isn't implemented yet, but reading + passing the flag
-                // means C.4 doesn't need re-plumbing when C.2 lands.
-                // Once C.2 exists, the branch will be:
-                //   if killSwitch || !canVoice → fallback
-                //   else                        → RealtimeSession
-                // For now: always fallback (the only driver).
+                // Driver selection (C.2 + C.3, ADR 0007):
+                //   killSwitch || !canVoice  → no driver at all (Free
+                //                                path, or server-side
+                //                                kill flipped)
+                //   Premium+ + pre-warm Live  → RealtimeSession (C.2)
+                //   Pre-warm Live failed      → SpeechFallbackService (C.3)
+                //
+                // The Live path attempts mint + WebSocket open +
+                // setupComplete handshake during preWarm. Any failure
+                // at any step (mint 5xx, WS unreachable, handshake
+                // timeout) falls back to C.3 cleanly — same VM code
+                // path, different `pathLabel` on the VoiceSessionDriver.
                 //
                 // canVoice is pinned to a local so the single read at
                 // Cook Mode entry drives both driver instantiation AND
@@ -144,41 +152,56 @@ struct CookModeRoot: View {
                 let killSwitch = entitlements.flagBool(forKey: "disable_cook_realtime") ?? false
                 let canVoice = entitlements.canAccess(.voiceCookMode) == .allowed
                 var driverForVM: (any VoiceSessionDriver)? = nil
-                if canVoice {
-                    // Pre-warm the AVAudioSession + STT + TTS so the
-                    // first mic tap engages in <200ms. ADR 0007
-                    // pre-commit: pre-warm at Cook Mode entry, not at
-                    // first tap.
-                    let newDriver = SpeechFallbackService(
-                        aiDispatch: aiDispatch,
-                        voiceTurnRepository: VoiceTurnRepository(),
-                        cookingSession: session,
-                    )
+
+                if canVoice && !killSwitch {
                     do {
                         try AVAudioSessionConfigurator.activateForCookMode()
-                        try await newDriver.preWarm()
-                        self.voiceDriver = newDriver
-                        driverForVM = newDriver
-                        Logger.voice.info(
-                            "cook_mode_voice_prewarmed kill_switch=\(killSwitch, privacy: .public)",
+                        let liveDriver = RealtimeSession(
+                            aiDispatch: aiDispatch,
+                            voiceTurnRepository: VoiceTurnRepository(),
+                            cookingSession: session,
                         )
+                        try await liveDriver.preWarm()
+                        self.voiceDriver = liveDriver
+                        driverForVM = liveDriver
+                        Logger.voice.info("cook_mode_voice_live_ready")
                     } catch {
-                        // Pre-warm failure is non-fatal — mic button
-                        // will be visible but tap will surface an
-                        // inline toast. The VM still gets the driver so
-                        // it can report "voice not available" cleanly
-                        // rather than crash.
+                        // Live failed to pre-warm — fall back to C.3
+                        // silently. Telemetry emits the
+                        // `voice_live_fallback_to_c3` event (deferred —
+                        // wired post-D.1 when we have a baseline for
+                        // fallback rate).
                         Logger.voice.warning(
-                            "cook_mode_voice_prewarm_failed: \(error.localizedDescription, privacy: .public)",
+                            "cook_mode_voice_live_fallback: \(error.localizedDescription, privacy: .public)",
                         )
-                        self.voiceDriver = newDriver
-                        driverForVM = newDriver
+                        driverForVM = await tryC3Fallback(session: session)
                     }
+                } else if canVoice && killSwitch {
+                    // Kill switch is on — go straight to C.3 without
+                    // attempting the Live mint. Fallback is still
+                    // Premium+ behavior; kill switch just forces path.
+                    Logger.voice.info("cook_mode_voice_kill_switch_engaged → c3")
+                    driverForVM = await tryC3Fallback(session: session)
                 }
                 // Free tier: no driver instantiated at all. The mic
                 // button still renders (Daniel's pre-commit) and the
                 // VM routes the tap to the paywall without touching
                 // SFSpeechRecognizer / AVAudioEngine / AVSpeechSynthesizer.
+
+                // Wire Live tool-call callbacks to VM side-effects.
+                // advance_step → nextStep(advancedBy: "voice")
+                // start_timer  → startTimerForCurrentStep
+                // Done here (not in VM init) because the tool-call
+                // surface is Live-only — polluting VoiceSessionDriver
+                // with Live-only methods would leak abstraction.
+                if let liveDriver = driverForVM as? RealtimeSession {
+                    // `vm` is captured weakly in the closures below to
+                    // break the retain cycle (driver held by VM held by
+                    // capture).
+                    // vm is declared in the next block; defer wiring
+                    // until after VM construction.
+                    _ = liveDriver
+                }
 
                 let capturedCoordinator = coordinator
                 let vm = CookModeViewModel(
@@ -192,6 +215,20 @@ struct CookModeRoot: View {
                     presentPaywall: { trigger in capturedCoordinator.presentPaywall(trigger) },
                 )
                 self.viewModel = vm
+
+                // Wire Live tool-call side-effects now that the VM
+                // exists. Weak capture breaks the driver ↔ VM cycle.
+                if let liveDriver = driverForVM as? RealtimeSession {
+                    liveDriver.onAdvanceStepRequested = { [weak vm] in
+                        vm?.nextStep(advancedBy: "voice")
+                    }
+                    liveDriver.onStartTimerRequested = { [weak vm] _, _ in
+                        Task { @MainActor [weak vm] in
+                            await vm?.startTimerForCurrentStep(generated: true)
+                        }
+                    }
+                }
+
                 // Reconcile any leftover timers from a cross-device
                 // arrival. No-op on fresh sessions.
                 await vm.reconcileTimersOnForeground()
@@ -232,6 +269,35 @@ struct CookModeRoot: View {
         case .saved: return .saved
         case .imported: return .imported
         case .leftovers: return .leftovers
+        }
+    }
+
+    /// Construct + pre-warm a SpeechFallbackService (C.3). Runs when the
+    /// Live path is unavailable (kill switch, preWarm failure). Returns
+    /// nil only if AVAudioSession activation itself fails, which is
+    /// effectively terminal — the mic button still renders but every
+    /// tap will surface the recognizerUnavailable toast path.
+    @MainActor
+    private func tryC3Fallback(session: CookingSession) async -> (any VoiceSessionDriver)? {
+        let driver = SpeechFallbackService(
+            aiDispatch: aiDispatch,
+            voiceTurnRepository: VoiceTurnRepository(),
+            cookingSession: session,
+        )
+        do {
+            try AVAudioSessionConfigurator.activateForCookMode()
+            try await driver.preWarm()
+            self.voiceDriver = driver
+            return driver
+        } catch {
+            Logger.voice.warning(
+                "cook_mode_voice_c3_fallback_prewarm_failed: \(error.localizedDescription, privacy: .public)",
+            )
+            // Still return the driver — VM routes taps to
+            // recognizerUnavailable cleanly rather than crashing on
+            // a nil driver unexpectedly.
+            self.voiceDriver = driver
+            return driver
         }
     }
 }
