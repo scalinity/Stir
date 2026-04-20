@@ -284,6 +284,34 @@ struct CookModeRoot: View {
             voiceDriver?.close()
             AVAudioSessionConfigurator.deactivate()
         }
+        // Paywall presentation from inside Cook Mode.
+        //
+        // RootView also binds a `.fullScreenCover` to
+        // `$coordinator.activePaywallTrigger`, which works for every
+        // feature except this one: Cook Mode is itself a fullScreenCover
+        // presented from TonightHome inside RootView. When the Free-tier
+        // user taps "Ask with voice", RootView's VC is already presenting
+        // Cook Mode, so RootView's paywall cover can't present a second
+        // modal on top — iOS silently queues it and the user sees
+        // nothing.
+        //
+        // Mirroring the modifier here presents the paywall from Cook
+        // Mode's own VC, which has no active modal, so presentation
+        // succeeds. On dismiss we clear the trigger the same way
+        // RootView does. Both bindings read the same state; SwiftUI's
+        // reconciler picks the leaf-most modifier whose source VC can
+        // actually present — CookModeRoot wins while it's in the tree,
+        // RootView wins when CookModeRoot is gone.
+        .fullScreenCover(item: Binding(
+            get: { coordinator.activePaywallTrigger },
+            set: { if $0 == nil { coordinator.dismissPaywall(wasSuccessful: false) } },
+        )) { trigger in
+            let vm = coordinator.makePaywallViewModel(trigger: trigger)
+            PaywallView(viewModel: vm)
+                .onDisappear {
+                    coordinator.dismissPaywall(wasSuccessful: vm.didSucceed)
+                }
+        }
     }
 
     private func entryPoint(for source: CookModeViewModel.EntrySource) -> CookingSession.EntryPoint {
