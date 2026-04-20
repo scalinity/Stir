@@ -135,6 +135,19 @@ Deno.test('substitution: VAL-01 on missing missing_ingredient', async () => {
   assertEquals(res.body.error, 'VAL-01');
 });
 
+// Step 6: live_session_id is optional — present when the Substitution Sheet
+// endpoint is called from a Gemini Live function-call round-trip; absent
+// for the standalone iOS sheet path.
+Deno.test('substitution: VAL-01 on non-UUID live_session_id', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callSubstitution(
+    validBody({ live_session_id: 'not-a-uuid' }),
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
 Deno.test('substitution: VAL-01 on invalid JSON body', async () => {
   const boot = await quickBootstrap({ installation_id: testInstallId() });
   const res = await fetch(`${FUNCTIONS_URL}/substitution`, {

@@ -48,9 +48,12 @@ Deno.test('config-bootstrap: happy path returns entitlements + flags + prompts',
   ]) {
     assertEquals(keys.has(expected), true, `prompts missing ${expected}`);
   }
-  // Step 3 promoted pantry_parse + dinner_solve to v1.0.0; step 4 adds
-  // substitution@1.0.0. Remaining features stay at step-1 v0.0.0.
-  const promotedToV1 = new Set(['pantry_parse', 'dinner_solve', 'substitution']);
+  // Step 3 promoted pantry_parse + dinner_solve to v1.0.0; step 4 added
+  // substitution@1.0.0; step 6 adds cook_mode_realtime + cook_turn at v1.0.0.
+  // Remaining features stay at step-1 v0.0.0.
+  const promotedToV1 = new Set([
+    'pantry_parse', 'dinner_solve', 'substitution', 'cook_mode_realtime', 'cook_turn',
+  ]);
   for (const p of body.prompts) {
     const expected = promotedToV1.has(p.feature_key) ? '1.0.0' : '0.0.0';
     assertEquals(p.version, expected, `unexpected version for ${p.feature_key}`);

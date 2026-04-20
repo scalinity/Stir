@@ -432,6 +432,11 @@ Deno.serve(async (req) => {
     retry_count: totalRetries,
     constraint_safe: wire.constraint_safe,
     cost_usd: costUsd,
+    // Step 6: log invocation path for cost-attribution dashboards.
+    // Present when the request came from the Live API function-call
+    // round-trip (sharp-edges #9/#12 path); absent for Substitution Sheet.
+    invocation: body.live_session_id ? 'realtime_function_call' : 'sheet',
+    ...(body.live_session_id ? { live_session_id: body.live_session_id } : {}),
   });
 
   return jsonOk(wire, requestId);

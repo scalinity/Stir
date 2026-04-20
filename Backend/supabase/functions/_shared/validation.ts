@@ -180,6 +180,13 @@ export const SubstitutionRequest = z.object({
   recipe_plan_id: z.string().uuid(),
   missing_ingredient: MissingIngredient,
   user_problem: z.string().min(1).max(500),
+  // Step 6: optional Live-session correlation. Present when the request
+  // came from a Gemini Live `substitution_check` function-call round-trip;
+  // absent when the request came from the standalone Substitution Sheet.
+  // Used for ai_request_log correlation and cost-attribution dashboards.
+  // Wire-shape stability matters: iOS sends the same body with or without
+  // this field depending on invocation path; server logs it if present.
+  live_session_id: z.string().uuid().optional(),
   household_context: z.object({
     dietary_rules: z.array(z.object({
       kind: DietaryRuleKind,
@@ -198,6 +205,95 @@ export const SubstitutionRequest = z.object({
 }).strict();
 
 export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/ai/realtime-session (step 6)
+// ---------------------------------------------------------------------------
+//
+// Mints an ephemeral Gemini Live auth token pre-configured for ONE Cook
+// Session. iOS opens a WebSocket directly to Google with the returned
+// token; the GEMINI_API_KEY never reaches the device.
+//
+// client_request_id: idempotency key — paired with cooking_session_id it
+//   scopes the mint cache so a second tap within ~60 s returns the SAME
+//   token (no double-charge, no leaked mints).
+// cooking_session_id: CloudKit UUID of the CookingSession the user is
+//   inside. Used for ai_request_log correlation and VoiceTurn grouping.
+// recipe_plan_id: RecipePlan the session is cooking from; context-only,
+//   not resolved server-side (user content is CloudKit-only).
+// current_step_number: 1-indexed step the user is on when Cook Mode voice
+//   opens. Drives the system prompt's "# Current step" block.
+// recipe_context: server trusts iOS to send the data it needs for the
+//   system prompt. No server-side lookup because user content isn't
+//   mirrored to Supabase.
+// household_context: same shape as substitution, for hard-rule and
+//   pantry/equipment substitution decisions the model may make.
+
+const RealtimeRecipeContext = z.object({
+  title: z.string().min(1).max(256),
+  servings: z.number().int().min(1).max(12),
+  estimated_minutes: z.number().int().min(1).max(720),
+  total_steps: z.number().int().min(1).max(100),
+  current_step_text: z.string().min(1).max(2000),
+  // 0 → no timer. Use nullable for "no timer" but keep it integer so Zod
+  // doesn't choke on null when a step has no timer.
+  current_step_timer_seconds: z.number().int().min(0).max(36000).nullable(),
+  remaining_ingredients: z.array(z.object({
+    display_name: z.string().min(1).max(128),
+    canonical_slug: z.string().min(1).max(128).optional(),
+  }).strict()).max(50),
+}).strict();
+
+const RealtimeHouseholdContext = z.object({
+  dietary_rules: z.array(z.object({
+    kind: DietaryRuleKind,
+    value: z.string().min(1).max(64),
+    severity: DietaryRuleSeverity,
+  }).strict()).max(50),
+  available_equipment: z.array(z.string().min(1).max(64)).max(50),
+  pantry_snapshot: z.array(z.object({
+    display_name: z.string().min(1).max(128),
+    canonical_slug: z.string().min(1).max(128).optional(),
+  }).strict()).max(200),
+}).strict();
+
+export const RealtimeSessionRequest = z.object({
+  client_request_id: z.string().uuid(),
+  cooking_session_id: z.string().uuid(),
+  recipe_plan_id: z.string().uuid(),
+  current_step_number: z.number().int().min(1).max(100),
+  recipe_context: RealtimeRecipeContext,
+  household_context: RealtimeHouseholdContext,
+}).strict();
+
+export type RealtimeSessionRequest = z.infer<typeof RealtimeSessionRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/ai/cook-turn (step 6 text fallback)
+// ---------------------------------------------------------------------------
+//
+// Text fallback for Cook Mode voice when Gemini Live is unavailable. iOS
+// transcribes the user's utterance on-device (SFSpeechRecognizer) and sends
+// the transcript to this endpoint; the model replies with a short spoken
+// response and optional suggested action. Same recipe + household context
+// shape as realtime-session since the same system-prompt template variables
+// are substituted.
+//
+// transcript: <500 chars; above that is a Q&A not a cook-turn.
+// Still Premium+ only — voice fallback is the degraded path for an
+// already-active voice cook session; Free users hit ENT-VOICE-01.
+
+export const CookTurnRequest = z.object({
+  client_request_id: z.string().uuid(),
+  cooking_session_id: z.string().uuid(),
+  recipe_plan_id: z.string().uuid(),
+  current_step_number: z.number().int().min(1).max(100),
+  transcript: z.string().min(1).max(500),
+  recipe_context: RealtimeRecipeContext,
+  household_context: RealtimeHouseholdContext,
+}).strict();
+
+export type CookTurnRequest = z.infer<typeof CookTurnRequest>;
 
 // ---------------------------------------------------------------------------
 // Zod → FieldError[] helper

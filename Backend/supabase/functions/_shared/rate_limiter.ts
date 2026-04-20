@@ -24,6 +24,7 @@ export type RateLimitPolicyKey =
   | 'ip:dinner_solve_daily'
   | 'ip:pantry_parse_daily'
   | 'ip:substitution_daily'
+  | 'ip:cook_turn_daily'
   | 'ip:bootstrap_hourly'
   | 'user:dinner_solve_hourly';
 
@@ -46,6 +47,7 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   'ip:dinner_solve_daily':    { windowSeconds: 86400, maxCount: 30 },
   'ip:pantry_parse_daily':    { windowSeconds: 86400, maxCount: 100 },
   'ip:substitution_daily':    { windowSeconds: 86400, maxCount: 50 },
+  'ip:cook_turn_daily':       { windowSeconds: 86400, maxCount: 300 },
   'ip:bootstrap_hourly':      { windowSeconds: 3600,  maxCount: 20 },
   'user:dinner_solve_hourly': { windowSeconds: 3600,  maxCount: 10 },
 };
