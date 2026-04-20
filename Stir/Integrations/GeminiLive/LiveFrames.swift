@@ -37,6 +37,13 @@ enum LiveOutboundFrame {
     case setup(payload: [String: Any])
     case realtimeInputAudio(base64: String, mimeType: String)
     case realtimeInputText(String)
+    /// Tells the server "no more audio coming" so automatic VAD can close
+    /// out the turn. Without this, the server waits for trailing silence
+    /// it never gets when iOS cuts the mic abruptly (tap-to-end UX) —
+    /// which produced the 30s turnDrained timeout observed 2026-04-20.
+    /// Only valid while `automaticActivityDetection.disabled == false`
+    /// (Stir's current mint config).
+    case realtimeInputAudioStreamEnd
     case toolResponse(functionResponseId: String, name: String, response: [String: Any])
     /// `session.update` — used for pruning context via turn-coverage flips
     /// and to bump generation_config mid-session when needed (CLAUDE.md
@@ -67,6 +74,14 @@ enum LiveOutboundFrame {
             return [
                 "realtimeInput": [
                     "text": text,
+                ],
+            ]
+        case .realtimeInputAudioStreamEnd:
+            // Empty object payload per BidiGenerateContentRealtimeInput
+            // spec — the KEY's presence is the signal.
+            return [
+                "realtimeInput": [
+                    "audioStreamEnd": [String: Any](),
                 ],
             ]
         case let .toolResponse(id, name, response):

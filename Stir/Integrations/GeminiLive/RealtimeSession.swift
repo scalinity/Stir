@@ -282,10 +282,34 @@ final class RealtimeSession: VoiceSessionDriver {
         guard stateMachine.state == .userSpeaking else {
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
-        // Stop mic capture (audio stream done). Server's automatic VAD
-        // + turn_coverage config closes the turn on its own; we don't
-        // send an explicit "end turn" frame — the audio pause IS the
-        // signal on Live.
+        // Explicit `audioStreamEnd` tells Gemini's automatic VAD that
+        // no more audio is coming. Without this, cutting the mic on a
+        // tap-to-end UX leaves VAD waiting for trailing silence it
+        // never sees, and `turnComplete` never arrives — producing the
+        // 30s `turnDrained` timeout observed 2026-04-20. Send BEFORE
+        // stopping mic forwarding so the signal actually makes it onto
+        // the wire (stopMicForwarding cancels the task that serializes
+        // outbound sends).
+        //
+        // Send is best-effort: if the WebSocket already dropped, the
+        // session is dead anyway and the mic teardown below handles
+        // cleanup. Swallow the send error so a transport glitch here
+        // doesn't mask the real issue (which would be the dropped WS).
+        if let transport {
+            do {
+                try await transport.send(.realtimeInputAudioStreamEnd)
+                #if DEBUG
+                VoiceSessionLog.log("turn.audio_stream_end_sent")
+                #endif
+            } catch {
+                Logger.voice.warning(
+                    "audio_stream_end_send_failed error=\(error.localizedDescription, privacy: .private)",
+                )
+                #if DEBUG
+                VoiceSessionLog.logError("turn.audio_stream_end_failed", error: error)
+                #endif
+            }
+        }
         audioPipeline?.stopCapture()
         stopMicForwarding()
 
