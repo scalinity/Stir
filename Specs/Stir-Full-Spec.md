@@ -1650,7 +1650,7 @@ See §12.3. In addition:
 | `suggested_dish_selected`          | rank, label_primary, missing_count                                                             | selection funnel           | Core Loop               |
 | `cook_mode_started`                | within_3min, source=solve/import/saved, voice_enabled                                          | core success funnel        | Core Loop               |
 | `cook_step_advanced`               | step_index, manual_or_voice                                                                    | usage depth                | Cook Mode               |
-| `timer_started`                    | duration_bucket, generated_vs_manual                                                           | timer adoption             | Cook Mode               |
+| `timer_started`                    | duration_bucket, generated_vs_manual (generated/manual/voice)                                    | timer adoption             | Cook Mode               |
 | `voice_affordance_tapped`          | tier (free/premium/pro), result (paywall_shown/voice_started/permission_denied/busy)            | conversion funnel          | Paywall + Cook Mode     |
 | `cook_turn_submitted`              | turn_type, current_step_index, path=live_api/gemini_fallback                                    | voice Q&A usage            | AI Ops                  |
 | `cook_turn_resolved`               | latency_ttfa_ms, latency_total_ms, barge_in, helpful_vote, path                                | Cook Mode quality          | AI Ops                  |

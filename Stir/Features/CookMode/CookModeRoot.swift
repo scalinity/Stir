@@ -262,15 +262,17 @@ struct CookModeRoot: View {
             // that doesn't run exit() — e.g., a swipe-down on the
             // fullScreenCover, or the parent dismissing for another
             // reason — close() on the driver still needs to fire so
-            // the WebSocket/mic tap/audio session all tear down. This
-            // call is idempotent; a second invocation after VM exit
-            // is a no-op.
+            // the WebSocket/mic tap/audio session all tear down. Both
+            // calls are idempotent (close() has internal guards;
+            // deactivate() uses an isActiveForCookMode flag), so a
+            // second invocation after VM exit is a safe no-op.
+            //
+            // Reading `self.voiceDriver` (which some VM paths nil
+            // mid-session on invariant violations) would miss teardown
+            // if nil'd before this fires. `voiceDriver?.close()` on a
+            // nil @State is a no-op — acceptable because the nil-ing
+            // path already called close(). Kept simple by design.
             voiceDriver?.close()
-            // Deactivate AVAudioSession too: neither driver's close()
-            // does it (ownership is in VM.exit), and on a non-exit
-            // dismiss the audio session stays configured for Cook Mode
-            // — producing the "stuck mic indicator" failure CLAUDE.md
-            // explicitly warns about (ADR 0007 pre-commit).
             AVAudioSessionConfigurator.deactivate()
         }
     }

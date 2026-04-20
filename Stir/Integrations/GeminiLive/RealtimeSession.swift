@@ -31,6 +31,22 @@ import AVFoundation
 import Foundation
 import OSLog
 
+/// Numeric budgets for the Live driver. Mirrored from CLAUDE.md's
+/// `LiveSessionLimits` spec. Keeping them here (scoped to the Live
+/// path) rather than in a global struct because every value is
+/// Live-specific and most have TODO(D.1) tunings pending.
+@MainActor
+enum LiveSessionBudget {
+    /// Seconds to wait for the server's `setupComplete` handshake
+    /// before failing `preWarm()`. Observed p95 is ~300 ms; 5 s is a
+    /// generous upper bound.
+    static let setupHandshakeSec: Double = 5
+    /// Seconds to wait for the server's `turnComplete` frame after
+    /// user audio closes. 2× Gemini's observed ~15 s p95 for a long
+    /// multi-sentence response.
+    static let turnCompleteSec: Double = 30
+}
+
 @MainActor
 final class RealtimeSession: VoiceSessionDriver {
 
@@ -142,11 +158,12 @@ final class RealtimeSession: VoiceSessionDriver {
             // 4. Start inbound receive dispatcher
             startReceiveDispatcher()
 
-            // 5. Wait for setupComplete (5s budget — server normally
-            //    emits this within 200-400 ms). Any inbound frame before
-            //    setupComplete is a protocol violation and throws.
+            // 5. Wait for setupComplete (budget named in
+            //    LiveSessionBudget — server normally emits this within
+            //    200-400 ms). Any inbound frame before setupComplete
+            //    is a protocol violation and throws.
             //    TODO(D.1): measure real budget and tune.
-            try await awaitSetupComplete(timeoutSec: 5)
+            try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
 
             stateMachine.advance(to: .ready)
             Logger.voice.info("live_session_ready session_id=\(response.sessionID, privacy: .public)")
@@ -472,11 +489,13 @@ final class RealtimeSession: VoiceSessionDriver {
 
     /// Await the server's `turnComplete` frame. Mirrors `awaitSetupComplete`'s
     /// timeout pattern so a stalled server (no close, no `turnComplete`)
-    /// can't hang the mic forever. 30 s budget is 2× Gemini's observed
-    /// p95 and still well under the user-perceived "stuck" threshold.
+    /// can't hang the mic forever. Budget comes from `LiveSessionBudget`
+    /// so it's tunable alongside the other Live-path budgets after D.1.
     /// On timeout, the caller's `endTurn` throws `.turnDrained`, the VM
     /// surfaces a toast, and state is recoverable by tapping again.
-    private func awaitTurnComplete(timeoutSec: Double = 30) async throws {
+    private func awaitTurnComplete(
+        timeoutSec: Double = LiveSessionBudget.turnCompleteSec,
+    ) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.turnCompleteContinuation = cont
             Task { @MainActor [weak self] in
@@ -529,6 +548,11 @@ final class RealtimeSession: VoiceSessionDriver {
             if stateMachine.state == .thinking || stateMachine.state == .toolCalling {
                 stateMachine.advance(to: .modelSpeaking)
             }
+            // Break on first failure — if `enqueuePlayback` throws,
+            // the audio engine is stopped and every subsequent chunk
+            // in this frame will fail the same way. One log per failed
+            // turn is sufficient for triage; absent the break, a
+            // failed turn would log ~50 warnings.
             for chunk in content.audioChunks {
                 do {
                     try audioPipeline?.enqueuePlayback(chunk)
@@ -536,6 +560,7 @@ final class RealtimeSession: VoiceSessionDriver {
                     Logger.voice.warning(
                         "live_playback_enqueue_failed error=\(error.localizedDescription, privacy: .private)",
                     )
+                    break
                 }
             }
         }
@@ -574,12 +599,20 @@ final class RealtimeSession: VoiceSessionDriver {
         // machine. A stale or duplicate toolCall frame arriving when
         // state is `.ready`, `.userSpeaking`, or `.modelSpeaking` would
         // silently no-op the advance in release and then send a spurious
-        // `toolResponse` that poisons the session protocol. Log and
-        // drop instead.
+        // `toolResponse` that poisons the session protocol.
+        //
+        // We can't salvage the session in that case (Gemini's state has
+        // drifted from ours), so fail the pending turn continuation fast
+        // rather than letting `awaitTurnComplete`'s 30s timeout absorb
+        // it. The VM surfaces a toast and the user can retry.
         guard stateMachine.state == .thinking else {
             Logger.voice.warning(
                 "live_tool_call_in_unexpected_state state=\(self.stateMachine.state.rawValue, privacy: .public)",
             )
+            if let cont = turnCompleteContinuation {
+                turnCompleteContinuation = nil
+                cont.resume(throwing: RealtimeSessionError.turnDrained)
+            }
             return
         }
         stateMachine.advance(to: .toolCalling)
