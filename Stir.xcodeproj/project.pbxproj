@@ -40,6 +40,7 @@
 		34F5BB054D4402919ED8FD1A /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */; };
 		35AC70781E412739ED5B3A1F /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F35DD33113B45A04F1536B90 /* SavedMealsView.swift */; };
 		3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */; };
+		3791D22CC5C78E95E27BFFCF /* StepSevenDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85F59C4F79FC45212EC1CD81 /* StepSevenDTOTests.swift */; };
 		37B6BE6E1E28976143207FED /* SpeechFallbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10F98D2B68FE751D86384C7 /* SpeechFallbackService.swift */; };
 		38E85E9BC14E09A3657DE46A /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61ECEB2E68886B41D1AE79C /* AppConfig.swift */; };
 		3AD32ADEBDCC71B2996F70D1 /* PantryItem+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */; };
@@ -87,6 +88,7 @@
 		8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A235A27546345C45BC15C3 /* ScanViewModel.swift */; };
 		89C550D052175C8023691845 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C97A077C3B8880A1E10D2F12 /* PaywallView.swift */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
+		8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */; };
 		8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */; };
 		9399B35D14137ACD534554C4 /* OnboardingRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF4659B21B5797AE4339706 /* OnboardingRoute.swift */; };
 		954E8C39BABBB1896397D9C5 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7561615148F2BA3D89570C /* CookModeViewModel.swift */; };
@@ -101,6 +103,7 @@
 		A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBA709C30DB047605482FD3 /* StirToast.swift */; };
 		ABDC21E86265244E9D9C665C /* OnboardingOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1106B6B1903590ECC6EB7227 /* OnboardingOptions.swift */; };
 		ACE62E7B306CA106423A6288 /* OutcomeFeedback+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B22924EBC9384C320BF729 /* OutcomeFeedback+Extensions.swift */; };
+		AE031573175A0E54D3E1F03B /* GroceryRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECE43357ACB78ADDBD0FD49 /* GroceryRepositoryTests.swift */; };
 		AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */; };
 		AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */; };
 		AFEB4BBD169B34228F3DB241 /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */; };
@@ -130,6 +133,7 @@
 		DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14744B65A207BA49BDB36C0A /* ErrorCode.swift */; };
 		DE76C4B2F34B0ACF847D5161 /* VoiceTurnRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78604678E2CA07EB7DCA2028 /* VoiceTurnRepository.swift */; };
 		DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */; };
+		E1D5171A34C972E48BF2D863 /* StepSevenTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCE61E45AB4894CBE50897C /* StepSevenTelemetryTests.swift */; };
 		E3E7BDB43BA459ACD8D44C08 /* ConstraintsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0D3A1CF905605DAE3309C2 /* ConstraintsSheet.swift */; };
 		E5EB78D6330F68AC9B71860D /* RevenueCatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD3FF753664453B636AD33F /* RevenueCatService.swift */; };
 		EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */; };
@@ -212,6 +216,7 @@
 		4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychain.swift; sourceTree = "<group>"; };
 		4C6381522171782F672F7009 /* ProComparisonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProComparisonSheet.swift; sourceTree = "<group>"; };
 		4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementService+Display.swift"; sourceTree = "<group>"; };
+		4ECE43357ACB78ADDBD0FD49 /* GroceryRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepositoryTests.swift; sourceTree = "<group>"; };
 		547DF5743B238714DCC945B6 /* KitchenEquipmentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KitchenEquipmentRepository.swift; sourceTree = "<group>"; };
 		55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
@@ -244,6 +249,7 @@
 		7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModelTests.swift; sourceTree = "<group>"; };
 		81FCD69FD54A65576C313EE2 /* CloudKitAccountMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitAccountMonitor.swift; sourceTree = "<group>"; };
 		837A31977083948E40A61365 /* CloudKitAccountChangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitAccountChangeTests.swift; sourceTree = "<group>"; };
+		85F59C4F79FC45212EC1CD81 /* StepSevenDTOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepSevenDTOTests.swift; sourceTree = "<group>"; };
 		86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HouseholdProfile+Extensions.swift"; sourceTree = "<group>"; };
 		86D2499D3F643A0F93C7D4A8 /* StirTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StirTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		88F34D3B30110FEF0532AF12 /* LiveFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveFrames.swift; sourceTree = "<group>"; };
@@ -251,8 +257,10 @@
 		8B43BD0B41921C2434989957 /* Radius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Radius.swift; sourceTree = "<group>"; };
 		8DBA709C30DB047605482FD3 /* StirToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirToast.swift; sourceTree = "<group>"; };
 		8E9C43E7C555D86F5524467E /* PantryItem+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PantryItem+Extensions.swift"; sourceTree = "<group>"; };
+		8FCE61E45AB4894CBE50897C /* StepSevenTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepSevenTelemetryTests.swift; sourceTree = "<group>"; };
 		903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityServiceTests.swift; sourceTree = "<group>"; };
 		948032DBA10C08623AB8E7A4 /* AccountStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStateTests.swift; sourceTree = "<group>"; };
+		94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeImportRepositoryTests.swift; sourceTree = "<group>"; };
 		9695B3F81139A97A1E549D40 /* IdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityService.swift; sourceTree = "<group>"; };
 		9953AC62F960A0A20087BBF2 /* SubstitutionSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetView.swift; sourceTree = "<group>"; };
 		9B57D15701FF047FC4C7C392 /* AIDispatchDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDispatchDTOs.swift; sourceTree = "<group>"; };
@@ -300,7 +308,7 @@
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
 		FC62FC656E734BA0343A7A00 /* GroceryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepository.swift; sourceTree = "<group>"; };
-		"TEMP_DCE972E6-78EC-4877-80F0-74FE92B0FDA4" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_434E7139-FEB6-4CED-89E3-F57A577ACCA8" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -355,6 +363,7 @@
 				3A9DE9C3193E73E1AE97C1CF /* CookModeViewModelTests.swift */,
 				74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */,
 				EAF46C4FD7E3B22EADFA7B3A /* EntitlementServiceTests.swift */,
+				4ECE43357ACB78ADDBD0FD49 /* GroceryRepositoryTests.swift */,
 				903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */,
 				13E851A6B4AAD065C5217BF5 /* LiveFramesTests.swift */,
 				633850447A198796407ED908 /* MockCloudKit.swift */,
@@ -364,10 +373,13 @@
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
 				D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */,
 				EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */,
+				94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */,
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
 				5EB0A25C9F12C9916D340A79 /* SavedMealsSortingTests.swift */,
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
 				E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */,
+				85F59C4F79FC45212EC1CD81 /* StepSevenDTOTests.swift */,
+				8FCE61E45AB4894CBE50897C /* StepSevenTelemetryTests.swift */,
 				E3338AB1A72A44CB0F1EA9C1 /* SubstitutionSheetViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 				F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */,
@@ -752,10 +764,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_A2C44949-F443-4EBA-8BD9-3852A68625C8" /* Stir */ = {
+		"TEMP_E31DFA2B-B8B1-4D16-8769-AC374056F21F" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_DCE972E6-78EC-4877-80F0-74FE92B0FDA4" /* Config.xcconfig */,
+				"TEMP_434E7139-FEB6-4CED-89E3-F57A577ACCA8" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -872,6 +884,7 @@
 				17EA5CAAC31FB20BD496DA83 /* CookModeVoiceIntegrationTests.swift in Sources */,
 				748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */,
 				B5CE0F49437BF827C38BF730 /* EntitlementServiceTests.swift in Sources */,
+				AE031573175A0E54D3E1F03B /* GroceryRepositoryTests.swift in Sources */,
 				16A9DBA56641F2BD47913C1A /* IdentityServiceTests.swift in Sources */,
 				5D064EAFE485CE103D180BA2 /* LiveFramesTests.swift in Sources */,
 				FA5CDC3ACD39F8A27A4D69BD /* MockCloudKit.swift in Sources */,
@@ -881,10 +894,13 @@
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
 				3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */,
 				C3554305F7809FD347ADDCFC /* PaywallViewModelTests.swift in Sources */,
+				8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */,
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
 				71A07B871B5C0D2A4AC61668 /* SavedMealsSortingTests.swift in Sources */,
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
 				0D973AD26FEDF6511E6580C0 /* SpeechFallbackServiceTests.swift in Sources */,
+				3791D22CC5C78E95E27BFFCF /* StepSevenDTOTests.swift in Sources */,
+				E1D5171A34C972E48BF2D863 /* StepSevenTelemetryTests.swift in Sources */,
 				F38CDECB559E08C7C760A273 /* SubstitutionSheetViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
 				EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */,
@@ -1022,7 +1038,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_DCE972E6-78EC-4877-80F0-74FE92B0FDA4" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_434E7139-FEB6-4CED-89E3-F57A577ACCA8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1061,7 +1077,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_DCE972E6-78EC-4877-80F0-74FE92B0FDA4" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_434E7139-FEB6-4CED-89E3-F57A577ACCA8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

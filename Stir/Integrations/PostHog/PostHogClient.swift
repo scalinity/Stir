@@ -115,4 +115,76 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case cookTurnResolved = "cook_turn_resolved"
     // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
     case reactivationNotificationOpened = "reactivation_notification_opened"
+    // Step 7 — import + grocery + widgets/shortcuts. Property names below
+    // are spec §15 canonical (destination NOT export_target; parse_quality
+    // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`
+    // — a widget deep-link tap fires `app_opened` with the URL param.
+    case recipeImportStarted = "recipe_import_started"
+    case recipeImportCompleted = "recipe_import_completed"
+    case widgetAdded = "widget_added"
+    case shortcutRun = "shortcut_run"
+    case groceryListExported = "grocery_list_exported"
+}
+
+/// Typed property-bag helpers for step-7 events. Keeping properties
+/// off a loose [String: Any] dict at call sites prevents the
+/// `export_target` / `confidence` / `needed_edits` drift that the
+/// telemetry snapshot test watches for.
+public enum StepSevenTelemetry {
+    /// `recipe_import_started` — one event per user-initiated import.
+    /// Properties: source_type (spec §15).
+    public static func recipeImportStarted(source: RecipeImportSource) -> [String: Any] {
+        ["source_type": source.rawValue]
+    }
+
+    /// `recipe_import_completed` — fires on final Import Review
+    /// acceptance OR on user cancellation OR on AI failure.
+    /// Properties: source_type, parse_quality, edit_required (spec §15).
+    public static func recipeImportCompleted(
+        source: RecipeImportSource,
+        parseQuality: String,
+        editRequired: Bool,
+    ) -> [String: Any] {
+        [
+            "source_type": source.rawValue,
+            "parse_quality": parseQuality,
+            "edit_required": editRequired,
+        ]
+    }
+
+    /// `widget_added` — fired when `WidgetCenter.shared.reloadAllTimelines()`
+    /// observes a new widget configuration. Properties: source (spec §15).
+    public static func widgetAdded(source: String) -> [String: Any] {
+        ["source": source]
+    }
+
+    /// `shortcut_run` — AppIntent invocation. Fires on BOTH successful
+    /// runs and entitlement-gated no-ops (gate shows up as `intent_name`
+    /// + separate entitlement_state_changed). Properties: intent_name.
+    public static func shortcutRun(intentName: String) -> [String: Any] {
+        ["intent_name": intentName]
+    }
+
+    /// `grocery_list_exported` — post-EventKit export success. Also fired
+    /// with `destination: "in_app"` when Reminders was denied and the
+    /// list stayed in Stir. Properties: item_count, destination.
+    public static func groceryListExported(itemCount: Int, destination: Destination) -> [String: Any] {
+        [
+            "item_count": itemCount,
+            "destination": destination.rawValue,
+        ]
+    }
+
+    /// Destination values match spec §15 verbatim. DO NOT add new values
+    /// without updating spec + CLAUDE.md + the snapshot test.
+    public enum Destination: String, Sendable, CaseIterable {
+        case reminders
+        case inApp = "in_app"
+    }
+
+    /// `reactivation_notification_opened` — local-notification deep link.
+    /// Properties: trigger_kind. Values restricted to spec §8 triggers.
+    public static func reactivationNotificationOpened(triggerKind: String) -> [String: Any] {
+        ["trigger_kind": triggerKind]
+    }
 }

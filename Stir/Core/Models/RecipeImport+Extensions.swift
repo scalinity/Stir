@@ -23,8 +23,9 @@ import Foundation
 
 /// `sourceType` — discriminates the four entry points. Kept distinct
 /// so `recipe_import_started` / `recipe_import_completed` telemetry
-/// can funnel-analyze Safari-share vs manual URL paste.
-public enum RecipeImportSource: String, Sendable, CaseIterable {
+/// can funnel-analyze Safari-share vs manual URL paste. Codable
+/// conformance lets the wire-format AIDispatch DTOs embed it directly.
+public enum RecipeImportSource: String, Codable, Sendable, CaseIterable {
     case url = "url"
     case shareSheet = "share_sheet"
     case screenshotOCR = "screenshot_ocr"

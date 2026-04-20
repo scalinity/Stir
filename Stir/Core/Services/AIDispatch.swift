@@ -186,6 +186,110 @@ actor AIDispatch {
         return response
     }
 
+    // MARK: - Recipe Import (step 7)
+
+    /// POST /v1/ai/recipe-import. Dispatches the four source_type paths
+    /// (url | share_sheet | screenshot_ocr | pasted_text) and returns
+    /// either a completed RecipeImportResponse with a parsed recipe, or a
+    /// queued response when the backend decided to process async
+    /// (pasted content > ~8KiB). The caller's RecipeImport entity state
+    /// machine is driven from the returned `status`.
+    ///
+    /// The backend applies its own ai_response_cache idempotency on
+    /// `import_id`, so a retry with the same id replays the cached
+    /// response instead of burning another Gemini call.
+    func recipeImport(request body: RecipeImportRequest) async throws -> RecipeImportResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/recipe-import")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 20
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode recipe-import body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "recipe_import_dispatch import_id=\(body.importID.uuidString, privacy: .public) source_type=\(body.sourceType.rawValue, privacy: .public)",
+        )
+        let response: RecipeImportResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "recipe_import_complete status=\(response.status.rawValue, privacy: .public) retry=\(response.retryCount, privacy: .public) parse_quality=\(response.recipe?.parseQuality.rawValue ?? "n/a", privacy: .public)",
+        )
+        return response
+    }
+
+    // MARK: - Grocery Generate (step 7)
+
+    /// POST /v1/ai/grocery-generate. Unmetered across tiers. Returns the
+    /// Gemini-generated diff of recipe ingredients against pantry snapshot
+    /// with `priority` populated on every missing_item (spec §4.17
+    /// required). Dedupe + aisle grouping are handled server-side; iOS
+    /// may still apply a secondary dedupe pass via GroceryRepository for
+    /// insurance.
+    func groceryGenerate(request body: GroceryGenerateRequest) async throws -> GroceryGenerateResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/grocery-generate")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 15
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode grocery-generate body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "grocery_generate_dispatch source_id=\(body.sourceID.uuidString, privacy: .public) source_type=\(body.sourceType.rawValue, privacy: .public)",
+        )
+        let response: GroceryGenerateResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "grocery_generate_complete missing=\(response.missingItems.count, privacy: .public) already=\(response.alreadyHave.count, privacy: .public) retry=\(response.retryCount, privacy: .public)",
+        )
+        return response
+    }
+
+    // MARK: - Push Register (step 7)
+
+    /// POST /v1/push/register. Called from iOS on first APNs token grant
+    /// and on every prefs-change in Settings → Notifications. Idempotent
+    /// by (canonical_user_key, installation_id, token, prefs) — reposts
+    /// with identical payload are a no-op UPDATE.
+    func pushRegister(request body: PushRegisterRequest) async throws -> PushRegisterResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/push-register")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 10
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode push-register body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "push_register_dispatch env=\(body.environment.rawValue, privacy: .public)",
+        )
+        let response: PushRegisterResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "push_register_complete installation_id=\(response.installationID, privacy: .public) env=\(response.environment, privacy: .public)",
+        )
+        return response
+    }
+
     // MARK: - Dinner solve (SSE)
 
     /// Returns an AsyncThrowingStream emitting DinnerSolveEvents as they

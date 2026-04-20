@@ -346,6 +346,8 @@ final class SolveViewModel {
                 dietaryRules: dietaryRules,
                 availableEquipment: availableEquipment,
             ),
+            contextHint: nil,
+            leftoversItems: nil,
         )
     }
 

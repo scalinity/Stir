@@ -113,6 +113,18 @@ struct DinnerSolveRequest: Encodable, Sendable {
     let ingredients: [IngredientLite]
     let constraints: Constraints?
     let householdContext: HouseholdContext
+    // Step-7 leftovers mode. When contextHint == .leftovers, backend
+    // canary-selects the v1.1.0 prompt and requires leftoversItems.
+    // Zod-level refine rejects the combinations `leftovers + []` and
+    // `standard + non-empty leftoversItems`; iOS must honor the same
+    // invariant before POSTing.
+    let contextHint: ContextHint?
+    let leftoversItems: [LeftoversItem]?
+
+    enum ContextHint: String, Encodable, Sendable {
+        case standard
+        case leftovers
+    }
 
     enum CodingKeys: String, CodingKey {
         case solveRequestID = "solve_request_id"
@@ -120,6 +132,20 @@ struct DinnerSolveRequest: Encodable, Sendable {
         case ingredients
         case constraints
         case householdContext = "household_context"
+        case contextHint = "context_hint"
+        case leftoversItems = "leftovers_items"
+    }
+
+    struct LeftoversItem: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+        let approximateAmountText: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+            case approximateAmountText = "approximate_amount_text"
+        }
     }
 
     struct IngredientLite: Encodable, Sendable {
@@ -534,6 +560,254 @@ struct RealtimeSessionRequest: Encodable, Sendable {
         case currentStepNumber = "current_step_number"
         case recipeContext = "recipe_context"
         case householdContext = "household_context"
+    }
+}
+
+// MARK: - Recipe Import (step 7)
+
+struct RecipeImportRequest: Encodable, Sendable {
+    let importID: UUID
+    let sourceType: RecipeImportSource
+    let payload: Payload
+
+    enum CodingKeys: String, CodingKey {
+        case importID = "import_id"
+        case sourceType = "source_type"
+        case payload
+    }
+
+    /// Shape varies per sourceType. The Edge Function's Zod schema rejects
+    /// cross-mixing (e.g. url+ocr_text together) so iOS must populate only
+    /// the one field appropriate for the chosen sourceType.
+    struct Payload: Encodable, Sendable {
+        let url: String?
+        let ocrText: String?
+        let pastedText: String?
+        let ocrPageCount: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case url
+            case ocrText = "ocr_text"
+            case pastedText = "pasted_text"
+            case ocrPageCount = "ocr_page_count"
+        }
+
+        static func url(_ url: String) -> Payload {
+            Payload(url: url, ocrText: nil, pastedText: nil, ocrPageCount: 0)
+        }
+
+        static func screenshotOCR(text: String, pageCount: Int) -> Payload {
+            Payload(url: nil, ocrText: text, pastedText: nil, ocrPageCount: pageCount)
+        }
+
+        static func pastedText(_ text: String) -> Payload {
+            Payload(url: nil, ocrText: nil, pastedText: text, ocrPageCount: 0)
+        }
+    }
+}
+
+struct RecipeImportResponse: Decodable, Sendable {
+    let importID: UUID
+    let status: Status
+    let recipe: ImportedRecipe?
+    let retryCount: Int
+    let promptVersion: String
+    let asyncJobID: String?
+
+    enum Status: String, Decodable, Sendable {
+        case completed
+        case queued
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case importID = "import_id"
+        case status
+        case recipe
+        case retryCount = "retry_count"
+        case promptVersion = "prompt_version"
+        case asyncJobID = "async_job_id"
+    }
+
+    struct ImportedRecipe: Decodable, Sendable {
+        let title: String
+        let servings: Int?
+        let estimatedMinutes: Int?
+        let ingredients: [Ingredient]
+        let steps: [Step]
+        let parseQuality: ParseQuality
+        let editHints: [String]?
+
+        enum ParseQuality: String, Decodable, Sendable {
+            case high, medium, low
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case title
+            case servings
+            case estimatedMinutes = "estimated_minutes"
+            case ingredients
+            case steps
+            case parseQuality = "parse_quality"
+            case editHints = "edit_hints"
+        }
+
+        struct Ingredient: Decodable, Sendable {
+            let displayName: String
+            let canonicalSlug: String?
+            let amountText: String?
+            let group: String?
+
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+                case canonicalSlug = "canonical_slug"
+                case amountText = "amount_text"
+                case group
+            }
+        }
+
+        struct Step: Decodable, Sendable {
+            let stepNumber: Int
+            let instructionText: String
+            let timerSeconds: Int?
+            let cautionTags: [String]?
+
+            enum CodingKeys: String, CodingKey {
+                case stepNumber = "step_number"
+                case instructionText = "instruction_text"
+                case timerSeconds = "timer_seconds"
+                case cautionTags = "caution_tags"
+            }
+        }
+    }
+}
+
+// MARK: - Grocery Generate (step 7)
+
+struct GroceryGenerateRequest: Encodable, Sendable {
+    let sourceID: UUID
+    let sourceType: SourceType
+    let ingredientsNeeded: [Ingredient]
+    let pantrySnapshot: [PantryItemLite]
+    let recipeTitle: String?
+
+    enum SourceType: String, Encodable, Sendable {
+        case recipe, session, leftovers
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceID = "source_id"
+        case sourceType = "source_type"
+        case ingredientsNeeded = "ingredients_needed"
+        case pantrySnapshot = "pantry_snapshot"
+        case recipeTitle = "recipe_title"
+    }
+
+    struct Ingredient: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+        let amountText: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+            case amountText = "amount_text"
+        }
+    }
+
+    struct PantryItemLite: Encodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+        }
+    }
+}
+
+struct GroceryGenerateResponse: Decodable, Sendable {
+    let sourceID: UUID
+    let sourceType: String
+    let missingItems: [MissingItem]
+    let alreadyHave: [AlreadyHave]
+    let totalItemCount: Int
+    let promptVersion: String
+    let retryCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case sourceID = "source_id"
+        case sourceType = "source_type"
+        case missingItems = "missing_items"
+        case alreadyHave = "already_have"
+        case totalItemCount = "total_item_count"
+        case promptVersion = "prompt_version"
+        case retryCount = "retry_count"
+    }
+
+    struct MissingItem: Decodable, Sendable {
+        let displayName: String
+        let amountText: String?
+        let canonicalSlug: String?
+        let groceryCategory: String   // matches GroceryCategory raw value
+        let priority: String          // "normal" | "low" | "high"
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case amountText = "amount_text"
+            case canonicalSlug = "canonical_slug"
+            case groceryCategory = "grocery_category"
+            case priority
+        }
+    }
+
+    struct AlreadyHave: Decodable, Sendable {
+        let displayName: String
+        let canonicalSlug: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case canonicalSlug = "canonical_slug"
+        }
+    }
+}
+
+// MARK: - Push Register (step 7)
+
+struct PushRegisterRequest: Encodable, Sendable {
+    let apnsToken: String
+    let environment: Environment
+    let notificationPrefs: NotificationPrefs
+
+    enum Environment: String, Encodable, Sendable {
+        case production, sandbox
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case apnsToken = "apns_token"
+        case environment
+        case notificationPrefs = "notification_prefs"
+    }
+
+    struct NotificationPrefs: Encodable, Sendable, Equatable {
+        let importCompletion: Bool
+        let reactivation: Bool
+        let trialReminder: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case importCompletion = "import_completion"
+            case reactivation
+            case trialReminder = "trial_reminder"
+        }
+    }
+}
+
+struct PushRegisterResponse: Decodable, Sendable {
+    let installationID: String
+    let environment: String
+
+    enum CodingKeys: String, CodingKey {
+        case installationID = "installation_id"
+        case environment
     }
 }
 
