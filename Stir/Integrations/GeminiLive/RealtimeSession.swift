@@ -237,7 +237,10 @@ final class RealtimeSession: VoiceSessionDriver {
         try pipeline.startCapture()
         startMicForwarding()
         #if DEBUG
-        VoiceSessionLog.log("turn.begin")
+        // `turn = turnCount + 1`: the turn about to run. Matches the
+        // value `turn.end_submitted` emits for the same turn, so a
+        // grep for `turn=5` finds every event in turn 5.
+        VoiceSessionLog.log("turn.begin", ["turn": turnCount + 1])
         #endif
     }
 
@@ -354,6 +357,13 @@ final class RealtimeSession: VoiceSessionDriver {
     // MARK: - cancelSpeaking
 
     func cancelSpeaking() async {
+        #if DEBUG
+        // Distinguish user-barge-in (this path) from natural
+        // end-of-turn (.modelSpeaking → .ready via turnComplete).
+        // Both produce the same state transition in the transcript,
+        // but only the former carries this tag.
+        VoiceSessionLog.log("user.interrupted", ["state": stateMachine.state.rawValue])
+        #endif
         audioPipeline?.cancelPlayback()
         // If we were mid-modelSpeaking, snap back to ready so the next
         // beginTurn doesn't hit the state guard. Legal transition per

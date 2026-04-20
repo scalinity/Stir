@@ -36,8 +36,13 @@ enum VoiceSessionLog {
     /// Reference start-of-session timestamp. Set at `sessionStart()`;
     /// nil otherwise. Used to emit a `dt_ms=<elapsed>` on every log
     /// line so rapid inspection of the transcript doesn't require
-    /// subtracting timestamps by hand.
-    nonisolated(unsafe) private static var sessionStartedAt: Date?
+    /// subtracting timestamps by hand. MainActor-isolated via the
+    /// enclosing enum's `@MainActor` attribute — deliberately NOT
+    /// `nonisolated(unsafe)`. Every call site is already on the main
+    /// actor; keeping the isolation compiler-enforced means a future
+    /// misuse from a non-MainActor task becomes a build error rather
+    /// than a data race.
+    private static var sessionStartedAt: Date?
 
     static func sessionStart() {
         sessionStartedAt = Date()
@@ -45,7 +50,12 @@ enum VoiceSessionLog {
     }
 
     static func sessionEnd() {
-        log("session.end")
+        if let start = sessionStartedAt {
+            let duration = Int(Date().timeIntervalSince(start) * 1000)
+            log("session.end", ["duration_ms": duration])
+        } else {
+            log("session.end")
+        }
         sessionStartedAt = nil
     }
 
@@ -54,7 +64,10 @@ enum VoiceSessionLog {
     ///   - tag: dot-separated event code (e.g. `mint.fail`,
     ///          `ws.send_failed`, `state.advance`).
     ///   - kv: optional key=value attributes; all values coerced to
-    ///         String via `String(describing:)`.
+    ///         String via `String(describing:)`. Values containing
+    ///         spaces are double-quoted so the line stays scannable
+    ///         (a bare `error=Error Domain=NSURLErrorDomain` would
+    ///         otherwise look like two attributes).
     static func log(_ tag: String, _ kv: [String: Any] = [:]) {
         let now = Date()
         let ts = formatter.string(from: now)
@@ -65,17 +78,26 @@ enum VoiceSessionLog {
         }
         pairs.append(contentsOf: kv
             .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\($0.value)" })
+            .map { key, value in
+                let s = String(describing: value)
+                let escaped = s.contains(" ") ? "\"\(s)\"" : s
+                return "\(key)=\(escaped)"
+            })
         let tail = pairs.isEmpty ? "" : " " + pairs.joined(separator: " ")
         print("[voice] \(ts) \(tag)\(tail)")
     }
 
     /// Convenience for error paths. Truncates the description to 200
-    /// chars so a wall-of-text URLError doesn't bury the transcript.
+    /// chars so a wall-of-text URLError doesn't bury the transcript,
+    /// AND runs through the shared `access_token=...` scrubber so a
+    /// token-bearing WebSocket URL embedded in `URLError.userInfo`
+    /// doesn't end up in a D.1 transcript pasted back for review.
+    /// The token is ephemeral (35 min, single-use) but still live.
     static func logError(_ tag: String, error: any Error, _ kv: [String: Any] = [:]) {
         var extended = kv
-        let desc = String(describing: error)
-        let truncated = desc.count > 200 ? String(desc.prefix(200)) + "…" : desc
+        let raw = String(describing: error)
+        let scrubbed = LiveWebSocketTransport.scrubAccessToken(raw)
+        let truncated = scrubbed.count > 200 ? String(scrubbed.prefix(200)) + "…" : scrubbed
         extended["error"] = truncated
         log(tag, extended)
     }
