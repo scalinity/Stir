@@ -469,9 +469,11 @@ final class RealtimeSession: VoiceSessionDriver {
             estimatedMinutes: Int(recipePlan.estimatedMinutes),
             totalSteps: steps.count,
             currentStepText: currentStep?.instructionText ?? "",
-            currentStepTimerSeconds: currentStep.flatMap {
-                $0.timerSeconds > 0 ? Int($0.timerSeconds) : nil
-            },
+            // 0 when no timer on this step (or no current step). DTO
+            // is non-Optional because the backend requires the key to
+            // be present even when null — explicit 0 is the simplest
+            // encoding that always satisfies the schema.
+            currentStepTimerSeconds: Int(currentStep?.timerSeconds ?? 0),
             remainingIngredients: recipePlan.ingredientArray.map { ing in
                 .init(displayName: ing.displayName ?? "", canonicalSlug: ing.canonicalIngredientSlug)
             },

@@ -788,9 +788,10 @@ final class CookModeViewModel {
             estimatedMinutes: Int(recipePlan.estimatedMinutes),
             totalSteps: totalSteps,
             currentStepText: step?.instructionText ?? "",
-            currentStepTimerSeconds: step.flatMap {
-                $0.timerSeconds > 0 ? Int($0.timerSeconds) : nil
-            },
+            // 0 when no timer on this step. DTO is non-Optional because
+            // backend requires the key to be present — see
+            // RealtimeRecipeContext.currentStepTimerSeconds doc comment.
+            currentStepTimerSeconds: Int(step?.timerSeconds ?? 0),
             remainingIngredients: remaining,
         )
     }

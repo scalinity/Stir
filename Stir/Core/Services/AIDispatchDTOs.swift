@@ -476,10 +476,14 @@ struct RealtimeRecipeContext: Encodable, Sendable {
     let estimatedMinutes: Int
     let totalSteps: Int
     let currentStepText: String
-    /// Nullable — some steps have no timer. Server passes through as
-    /// zero when null (prompt template displays `0` literally in that
-    /// case; consumer reads "no timer" from a zero timerSeconds).
-    let currentStepTimerSeconds: Int?
+    /// Seconds for the current step's timer; 0 = no timer. Must be
+    /// present on every request — backend schema is
+    /// `z.number().int().min(0).max(36000).nullable()`, meaning the key
+    /// is REQUIRED even when the step has no timer. Prior Optional<Int>
+    /// shape caused JSONEncoder to omit the key on nil, tripping
+    /// VAL-01 "Required" on the mint. Using non-Optional forces
+    /// explicit 0 on no-timer steps.
+    let currentStepTimerSeconds: Int
     let remainingIngredients: [RemainingIngredient]
 
     enum CodingKeys: String, CodingKey {
@@ -499,6 +503,21 @@ struct RealtimeRecipeContext: Encodable, Sendable {
         enum CodingKeys: String, CodingKey {
             case displayName = "display_name"
             case canonicalSlug = "canonical_slug"
+        }
+
+        /// Skip encoding `canonical_slug` when blank — Core Data string
+        /// attrs default to "" and backend Zod enforces `.min(1)` on
+        /// the optional slug, so an empty pass-through trips VAL-01.
+        /// Encoding the key as absent keeps the field "optional" per
+        /// the schema intent.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(displayName, forKey: .displayName)
+            if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !slug.isEmpty
+            {
+                try c.encode(slug, forKey: .canonicalSlug)
+            }
         }
     }
 }
@@ -521,6 +540,17 @@ struct RealtimeHouseholdContext: Encodable, Sendable {
         enum CodingKeys: String, CodingKey {
             case displayName = "display_name"
             case canonicalSlug = "canonical_slug"
+        }
+
+        /// See RemainingIngredient.encode(to:) — same rationale.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(displayName, forKey: .displayName)
+            if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !slug.isEmpty
+            {
+                try c.encode(slug, forKey: .canonicalSlug)
+            }
         }
     }
 }
