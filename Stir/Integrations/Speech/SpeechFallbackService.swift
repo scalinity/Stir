@@ -103,7 +103,6 @@ final class SpeechFallbackService: VoiceSessionDriver {
     private let audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
     private var synthesisDelegate: SynthesisDelegate?
-    private var synthesisContinuation: CheckedContinuation<Void, Never>?
     private var turnStartTime: Date?
     private var sttFinalTime: Date?
     private var currentTranscript: String = ""

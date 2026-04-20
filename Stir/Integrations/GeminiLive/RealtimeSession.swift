@@ -65,7 +65,6 @@ final class RealtimeSession: VoiceSessionDriver {
     private var receiveDispatcherTask: Task<Void, Never>?
 
     // Per-turn accumulator. Reset at beginTurn.
-    private var currentTurnAudioChunks: [LiveAudioChunk] = []
     private var currentTurnInlineText: String?
     private var turnCompleteContinuation: CheckedContinuation<Void, Error>?
     private var lastUsageMetadata: LiveUsageMetadata?
@@ -171,7 +170,6 @@ final class RealtimeSession: VoiceSessionDriver {
         }
 
         // Reset per-turn accumulators
-        currentTurnAudioChunks = []
         currentTurnInlineText = nil
         lastUsageMetadata = nil
 
@@ -287,6 +285,21 @@ final class RealtimeSession: VoiceSessionDriver {
     // MARK: - close
 
     func close() {
+        // Drain pending continuations BEFORE cancelling tasks — if we
+        // cancel `receiveDispatcherTask` first, its `handleTransportError`
+        // path (the normal drain site) never fires, and any caller
+        // suspended on `awaitSetupComplete` / `awaitTurnComplete` is
+        // stranded. On dealloc that becomes a "continuation was not
+        // resumed" concurrency runtime crash. Nil-clear before resume so
+        // a racing happy-path resolve can't double-resume.
+        if let cont = setupCompleteContinuation {
+            setupCompleteContinuation = nil
+            cont.resume(throwing: RealtimeSessionError.notOpen)
+        }
+        if let cont = turnCompleteContinuation {
+            turnCompleteContinuation = nil
+            cont.resume(throwing: RealtimeSessionError.notOpen)
+        }
         receiveDispatcherTask?.cancel()
         receiveDispatcherTask = nil
         micForwardTask?.cancel()
@@ -295,7 +308,10 @@ final class RealtimeSession: VoiceSessionDriver {
         transport = nil
         audioPipeline?.tearDown()
         audioPipeline = nil
-        AVAudioSessionConfigurator.deactivate()
+        // AVAudioSession deactivation is the VM's responsibility (see
+        // CookModeViewModel.exit). Removed from close() to keep the
+        // audio-session lifecycle owned in one place — parity with
+        // SpeechFallbackService.close().
         if stateMachine.state != .closed {
             stateMachine.forceClose()
         }
@@ -423,7 +439,7 @@ final class RealtimeSession: VoiceSessionDriver {
                 }
             } catch {
                 Logger.voice.warning(
-                    "live_receive_dispatcher_failed error=\(error.localizedDescription, privacy: .public)",
+                    "live_receive_dispatcher_failed error=\(error.localizedDescription, privacy: .private)",
                 )
                 await self.handleTransportError(error)
             }
@@ -432,35 +448,56 @@ final class RealtimeSession: VoiceSessionDriver {
 
     private var setupCompleteContinuation: CheckedContinuation<Void, Error>?
 
+    /// Await the server's `setupComplete` handshake frame. Returns when
+    /// `handleInboundFrame` resumes the continuation; throws
+    /// `RealtimeSessionError.setupTimeout` if the budget elapses first.
+    ///
+    /// Implementation note: earlier drafts used a TaskGroup with one
+    /// task blocking on the continuation and another on a timer.
+    /// `TaskGroup.cancelAll()` does NOT propagate into a
+    /// `withCheckedThrowingContinuation` — the continuation never
+    /// resumed and leaked. This version resolves the continuation
+    /// explicitly from the timeout path, so neither side leaks.
     private func awaitSetupComplete(timeoutSec: Double) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                    Task { @MainActor [weak self] in
-                        self?.setupCompleteContinuation = cont
-                    }
-                }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            self.setupCompleteContinuation = cont
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(timeoutSec))
+                guard let self, let pending = self.setupCompleteContinuation else { return }
+                self.setupCompleteContinuation = nil
+                pending.resume(throwing: RealtimeSessionError.setupTimeout)
             }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeoutSec))
-                throw RealtimeSessionError.setupTimeout
-            }
-            try await group.next()
-            group.cancelAll()
         }
     }
 
-    private func awaitTurnComplete() async throws {
+    /// Await the server's `turnComplete` frame. Mirrors `awaitSetupComplete`'s
+    /// timeout pattern so a stalled server (no close, no `turnComplete`)
+    /// can't hang the mic forever. 30 s budget is 2× Gemini's observed
+    /// p95 and still well under the user-perceived "stuck" threshold.
+    /// On timeout, the caller's `endTurn` throws `.turnDrained`, the VM
+    /// surfaces a toast, and state is recoverable by tapping again.
+    private func awaitTurnComplete(timeoutSec: Double = 30) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.turnCompleteContinuation = cont
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(timeoutSec))
+                guard let self, let pending = self.turnCompleteContinuation else { return }
+                self.turnCompleteContinuation = nil
+                pending.resume(throwing: RealtimeSessionError.turnDrained)
+            }
         }
     }
 
     private func handleInboundFrame(_ frame: LiveInboundFrame) async {
         switch frame {
         case .setupComplete:
-            setupCompleteContinuation?.resume()
-            setupCompleteContinuation = nil
+            // Nil-clear BEFORE resume so a re-entrant resume (shouldn't
+            // happen, but defense-in-depth against Google sending two
+            // setupComplete frames) doesn't double-resume.
+            if let cont = setupCompleteContinuation {
+                setupCompleteContinuation = nil
+                cont.resume()
+            }
 
         case let .serverContent(content):
             await handleServerContent(content)
@@ -484,7 +521,12 @@ final class RealtimeSession: VoiceSessionDriver {
 
     private func handleServerContent(_ content: LiveServerContent) async {
         if !content.audioChunks.isEmpty {
-            if stateMachine.state == .thinking {
+            // Audio can arrive either from the first post-thinking
+            // response OR after a toolResponse round-trip (Gemini
+            // auto-continues the turn, CLAUDE.md §sharp-edge #9). Both
+            // `.thinking → .modelSpeaking` and `.toolCalling →
+            // .modelSpeaking` are legal state-machine transitions.
+            if stateMachine.state == .thinking || stateMachine.state == .toolCalling {
                 stateMachine.advance(to: .modelSpeaking)
             }
             for chunk in content.audioChunks {
@@ -492,7 +534,7 @@ final class RealtimeSession: VoiceSessionDriver {
                     try audioPipeline?.enqueuePlayback(chunk)
                 } catch {
                     Logger.voice.warning(
-                        "live_playback_enqueue_failed error=\(error.localizedDescription, privacy: .public)",
+                        "live_playback_enqueue_failed error=\(error.localizedDescription, privacy: .private)",
                     )
                 }
             }
@@ -501,16 +543,45 @@ final class RealtimeSession: VoiceSessionDriver {
             currentTurnInlineText = (currentTurnInlineText ?? "") + text
         }
         if content.turnComplete {
+            // Guard against `.thinking → .ready` illegal transition:
+            // Gemini can emit `turnComplete` with no preceding audio
+            // (text-only response or bare completion signal). Without
+            // this, `handleServerContent` leaves state in `.thinking`
+            // and endTurn's subsequent `advance(to: .ready)` crashes
+            // in debug builds / stucks state in release. Advance
+            // through `.modelSpeaking` first so the .ready transition
+            // is always legal.
+            if stateMachine.state == .thinking {
+                stateMachine.advance(to: .modelSpeaking)
+            }
             // The playback may still be queued — we resume the
             // continuation immediately so the VM can react; audio
             // continues playing in the background. The VM calls
             // cancelSpeaking / next tap to interrupt if needed.
-            turnCompleteContinuation?.resume()
-            turnCompleteContinuation = nil
+            //
+            // Nil-clear before resume so a re-entrant turnComplete
+            // (e.g., server emits one on audio end and another on
+            // toolCall completion) doesn't double-resume.
+            if let cont = turnCompleteContinuation {
+                turnCompleteContinuation = nil
+                cont.resume()
+            }
         }
     }
 
     private func handleToolCall(_ toolCall: LiveToolCall) async {
+        // Guard: only `.thinking → .toolCalling` is legal per the state
+        // machine. A stale or duplicate toolCall frame arriving when
+        // state is `.ready`, `.userSpeaking`, or `.modelSpeaking` would
+        // silently no-op the advance in release and then send a spurious
+        // `toolResponse` that poisons the session protocol. Log and
+        // drop instead.
+        guard stateMachine.state == .thinking else {
+            Logger.voice.warning(
+                "live_tool_call_in_unexpected_state state=\(self.stateMachine.state.rawValue, privacy: .public)",
+            )
+            return
+        }
         stateMachine.advance(to: .toolCalling)
 
         // 3.1 Flash Live does synchronous tool calls — one in flight
@@ -527,17 +598,20 @@ final class RealtimeSession: VoiceSessionDriver {
                 try await transport?.send(frame)
             } catch {
                 Logger.voice.warning(
-                    "live_tool_response_send_failed name=\(call.name, privacy: .public) error=\(error.localizedDescription, privacy: .public)",
+                    "live_tool_response_send_failed name=\(call.name, privacy: .public) error=\(error.localizedDescription, privacy: .private)",
                 )
             }
         }
 
-        // After toolResponse, Gemini auto-continues the turn (CLAUDE.md
-        // §sharp-edge #9). State returns to .thinking until the model
-        // resumes speaking.
-        if stateMachine.state == .toolCalling {
-            stateMachine.advance(to: .thinking)
-        }
+        // After toolResponse, state STAYS in `.toolCalling` until the
+        // next serverContent audio frame arrives — the state machine's
+        // legal transitions forbid `.toolCalling → .thinking` (only
+        // `.toolCalling → .modelSpeaking` is allowed). When Gemini
+        // resumes its spoken response (sharp-edge #9: auto-continue
+        // after toolResponse), `handleServerContent` advances
+        // `.toolCalling → .modelSpeaking` on the first audio chunk.
+        // Removing a prior premature `.toolCalling → .thinking` hop
+        // that would have hit an assertionFailure in debug builds.
     }
 
     private func dispatchTool(_ call: LiveFunctionCall) async -> [String: Any] {
@@ -565,16 +639,19 @@ final class RealtimeSession: VoiceSessionDriver {
         // source of truth per CLAUDE.md §north-star constraint #5).
         //
         // TODO(D.1): provide full substitution context (recipe,
-        // household). For the scaffold we pass through the current
-        // session state via the cached cookingSession.
-        guard let missing = call.substitutionMissingIngredient else {
-            return ["ok": false, "error": "missing_ingredient"]
-        }
-        // Short path — placeholder result until the full substitution
-        // dispatcher is wired to the actor's context. Validation gate
-        // will catch this with a real Gemini session.
-        _ = missing
-        return ["ok": true, "stub": true]
+        // household). For the scaffold we fail CLOSED — returning
+        // `ok: false` prevents the model from rendering an
+        // unvalidated substitution to the user. Once the full
+        // dispatcher is wired (post-D.1), this returns the real
+        // hard-rule-validated result from AIDispatch.substitution.
+        Logger.voice.warning(
+            "live_substitution_stub tool=\(call.name, privacy: .public) — returning fail-closed result",
+        )
+        return [
+            "ok": false,
+            "error": "substitution_not_yet_supported",
+            "message": "Use the Substitution Sheet for now.",
+        ]
     }
 
     private func handleTransportError(_ error: any Error) async {
@@ -585,17 +662,31 @@ final class RealtimeSession: VoiceSessionDriver {
         if stateMachine.state != .closed {
             stateMachine.advance(to: .error)
         }
-        turnCompleteContinuation?.resume(throwing: error)
-        turnCompleteContinuation = nil
-        setupCompleteContinuation?.resume(throwing: error)
-        setupCompleteContinuation = nil
+        // Nil-clear each continuation BEFORE resume so a concurrent
+        // happy-path resolve (e.g., a setupComplete / turnComplete
+        // frame racing the transport error) can't double-resume the
+        // same CheckedContinuation — that's a crash.
+        if let cont = turnCompleteContinuation {
+            turnCompleteContinuation = nil
+            cont.resume(throwing: error)
+        }
+        if let cont = setupCompleteContinuation {
+            setupCompleteContinuation = nil
+            cont.resume(throwing: error)
+        }
     }
 
     // MARK: - Private: mic forwarding
 
     private func startMicForwarding() {
         guard let pipeline = audioPipeline, let transport else { return }
-        micForwardTask = Task { [weak self] in
+        // No self-capture: the Task reads from `pipeline` and
+        // `transport` (captured strongly from locals), both of which
+        // outlive the Task because this actor owns them and cancels
+        // the task in `stopMicForwarding()` / `close()` before
+        // teardown. Earlier drafts carried `[weak self]` + `_ = self`
+        // to silence the unused-capture warning, which was misleading.
+        micForwardTask = Task {
             for await frame in pipeline.micFrames {
                 if Task.isCancelled { break }
                 do {
@@ -604,13 +695,10 @@ final class RealtimeSession: VoiceSessionDriver {
                         mimeType: frame.mimeType,
                     ))
                 } catch {
-                    Logger.voice.warning(
-                        "live_mic_send_failed error=\(error.localizedDescription, privacy: .public)",
-                    )
+                    Logger.voice.warning("live_mic_send_failed")
                     break
                 }
             }
-            _ = self  // capture to silence unused warning
         }
     }
 

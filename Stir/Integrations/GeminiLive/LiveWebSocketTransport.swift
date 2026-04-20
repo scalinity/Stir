@@ -67,6 +67,12 @@ final class LiveWebSocketTransport {
     /// the `setupComplete` inbound frame is the real "ready" signal and
     /// the session actor awaits that explicitly (don't front-run the
     /// handshake from here).
+    ///
+    /// SECURITY: Validates scheme + host before opening. The URL
+    /// carries the Gemini ephemeral token as `?access_token=...`; a
+    /// compromised or MITM'd mint response could redirect it to an
+    /// attacker endpoint. Pinning scheme=`wss` + host=`*.googleapis.com`
+    /// prevents that silent exfiltration.
     func open(url: URL) throws {
         guard wsTask == nil else {
             Logger.voice.warning("live_ws_open_called_twice")
@@ -75,12 +81,23 @@ final class LiveWebSocketTransport {
         guard !isClosed else {
             throw TransportError.sendAfterClose
         }
+        guard url.scheme == "wss" else {
+            throw TransportError.openFailed(message: "non-wss scheme rejected")
+        }
+        guard url.host?.hasSuffix("googleapis.com") == true else {
+            throw TransportError.openFailed(message: "host not pinned to googleapis.com")
+        }
         var request = URLRequest(url: url)
         // Gemini Live's ephemeral-token path uses ?access_token=... in
         // the URL; no Authorization header. Attaching one causes a 401
         // in practice (pinned here so nobody "fixes" it by adding one).
         request.timeoutInterval = 10
         let task = urlSession.webSocketTask(with: request)
+        // Cap inbound message size so a malicious/misbehaving endpoint
+        // can't OOM the device with an unbounded payload. 512 KiB is
+        // well above the largest observed Gemini frame (~30 KiB audio
+        // chunks) with headroom for batched usageMetadata blocks.
+        task.maximumMessageSize = 512 * 1024
         self.wsTask = task
         task.resume()
         startReceiveLoop()
@@ -94,6 +111,11 @@ final class LiveWebSocketTransport {
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
         inboundContinuation?.finish()
+        // Explicit URLSession invalidation releases the delegate
+        // operation queue. Without this, URLSession objects accumulate
+        // per Cook Mode entry (Resume path creates a new session each
+        // time) and iOS 26 logs runtime warnings on dealloc.
+        urlSession.invalidateAndCancel()
     }
 
     // MARK: - Send
@@ -106,11 +128,19 @@ final class LiveWebSocketTransport {
             throw TransportError.sendAfterClose
         }
         let obj = frame.asJSONObject()
+        // Pre-validate so a future heterogeneous `sessionUpdate` or
+        // `toolResponse` payload carrying a non-JSON-encodable value
+        // (e.g., Date, URL, NSNull subclass) surfaces as a typed
+        // `malformedInbound` error rather than a fatalError inside
+        // JSONSerialization on older runtimes.
+        guard JSONSerialization.isValidJSONObject(obj) else {
+            throw TransportError.malformedInbound(message: "outbound frame not JSON-encodable")
+        }
         let data: Data
         do {
             data = try JSONSerialization.data(withJSONObject: obj, options: [])
         } catch {
-            throw TransportError.malformedInbound(message: "encode failed: \(error.localizedDescription)")
+            throw TransportError.malformedInbound(message: "encode failed")
         }
         // Gemini Live accepts text frames (stringified JSON) for the
         // control channel. Audio is still base64 inside that JSON — we
@@ -119,6 +149,28 @@ final class LiveWebSocketTransport {
             throw TransportError.malformedInbound(message: "utf8 conversion failed")
         }
         try await task.send(.string(str))
+    }
+
+    // MARK: - Security helpers
+
+    /// Redact the `access_token=...` query-param value from any string
+    /// that may contain the Gemini ephemeral token. Used before logging
+    /// or surfacing error descriptions that URLSession constructed from
+    /// the request URL.
+    static func scrubAccessToken(_ s: String) -> String {
+        // Matches `access_token=` followed by any non-whitespace, non-&
+        // characters. Replace with a redaction marker.
+        guard let regex = try? NSRegularExpression(
+            pattern: #"access_token=[^&\s"]+"#,
+            options: [],
+        ) else { return s }
+        let range = NSRange(s.startIndex..., in: s)
+        return regex.stringByReplacingMatches(
+            in: s,
+            options: [],
+            range: range,
+            withTemplate: "access_token=REDACTED",
+        )
     }
 
     // MARK: - Receive loop
@@ -139,11 +191,18 @@ final class LiveWebSocketTransport {
                 if isClosed || Task.isCancelled { break }
                 // Map NSURLErrorDomain to connectionDropped. The
                 // session actor decides whether to attempt refresh.
+                //
+                // SECURITY: strip `access_token=...` from the reason
+                // string — the ephemeral Gemini token rides in the
+                // URL query param and URLError.localizedDescription
+                // sometimes embeds the failing URL. We don't want the
+                // token flowing into Sentry breadcrumbs / OSLog.
                 let nsErr = error as NSError
+                let scrubbedReason = Self.scrubAccessToken(nsErr.localizedDescription)
                 inboundContinuation?.finish(
                     throwing: TransportError.connectionDropped(
                         code: nsErr.code,
-                        reason: nsErr.localizedDescription,
+                        reason: scrubbedReason,
                     ),
                 )
                 break
@@ -180,7 +239,7 @@ final class LiveWebSocketTransport {
             json = try JSONSerialization.jsonObject(with: data, options: [])
         } catch {
             Logger.voice.warning(
-                "live_ws_inbound_json_parse_failed error=\(error.localizedDescription, privacy: .public)",
+                "live_ws_inbound_json_parse_failed error=\(error.localizedDescription, privacy: .private)",
             )
             return
         }

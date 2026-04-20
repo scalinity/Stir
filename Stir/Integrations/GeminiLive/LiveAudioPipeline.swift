@@ -196,7 +196,19 @@ final class LiveAudioPipeline {
 
         if !audioEngine.isRunning {
             // Only starts if startCapture or tearDown left it stopped.
-            try? audioEngine.start()
+            // Propagate errors instead of `try?`-swallowing — a silent
+            // engine-start failure produces "Gemini speaking, user
+            // hears nothing" with no signal for triage. enqueuePlayback
+            // already declares `throws`; `handleServerContent` logs
+            // the failure via `live_playback_enqueue_failed`.
+            do {
+                try audioEngine.start()
+            } catch {
+                Logger.voice.error(
+                    "live_audio_engine_start_failed error=\(error.localizedDescription, privacy: .private)",
+                )
+                throw PipelineError.malformedAudioChunk(reason: "engine start failed: \(error.localizedDescription)")
+            }
         }
         if !playerNode.isPlaying {
             playerNode.play()

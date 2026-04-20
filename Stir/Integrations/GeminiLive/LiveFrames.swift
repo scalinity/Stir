@@ -249,12 +249,23 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
         args["user_problem"] as? String
     }
 
-    /// `start_timer.seconds` — required int arg.
+    /// `start_timer.seconds` — required int arg. Clamped to a cooking-
+    /// plausible range (1 sec to 4 hours) so a malicious or malformed
+    /// response can't feed `Int.max` / negative values into the timer
+    /// scheduler and trigger overflow or infinite timers.
     var timerSeconds: Int? {
-        if let i = args["seconds"] as? Int { return i }
-        if let n = args["seconds"] as? NSNumber { return n.intValue }
-        if let s = args["seconds"] as? String { return Int(s) }
-        return nil
+        let raw: Int?
+        if let i = args["seconds"] as? Int { raw = i }
+        else if let n = args["seconds"] as? NSNumber {
+            // Reject Bool bridged as NSNumber — Bool values disguised as
+            // ints would otherwise parse as 0 or 1 seconds.
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
+            raw = n.intValue
+        }
+        else if let s = args["seconds"] as? String { raw = Int(s) }
+        else { raw = nil }
+        guard let value = raw, (1...14400).contains(value) else { return nil }
+        return value
     }
 
     /// `start_timer.label` — optional string arg.

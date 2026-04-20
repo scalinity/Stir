@@ -188,20 +188,10 @@ struct CookModeRoot: View {
                 // VM routes the tap to the paywall without touching
                 // SFSpeechRecognizer / AVAudioEngine / AVSpeechSynthesizer.
 
-                // Wire Live tool-call callbacks to VM side-effects.
-                // advance_step → nextStep(advancedBy: "voice")
-                // start_timer  → startTimerForCurrentStep
-                // Done here (not in VM init) because the tool-call
-                // surface is Live-only — polluting VoiceSessionDriver
-                // with Live-only methods would leak abstraction.
-                if let liveDriver = driverForVM as? RealtimeSession {
-                    // `vm` is captured weakly in the closures below to
-                    // break the retain cycle (driver held by VM held by
-                    // capture).
-                    // vm is declared in the next block; defer wiring
-                    // until after VM construction.
-                    _ = liveDriver
-                }
+                // Tool-call callbacks are Live-only. They're wired
+                // AFTER the VM is constructed below (see block tagged
+                // "Wire Live tool-call side-effects"). Not here —
+                // the VM doesn't exist yet at this point.
 
                 let capturedCoordinator = coordinator
                 let vm = CookModeViewModel(
@@ -218,13 +208,17 @@ struct CookModeRoot: View {
 
                 // Wire Live tool-call side-effects now that the VM
                 // exists. Weak capture breaks the driver ↔ VM cycle.
+                // `onStartTimerRequested` now honors the model's
+                // requested `seconds` (previously discarded), routing
+                // through `startTimerFromVoice` which respects the
+                // 1..14400 range already clamped in LiveFunctionCall.
                 if let liveDriver = driverForVM as? RealtimeSession {
                     liveDriver.onAdvanceStepRequested = { [weak vm] in
                         vm?.nextStep(advancedBy: "voice")
                     }
-                    liveDriver.onStartTimerRequested = { [weak vm] _, _ in
+                    liveDriver.onStartTimerRequested = { [weak vm] seconds, label in
                         Task { @MainActor [weak vm] in
-                            await vm?.startTimerForCurrentStep(generated: true)
+                            await vm?.startTimerFromVoice(seconds: seconds, label: label)
                         }
                     }
                 }
@@ -260,6 +254,24 @@ struct CookModeRoot: View {
             // VM flips shouldDismiss only when the user chose "Pause and
             // resume later" or "Abandon". "Keep cooking" leaves it false.
             if shouldDismiss { onDismiss() }
+        }
+        .onDisappear {
+            // Defense in depth: the VM's exit() path is the canonical
+            // teardown site (calls driver.close + AVAudioSession
+            // deactivate), but if the user dismisses via a code path
+            // that doesn't run exit() — e.g., a swipe-down on the
+            // fullScreenCover, or the parent dismissing for another
+            // reason — close() on the driver still needs to fire so
+            // the WebSocket/mic tap/audio session all tear down. This
+            // call is idempotent; a second invocation after VM exit
+            // is a no-op.
+            voiceDriver?.close()
+            // Deactivate AVAudioSession too: neither driver's close()
+            // does it (ownership is in VM.exit), and on a non-exit
+            // dismiss the audio session stays configured for Cook Mode
+            // — producing the "stuck mic indicator" failure CLAUDE.md
+            // explicitly warns about (ADR 0007 pre-commit).
+            AVAudioSessionConfigurator.deactivate()
         }
     }
 

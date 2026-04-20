@@ -307,6 +307,47 @@ final class CookModeViewModel {
         }
     }
 
+    /// Voice-driven timer start. The Live `start_timer` tool call
+    /// passes an explicit `seconds` argument — this method honors it
+    /// (as distinct from `startTimerForCurrentStep` which always reads
+    /// the configured step duration). Use for the C.2 path; the C.3
+    /// path's `start_timer` suggested_action continues to call
+    /// `startTimerForCurrentStep` because the fallback cook-turn
+    /// response doesn't carry a seconds arg today.
+    ///
+    /// Seconds are already clamped to 1...14400 by `LiveFunctionCall.timerSeconds`;
+    /// the guard here is defensive.
+    func startTimerFromVoice(seconds: Int, label: String?) async {
+        guard let step = currentStep else { return }
+        guard (1...14400).contains(seconds) else { return }
+        // Skip if a running timer for this step already exists.
+        if activeTimers.contains(where: { $0.step?.id == step.id && $0.typedState == .running }) {
+            return
+        }
+        do {
+            let resolvedLabel = label?.isEmpty == false
+                ? label!
+                : (step.title?.isEmpty == false ? step.title! : "Step \(step.stepNumber)") + " timer"
+            let timer = try cookTimerRepository.createTimer(
+                for: session,
+                step: step,
+                label: resolvedLabel,
+                durationSec: seconds,
+            )
+            await timerService.requestAuthorizationIfNeeded()
+            try await timerService.start(timer, on: session)
+            activeTimers = cookTimerRepository.timers(for: session)
+
+            analytics.capture(.timerStarted, properties: [
+                "duration_bucket": bucketForDuration(seconds),
+                "generated_vs_manual": "voice",
+                "step_number": Int(step.stepNumber),
+            ])
+        } catch {
+            Logger.ui.error("cook mode startTimerFromVoice failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func pauseTimer(_ timer: CookTimer) async {
         do {
             try await timerService.pause(timer, on: session)
