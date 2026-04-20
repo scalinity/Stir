@@ -233,7 +233,15 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
         struct IngredientWire: Decodable, Sendable, Equatable, Hashable {
             let displayName: String
             let canonicalSlug: String?
+            /// Optional on the wire (`hard_rules.ts` DishIngredient declares
+            /// `amount_text?: string`). Gemini occasionally omits the key
+            /// — previously this crashed iOS decode with the generic
+            /// "isn't in the correct format" error. Default to empty
+            /// string and let the UI layer render "to taste" fallback.
             let amountText: String
+            /// Optional on the wire (`is_optional?: boolean`). Default
+            /// to `false` when omitted — matches Gemini's "unspecified
+            /// means required" convention.
             let isOptional: Bool
 
             enum CodingKeys: String, CodingKey {
@@ -241,6 +249,14 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
                 case canonicalSlug = "canonical_slug"
                 case amountText = "amount_text"
                 case isOptional = "is_optional"
+            }
+
+            init(from decoder: any Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                self.displayName = try c.decode(String.self, forKey: .displayName)
+                self.canonicalSlug = try c.decodeIfPresent(String.self, forKey: .canonicalSlug)
+                self.amountText = try c.decodeIfPresent(String.self, forKey: .amountText) ?? ""
+                self.isOptional = try c.decodeIfPresent(Bool.self, forKey: .isOptional) ?? false
             }
         }
 

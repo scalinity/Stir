@@ -385,8 +385,39 @@ private func handleEvent(
     dataJSON: String,
     continuation: AsyncThrowingStream<DinnerSolveEvent, Error>.Continuation,
 ) throws {
-    if let evt = try decodeSSEEvent(event: event, dataJSON: dataJSON) {
-        continuation.yield(evt)
+    do {
+        if let evt = try decodeSSEEvent(event: event, dataJSON: dataJSON) {
+            continuation.yield(evt)
+        }
+    } catch {
+        // Emit a loud, paste-friendly log of the exact JSON that
+        // failed to decode. DecodingError's default
+        // `localizedDescription` is always the useless "isn't in the
+        // correct format" — the real detail (missing key, type
+        // mismatch, coding path) only lives in its associated values.
+        // For D.1-class triage we want both the typed detail AND the
+        // raw payload so we can eyeball schema drift against DishCard.
+        let preview = dataJSON.count > 2000
+            ? String(dataJSON.prefix(2000)) + "…(truncated)"
+            : dataJSON
+        if let decodingError = error as? DecodingError {
+            Logger.aiDispatch.error(
+                """
+                sse_decode_failed event=\(event, privacy: .public) \
+                detail=\(String(describing: decodingError), privacy: .public)
+                raw_data=\(preview, privacy: .public)
+                """,
+            )
+        } else {
+            Logger.aiDispatch.error(
+                """
+                sse_decode_failed event=\(event, privacy: .public) \
+                error=\(error.localizedDescription, privacy: .public)
+                raw_data=\(preview, privacy: .public)
+                """,
+            )
+        }
+        throw error
     }
 }
 
