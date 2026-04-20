@@ -343,7 +343,13 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 6. Prompt + context
   // ---------------------------------------------------------------------
-  const activePrompt = await readActivePrompt(client, FEATURE_KEY);
+  // Leftovers mode (step 7) uses the v1.1.0 prompt. Canary via
+  // rollout_pct on the v1.1.0 row — if below percentile, fall back to
+  // v1.0.0. Non-leftovers requests always use the default prompt row.
+  const isLeftovers = body.context_hint === 'leftovers';
+  const activePrompt = isLeftovers
+    ? await pickLeftoversPrompt(client, body.solve_request_id)
+    : await readActivePrompt(client, FEATURE_KEY);
   if (!activePrompt) {
     await refundQuota(client, userLog, claims.canonical_user_key, 'dinner_solve', consumedPeriodStart);
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
@@ -356,6 +362,10 @@ Deno.serve(async (req) => {
     constraints_json: body.constraints ?? {},
     equipment_json: body.household_context.available_equipment,
     feedback_json: null,
+    // Only referenced by the v1.1.0 leftovers template; the renderer's
+    // missing-key behavior leaves {{leftovers_json}} literal in the
+    // v1.0.0 template, which is never present there.
+    leftovers_json: body.leftovers_items ?? [],
   });
 
   const dishCtx: DishContext = {
@@ -745,4 +755,70 @@ function streamCachedEvents(body: CachedSolveBody, requestId: string): Response 
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------
+// Leftovers prompt selector
+// ---------------------------------------------------------------------
+// Step 7 canaries v1.1.0 of dinner_solve for leftovers-mode requests.
+// The v1.1.0 row has is_default=FALSE + rollout_pct=20 — this function
+// dice-rolls using the request UUID (deterministic per request, same
+// request always resolves to the same bucket) to decide whether to
+// serve v1.1.0 or fall back to v1.0.0.
+// After the canary promotes to 100 via migration, the dice roll always
+// wins and this function becomes equivalent to a direct v1.1.0 lookup.
+
+async function pickLeftoversPrompt(
+  client: ReturnType<typeof createServiceClient>,
+  solveRequestId: string,
+): Promise<
+  | {
+      feature_key: string;
+      version: string;
+      provider_model: string;
+      template_blob: string;
+      schema_hash: string;
+      rollout_pct: number;
+    }
+  | null
+> {
+  const { data, error } = await client
+    .from('prompt_versions')
+    .select('feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled')
+    .eq('feature_key', FEATURE_KEY)
+    .eq('is_enabled', true)
+    .in('version', ['1.1.0']);
+  if (error || !data || data.length === 0) {
+    // No v1.1.0 enabled row — fall back to the default prompt.
+    return readActivePrompt(client, FEATURE_KEY);
+  }
+  const candidate = data[0];
+  if (!candidate) return readActivePrompt(client, FEATURE_KEY);
+  // Deterministic bucket: stable per solve_request_id, so a retry with the
+  // same ID sees the same prompt. Simple FNV-1a would do but a byte-XOR
+  // over the UUID bytes + mod 100 is enough for a 20% canary.
+  const bucket = hashUuidToBucket100(solveRequestId);
+  if (bucket < candidate.rollout_pct) {
+    return {
+      feature_key: candidate.feature_key,
+      version: candidate.version,
+      provider_model: candidate.provider_model,
+      template_blob: candidate.template_blob,
+      schema_hash: candidate.schema_hash,
+      rollout_pct: candidate.rollout_pct,
+    };
+  }
+  return readActivePrompt(client, FEATURE_KEY);
+}
+
+function hashUuidToBucket100(uuid: string): number {
+  const hex = uuid.replace(/-/g, '');
+  let x = 0;
+  for (let i = 0; i < hex.length; i += 2) {
+    const byte = parseInt(hex.slice(i, i + 2), 16);
+    if (!Number.isNaN(byte)) {
+      x = ((x * 31) + byte) >>> 0;
+    }
+  }
+  return x % 100;
 }

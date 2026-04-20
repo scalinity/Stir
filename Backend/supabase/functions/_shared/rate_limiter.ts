@@ -26,6 +26,9 @@ export type RateLimitPolicyKey =
   | 'ip:substitution_daily'
   | 'ip:cook_turn_daily'
   | 'ip:bootstrap_hourly'
+  | 'ip:recipe_import_daily'
+  | 'ip:grocery_generate_daily'
+  | 'ip:push_register_hourly'
   | 'user:dinner_solve_hourly';
 
 export interface RateLimitPolicy {
@@ -49,6 +52,18 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   'ip:substitution_daily':    { windowSeconds: 86400, maxCount: 50 },
   'ip:cook_turn_daily':       { windowSeconds: 86400, maxCount: 300 },
   'ip:bootstrap_hourly':      { windowSeconds: 3600,  maxCount: 20 },
+  // Step 7 additions:
+  // recipe_import: unmetered per-user quota (Free:2/mo, Premium/Pro:unlimited)
+  //   enforced separately via usage_counters. This IP cap catches abusers
+  //   who rotate Apple IDs; 40/day covers 20 imports × 2 retries.
+  'ip:recipe_import_daily':    { windowSeconds: 86400, maxCount: 40 },
+  // grocery_generate: unmetered across all tiers; 100/day/IP is a burst cap,
+  //   not a product cap. A real user generates <5/day.
+  'ip:grocery_generate_daily': { windowSeconds: 86400, maxCount: 100 },
+  // push_register: iOS calls once per install + once per preference change.
+  //   20/hour prevents token-churn abuse (rotating installs to enumerate
+  //   apns_token space) without interfering with legitimate use.
+  'ip:push_register_hourly':   { windowSeconds: 3600,  maxCount: 20 },
   'user:dinner_solve_hourly': { windowSeconds: 3600,  maxCount: 10 },
 };
 

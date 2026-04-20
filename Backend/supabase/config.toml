@@ -405,6 +405,22 @@ verify_jwt = false
 [functions.cook-turn]
 verify_jwt = false
 
+# Step-7 additions.
+[functions.recipe-import]
+verify_jwt = false
+
+[functions.grocery-generate]
+verify_jwt = false
+
+[functions.push-register]
+verify_jwt = false
+
+# pgmq-dispatch is invoked by pg_cron via net.http_post; no Supabase JWT.
+# In production it sits behind network ACLs (pg_net runs inside the DB
+# VPC). Local dev invokes it via curl in integration tests.
+[functions.pgmq-dispatch]
+verify_jwt = false
+
 # RevenueCat webhook verifies its own Authorization header (shared secret,
 # not a Supabase JWT). If Kong ran its JWT check first we'd never see the
 # request — RC doesn't speak the Bearer-JWT format Kong expects.

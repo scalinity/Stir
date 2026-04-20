@@ -1,0 +1,133 @@
+// push_register_test
+//
+// HTTP-level tests for /v1/push/register — AUTH-01, VAL-01 (apns_token
+// regex, prefs shape, environment enum), and happy-path upsert that
+// records apns_environment + notification_prefs_json on the install row.
+
+import { assertEquals } from '@std/assert';
+import { quickBootstrap, testIPHeaders } from './_helpers/factory.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+
+await clearRateLimitBuckets();
+
+const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
+  ? `${Deno.env.get('SUPABASE_URL')}/functions/v1`
+  : 'http://127.0.0.1:54321/functions/v1';
+
+interface HttpResult {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+async function callPushRegister(body: unknown, jwt: string | null): Promise<HttpResult> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...testIPHeaders(),
+  };
+  if (jwt !== null) headers['Authorization'] = `Bearer ${jwt}`;
+  const res = await fetch(`${FUNCTIONS_URL}/push-register`, {
+    method: 'POST',
+    headers,
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+  const parsed = await res.json();
+  return { status: res.status, body: parsed };
+}
+
+function hex64(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function validBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    apns_token: hex64(),
+    environment: 'sandbox',
+    notification_prefs: {
+      import_completion: true,
+      reactivation: false,
+      trial_reminder: true,
+    },
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AUTH-01
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: AUTH-01 on missing Authorization', async () => {
+  const res = await callPushRegister(validBody(), null);
+  assertEquals(res.status, 401);
+  assertEquals(res.body.error, 'AUTH-01');
+});
+
+// ---------------------------------------------------------------------------
+// VAL-01
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: VAL-01 when apns_token is not 64 hex', async () => {
+  const { session_jwt } = await quickBootstrap();
+  const res = await callPushRegister(validBody({ apns_token: 'zzzz' }), session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('push_register: VAL-01 when environment is invalid', async () => {
+  const { session_jwt } = await quickBootstrap();
+  const res = await callPushRegister(validBody({ environment: 'staging' }), session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('push_register: VAL-01 when a notification_pref is not boolean', async () => {
+  const { session_jwt } = await quickBootstrap();
+  const res = await callPushRegister(
+    validBody({
+      notification_prefs: { import_completion: 'yes', reactivation: false, trial_reminder: false },
+    }),
+    session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+// ---------------------------------------------------------------------------
+// Happy path — upsert persists on device_installations
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: happy path persists push_token + env + prefs', async () => {
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const token = hex64();
+  const res = await callPushRegister(
+    validBody({
+      apns_token: token,
+      environment: 'production',
+      notification_prefs: { import_completion: true, reactivation: true, trial_reminder: false },
+    }),
+    session_jwt,
+  );
+  assertEquals(res.status, 200);
+
+  const client = serviceClient();
+  const { data, error } = await client
+    .from('device_installations')
+    .select('push_token, apns_environment, notifications_enabled, notification_prefs_json')
+    .eq('canonical_user_key', canonical_user_key)
+    .order('last_seen_at', { ascending: false })
+    .limit(1)
+    .single<{
+      push_token: string | null;
+      apns_environment: string | null;
+      notifications_enabled: boolean;
+      notification_prefs_json: Record<string, boolean> | null;
+    }>();
+  assertEquals(error, null);
+  assertEquals(data?.push_token, token);
+  assertEquals(data?.apns_environment, 'production');
+  assertEquals(data?.notifications_enabled, true);
+  assertEquals(data?.notification_prefs_json?.import_completion, true);
+  assertEquals(data?.notification_prefs_json?.reactivation, true);
+  assertEquals(data?.notification_prefs_json?.trial_reminder, false);
+});

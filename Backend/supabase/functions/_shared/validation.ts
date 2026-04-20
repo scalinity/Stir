@@ -101,10 +101,26 @@ const IngredientLite = z.object({
   amount_text: z.string().min(1).max(128).optional(),
 }).strict();
 
+// Step 7 — leftovers variant: when context_hint = 'leftovers', the solve
+// uses the v1.1.0 prompt and emphasizes next-2-days use-up. `leftovers_items`
+// is the list of leftover ingredients from a previous cook (sourced from
+// OutcomeFeedback.leftoverCount > 0 + user selection in the Leftovers sheet).
+const LeftoversItem = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+  approximate_amount_text: z.string().min(1).max(128).optional(),
+}).strict();
+
 export const DinnerSolveRequest = z.object({
   solve_request_id: z.string().uuid(),
   parse_id: z.string().uuid().optional(),
   ingredients: z.array(IngredientLite).min(1).max(200),
+  // context_hint carries the solve intent. Default (undefined | 'standard')
+  // → v1.0.0 prompt; 'leftovers' → v1.1.0 prompt canaried at rollout_pct=20.
+  context_hint: z.enum(['standard', 'leftovers']).optional(),
+  // Present iff context_hint === 'leftovers'. Empty array rejected here so
+  // the client can't accidentally request leftovers mode with no leftovers.
+  leftovers_items: z.array(LeftoversItem).min(1).max(20).optional(),
   constraints: z.object({
     max_time_minutes: z.number().int().min(1).max(360).optional(),
     cuisine_leaning: z.string().min(1).max(64).optional(),
@@ -121,7 +137,17 @@ export const DinnerSolveRequest = z.object({
     })).max(50),
     available_equipment: z.array(z.string().min(1).max(64)).max(50),
   }).strict(),
-}).strict();
+}).strict().refine(
+  // Guard rails: leftovers mode must carry items; standard mode must not.
+  (b) => {
+    if (b.context_hint === 'leftovers') return !!b.leftovers_items && b.leftovers_items.length > 0;
+    return !b.leftovers_items || b.leftovers_items.length === 0;
+  },
+  {
+    message: "leftovers_items required when context_hint='leftovers' and forbidden otherwise",
+    path: ['leftovers_items'],
+  },
+);
 
 export type DinnerSolveRequest = z.infer<typeof DinnerSolveRequest>;
 
@@ -294,6 +320,153 @@ export const CookTurnRequest = z.object({
 }).strict();
 
 export type CookTurnRequest = z.infer<typeof CookTurnRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/ai/recipe-import (step 7)
+// ---------------------------------------------------------------------------
+//
+// import_id: client-generated UUID. Idempotency key AND the CloudKit
+//   RecipeImport row's primary key. A second POST with the same
+//   import_id returns the cached response (or 'queued' if async is
+//   still processing).
+// source_type: one of four strings.
+//   - 'url'            : user pasted a URL into the Import Entry screen.
+//                        Server fetches HTML, extracts recipe content.
+//   - 'share_sheet'    : Safari/social share sheet passed a URL. Same
+//                        code path as 'url' BUT kept distinct for
+//                        funnel analytics — share_sheet conversion
+//                        differs materially from manual paste.
+//   - 'screenshot_ocr' : iOS ran Vision OCR client-side and sends text.
+//   - 'pasted_text'    : user pasted recipe text directly (free-form).
+// payload: shape depends on source_type. Zod refinement below enforces
+//   the right shape per source.
+// ocr_page_count: required on 'screenshot_ocr'; 0 on other paths. Used
+//   to persist RecipeImport.ocrPageCount per spec §4.10.
+const UrlImportPayload = z.object({
+  url: z.string().url().max(2048),
+  ocr_text: z.undefined().optional(),
+  pasted_text: z.undefined().optional(),
+  ocr_page_count: z.number().int().min(0).max(0).optional(),
+}).strict();
+
+const ScreenshotOcrPayload = z.object({
+  url: z.undefined().optional(),
+  ocr_text: z.string().min(1).max(200_000),   // ~50 pages of OCR text
+  pasted_text: z.undefined().optional(),
+  ocr_page_count: z.number().int().min(1).max(20),
+}).strict();
+
+const PastedTextPayload = z.object({
+  url: z.undefined().optional(),
+  ocr_text: z.undefined().optional(),
+  pasted_text: z.string().min(1).max(200_000),
+  ocr_page_count: z.number().int().min(0).max(0).optional(),
+}).strict();
+
+export const RecipeImportRequest = z.object({
+  import_id: z.string().uuid(),
+  source_type: z.enum(['url', 'share_sheet', 'screenshot_ocr', 'pasted_text']),
+  payload: z.union([UrlImportPayload, ScreenshotOcrPayload, PastedTextPayload]),
+}).strict().superRefine((body, ctx) => {
+  const s = body.source_type;
+  const p = body.payload as {
+    url?: string | undefined;
+    ocr_text?: string | undefined;
+    pasted_text?: string | undefined;
+    ocr_page_count?: number | undefined;
+  };
+  if ((s === 'url' || s === 'share_sheet') && !p.url) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['payload', 'url'],
+      message: `url required when source_type='${s}'`,
+    });
+  }
+  if (s === 'screenshot_ocr') {
+    if (!p.ocr_text) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['payload', 'ocr_text'],
+        message: "ocr_text required when source_type='screenshot_ocr'",
+      });
+    }
+    if (p.ocr_page_count === undefined || p.ocr_page_count < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['payload', 'ocr_page_count'],
+        message: "ocr_page_count must be >= 1 when source_type='screenshot_ocr'",
+      });
+    }
+  }
+  if (s === 'pasted_text' && !p.pasted_text) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['payload', 'pasted_text'],
+      message: "pasted_text required when source_type='pasted_text'",
+    });
+  }
+});
+
+export type RecipeImportRequest = z.infer<typeof RecipeImportRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/ai/grocery-generate (step 7)
+// ---------------------------------------------------------------------------
+//
+// source_id: idempotency key. Either a RecipePlan UUID or a CookingSession
+//   UUID depending on source_type — iOS reuses the entity's own UUID here.
+// source_type: metadata for telemetry only. NOT persisted on GroceryList
+//   (spec §4.16 has sourceCookingSessionId but no source_type column).
+// ingredients_needed: full set of recipe ingredients to diff against pantry.
+// pantry_snapshot: iOS-supplied because backend doesn't mirror user content
+//   (CloudKit-only, invariant §3).
+
+const GroceryIngredient = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+  amount_text: z.string().min(1).max(128).optional(),
+}).strict();
+
+const GroceryPantryItem = z.object({
+  display_name: z.string().min(1).max(128),
+  canonical_slug: z.string().min(1).max(128).optional(),
+}).strict();
+
+export const GroceryGenerateRequest = z.object({
+  source_id: z.string().uuid(),
+  source_type: z.enum(['recipe', 'session', 'leftovers']),
+  ingredients_needed: z.array(GroceryIngredient).min(1).max(200),
+  pantry_snapshot: z.array(GroceryPantryItem).max(500),
+  recipe_title: z.string().min(1).max(256).optional(),   // context for model; aids category inference
+}).strict();
+
+export type GroceryGenerateRequest = z.infer<typeof GroceryGenerateRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/push/register (step 7)
+// ---------------------------------------------------------------------------
+//
+// APNs token registration + notification prefs upsert. iOS calls on first
+// token grant and on every prefs-change. Idempotent by (canonical_user_key,
+// environment, apns_token) — re-registering the same token is a no-op UPDATE.
+//
+// apns_token: 64-hex-char Apple device token. Validated by length + charset.
+// environment: 'production' (release) or 'sandbox' (TestFlight + DEBUG).
+// notification_prefs: three flags iOS surfaces in Settings → Notifications.
+
+const APNS_TOKEN_REGEX = /^[0-9a-fA-F]{64}$/;
+
+export const PushRegisterRequest = z.object({
+  apns_token: z.string().regex(APNS_TOKEN_REGEX, 'must be 64 hex characters'),
+  environment: z.enum(['production', 'sandbox']),
+  notification_prefs: z.object({
+    import_completion: z.boolean(),
+    reactivation: z.boolean(),
+    trial_reminder: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type PushRegisterRequest = z.infer<typeof PushRegisterRequest>;
 
 // ---------------------------------------------------------------------------
 // Zod → FieldError[] helper

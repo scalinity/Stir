@@ -118,6 +118,38 @@ Deno.test('dinner-solve: RATE-01 monthly quota when used_count == cap', async ()
   assertEquals(res.body?.cap, 6);
 });
 
+// Leftovers mode (step 7): the same endpoint accepts a context_hint +
+// leftovers_items. Validation here covers the refine guard rails.
+Deno.test('dinner-solve: VAL-01 when context_hint=leftovers but leftovers_items missing', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callDinnerSolve(
+    { ...validBody(), context_hint: 'leftovers' },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});
+
+Deno.test('dinner-solve: VAL-01 when leftovers_items provided but context_hint!=leftovers', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callDinnerSolve(
+    { ...validBody(), leftovers_items: [{ display_name: 'chili' }] },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});
+
+Deno.test('dinner-solve: VAL-01 when context_hint=leftovers with empty leftovers_items', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callDinnerSolve(
+    { ...validBody(), context_hint: 'leftovers', leftovers_items: [] },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});
+
 Deno.test('dinner-solve: AUTH-01 when user_row missing (broken JWT with phantom sub)', async () => {
   // This user doesn't exist in app_users. Bootstrap a user, then manually
   // DELETE their app_users row and re-use the JWT.
