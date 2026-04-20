@@ -131,13 +131,20 @@ struct CookModeRoot: View {
                 // isn't implemented yet, but reading + passing the flag
                 // means C.4 doesn't need re-plumbing when C.2 lands.
                 // Once C.2 exists, the branch will be:
-                //   if killSwitch || !entitlements.voiceCookMode → fallback
-                //   else                                         → RealtimeSession
+                //   if killSwitch || !canVoice → fallback
+                //   else                        → RealtimeSession
                 // For now: always fallback (the only driver).
+                //
+                // canVoice is pinned to a local so the single read at
+                // Cook Mode entry drives both driver instantiation AND
+                // the VM's `voiceDriver` arg — without the pin, a
+                // bootstrap refresh mid-task could split the two reads
+                // and leave the VM with a nil driver even though we
+                // pre-warmed one.
                 let killSwitch = entitlements.flagBool(forKey: "disable_cook_realtime") ?? false
-                _ = killSwitch  // logged below; no branch yet
-                let driver: SpeechFallbackService
-                if entitlements.canAccess(.voiceCookMode) == .allowed {
+                let canVoice = entitlements.canAccess(.voiceCookMode) == .allowed
+                var driverForVM: (any VoiceSessionDriver)? = nil
+                if canVoice {
                     // Pre-warm the AVAudioSession + STT + TTS so the
                     // first mic tap engages in <200ms. ADR 0007
                     // pre-commit: pre-warm at Cook Mode entry, not at
@@ -150,8 +157,8 @@ struct CookModeRoot: View {
                     do {
                         try AVAudioSessionConfigurator.activateForCookMode()
                         try await newDriver.preWarm()
-                        driver = newDriver
                         self.voiceDriver = newDriver
+                        driverForVM = newDriver
                         Logger.voice.info(
                             "cook_mode_voice_prewarmed kill_switch=\(killSwitch, privacy: .public)",
                         )
@@ -164,22 +171,14 @@ struct CookModeRoot: View {
                         Logger.voice.warning(
                             "cook_mode_voice_prewarm_failed: \(error.localizedDescription, privacy: .public)",
                         )
-                        driver = newDriver
                         self.voiceDriver = newDriver
+                        driverForVM = newDriver
                     }
-                } else {
-                    // Free user — no driver initialized. The mic button
-                    // still shows (Daniel's pre-commit: visible on all
-                    // tiers) and the VM routes the tap to the paywall.
-                    driver = SpeechFallbackService(
-                        aiDispatch: aiDispatch,
-                        voiceTurnRepository: VoiceTurnRepository(),
-                        cookingSession: session,
-                    )
-                    // Intentionally not preWarm'd; voiceDriver stays nil
-                    // so `cleanup()` doesn't try to close an
-                    // un-initialized AVAudioSession on dismiss.
                 }
+                // Free tier: no driver instantiated at all. The mic
+                // button still renders (Daniel's pre-commit) and the
+                // VM routes the tap to the paywall without touching
+                // SFSpeechRecognizer / AVAudioEngine / AVSpeechSynthesizer.
 
                 let capturedCoordinator = coordinator
                 let vm = CookModeViewModel(
@@ -188,7 +187,7 @@ struct CookModeRoot: View {
                     household: household,
                     source: source,
                     entitlements: entitlements,
-                    voiceDriver: entitlements.canAccess(.voiceCookMode) == .allowed ? driver : nil,
+                    voiceDriver: driverForVM,
                     disableCookRealtime: killSwitch,
                     presentPaywall: { trigger in capturedCoordinator.presentPaywall(trigger) },
                 )

@@ -88,7 +88,7 @@ final class SpeechFallbackServiceTests: XCTestCase {
         XCTAssertEqual(service.currentState, .closed)
     }
 
-    func test_cancelSpeaking_doesNotCrash_whenNotSpeaking() {
+    func test_cancelSpeaking_doesNotCrash_whenNotSpeaking() async {
         let service = SpeechFallbackService(
             aiDispatch: aiDispatch,
             voiceTurnRepository: voiceTurnRepo,
@@ -97,7 +97,7 @@ final class SpeechFallbackServiceTests: XCTestCase {
         // No active speech — this is a no-op. Used to be the kind of
         // thing that crashed on AVSpeechSynthesizer.stopSpeaking when
         // the synthesizer had never started; guard keeps it safe.
-        service.cancelSpeaking()
+        await service.cancelSpeaking()
         XCTAssertNotEqual(service.currentState, .error)
     }
 

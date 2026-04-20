@@ -43,6 +43,11 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     /// in step 6 (Cook Mode voice).
     case voiceAffordanceTapped
 
+    /// Premium user ran out of monthly voice Cook Sessions. Routes to
+    /// the Pro-upsell variant of the paywall (more voice sessions, multi-
+    /// image scan, priority inference queue).
+    case voiceCookQuotaExhausted
+
     // MARK: - Telemetry
 
     /// Snake-case value sent to PostHog as `paywall_viewed.trigger`.
@@ -57,6 +62,7 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         case .multiImageScanGate:          return "multi_image_scan_gate"
         case .settingsUpgrade:             return "settings_upgrade"
         case .voiceAffordanceTapped:       return "voice_affordance_tapped"
+        case .voiceCookQuotaExhausted:     return "voice_cook_quota_exhausted"
         }
     }
 
@@ -66,6 +72,8 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         switch self {
         case .voiceAffordanceTapped:
             return "Cook hands-free. Try Premium free for 7 days."
+        case .voiceCookQuotaExhausted:
+            return "You've used this month's voice Cook Sessions. Upgrade to Pro for more."
         case .dinnerSolveQuotaExhausted:
             return "You're out of Dinner Solves for this month. Upgrade to keep going."
         case .recipeImportQuotaExhausted:
@@ -99,6 +107,9 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         switch self {
         case .voiceAffordanceTapped:
             return "Hands-free voice Cook Mode, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
+        case .voiceCookQuotaExhausted, .multiImageScanGate:
+            // Pro-tier upsell — caller has already paid for Premium.
+            return "120 Dinner Solves/mo, 40 voice Cook Sessions, multi-image scan, priority inference, 1,000 pantry items."
         case .dinnerSolveQuotaExhausted,
              .recipeImportQuotaExhausted,
              .savedFavoritesGate,
@@ -106,9 +117,6 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
              .leftoversGate,
              .settingsUpgrade:
             return voiceComingSoon
-        case .multiImageScanGate:
-            // Pro-only feature — pitch Pro explicitly.
-            return "120 Dinner Solves/mo, multi-image scan, priority inference, 1,000 pantry items."
         }
     }
 }

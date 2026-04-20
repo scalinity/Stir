@@ -41,6 +41,11 @@ enum SpeechFallbackError: Error, Equatable, Sendable {
     /// Synthesizer rejected the voice / went silent. Caller falls back
     /// to rendering `spoken_response` as visible text in the step card.
     case synthesisFailed(message: String)
+    /// `beginTurn` was called while a prior turn is still in-flight
+    /// (state is one of userSpeaking / transcribing / thinking /
+    /// modelSpeaking). Caller should surface a toast rather than
+    /// silently no-op — a silent reject looks like a dead mic button.
+    case busy(state: String)
 
     enum PermissionKind: String, Sendable, Equatable {
         case microphone
@@ -209,12 +214,14 @@ final class SpeechFallbackService: VoiceSessionDriver {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else {
             throw SpeechFallbackError.recognizerUnavailable
         }
-        // Guard against double-tap / overlapping turns.
+        // Guard against double-tap / overlapping turns. Throw a typed
+        // error so the VM can surface it as a toast — a silent no-op
+        // here presents as a dead mic button to the user.
         if currentState == .userSpeaking || currentState == .transcribing
             || currentState == .thinking || currentState == .modelSpeaking
         {
             Logger.voice.warning("begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)")
-            return
+            throw SpeechFallbackError.busy(state: currentState.rawValue)
         }
 
         // Mic permission primer (first-tap only).
@@ -445,13 +452,24 @@ final class SpeechFallbackService: VoiceSessionDriver {
         }
     }
 
-    /// Cancel any in-flight speech. Used when the user taps the mic
-    /// while the model is still speaking — tap-to-speak, no barge-in.
-    /// This is the "manually stop speaking before starting to listen"
-    /// path on fallback; C.2's Live path handles barge-in differently.
-    func cancelSpeaking() {
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking(at: .immediate)
+    /// Cancel any in-flight speech. Awaits the state-machine transition
+    /// back to `.ready` before returning so a caller that immediately
+    /// invokes `beginTurn()` won't hit the `.busy` guard from the race
+    /// between `stopSpeaking(at: .immediate)` (which returns before the
+    /// delegate's `didCancel` callback fires) and our state-machine
+    /// update.
+    ///
+    /// Bounded wait (~500 ms max) so a stuck synthesizer can't deadlock
+    /// the mic tap — if the cap is reached we return anyway and let
+    /// `beginTurn` throw `.busy`, which the VM already handles.
+    func cancelSpeaking() async {
+        guard synthesizer.isSpeaking else { return }
+        synthesizer.stopSpeaking(at: .immediate)
+        // Poll the state machine until it settles. 50 × 10ms = 500ms cap.
+        // In practice the delegate fires within one runloop tick.
+        for _ in 0..<50 {
+            if stateMachine.state != .modelSpeaking { return }
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 

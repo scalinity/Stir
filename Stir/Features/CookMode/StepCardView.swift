@@ -232,12 +232,15 @@ struct StepCardView: View {
     /// tap-behavior branches in the VM:
     ///   Free      → paywall trigger
     ///   Premium/Pro → voice turn
-    /// Visual state reflects voiceState: idle/ready → mic, userSpeaking
-    /// → stop (tap again to submit), thinking/modelSpeaking → disabled
-    /// spinner.
-    @ViewBuilder
+    /// Visual state reflects the VM's `micButtonRole` (single source of
+    /// truth — never recompute from raw voiceState bits here). Review
+    /// fix: unified `.buttonStyle(.bordered)` with tint carrying weight
+    /// shift — a conditional `.buttonStyle` between two concrete styles
+    /// creates two distinct SwiftUI view types and forces a remount on
+    /// state flip, breaking `Button.isPressed` mid-gesture and forcing
+    /// accessibility to re-read the whole control.
     private var voiceRow: some View {
-        let button = Button {
+        Button {
             Task { await viewModel.handleMicTap() }
         } label: {
             HStack(spacing: 10) {
@@ -246,7 +249,7 @@ struct StepCardView: View {
                     .accessibilityHidden(true)
                 Text(micLabel)
                     .font(.subheadline.weight(.semibold))
-                if viewModel.voiceIsBusy {
+                if viewModel.micButtonRole == .busy {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .controlSize(.small)
@@ -255,45 +258,63 @@ struct StepCardView: View {
             .frame(maxWidth: .infinity, minHeight: 48)
             .contentShape(Rectangle())
         }
-        .tint(viewModel.voiceIsListening ? .red : .accentColor)
-        .disabled(viewModel.voiceIsBusy)
+        .buttonStyle(.bordered)
+        .tint(micTint)
+        .disabled(viewModel.micButtonRole == .busy)
         .accessibilityLabel(micAccessibilityLabel)
         .accessibilityHint(micAccessibilityHint)
-
-        // SwiftUI doesn't support a runtime-switched ButtonStyle via a
-        // conditional; split the branch at the buttonStyle modifier
-        // call site instead.
-        if viewModel.voiceIsListening {
-            button.buttonStyle(.borderedProminent)
-        } else {
-            button.buttonStyle(.bordered)
-        }
     }
 
     private var micIconName: String {
-        if viewModel.voiceIsListening { return "stop.circle.fill" }
-        if viewModel.voiceIsBusy { return "waveform.circle" }
-        return "mic.circle.fill"
+        switch viewModel.micButtonRole {
+        case .submit:        return "stop.circle.fill"
+        case .busy:          return "waveform.circle"
+        case .askWithVoice:  return "mic.circle.fill"
+        }
     }
 
     private var micLabel: String {
-        if viewModel.voiceIsListening { return "Tap when you're done" }
-        if viewModel.voiceState == .thinking { return "Thinking…" }
-        if viewModel.voiceState == .modelSpeaking { return "Speaking" }
-        if viewModel.voiceState == .transcribing { return "Getting that…" }
-        return "Ask with voice"
+        switch viewModel.micButtonRole {
+        case .submit:
+            return "Tap when you're done"
+        case .busy:
+            // Distinguish the three in-flight sub-states for the user.
+            // Fine-grained voiceState read is local to label copy only —
+            // not logic. The button's role binding still controls
+            // disabled / tint / icon.
+            if viewModel.voiceState == .thinking { return "Thinking…" }
+            if viewModel.voiceState == .modelSpeaking { return "Speaking" }
+            if viewModel.voiceState == .transcribing { return "Getting that…" }
+            return "Working…"
+        case .askWithVoice:
+            return "Ask with voice"
+        }
+    }
+
+    private var micTint: Color {
+        // Listening → red so the "tap to submit" affordance reads as an
+        // active recording state at a glance. Everything else uses the
+        // app accent.
+        viewModel.micButtonRole == .submit ? .red : .accentColor
     }
 
     private var micAccessibilityLabel: String {
-        if viewModel.voiceIsListening { return "Stop listening and send" }
-        return "Ask with voice"
+        switch viewModel.micButtonRole {
+        case .submit:       return "Stop listening and send"
+        case .busy:         return "Voice busy"
+        case .askWithVoice: return "Ask with voice"
+        }
     }
 
     private var micAccessibilityHint: String {
-        if viewModel.voiceIsListening {
+        switch viewModel.micButtonRole {
+        case .submit:
             return "Taps end your turn and sends the question."
+        case .busy:
+            return "Waiting for the assistant to finish."
+        case .askWithVoice:
+            return "Opens microphone for hands-free cooking questions. Premium feature."
         }
-        return "Opens microphone for hands-free cooking questions. Premium feature."
     }
 }
 

@@ -50,8 +50,9 @@ protocol VoiceSessionDriver: AnyObject {
 
     /// Pre-warm. Request permissions, load recognizers, open WebSockets.
     /// Caller awaits before the first `beginTurn`. Throws on permission
-    /// denial or hardware unavailability; CookModeViewModel maps the
-    /// failure to a `screen_error_shown` event + inline toast.
+    /// denial or hardware unavailability; CookModeViewModel surfaces the
+    /// failure as an inline toast + a `screen_error_shown` telemetry
+    /// event.
     func preWarm() async throws
 
     /// Begin listening for a user turn. Tap-to-speak; caller calls
@@ -72,8 +73,11 @@ protocol VoiceSessionDriver: AnyObject {
     /// when the utterance finishes speaking.
     func speak(_ text: String) async
 
-    /// Interrupt any in-flight speech. No-op if not speaking.
-    func cancelSpeaking()
+    /// Interrupt any in-flight speech. Awaits the state-machine
+    /// transition back to `.ready` before returning so the caller can
+    /// immediately begin a new turn without hitting `.busy`. No-op if
+    /// not speaking.
+    func cancelSpeaking() async
 
     /// Teardown. Idempotent — safe to call multiple times. Must
     /// release AVAudioSession so the system mic indicator drops;

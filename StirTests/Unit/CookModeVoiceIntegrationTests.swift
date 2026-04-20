@@ -165,6 +165,76 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
                        "voiceEnabled must flip only on first normal VoiceTurn, not on mic tap")
     }
 
+    // MARK: - endVoiceTurn — suggested_action transitions
+
+    func test_endVoiceTurn_advanceStep_callsNextStepWithVoiceLabel() async throws {
+        // Spec §15 requires `cook_step_advanced.advanced_by` to
+        // discriminate manual vs voice. Review finding #2 fixed the
+        // label bug; this test pins it.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.endTurnResult = .defaultMock(action: .advanceStep)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        await vm.handleMicTap()  // begin
+        XCTAssertEqual(driver.beginTurnCallCount, 1)
+        await vm.handleMicTap()  // submit → endVoiceTurn
+
+        XCTAssertEqual(driver.endTurnCallCount, 1)
+        XCTAssertEqual(driver.speakCallCount, 1, "spoken_response must be played")
+
+        let stepAdvances = telemetrySpy.events.filter { $0.event == .cookStepAdvanced }
+        XCTAssertEqual(stepAdvances.count, 1)
+        // Property key is `manual_or_voice` per spec §15 (not `advanced_by`).
+        XCTAssertEqual(stepAdvances.first?.properties["manual_or_voice"] as? String, "voice",
+                       "voice-driven advance must tag manual_or_voice=voice, not manual")
+        XCTAssertEqual(vm.currentStepIndex, 1, "step must actually advance")
+    }
+
+    func test_endVoiceTurn_noneAction_doesNotAdvanceStep() async throws {
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.endTurnResult = .defaultMock(action: .none, spokenResponse: "reduce heat a little")
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        await vm.handleMicTap()
+        await vm.handleMicTap()
+
+        XCTAssertEqual(driver.endTurnCallCount, 1)
+        XCTAssertEqual(driver.speakCallCount, 1)
+        XCTAssertEqual(driver.speakArgs.first, "reduce heat a little",
+                       "spoken_response text must round-trip to the synthesizer")
+        XCTAssertEqual(vm.currentStepIndex, 0, "none action must leave step index untouched")
+        XCTAssertTrue(telemetrySpy.events.contains { $0.event == .cookTurnResolved },
+                      "cook_turn_resolved must fire even for no-action turns")
+    }
+
+    func test_endVoiceTurn_recipePlanIdNil_surfacesValidationToast() async throws {
+        // Review finding #3 fix: a nil recipe_plan_id used to silently
+        // drop the turn. Now it must surface a VAL-01 toast + emit
+        // screen_error_shown + Sentry breadcrumb.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        await vm.handleMicTap()  // begin
+        // Force the invariant violation after beginTurn so the state
+        // machine is actually in userSpeaking when endVoiceTurn runs.
+        recipePlan.id = nil
+        await vm.handleMicTap()  // submit
+
+        XCTAssertEqual(driver.endTurnCallCount, 0,
+                       "endTurn must not be called when recipe_plan.id is nil")
+        XCTAssertNotNil(vm.voiceToastMessage,
+                        "user-visible toast must surface the validation failure")
+        let screenErrors = telemetrySpy.events.filter { $0.event == .screenErrorShown }
+        XCTAssertEqual(screenErrors.count, 1)
+        XCTAssertEqual(screenErrors.first?.properties["error_code"] as? String, "VAL-01")
+    }
+
     // MARK: - disable_cook_realtime plumbing
 
     func test_disableCookRealtime_flag_capturedAtEntry() throws {
@@ -267,11 +337,16 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
     private(set) var beginTurnCallCount = 0
     private(set) var endTurnCallCount = 0
     private(set) var speakCallCount = 0
+    private(set) var speakArgs: [String] = []
     private(set) var cancelSpeakingCallCount = 0
     private(set) var closeCallCount = 0
 
     /// If set, `beginTurn()` throws this error instead of advancing state.
     var beginTurnErrorToThrow: (any Error)?
+
+    /// If set, `endTurn()` returns this result. Defaults to a benign
+    /// `.none`-action response so existing tests keep working.
+    var endTurnResult: CookTurnResult = .defaultMock()
 
     init(path: VoiceSessionPath) {
         self.pathLabel = path
@@ -296,12 +371,40 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
     ) async throws -> CookTurnResult {
         endTurnCallCount += 1
         currentState = .modelSpeaking
-        return CookTurnResult(
+        return endTurnResult
+    }
+
+    func speak(_ text: String) async {
+        speakCallCount += 1
+        speakArgs.append(text)
+        currentState = .ready
+    }
+
+    /// Async to match the updated `VoiceSessionDriver` protocol
+    /// (post review fix: cancel now awaits state transition so the next
+    /// beginTurn can't race into `.busy`).
+    func cancelSpeaking() async {
+        cancelSpeakingCallCount += 1
+    }
+
+    func close() {
+        closeCallCount += 1
+        currentState = .closed
+    }
+}
+
+private extension CookTurnResult {
+    static func defaultMock(
+        action: CookTurnResponse.SuggestedAction = .none,
+        params: CookTurnResponse.ActionParams? = nil,
+        spokenResponse: String = "mocked",
+    ) -> CookTurnResult {
+        CookTurnResult(
             transcript: "test",
             response: CookTurnResponse(
-                spokenResponse: "mocked",
-                suggestedAction: .none,
-                actionParams: nil,
+                spokenResponse: spokenResponse,
+                suggestedAction: action,
+                actionParams: params,
                 promptVersion: "1.0.0",
                 latencyMS: 10,
                 retryCount: 0,
@@ -309,20 +412,6 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
             sttLatencyMs: 5,
             backendLatencyMs: 5,
         )
-    }
-
-    func speak(_ text: String) async {
-        speakCallCount += 1
-        currentState = .ready
-    }
-
-    func cancelSpeaking() {
-        cancelSpeakingCallCount += 1
-    }
-
-    func close() {
-        closeCallCount += 1
-        currentState = .closed
     }
 }
 

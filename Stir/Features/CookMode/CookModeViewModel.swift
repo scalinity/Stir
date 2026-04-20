@@ -70,21 +70,40 @@ final class CookModeViewModel {
     /// net error, permission denied). View binds + clears on tap.
     var voiceToastMessage: String?
 
-    /// Whether the voice session is in a state where a mic tap starts
-    /// a new turn (as opposed to ending one). Derived from voiceState.
-    var voiceIsIdle: Bool {
-        voiceState == nil || voiceState == .idle || voiceState == .ready
-            || voiceState == .error
+    /// UX-level role the mic button plays right now. The view binds
+    /// this single property instead of computing its own enabled /
+    /// tinting / labeling logic from raw state bits. Changes only via
+    /// voiceState mutations, so SwiftUI diffing stays predictable.
+    var micButtonRole: MicButtonRole {
+        switch voiceState {
+        case nil, .idle, .ready, .error, .closed:
+            return .askWithVoice
+        case .userSpeaking:
+            return .submit
+        case .transcribing, .thinking, .modelSpeaking:
+            return .busy
+        case .connecting, .toolCalling, .refreshing, .fallingBack:
+            // C.2-only states. Treated as "busy" for the C.3 UX until
+            // the Live path lands. Distinct labels can be added later.
+            return .busy
+        }
     }
 
-    /// Whether we're mid-user-turn — a second mic tap submits.
-    var voiceIsListening: Bool { voiceState == .userSpeaking }
-
-    /// Whether a backend call or TTS is in flight. Mic is disabled.
-    var voiceIsBusy: Bool {
-        voiceState == .transcribing || voiceState == .thinking
-            || voiceState == .modelSpeaking
+    /// What the mic button is showing right now. Drives icon, label,
+    /// color, and enabled-state in StepCardView.
+    enum MicButtonRole: Equatable, Sendable {
+        /// Default — tap begins a new turn.
+        case askWithVoice
+        /// Listening — tap submits the turn.
+        case submit
+        /// Backend/TTS in flight — disabled, showing spinner.
+        case busy
     }
+
+    /// Legacy convenience — kept so existing tests don't have to update.
+    /// Prefer `micButtonRole` in view code.
+    var voiceIsListening: Bool { micButtonRole == .submit }
+    var voiceIsBusy: Bool { micButtonRole == .busy }
 
     // MARK: - Deps
 
@@ -92,6 +111,7 @@ final class CookModeViewModel {
     private let cookTimerRepository: CookTimerRepository
     private let timerService: TimerService
     private let analytics: PostHogClient
+    private let sentry: any SentryReporting
     private let entitlements: EntitlementService?
     /// Injected by the root on entry. nil for Free users who would hit
     /// the paywall anyway. When non-nil, CookModeViewModel has already
@@ -117,6 +137,7 @@ final class CookModeViewModel {
         cookTimerRepository: CookTimerRepository? = nil,
         timerService: TimerService? = nil,
         analytics: PostHogClient = .shared,
+        sentry: (any SentryReporting)? = nil,
         entitlements: EntitlementService? = nil,
         voiceDriver: (any VoiceSessionDriver)? = nil,
         disableCookRealtime: Bool = false,
@@ -131,6 +152,7 @@ final class CookModeViewModel {
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository()
         self.timerService = timerService ?? TimerService()
         self.analytics = analytics
+        self.sentry = sentry ?? SentryReporter.shared
         self.entitlements = entitlements
         self.voiceDriver = voiceDriver
         self.disableCookRealtimeAtEntry = disableCookRealtime
@@ -180,7 +202,11 @@ final class CookModeViewModel {
 
     // MARK: - Navigation
 
-    func nextStep() {
+    /// Advance one step. `advancedBy` is sent on the
+    /// `cook_step_advanced` event (spec §15 `manual_or_voice` property).
+    /// Defaults to `"manual"` for Prev/Next button taps; voice-driven
+    /// advances from endVoiceTurn pass `"voice"`.
+    func nextStep(advancedBy: String = "manual") {
         // Empty recipe → nowhere to go. Don't advance, don't present
         // OutcomeFeedback for a session that never had a step.
         guard totalSteps > 0 else { return }
@@ -194,7 +220,7 @@ final class CookModeViewModel {
             currentStepIndex = newIndex
             analytics.capture(.cookStepAdvanced, properties: [
                 "step_index": newIndex,
-                "manual_or_voice": "manual",
+                "manual_or_voice": advancedBy,
             ])
         } catch {
             Logger.ui.error("cook mode advanceStep failed: \(error.localizedDescription, privacy: .public)")
@@ -357,11 +383,14 @@ final class CookModeViewModel {
                 Logger.ui.error("exit cancelTimer failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        // Voice teardown — idempotent. Close the driver FIRST so
-        // cancelSpeaking/recognitionTask stop before the audio session
-        // deactivates. Runs on BOTH paths so the system mic indicator
-        // drops regardless of whether the user paused or abandoned.
-        voiceDriver?.cancelSpeaking()
+        // Voice teardown — idempotent. cancelSpeaking is now async and
+        // waits for the state machine to settle; close() then tears
+        // down the recognizer + synthesizer; AVAudioSession is
+        // deactivated last so the system mic indicator drops. Runs on
+        // BOTH pause and abandon paths — kitchen UX cares more about
+        // the mic indicator going dark than about any pause/abandon
+        // semantics.
+        await voiceDriver?.cancelSpeaking()
         voiceDriver?.close()
         AVAudioSessionConfigurator.deactivate()
         // endedAt writes ONLY on abandon — pause-and-resume-later must
@@ -411,9 +440,15 @@ final class CookModeViewModel {
         switch decision {
         case .allowed:
             break
-        case .blockedByTier, .blockedByBilling, .blockedByQuota:
+        case .blockedByTier, .blockedByBilling:
             emitVoiceAffordance(tier: tier, result: "paywall_shown")
             presentPaywall?(.voiceAffordanceTapped)
+            return
+        case .blockedByQuota:
+            // Premium+ who's hit the monthly voice cap — Pro-upsell
+            // paywall, not the generic trial one.
+            emitVoiceAffordance(tier: tier, result: "paywall_shown")
+            presentPaywall?(.voiceCookQuotaExhausted)
             return
         }
 
@@ -424,34 +459,69 @@ final class CookModeViewModel {
             return
         }
         if voiceIsBusy {
-            // Mid-turn (backend in flight or model speaking). A tap
-            // while modelSpeaking cancels + starts a new turn; a tap
-            // while thinking does nothing (request can't be aborted
-            // cleanly in v1).
+            // Tap while modelSpeaking cancels + begins a fresh turn.
+            // Tap while thinking/transcribing/etc. is a no-op with a
+            // subtle toast so the user isn't left wondering why the
+            // mic went dead.
             if voiceState == .modelSpeaking {
-                voiceDriver?.cancelSpeaking()
+                // cancelSpeaking() awaits the state machine's
+                // transition back to .ready — prevents the race where
+                // beginTurn() below would throw .busy because the
+                // synthesizer's didCancel delegate hadn't fired yet.
+                await voiceDriver?.cancelSpeaking()
+                voiceState = voiceDriver?.currentState
                 // Fall through to start a fresh turn below.
             } else {
+                voiceToastMessage = "One moment — finishing up."
                 return
             }
         }
 
         // Idle/ready path → begin listening. Emit the success telemetry
-        // after beginTurn() actually starts; on failure, emit
-        // permission_denied or bubble the toast.
+        // after beginTurn() actually starts; on failure, map the typed
+        // error to copy + emit permission_denied OR forward to the
+        // server-error presentation path.
         do {
             try await beginVoiceTurnInner()
             emitVoiceAffordance(tier: tier, result: "voice_started")
         } catch SpeechFallbackError.permissionDenied {
             emitVoiceAffordance(tier: tier, result: "permission_denied")
-            voiceToastMessage =
-                "Microphone access is off. You can keep cooking with taps, or turn on the mic in Settings."
+            showVoiceError(
+                message: "Microphone access is off. You can keep cooking with taps, or turn on the mic in Settings.",
+                errorCode: "PERM-MIC-01",
+                screen: "cook_mode_voice_begin",
+            )
         } catch SpeechFallbackError.recognizerUnavailable {
             emitVoiceAffordance(tier: tier, result: "permission_denied")
-            voiceToastMessage = "Voice isn't available on this device."
+            showVoiceError(
+                message: "Voice isn't available on this device.",
+                errorCode: "PERM-MIC-01",
+                screen: "cook_mode_voice_begin",
+            )
+        } catch SpeechFallbackError.busy {
+            // Should be rare after the cancel-await above. If it still
+            // happens, the driver is wedged in a state we didn't expect
+            // — surface a soft recovery hint.
+            showVoiceError(
+                message: "Voice is still catching up. Try again.",
+                errorCode: "AI-03",
+                screen: "cook_mode_voice_begin",
+            )
         } catch {
-            Logger.ui.error("voice begin failed: \(error.localizedDescription, privacy: .public)")
-            voiceToastMessage = "Voice didn't start. Try again."
+            // Typed-error mapping for backend failures on preWarm()
+            // retries (rare for C.3 — most pre-warm failures surface
+            // at Cook Mode entry, not mic tap). Route StirError via
+            // the presenter so copy is consistent with the rest of
+            // the app.
+            let presented = presentStirError(error, screen: "cook_mode_voice_begin")
+            if !presented {
+                Logger.ui.error("voice begin failed: \(error.localizedDescription, privacy: .public)")
+                showVoiceError(
+                    message: "Voice didn't start. Try again.",
+                    errorCode: "NET-01",
+                    screen: "cook_mode_voice_begin",
+                )
+            }
         }
     }
 
@@ -459,7 +529,7 @@ final class CookModeViewModel {
         guard let voiceDriver else {
             // This happens when the driver failed to initialize (kill
             // switch flipped mid-session, or CookModeRoot never got to
-            // preWarm). Treat as permission-denied UX-wise.
+            // preWarm). Treat as recognizerUnavailable UX-wise.
             throw SpeechFallbackError.recognizerUnavailable
         }
         try await voiceDriver.beginTurn()
@@ -467,7 +537,29 @@ final class CookModeViewModel {
     }
 
     private func endVoiceTurn() async {
-        guard let voiceDriver, let recipePlanId = recipePlan.id else { return }
+        guard let voiceDriver else { return }
+        // recipePlan.id should never be nil on an active session (Core
+        // Data + step-3 repository creation always stamps it). If it
+        // ever IS nil, surface a toast + screen_error_shown + Sentry
+        // breadcrumb rather than silently dropping the turn — a silent
+        // drop orphans the transcript and leaves the user tapping.
+        guard let recipePlanId = recipePlan.id else {
+            Logger.ui.error("endVoiceTurn: recipePlan.id is nil — unrecoverable")
+            sentry.captureError(
+                StirError.validation(
+                    fieldErrors: [FieldError(field: "recipe_plan.id", issue: "nil on active cook session")],
+                    message: "endVoiceTurn recipePlan.id nil",
+                ),
+                context: ["cooking_session_id": session.id?.uuidString ?? ""],
+            )
+            showVoiceError(
+                message: "Voice turn failed. Try again or tap through.",
+                errorCode: "VAL-01",
+                screen: "cook_mode_voice_end",
+            )
+            voiceState = voiceDriver.currentState
+            return
+        }
 
         let recipeCtx = buildRealtimeRecipeContext()
         let householdCtx = buildRealtimeHouseholdContext()
@@ -502,10 +594,12 @@ final class CookModeViewModel {
             await voiceDriver.speak(result.response.spokenResponse)
             voiceState = voiceDriver.currentState
 
-            // Act on suggested_action.
+            // Act on suggested_action. `advancedBy: "voice"` is the
+            // spec §15 discrimination — product dashboards need to
+            // tell manual vs voice-driven step advances apart.
             switch result.response.suggestedAction {
             case .advanceStep:
-                nextStep()
+                nextStep(advancedBy: "voice")
             case .startTimer:
                 // The current step's own timer takes precedence; if
                 // the model wants a custom timer we'd need a dedicated
@@ -521,9 +615,82 @@ final class CookModeViewModel {
             voiceState = voiceDriver.currentState
         } catch {
             voiceState = voiceDriver.currentState
-            Logger.ui.error("voice endTurn failed: \(error.localizedDescription, privacy: .public)")
-            voiceToastMessage = "Voice turn failed. Try again or tap through."
+            let presented = presentStirError(error, screen: "cook_mode_voice_end")
+            if !presented {
+                Logger.ui.error("voice endTurn failed: \(error.localizedDescription, privacy: .public)")
+                showVoiceError(
+                    message: "Voice turn failed. Try again or tap through.",
+                    errorCode: "NET-01",
+                    screen: "cook_mode_voice_end",
+                )
+            }
         }
+    }
+
+    // MARK: - Voice error presentation
+
+    /// Map typed StirErrors to the appropriate UX (toast + optional
+    /// paywall hand-off) so voice errors land consistently with the
+    /// rest of the app instead of getting swallowed by a generic catch.
+    /// Returns true if the error was handled; false if the caller
+    /// should fall through to a generic toast.
+    private func presentStirError(_ error: any Error, screen: String) -> Bool {
+        guard let stirError = error as? StirError else { return false }
+        // Breadcrumb every typed error for Sentry — voice failures are
+        // otherwise hard to triage from user reports alone.
+        sentry.breadcrumb(
+            category: "voice",
+            message: String(describing: stirError),
+            data: ["screen": screen, "code": stirError.presentableCode.rawValue],
+        )
+        switch stirError {
+        case .rateLimited:
+            // User hit voice_cook_session monthly cap — Pro-upsell path.
+            emitVoiceAffordance(tier: entitlements?.tier ?? .free, result: "paywall_shown")
+            presentPaywall?(.voiceCookQuotaExhausted)
+            return true
+        case .entitlementRequired(let code, _) where code == .entVoice01:
+            // Entitlement slipped mid-session (RC webhook lag, grace
+            // period expired during a running cook). Route to upgrade
+            // paywall rather than a generic toast.
+            presentPaywall?(.voiceAffordanceTapped)
+            return true
+        case .server(let code, _, _) where code == .aiVoice01:
+            showVoiceError(
+                message: "Voice mode is unavailable right now. Tap Cook Mode still works.",
+                errorCode: code.rawValue,
+                screen: screen,
+            )
+            return true
+        case .server(let code, _, _) where code == .ai01 || code == .ai03:
+            showVoiceError(
+                message: "Voice is taking a moment. Try again shortly.",
+                errorCode: code.rawValue,
+                screen: screen,
+            )
+            return true
+        case .networkUnreachable, .timeout:
+            showVoiceError(
+                message: "Couldn't reach Stir. Check your connection and try again.",
+                errorCode: "NET-01",
+                screen: screen,
+            )
+            return true
+        default:
+            // AUTH-01, VAL-01, unknown — let the caller fall back to
+            // the generic toast + logger.error path.
+            return false
+        }
+    }
+
+    /// Set the inline toast + fire spec §15 `screen_error_shown` so
+    /// voice errors are queryable in PostHog alongside other UX errors.
+    private func showVoiceError(message: String, errorCode: String, screen: String) {
+        voiceToastMessage = message
+        analytics.capture(.screenErrorShown, properties: [
+            "screen_name": screen,
+            "error_code": errorCode,
+        ])
     }
 
     /// Build the recipe context shape the backend expects. Snapshot of

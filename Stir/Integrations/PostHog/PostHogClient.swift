@@ -60,9 +60,13 @@ class PostHogClient: @unchecked Sendable {
         PostHogSDK.shared.capture(event.rawValue, properties: properties)
     }
 
+    #if DEBUG
     /// Protected init so tests can subclass with an override of
-    /// `capture(...)`. Production code should continue to use `.shared`.
+    /// `capture(...)`. DEBUG-only so production builds can't
+    /// accidentally construct an uninitialized instance and bypass
+    /// the singleton.
     init(testingOnly: Bool) {}
+    #endif
 }
 
 /// Canonical event name allow-list. Adding one requires updating both
