@@ -315,14 +315,31 @@ actor AIDispatch {
 
                     let (_, bytes) = try await session.performAuthenticatedStream(request)
 
-                    // SSE parsing: read line by line; events are blank-line
-                    // delimited; each event has `event: <name>` + `data: <json>`.
+                    // SSE parsing: events are blank-line delimited; each
+                    // event has `event: <name>` + `data: <json>`.
+                    //
+                    // We do NOT use `bytes.lines` here — its
+                    // AsyncLineSequence SKIPS consecutive newlines (the
+                    // blank line between SSE events never surfaces),
+                    // which caused every event's `data:` payload to
+                    // accumulate into one buffer and the final
+                    // `currentEvent` tag (`done`) to claim them all.
+                    // Symptom: decode error "Unexpected character '{'
+                    // after top-level value" because the `done` frame's
+                    // buffer contained N dish JSONs concatenated.
+                    //
+                    // Byte-level splitting preserves empty lines and is
+                    // fast enough for our SSE volume (3-4 events per
+                    // solve, a few KB each).
                     var currentEvent: String = ""
                     var dataBuffer: String = ""
+                    var lineBuffer = Data()
 
-                    for try await line in bytes.lines {
+                    func flushLine() throws {
+                        let line = String(data: lineBuffer, encoding: .utf8) ?? ""
+                        lineBuffer.removeAll(keepingCapacity: true)
                         if line.isEmpty {
-                            // End of one event — emit to continuation.
+                            // Blank line terminates the current event.
                             if !currentEvent.isEmpty, !dataBuffer.isEmpty {
                                 try handleEvent(
                                     event: currentEvent,
@@ -332,16 +349,15 @@ actor AIDispatch {
                             }
                             currentEvent = ""
                             dataBuffer = ""
-                            continue
+                            return
                         }
                         if line.hasPrefix(":") {
-                            // SSE keepalive comment — ignore.
-                            continue
+                            return  // SSE keepalive comment — ignore.
                         }
                         if line.hasPrefix("event:") {
                             currentEvent = String(line.dropFirst("event:".count))
                                 .trimmingCharacters(in: .whitespaces)
-                            continue
+                            return
                         }
                         if line.hasPrefix("data:") {
                             let chunk = String(line.dropFirst("data:".count))
@@ -351,11 +367,26 @@ actor AIDispatch {
                             } else {
                                 dataBuffer += "\n" + chunk
                             }
-                            continue
+                            return
                         }
                         // Any other line — ignore (unknown field).
                     }
-                    // Final flush if the stream ended without trailing blank line.
+
+                    for try await byte in bytes {
+                        if byte == 0x0A { // \n
+                            try flushLine()
+                        } else if byte == 0x0D { // \r (CRLF tolerance)
+                            continue
+                        } else {
+                            lineBuffer.append(byte)
+                        }
+                    }
+                    // Flush any trailing partial line first…
+                    if !lineBuffer.isEmpty {
+                        try flushLine()
+                    }
+                    // …then the final event if the stream ended without
+                    // a trailing blank line.
                     if !currentEvent.isEmpty, !dataBuffer.isEmpty {
                         try handleEvent(
                             event: currentEvent,
