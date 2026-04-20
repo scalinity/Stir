@@ -14,9 +14,11 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 
 - **Full spec** (product truth): `Specs/Stir-Full-Spec.md`
 - **Cook Mode research** (voice implementation reference): `Specs/Stir-Cook-Mode-Architecture.md`
+- **Design system tokens + rules** (palette, typography, radius, iconography, principles): `Specs/Design-System.md`
+- **Design mockups** (visual source of truth — every v1 screen as an HTML prototype): `stir-app-design/project/DesignMockups/`. 17 files (`01_shell_and_launch.html` → `17_errors_permissions.html`) indexed by `INDEX.md`. **Before coding any screen that isn't implemented yet, read the matching mockup first** — it's pixel-truth for layout, typography, spacing, and states. Shared CSS tokens live in `_shared/colors_and_type.css`. Provenance + mockup-to-Swift token mapping in `EXTRACTED_TOKENS.md`. Product content (copy, pricing, tier structure) is NOT authoritative here — mockups are illustrative on that axis; spec + this file win for anything billing/tier/copy-related.
 - **Architecture Decision Records** (load-bearing choices + their reasoning): `docs/decisions/`
 - **Ops runbooks** (secret rotation, prod incidents, release procedures): `docs/runbooks/`
-- If this file disagrees with the spec, the spec wins. If this file or the spec disagrees with an ADR, the ADR wins for reasoning / history but any spec or this-file update required by the ADR must land in the same commit as the ADR. Flag discrepancies.
+- If this file disagrees with the spec, the spec wins. If this file or the spec disagrees with an ADR, the ADR wins for reasoning / history but any spec or this-file update required by the ADR must land in the same commit as the ADR. If the mockups disagree with `Specs/Design-System.md` on a token, mockups win and §3/§4/§5/§6/§12 must be updated to match (principles in §1/§2/§7/§11/§13 stay). Flag discrepancies.
 
 ## Decisions system
 
@@ -527,6 +529,33 @@ Backend/supabase/
 Specs/                           # product spec + research docs
   Stir-Full-Spec.md
   Stir-Cook-Mode-Architecture.md
+  Design-System.md               # palette/type/spacing/radius/icons + principles
+
+stir-app-design/                 # Claude Design handoff bundle — VISUAL SOURCE OF TRUTH
+  project/DesignMockups/
+    INDEX.md                     # the 17-screen table of contents
+    01_shell_and_launch.html     # launch, welcome, offline fallback
+    02_onboarding.html           # Setup 1 prefs, Setup 2 kitchen, completion
+    03_tonight_home.html         # default, first-use empty, offline, Use Soon
+    04_scan_flow.html             # camera primer, capture, review, sample fallback
+    05_solve_flow.html            # constraints sheet, dinner options, dish preview
+    06_cook_mode_tap.html         # tap-only Cook Mode (Free) + timer + sub sheet
+    07_cook_mode_voice.html       # voice Cook Mode (Premium+) + fallback banner
+    08_substitution.html          # sheet + safe result + allergen result
+    09_post_cook.html             # outcome feedback, leftovers prompt, leftover solve
+    10_saved.html                 # library, free-tier locked, recipe detail
+    11_import.html                # entry, share ext, review, async processing
+    12_grocery.html               # list, Reminders export, in-app fallback
+    13_widgets_liveactivity.html  # home widgets + Dynamic Island + Live Activity
+    14_settings.html              # root, prefs, notifications, privacy, sync
+    15_plan_billing.html          # all 7 billing states
+    16_paywall.html               # 3 paywall surfaces (soft / feature / inline)
+    17_errors_permissions.html    # permission recovery, NET/AI/RATE/PAY errors
+    _shared/                      # tokens inlined as CSS custom properties
+      colors_and_type.css
+      mock-page.css
+      StirFrame.jsx
+    EXTRACTED_TOKENS.md           # audit trail — mockup ↔ Swift token provenance
 
 docs/
   decisions/                     # ADRs for material architecture choices (includes rejected OpenAI path)
