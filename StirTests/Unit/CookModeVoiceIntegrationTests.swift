@@ -20,6 +20,7 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
     private var household: HouseholdProfile!
     private var recipePlan: RecipePlan!
     private var telemetrySpy: SpyTelemetry!
+    private var sentrySpy: SpySentry!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -28,6 +29,7 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
         household = try houseRepo.ensureHouseholdProfile(for: "install:test-\(UUID().uuidString)")
         recipePlan = try makeRecipePlan(household: household)
         telemetrySpy = SpyTelemetry()
+        sentrySpy = SpySentry()
     }
 
     // MARK: - Free-tier path
@@ -211,10 +213,13 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
                       "cook_turn_resolved must fire even for no-action turns")
     }
 
-    func test_endVoiceTurn_recipePlanIdNil_surfacesValidationToast() async throws {
+    func test_endVoiceTurn_recipePlanIdNil_surfacesValidationToast_andTearsDownDriver() async throws {
         // Review finding #3 fix: a nil recipe_plan_id used to silently
-        // drop the turn. Now it must surface a VAL-01 toast + emit
-        // screen_error_shown + Sentry breadcrumb.
+        // drop the turn. Must surface a VAL-01 toast + emit
+        // screen_error_shown + capture to Sentry. Follow-up review:
+        // also must tear down the driver so the user doesn't get stuck
+        // in a dead-mic loop (state stays `.userSpeaking` → every tap
+        // re-hits the guard).
         let session = try freshSession()
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         let driver = MockVoiceSessionDriver(path: .geminiFallback)
@@ -233,6 +238,133 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
         let screenErrors = telemetrySpy.events.filter { $0.event == .screenErrorShown }
         XCTAssertEqual(screenErrors.count, 1)
         XCTAssertEqual(screenErrors.first?.properties["error_code"] as? String, "VAL-01")
+
+        // Sentry capture + driver teardown contract.
+        XCTAssertEqual(sentrySpy.captures.count, 1,
+                       "nil recipe_plan_id must be captured to Sentry as an error, not just a breadcrumb")
+        XCTAssertEqual(driver.closeCallCount, 1,
+                       "driver must be torn down to recover from the dead-mic loop trap")
+        XCTAssertEqual(vm.voiceState, .closed,
+                       "voiceState must reflect the torn-down driver so voiceIsListening flips false")
+
+        // Subsequent tap must route to the "no driver" path (surfaces
+        // "Voice isn't available on this device") instead of re-hitting
+        // the same nil-recipe guard.
+        let screenErrorsBefore = telemetrySpy.events.filter { $0.event == .screenErrorShown }.count
+        await vm.handleMicTap()
+        let screenErrorsAfter = telemetrySpy.events.filter { $0.event == .screenErrorShown }.count
+        XCTAssertEqual(driver.endTurnCallCount, 0, "dropped driver must not receive further endTurn calls")
+        XCTAssertEqual(screenErrorsAfter, screenErrorsBefore + 1,
+                       "third tap emits a new error (no-driver path), not looping the nil-recipe error")
+    }
+
+    // MARK: - endVoiceTurn — startTimer transition
+
+    func test_endVoiceTurn_startTimerAction_triggersTimerForCurrentStep() async throws {
+        // Suggestion #2 from re-review: pin the .startTimer suggested
+        // action. Current step has a timerSeconds > 0, so the model's
+        // start_timer request must result in a real timer being scheduled.
+        let session = try freshSession()
+        // Give step 0 a timer so startTimerForCurrentStep has something
+        // to activate.
+        recipePlan.stepArray.first?.timerSeconds = 120
+        try controller.save()
+
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.endTurnResult = .defaultMock(action: .startTimer, spokenResponse: "Starting a two-minute timer.")
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        await vm.handleMicTap()  // begin
+        await vm.handleMicTap()  // submit → endVoiceTurn → startTimer
+
+        XCTAssertEqual(driver.endTurnCallCount, 1)
+        XCTAssertEqual(driver.speakCallCount, 1)
+        // startTimerForCurrentStep creates + starts a CookTimer for the
+        // current step. We assert the VM now tracks one timer attached
+        // to the current step.
+        XCTAssertEqual(vm.activeTimers.count, 1, ".startTimer must create exactly one timer")
+        XCTAssertEqual(vm.activeTimers.first?.step?.id, recipePlan.stepArray.first?.id,
+                       "timer must be attached to the current step")
+    }
+
+    // MARK: - handleMicTap — tap-while-busy telemetry
+
+    func test_handleMicTap_whileThinking_emitsBusyResult_andShowsToast() async throws {
+        // Suggestion #1 from re-review: the tap-while-thinking branch
+        // previously set a toast with no telemetry. Now it emits
+        // voice_affordance_tapped(result=busy) so the funnel sees every
+        // tap, not just the ones that hit success/fail cleanly.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        // Put the VM into .thinking without having to drive a full
+        // turn. The mock's state is also poked so driver reads stay
+        // consistent if the VM re-syncs mid-flow.
+        driver.stubState(.thinking)
+        vm._testForceVoiceState(.thinking)
+
+        await vm.handleMicTap()
+
+        XCTAssertNotNil(vm.voiceToastMessage,
+                        "busy tap must surface a reassurance toast")
+        let affordances = telemetrySpy.events.filter { $0.event == .voiceAffordanceTapped }
+        XCTAssertEqual(affordances.count, 1)
+        XCTAssertEqual(affordances.first?.properties["result"] as? String, "busy")
+    }
+
+    // MARK: - presentStirError — typed error routing
+
+    func test_endVoiceTurn_rateLimitedError_routesToProUpsellPaywall() async throws {
+        // Suggestion #3 from re-review: pin the StirError routing
+        // contract. A RATE-01 surfacing during an in-flight voice turn
+        // (Premium hit their monthly voice cap) must route to the
+        // voiceCookQuotaExhausted Pro-upsell paywall, not the generic
+        // trial one. Must also fire a code-only Sentry breadcrumb
+        // (no PII from String(describing:) walking associated values).
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.endTurnErrorToThrow = StirError.rateLimited(resetDate: nil, message: "RATE-01")
+        var paywallTriggers: [PaywallTrigger] = []
+
+        let vm = makeVM(
+            session: session,
+            entitlements: entitlements,
+            voiceDriver: driver,
+            presentPaywall: { paywallTriggers.append($0) },
+        )
+        await vm.handleMicTap()  // begin
+        await vm.handleMicTap()  // submit → endVoiceTurn → rateLimited
+
+        XCTAssertEqual(paywallTriggers, [.voiceCookQuotaExhausted],
+                       "in-flight RATE-01 must route to Pro-upsell, not generic trial paywall")
+        // Sentry breadcrumb fires with code-only message (no PII from
+        // String(describing:) walking associated values).
+        let voiceBreadcrumbs = sentrySpy.breadcrumbs.filter { $0.category == "voice" }
+        XCTAssertEqual(voiceBreadcrumbs.count, 1)
+        XCTAssertEqual(voiceBreadcrumbs.first?.message, "RATE-01",
+                       "breadcrumb message must be the error code only, no associated-value payload")
+        XCTAssertEqual(voiceBreadcrumbs.first?.data["code"], "RATE-01")
+    }
+
+    func test_endVoiceTurn_networkUnreachable_surfacesNet01Toast() async throws {
+        // StirError.networkUnreachable must route to a NET-01 toast,
+        // not the generic "voice turn failed" fallback.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.endTurnErrorToThrow = StirError.networkUnreachable(underlying: nil)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        await vm.handleMicTap()
+        await vm.handleMicTap()
+
+        let screenErrors = telemetrySpy.events.filter { $0.event == .screenErrorShown }
+        XCTAssertEqual(screenErrors.count, 1)
+        XCTAssertEqual(screenErrors.first?.properties["error_code"] as? String, "NET-01")
     }
 
     // MARK: - disable_cook_realtime plumbing
@@ -273,6 +405,7 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
                 notificationCenter: FakeVoiceNotificationCenter(),
             ),
             analytics: telemetrySpy,
+            sentry: sentrySpy,
             entitlements: entitlements,
             voiceDriver: voiceDriver,
             disableCookRealtime: disableCookRealtime,
@@ -344,6 +477,12 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
     /// If set, `beginTurn()` throws this error instead of advancing state.
     var beginTurnErrorToThrow: (any Error)?
 
+    /// If set, `endTurn()` throws this error (after incrementing
+    /// `endTurnCallCount` + moving state to `.modelSpeaking`) instead of
+    /// returning `endTurnResult`. Lets tests pin the `presentStirError`
+    /// routing contract for RATE-01 / NET-01 / AI-VOICE-01 / etc.
+    var endTurnErrorToThrow: (any Error)?
+
     /// If set, `endTurn()` returns this result. Defaults to a benign
     /// `.none`-action response so existing tests keep working.
     var endTurnResult: CookTurnResult = .defaultMock()
@@ -371,6 +510,7 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
     ) async throws -> CookTurnResult {
         endTurnCallCount += 1
         currentState = .modelSpeaking
+        if let err = endTurnErrorToThrow { throw err }
         return endTurnResult
     }
 
@@ -390,6 +530,13 @@ final class MockVoiceSessionDriver: VoiceSessionDriver {
     func close() {
         closeCallCount += 1
         currentState = .closed
+    }
+
+    /// Test hook: forcibly set the driver state so we can exercise
+    /// VM flows that expect a specific mid-session state without
+    /// running a full turn to get there (e.g., tap-while-thinking).
+    func stubState(_ state: VoiceSessionState) {
+        currentState = state
     }
 }
 
@@ -413,6 +560,49 @@ private extension CookTurnResult {
             backendLatencyMs: 5,
         )
     }
+}
+
+// MARK: - Sentry spy
+
+/// Captures every captureError + breadcrumb call so tests can assert on
+/// the typed-error + breadcrumb contract in `presentStirError` and the
+/// nil-recipe-id recovery path. Pinned here (not per-test) so every VM
+/// test exercises the same spy.
+final class SpySentry: SentryReporting, @unchecked Sendable {
+    struct BreadcrumbCall: Sendable {
+        let category: String
+        let message: String
+        let data: [String: String]
+    }
+    struct CaptureCall: Sendable {
+        let error: any Error
+        let context: [String: String]
+    }
+
+    private let lock = NSLock()
+    private var _breadcrumbs: [BreadcrumbCall] = []
+    private var _captures: [CaptureCall] = []
+
+    var breadcrumbs: [BreadcrumbCall] {
+        lock.lock(); defer { lock.unlock() }
+        return _breadcrumbs
+    }
+    var captures: [CaptureCall] {
+        lock.lock(); defer { lock.unlock() }
+        return _captures
+    }
+
+    func captureError(_ error: any Error, context: [String: String]) {
+        lock.lock(); defer { lock.unlock() }
+        _captures.append(CaptureCall(error: error, context: context))
+    }
+
+    func breadcrumb(category: String, message: String, data: [String: String]) {
+        lock.lock(); defer { lock.unlock() }
+        _breadcrumbs.append(BreadcrumbCall(category: category, message: message, data: data))
+    }
+
+    func setUserContext(keyHash: String) {}
 }
 
 // MARK: - Telemetry spy
@@ -447,16 +637,19 @@ final class SpyTelemetry: PostHogClient, @unchecked Sendable {
 
 // MARK: - Notification-center stub
 
-/// No-op UNUserNotificationCenterClient so TimerService can be
-/// constructed without real permission requests. Matches the
-/// FakeNotificationCenter pattern in CookModeViewModelTests; kept
-/// local here to avoid exposing a shared test helper until needed.
+/// UNUserNotificationCenterClient stub for CookModeVoiceIntegrationTests.
+/// Delegates `notificationSettings()` to the real UNUserNotificationCenter
+/// so timer-starting flows (reached by the .startTimer suggested_action
+/// test) don't crash. The test runner returns `.notDetermined` for
+/// unconfigured settings, which `requestAuthorization` below stubs
+/// truthy — keeps the TimerService path usable without touching real
+/// notification infrastructure.
 @MainActor
 private final class FakeVoiceNotificationCenter: UNUserNotificationCenterClient {
     func notificationSettings() async -> UNNotificationSettings {
-        fatalError("notificationSettings not reached in CookModeVoiceIntegrationTests")
+        await UNUserNotificationCenter.current().notificationSettings()
     }
-    func requestAuthorization(_ options: UNAuthorizationOptions) async throws -> Bool { false }
+    func requestAuthorization(_ options: UNAuthorizationOptions) async throws -> Bool { true }
     func add(_ request: UNNotificationRequest) async throws {}
     func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {}
 }

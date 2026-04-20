@@ -45,7 +45,9 @@ enum SpeechFallbackError: Error, Equatable, Sendable {
     /// (state is one of userSpeaking / transcribing / thinking /
     /// modelSpeaking). Caller should surface a toast rather than
     /// silently no-op — a silent reject looks like a dead mic button.
-    case busy(state: String)
+    /// Typed state (not String) so consumers can branch on the specific
+    /// sub-state without rawValue parsing.
+    case busy(state: VoiceSessionState)
 
     enum PermissionKind: String, Sendable, Equatable {
         case microphone
@@ -221,7 +223,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
             || currentState == .thinking || currentState == .modelSpeaking
         {
             Logger.voice.warning("begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)")
-            throw SpeechFallbackError.busy(state: currentState.rawValue)
+            throw SpeechFallbackError.busy(state: currentState)
         }
 
         // Mic permission primer (first-tap only).

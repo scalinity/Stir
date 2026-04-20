@@ -64,6 +64,11 @@ final class CookModeViewModel {
     /// observe this to render the mic button + waveform + thinking
     /// affordance. `nil` when no driver has been set (e.g. permission
     /// denied or disable_cook_realtime at session start).
+    ///
+    /// Only the VM itself mutates this in production. The DEBUG-only
+    /// `_testForceVoiceState(_:)` hook lets integration tests simulate
+    /// mid-session states (e.g., tap-while-thinking) without having to
+    /// drive a full turn through the mock to reach them.
     private(set) var voiceState: VoiceSessionState? = nil
 
     /// Transient inline toast — set by voice failures (empty transcript,
@@ -115,7 +120,11 @@ final class CookModeViewModel {
     private let entitlements: EntitlementService?
     /// Injected by the root on entry. nil for Free users who would hit
     /// the paywall anyway. When non-nil, CookModeViewModel has already
-    /// called `preWarm()` on it.
+    /// called `preWarm()` on it. May be cleared mid-session if an
+    /// unrecoverable invariant violation (e.g., nil recipe_plan_id)
+    /// forces teardown; subsequent taps then route through the
+    /// "no driver" path and show "Voice isn't available" rather than
+    /// loop on the same error.
     private var voiceDriver: (any VoiceSessionDriver)?
     /// Captured at entry so mid-session flag flips don't confuse the
     /// driver-selection logic. Read by callers that want to explain
@@ -202,10 +211,14 @@ final class CookModeViewModel {
 
     // MARK: - Navigation
 
-    /// Advance one step. `advancedBy` is sent on the
-    /// `cook_step_advanced` event (spec §15 `manual_or_voice` property).
-    /// Defaults to `"manual"` for Prev/Next button taps; voice-driven
-    /// advances from endVoiceTurn pass `"voice"`.
+    /// Advance one step.
+    ///
+    /// `advancedBy` → telemetry key `manual_or_voice` on the
+    /// `cook_step_advanced` event (spec §15). The param name reflects
+    /// the intent ("what advanced the step"); the telemetry key is a
+    /// wire-format contract with PostHog dashboards and can't change
+    /// without breaking downstream queries. Passing `"manual"` covers
+    /// Prev/Next button taps; `"voice"` is used by voice endVoiceTurn.
     func nextStep(advancedBy: String = "manual") {
         // Empty recipe → nowhere to go. Don't advance, don't present
         // OutcomeFeedback for a session that never had a step.
@@ -472,6 +485,10 @@ final class CookModeViewModel {
                 voiceState = voiceDriver?.currentState
                 // Fall through to start a fresh turn below.
             } else {
+                // Emit `busy` result so the funnel sees every tap, not
+                // just the ones that succeed/fail cleanly — matters
+                // for "user gave up mid-thinking" signal.
+                emitVoiceAffordance(tier: tier, result: "busy")
                 voiceToastMessage = "One moment — finishing up."
                 return
             }
@@ -557,7 +574,21 @@ final class CookModeViewModel {
                 errorCode: "VAL-01",
                 screen: "cook_mode_voice_end",
             )
-            voiceState = voiceDriver.currentState
+            // Recover from the "dead mic loop": without this teardown,
+            // the driver stays in `.userSpeaking` waiting for an
+            // endTurn that'll never come. `voiceIsListening` stays
+            // true and every subsequent tap re-enters endVoiceTurn →
+            // re-hits this guard → re-emits screen_error_shown, and
+            // the user is stuck tapping a dead mic.
+            //
+            // Force-close stops recognition / TTS / AVAudioSession and
+            // moves state to `.closed`. Dropping the reference routes
+            // the next tap through beginVoiceTurnInner's "no driver"
+            // path (surfaces "Voice isn't available on this device")
+            // — a clean dead end that keeps tap-only Cook Mode usable.
+            voiceDriver.close()
+            self.voiceDriver = nil
+            voiceState = .closed
             return
         }
 
@@ -638,10 +669,17 @@ final class CookModeViewModel {
         guard let stirError = error as? StirError else { return false }
         // Breadcrumb every typed error for Sentry — voice failures are
         // otherwise hard to triage from user reports alone.
+        //
+        // Privacy: `message` is strictly the error CODE (never
+        // `String(describing: stirError)`, which walks the enum mirror
+        // and would pull in user-entered recipe/substitution text via
+        // associated values). Full error payload is still captured
+        // when `sentry.captureError(...)` fires on an unhandled path.
+        let code = stirError.presentableCode.rawValue
         sentry.breadcrumb(
             category: "voice",
-            message: String(describing: stirError),
-            data: ["screen": screen, "code": stirError.presentableCode.rawValue],
+            message: code,
+            data: ["screen": screen, "code": code],
         )
         switch stirError {
         case .rateLimited:
@@ -760,4 +798,14 @@ final class CookModeViewModel {
         default: return "over_30m"
         }
     }
+
+    #if DEBUG
+    /// Test-only hook for simulating mid-session voice states without
+    /// having to drive a full turn through the mock driver. Production
+    /// code must never call this — the DEBUG gate ensures release
+    /// builds can't accidentally bypass the state machine.
+    func _testForceVoiceState(_ state: VoiceSessionState?) {
+        voiceState = state
+    }
+    #endif
 }
