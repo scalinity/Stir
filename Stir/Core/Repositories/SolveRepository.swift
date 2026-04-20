@@ -120,7 +120,10 @@ final class SolveRepository {
                 row.displayName = ing.displayName
                 row.canonicalIngredientSlug = ing.canonicalSlug
                 row.amountText = ing.amountText
-                row.isOptional = ing.isOptional
+                // Persisted schema defaults ambiguous (nil from wire)
+                // to `false` = required. Matches prior behavior before
+                // isOptional was made nullable on the wire.
+                row.isOptional = ing.isOptional ?? false
                 row.sortOrder = Int16(idx)
                 row.typedSource = .ai
             }

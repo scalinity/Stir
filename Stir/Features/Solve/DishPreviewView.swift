@@ -8,6 +8,7 @@
 // hit iOS's "only single sheet" limit and silently queue the inner
 // presentation forever.
 
+import OSLog
 import SwiftUI
 
 struct DishPreviewView: View {
@@ -23,6 +24,11 @@ struct DishPreviewView: View {
 
     @State private var hasCapturedSelection = false
     @State private var localFavorite: Bool = false
+    /// Surfaces a toast when "Start Cooking" can't resolve the
+    /// persisted RecipePlan or current household — a rare CloudKit
+    /// race or upsert failure. Without this the button was a silent
+    /// no-op; users would tap repeatedly with no feedback.
+    @State private var errorToast: StirToastPayload?
 
     /// Ingredient amount column min width — scales with Dynamic Type so
     /// amounts like "1 1/2 cups" don't clip at AX sizes. Value at
@@ -62,6 +68,7 @@ struct DishPreviewView: View {
                 .padding(.bottom, 8)
                 .background(.bar)
         }
+        .stirToast($errorToast)
         .onAppear {
             // Guard against re-capture on back-nav re-entry. NavigationStack
             // creates a fresh DishPreviewView on each push so @State resets,
@@ -137,7 +144,7 @@ struct DishPreviewView: View {
                             // 80pt; a hard width would clip. Flexible lower
                             // bound keeps the column aligned at body size.
                             .frame(minWidth: amountColumnMinWidth, alignment: .leading)
-                        Text(ing.displayName + (ing.isOptional ? "  (optional)" : ""))
+                        Text(ing.displayName + (ing.isOptional == true ? "  (optional)" : ""))
                             .font(.subheadline)
                     }
                     .accessibilityElement(children: .combine)
@@ -222,7 +229,21 @@ struct DishPreviewView: View {
         Button {
             guard let plan = viewModel.persistedRecipePlan(for: dish),
                   let household = viewModel.currentHousehold
-            else { return }
+            else {
+                // Rare: CloudKit Nullify race or a solve-persistence
+                // failure. Surface a toast + log so the user knows the
+                // tap landed AND Sentry sees the miss. Silent no-op
+                // left the user tapping a dead button.
+                Logger.ui.error(
+                    "dish_preview_start_cooking_missing_plan_or_household rank=\(dish.rank, privacy: .public)",
+                )
+                errorToast = StirToastPayload(
+                    id: UUID(),
+                    message: "Couldn't start this one. Try another dish.",
+                    kind: .failed,
+                )
+                return
+            }
             coordinator.startCookMode(recipePlan: plan, household: household)
             dismiss()
         } label: {

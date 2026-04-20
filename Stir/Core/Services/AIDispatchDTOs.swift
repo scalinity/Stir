@@ -239,10 +239,13 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
             /// "isn't in the correct format" error. Default to empty
             /// string and let the UI layer render "to taste" fallback.
             let amountText: String
-            /// Optional on the wire (`is_optional?: boolean`). Default
-            /// to `false` when omitted — matches Gemini's "unspecified
-            /// means required" convention.
-            let isOptional: Bool
+            /// Optional on the wire (`is_optional?: boolean`). Kept
+            /// nullable on iOS too: defaulting to `false` on a missing
+            /// key would silently flip ambiguous ingredients into
+            /// required; `nil` preserves "no strong signal" so the
+            /// UI only renders the "(optional)" suffix when the model
+            /// explicitly said `true`.
+            let isOptional: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case displayName = "display_name"
@@ -256,7 +259,7 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
                 self.displayName = try c.decode(String.self, forKey: .displayName)
                 self.canonicalSlug = try c.decodeIfPresent(String.self, forKey: .canonicalSlug)
                 self.amountText = try c.decodeIfPresent(String.self, forKey: .amountText) ?? ""
-                self.isOptional = try c.decodeIfPresent(Bool.self, forKey: .isOptional) ?? false
+                self.isOptional = try c.decodeIfPresent(Bool.self, forKey: .isOptional)
             }
         }
 

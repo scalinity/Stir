@@ -333,11 +333,10 @@ actor AIDispatch {
                     // solve, a few KB each).
                     var currentEvent: String = ""
                     var dataBuffer: String = ""
-                    var lineBuffer = Data()
 
-                    func flushLine() throws {
-                        let line = String(data: lineBuffer, encoding: .utf8) ?? ""
-                        lineBuffer.removeAll(keepingCapacity: true)
+                    // The line parser is extracted into `SSELineParser`
+                    // for unit testing (see SSELineParserTests).
+                    var parser = SSELineParser { line in
                         if line.isEmpty {
                             // Blank line terminates the current event.
                             if !currentEvent.isEmpty, !dataBuffer.isEmpty {
@@ -373,18 +372,10 @@ actor AIDispatch {
                     }
 
                     for try await byte in bytes {
-                        if byte == 0x0A { // \n
-                            try flushLine()
-                        } else if byte == 0x0D { // \r (CRLF tolerance)
-                            continue
-                        } else {
-                            lineBuffer.append(byte)
-                        }
+                        try parser.append(byte)
                     }
                     // Flush any trailing partial line first…
-                    if !lineBuffer.isEmpty {
-                        try flushLine()
-                    }
+                    try parser.finalizePartialLine()
                     // …then the final event if the stream ended without
                     // a trailing blank line.
                     if !currentEvent.isEmpty, !dataBuffer.isEmpty {
@@ -406,6 +397,47 @@ actor AIDispatch {
                 task.cancel()
             }
         }
+    }
+}
+
+// MARK: - SSE line parser (extracted for unit testing)
+
+/// Pure byte-at-a-time SSE parser. Splits on `\n` (tolerant of `\r`),
+/// preserves empty lines (which are SSE event delimiters) — the whole
+/// reason we stopped using `URLSession.AsyncBytes.lines`, which
+/// silently collapses consecutive newlines.
+///
+/// Usage: feed every inbound byte to `append(_:)`. Call
+/// `finalizePartialLine()` when the stream ends so any trailing
+/// partial line is flushed. The `onLine` callback fires for each
+/// complete line, including empty ones.
+struct SSELineParser {
+    private var buffer = Data()
+    let onLine: (String) throws -> Void
+
+    init(onLine: @escaping (String) throws -> Void) {
+        self.onLine = onLine
+    }
+
+    mutating func append(_ byte: UInt8) throws {
+        if byte == 0x0A { // \n
+            try flush()
+        } else if byte == 0x0D { // \r — CRLF tolerance; ignored.
+            return
+        } else {
+            buffer.append(byte)
+        }
+    }
+
+    mutating func finalizePartialLine() throws {
+        guard !buffer.isEmpty else { return }
+        try flush()
+    }
+
+    private mutating func flush() throws {
+        let line = String(data: buffer, encoding: .utf8) ?? ""
+        buffer.removeAll(keepingCapacity: true)
+        try onLine(line)
     }
 }
 

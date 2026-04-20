@@ -223,7 +223,7 @@ final class SolveViewModel {
                             displayName: ing.displayName,
                             canonicalSlug: ing.canonicalSlug,
                             amountText: ing.amountText,
-                            isOptional: ing.isOptional,
+                            isOptional: ing.isOptional ?? false,
                         )
                     },
                     steps: d.recipePlan.steps.map { step in

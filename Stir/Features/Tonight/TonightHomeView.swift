@@ -72,10 +72,10 @@ struct TonightHomeView: View {
                 set: { coordinator.activeCookLaunch = $0 },
             )) { launch in
                 switch launch {
-                case let .fresh(plan, household, _):
+                case let .fresh(launch):
                     CookModeRoot(
-                        recipePlan: plan,
-                        household: household,
+                        recipePlan: launch.recipePlan,
+                        household: launch.household,
                         aiDispatch: coordinator.aiDispatch,
                         source: .solve,
                         onDismiss: {
@@ -84,7 +84,16 @@ struct TonightHomeView: View {
                         },
                     )
                 case let .resume(session):
-                    if let plan = session.recipePlan,
+                    // Guard: CloudKit Nullify delete can leave a
+                    // CookingSession with nil recipePlan/household
+                    // (cross-device race), OR the session itself can
+                    // be `isDeleted` if the managed context deleted it
+                    // between state-set and fullScreenCover render.
+                    // Both paths land in the fallback to avoid a
+                    // zombie-access crash or a blank undismissable
+                    // modal. Mirrors DishPreview's fallback copy.
+                    if !session.isDeleted,
+                       let plan = session.recipePlan,
                        let household = session.household {
                         CookModeRoot(
                             recipePlan: plan,
@@ -98,11 +107,6 @@ struct TonightHomeView: View {
                             },
                         )
                     } else {
-                        // Guard: CloudKit Nullify delete can leave a
-                        // CookingSession with nil recipePlan/household
-                        // (cross-device race). Without this branch
-                        // fullScreenCover renders a blank undismissable
-                        // modal. Mirrors DishPreview's fallback copy.
                         VStack(spacing: 12) {
                             Text("Couldn't load this dish")
                                 .font(.headline)

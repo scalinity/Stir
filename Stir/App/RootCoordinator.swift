@@ -89,14 +89,27 @@ final class RootCoordinator {
         /// Fresh Cook Mode launched from DishPreview → Start Cooking.
         /// Recipe plan + household are resolved at DishPreview time;
         /// CookModeRoot's .task creates the CookingSession.
-        case fresh(recipePlan: RecipePlan, household: HouseholdProfile, id: UUID = UUID())
+        ///
+        /// `id` is constructed by the coordinator's `startCookMode(…)`
+        /// factory (never defaulted at the call site). Each fresh
+        /// launch needs a distinct UUID so SwiftUI's Identifiable
+        /// diff re-presents the cover rather than animating a no-op
+        /// swap when the same recipe is started twice.
+        case fresh(FreshLaunch)
         /// Resumed or re-opened session (resumable banner, Cook Again
         /// on a recent). CookingSession already exists.
         case resume(session: CookingSession)
 
+        struct FreshLaunch: Equatable {
+            let id: UUID
+            let recipePlan: RecipePlan
+            let household: HouseholdProfile
+            static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        }
+
         var id: String {
             switch self {
-            case let .fresh(_, _, id): return "fresh-\(id)"
+            case let .fresh(launch): return "fresh-\(launch.id)"
             case let .resume(session): return "resume-\(session.id?.uuidString ?? "unknown")"
             }
         }
@@ -511,7 +524,9 @@ final class RootCoordinator {
     /// "Currently, only presenting a single sheet is supported"
     /// warning that nested fullScreenCovers trigger.
     func startCookMode(recipePlan: RecipePlan, household: HouseholdProfile) {
-        activeCookLaunch = .fresh(recipePlan: recipePlan, household: household)
+        activeCookLaunch = .fresh(
+            .init(id: UUID(), recipePlan: recipePlan, household: household),
+        )
     }
 
     /// Resume / re-open an existing CookingSession. Used by the
