@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 14 Settings</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:820px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614'};
+const u=(d)=>d?D:L;
+const SF={
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  chev:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  back:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  check:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+  plus:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  user:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>,
+  house:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-7h-6v7H4a1 1 0 01-1-1z"/></svg>,
+  allergen:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M5 5l14 14"/></svg>,
+  mic:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>,
+  bell:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 0112 0v5l2 3H4l2-3zM10 21h4"/></svg>,
+  shield:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6z"/></svg>,
+  cart:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h2l2.4 12.6a1.5 1.5 0 001.5 1.2h9.4a1.5 1.5 0 001.5-1.1L21 9H6"/><circle cx="9" cy="21" r="1.2"/><circle cx="18" cy="21" r="1.2"/></svg>,
+  palette:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><path d="M12 3a9 9 0 00-9 9c0 5 4 9 9 9a2 2 0 002-2 2 2 0 00-.6-1.4A2 2 0 0115 14h3a3 3 0 003-3A8 8 0 0012 3z"/><circle cx="7" cy="11" r="1" fill={c}/><circle cx="11" cy="7" r="1" fill={c}/><circle cx="16" cy="8" r="1" fill={c}/></svg>,
+  help:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 016 0c0 2-3 2-3 4"/><circle cx="12" cy="17" r="0.8" fill={c}/></svg>,
+};
+function Bar({dark,time='6:44'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column',minHeight:0}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+function Toggle({on,dark=false}){const c=u(dark);return(<div style={{width:40,height:24,borderRadius:999,background:on?c.sage:c.ink300,padding:2,display:'flex',alignItems:'center',justifyContent:on?'flex-end':'flex-start',flexShrink:0}}><div style={{width:20,height:20,borderRadius:999,background:'#fff',boxShadow:'0 1px 2px rgba(0,0,0,0.2)'}}/></div>);}
+
+/* ============ 1) Settings home ============ */
+function SettingsHome({dark=false}){
+  const c=u(dark);
+  const groups=[
+    {h:'Your kitchen',rows:[
+      {i:SF.house(c.ember,16),t:'Household',sub:'2 people · 1 dietary',r:SF.chev(c.ink500,13)},
+      {i:SF.allergen(c.ember,16),t:'Allergens & diet',sub:'Shellfish, pork',r:SF.chev(c.ink500,13)},
+      {i:SF.cart(c.ember,16),t:'Pantry defaults',sub:'Auto-replenish on',r:SF.chev(c.ink500,13)},
+    ]},
+    {h:'Cooking',rows:[
+      {i:SF.mic(c.ember,16),t:'Voice & hands-free',sub:'Hotword off · keep screen on',r:SF.chev(c.ink500,13)},
+      {i:SF.bell(c.ember,16),t:'Notifications',sub:'Cook timers · grocery',r:SF.chev(c.ink500,13)},
+      {i:SF.palette(c.ember,16),t:'Appearance',sub:'Auto · text size default',r:SF.chev(c.ink500,13)},
+    ]},
+    {h:'Account',rows:[
+      {i:SF.user(c.ember,16),t:'Profile',sub:'maya@stir.kitchen',r:SF.chev(c.ink500,13)},
+      {i:SF.shield(c.ember,16),t:'Privacy',sub:'On-device parsing',r:SF.chev(c.ink500,13)},
+      {i:SF.help(c.ember,16),t:'Help & feedback',r:SF.chev(c.ink500,13)},
+    ]},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <div style={{width:36}}/>
+      <div style={{fontFamily:'var(--font-serif)',fontSize:20,fontWeight:600,letterSpacing:'-0.01em',color:c.ink900}}>Settings</div>
+      <div style={{width:36}}/>
+    </div>
+
+    {/* Profile card */}
+    <div style={{margin:'4px 20px 14px',padding:'14px 16px',background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+      <div style={{width:44,height:44,borderRadius:999,background:`linear-gradient(135deg, ${c.ember} 0%, ${c.amber} 100%)`,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600}}>M</div>
+      <div style={{flex:1}}>
+        <div style={{fontSize:15,fontWeight:600,color:c.ink900}}>Maya Chen</div>
+        <div style={{fontSize:12,color:c.ink500,marginTop:1}}>Stir Home · 2 people</div>
+      </div>
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember,padding:'3px 8px',border:`1px solid ${c.ember}`,borderRadius:999}}>Pro</div>
+    </div>
+
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 20px'}}>
+      {groups.map((g,i)=><div key={i} style={{marginBottom:16}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,padding:'8px 4px 6px'}}>{g.h}</div>
+        <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+          {g.rows.map((r,k)=><div key={k} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderTop:k===0?'none':`1px solid ${c.ink100}`}}>
+            <div style={{width:32,height:32,borderRadius:8,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{r.i}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>{r.t}</div>
+              {r.sub && <div style={{fontSize:12,color:c.ink500,marginTop:1}}>{r.sub}</div>}
+            </div>
+            {r.r}
+          </div>)}
+        </div>
+      </div>)}
+      <div style={{textAlign:'center',fontSize:11,color:c.ink500,padding:'14px 0 4px',fontFamily:'var(--font-mono)'}}>Stir 1.0.0 (build 420)</div>
+    </div>
+  </div>);
+}
+
+/* ============ 2) Allergens & diet ============ */
+function Allergens({dark=false}){
+  const c=u(dark);
+  const allergens=[
+    {n:'Shellfish',on:true,sev:'Strict'},
+    {n:'Pork',on:true,sev:'Avoid'},
+    {n:'Tree nuts',on:false},
+    {n:'Peanuts',on:false},
+    {n:'Eggs',on:false},
+    {n:'Dairy',on:false},
+    {n:'Gluten',on:false},
+    {n:'Soy',on:false},
+    {n:'Sesame',on:false},
+    {n:'Fish',on:false},
+  ];
+  const diets=[{n:'Pescatarian',on:false},{n:'Vegetarian',on:false},{n:'Vegan',on:false},{n:'Low-sodium',on:false},{n:'Low-carb',on:false}];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Allergens & diet</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 20px'}}>
+      {/* Intro */}
+      <div style={{padding:'10px 0 16px'}}>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:22,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:'28px'}}>What Stir should never put in a recipe.</div>
+        <div style={{fontSize:13,color:c.ink500,marginTop:6,lineHeight:'18px'}}>Strict = auto-swap every time. Avoid = flag and suggest, but you decide.</div>
+      </div>
+
+      {/* Allergens */}
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Allergens</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden',marginBottom:20}}>
+        {allergens.map((a,i)=><div key={a.n} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{fontSize:14,fontWeight:500,color:c.ink900,flex:1}}>{a.n}</div>
+          {a.on && a.sev && <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:a.sev==='Strict'?c.ember:c.amber,padding:'3px 8px',background:a.sev==='Strict'?c.emberTint:c.amberTint,borderRadius:999}}>{a.sev}</div>}
+          <Toggle on={a.on} dark={dark}/>
+        </div>)}
+      </div>
+
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Diet</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {diets.map((d,i)=><div key={d.n} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{fontSize:14,fontWeight:500,color:c.ink900,flex:1}}>{d.n}</div>
+          <Toggle on={d.on} dark={dark}/>
+        </div>)}
+      </div>
+
+      <div style={{fontSize:12,color:c.ink500,marginTop:16,padding:'10px 12px',background:c.paper100,borderRadius:10,lineHeight:'17px'}}>
+        Stir will never auto-deliver a recipe containing a <b style={{color:c.ember}}>Strict</b> allergen. Results are filtered before they reach you.
+      </div>
+    </div>
+  </div>);
+}
+
+/* ============ 3) Voice & hands-free ============ */
+function Voice({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Voice & hands-free</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 20px'}}>
+      <div style={{padding:'8px 0 14px'}}>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:22,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:'28px'}}>Cook with your hands, not your thumbs.</div>
+      </div>
+
+      {/* Hotword card */}
+      <div style={{padding:'14px 16px',background:c.emberTint,borderRadius:14,border:`1px solid ${c.ember}44`,marginBottom:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+          <div style={{width:28,height:28,borderRadius:8,background:c.ember,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.mic('#fff',15)}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Hey Stir</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:1}}>Wake Stir with your voice during cook mode</div>
+          </div>
+          <Toggle on={false} dark={dark}/>
+        </div>
+        <div style={{fontSize:11,color:c.ink500,lineHeight:'16px',borderTop:`1px solid ${c.ember}22`,paddingTop:10}}>
+          Always-on listening only during active cook sessions. Audio stays on device and never leaves your phone.
+        </div>
+      </div>
+
+      {/* Voice settings */}
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden',marginBottom:16}}>
+        {[
+          {t:'Push-to-talk only',sub:'Long-press the mic instead of hotword',on:true},
+          {t:'Read steps aloud',sub:'Voice dictates each step when you say "next"',on:true},
+          {t:'Confirm before swaps',sub:'"Use honey instead? Say yes."',on:true},
+        ].map((r,i)=><div key={r.t} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{r.t}</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:1}}>{r.sub}</div>
+          </div>
+          <Toggle on={r.on} dark={dark}/>
+        </div>)}
+      </div>
+
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Voice</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden',marginBottom:16}}>
+        {[
+          {t:'Voice',v:'Warm · female',a:true},
+          {t:'Speaking rate',v:'Normal'},
+        ].map((r,i)=><div key={r.t} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1,fontSize:14,fontWeight:500,color:c.ink900}}>{r.t}</div>
+          <div style={{fontSize:13,color:c.ink500}}>{r.v}</div>
+          {SF.chev(c.ink500,12)}
+        </div>)}
+      </div>
+
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Display while cooking</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {[
+          {t:'Keep screen on',on:true},
+          {t:'Large text in cook mode',on:true},
+          {t:'Darken wallpaper',on:false},
+        ].map((r,i)=><div key={r.t} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1,fontSize:14,fontWeight:500,color:c.ink900}}>{r.t}</div>
+          <Toggle on={r.on} dark={dark}/>
+        </div>)}
+      </div>
+    </div>
+  </div>);
+}
+
+/* ============ 4) Household ============ */
+function Household({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Household</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 20px'}}>
+      <div style={{padding:'8px 0 14px'}}>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:22,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:'28px'}}>Who are we cooking for?</div>
+        <div style={{fontSize:13,color:c.ink500,marginTop:6,lineHeight:'18px'}}>Stir scales recipes to this household size and merges everyone's preferences.</div>
+      </div>
+
+      {/* Size */}
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Default servings</div>
+      <div style={{padding:'16px 18px',background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+        <button style={{width:36,height:36,borderRadius:999,background:c.ink900,border:0,display:'flex',alignItems:'center',justifyContent:'center',color:c.bg,fontSize:18,fontWeight:600}}>−</button>
+        <div style={{flex:1,textAlign:'center'}}>
+          <div style={{fontFamily:'var(--font-serif)',fontSize:38,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:1}}>2</div>
+          <div style={{fontSize:11,color:c.ink500,marginTop:4,letterSpacing:'0.06em',textTransform:'uppercase'}}>servings</div>
+        </div>
+        <button style={{width:36,height:36,borderRadius:999,background:c.ember,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.plus('#fff',14)}</button>
+      </div>
+
+      {/* Members */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Members</div>
+        <button style={{background:'transparent',border:0,color:c.ember,fontSize:12,fontWeight:600,padding:'4px 0',display:'flex',alignItems:'center',gap:3}}>{SF.plus(c.ember,12)} Invite</button>
+      </div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden',marginBottom:20}}>
+        {[
+          {n:'Maya Chen',sub:'You · owner',pref:'Shellfish, pork avoid',initial:'M',bg:`linear-gradient(135deg, ${c.ember}, ${c.amber})`},
+          {n:'Jordan Park',sub:'Joined Mar 14',pref:'Cilantro dislike',initial:'J',bg:`linear-gradient(135deg, ${c.sage}, ${c.amber})`},
+        ].map((m,i)=><div key={m.n} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{width:40,height:40,borderRadius:999,background:m.bg,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontFamily:'var(--font-serif)',fontSize:16,fontWeight:600,flexShrink:0}}>{m.initial}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>{m.n}</div>
+            <div style={{fontSize:11,color:c.ink500}}>{m.sub} · {m.pref}</div>
+          </div>
+          {SF.chev(c.ink500,13)}
+        </div>)}
+      </div>
+
+      {/* Shopping */}
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Shopping</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px'}}>
+          <div style={{flex:1,fontSize:14,fontWeight:500,color:c.ink900}}>Home store</div>
+          <div style={{fontSize:13,color:c.ink500}}>Whole Foods · Gowanus</div>
+          {SF.chev(c.ink500,12)}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:`1px solid ${c.ink100}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>Shared grocery list</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:1}}>Both members can add and check off</div>
+          </div>
+          <Toggle on={true} dark={dark}/>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">14 · Settings & Pantry Prefs</h1>
+      <p className="mock-sub">
+        Four screens. Settings home is the grocery-store aisle — grouped by job
+        ("Your kitchen", "Cooking", "Account") rather than iOS defaults.
+        <em> Allergens</em> are a first-class surface because they're the thing
+        Stir <em>must</em> get right. <em>Voice</em> is where we expose the
+        privacy posture. <em>Household</em> makes cooking-for-N a concrete
+        number.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #49–#52</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Settings trees — root + 3 details</span>
+      </div>
+    </header>
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Settings home</h2>
+        <p className="mock-section-desc">
+          Profile card with subscription badge up top. Grouped list below. Each
+          row has an ember-tinted glyph (consistent with the rest of the app),
+          a title, and a value-preview subtitle so you can scan without
+          drilling in.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light</div><Frame><SettingsHome/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark</div><Frame dark><SettingsHome dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Allergens & diet</h2>
+        <p className="mock-section-desc">
+          Two-tier severity: <em>Strict</em> (filter out entirely) vs.
+          <em> Avoid</em> (flag with a suggestion). Color-coded chips make the
+          current rules legible at a glance. Footnote restates what the app
+          will actually do with this data — no fine print.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 2 active, 1 strict</div><Frame><Allergens/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Allergens dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Voice & hands-free</h2>
+        <p className="mock-section-desc">
+          Ember-tinted privacy card at the top — "on-device" is the claim this
+          app lives or dies on. Push-to-talk is the default-on safer
+          alternative to always-listening. Display-while-cooking settings
+          (keep screen on, large text) live at the bottom.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Hotword off</div><Frame><Voice/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Voice dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Household</h2>
+        <p className="mock-section-desc">
+          Servings stepper as the hero — the one number that scales every
+          recipe. Members list with a merged preference summary (Jordan's
+          "cilantro dislike" shows up in Solve filters too). Home store is
+          what re-orders grocery to aisle layout.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 2 people</div><Frame><Household/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Household dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

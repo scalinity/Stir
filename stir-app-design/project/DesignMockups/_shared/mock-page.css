@@ -1,0 +1,101 @@
+/* Shared stylesheet for Stir DesignMockups.
+   Tokens mirror Specs/Design-System.md §3 + §4 + §5.
+   Each mockup page links this file plus sets up its own <main>. */
+
+/* -------- Fonts -------- */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap');
+
+:root {
+  --font-sans: -apple-system, "SF Pro Text", "SF Pro Display", BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-serif: "New York", "NewYork", ui-serif, "Source Serif 4", "Charter", "Iowan Old Style", "Palatino", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+}
+
+/* -------- Page shell (NOT the phone frame — the gallery around it) -------- */
+.mock-page {
+  min-height: 100vh;
+  background: #EFEAE1;
+  padding: 48px 32px 80px;
+  font-family: var(--font-sans);
+  color: #1A1612;
+}
+.mock-header {
+  max-width: 1600px;
+  margin: 0 auto 40px;
+}
+.mock-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 40px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: #1A1612;
+  margin: 0;
+}
+.mock-sub {
+  font-size: 15px;
+  color: #6B5F54;
+  margin-top: 8px;
+  max-width: 760px;
+  line-height: 1.5;
+}
+.mock-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+  font-size: 12px;
+  color: #6B5F54;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.mock-meta span { padding: 4px 10px; background: #E8E3DD; border-radius: 999px; }
+
+.mock-main { max-width: 1600px; margin: 0 auto; }
+
+/* Section header within a page — used to group variant pairs */
+.mock-section {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid #D9D2C4;
+}
+.mock-section:first-of-type { border-top: none; padding-top: 0; }
+.mock-section-title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: #1A1612;
+  margin: 0;
+}
+.mock-section-desc {
+  font-size: 14px;
+  color: #6B5F54;
+  margin-top: 6px;
+  max-width: 720px;
+  line-height: 1.5;
+}
+
+/* Row of phones (horizontal scroll on small screens) */
+.mock-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 36px;
+  margin-top: 24px;
+}
+
+.mock-cell { display: flex; flex-direction: column; gap: 10px; }
+.mock-cell-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6B5F54;
+}
+.mock-cell-caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6B5F54;
+  max-width: 410px;
+  margin-top: 2px;
+}

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 07 Cook Mode (Voice)</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+  .mock-cell-caption{font-size:12px;line-height:1.5;color:#6B5F54;max-width:410px;margin-top:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',crimson:'#9A2E2E',crimsonTint:'#F2DCDC',voice:'#5E4AE0',voiceTint:'#E8E3FA'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',crimson:'#C94747',crimsonTint:'#2E1818',voice:'#8473E8',voiceTint:'#1F1A33'};
+const u=(d)=>d?D:L;
+const SF={
+  close:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  chevronL:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  chevronR:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  mic:(c,s=20,slash=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M8 21h8"/>{slash && <path d="M3 3l18 18" strokeWidth="2"/>}</svg>,
+  micFill:(c,s=20)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M8 21h8" stroke={c} strokeWidth="1.6" fill="none" strokeLinecap="round"/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  sparkles:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8zM20 14l.9 2.1L23 17l-2.1.9L20 20l-.9-2.1L17 17l2.1-.9z"/></svg>,
+  lock:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>,
+  warn:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2z"/></svg>,
+  timer:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 8v5l3 2M9 2h6"/></svg>,
+  check:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+};
+function Bar({dark,time='7:49'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='7:49'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* ============ Voice Primer ============ */
+function VoicePrimer({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',padding:'12px 20px 20px'}}>
+    <div style={{display:'flex',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,padding:6}}>Not now</button>
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.voice,background:c.voiceTint,padding:'4px 10px',borderRadius:999,display:'flex',alignItems:'center',gap:4}}>{SF.sparkles(c.voice,11)} Premium</div>
+    </div>
+
+    <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center',gap:18}}>
+      <div style={{display:'flex',justifyContent:'center'}}>
+        <div style={{width:120,height:120,borderRadius:999,background:c.voiceTint,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+          <div style={{position:'absolute',inset:-12,borderRadius:999,border:`1.5px solid ${c.voice}`,opacity:0.25}}/>
+          <div style={{position:'absolute',inset:-24,borderRadius:999,border:`1.5px solid ${c.voice}`,opacity:0.12}}/>
+          {SF.micFill(c.voice,48)}
+        </div>
+      </div>
+      <div style={{textAlign:'center'}}>
+        <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:30,lineHeight:'36px',letterSpacing:'-0.02em',color:c.ink900,margin:'0 0 10px',textWrap:'balance'}}>Cook without touching your phone.</h2>
+        <p style={{fontSize:15,lineHeight:'22px',color:c.ink500,margin:'0 auto',maxWidth:300}}>Stir reads steps aloud. Say "next," "back," "timer ten," or "how long?" — I'll keep up with greasy hands.</p>
+      </div>
+
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,padding:'14px 16px',display:'flex',flexDirection:'column',gap:10}}>
+        {[
+          {t:'On-device wake word',s:'"Hey Stir" — voice stays local'},
+          {t:'Processed only while cooking',s:'Mic off the moment you close the recipe'},
+          {t:'Works offline after the first solve',s:'No transcripts stored'},
+        ].map(r=><div key={r.t} style={{display:'flex',gap:12,alignItems:'flex-start'}}>
+          <div style={{width:22,height:22,borderRadius:999,background:c.voice,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{SF.check('#fff',13)}</div>
+          <div><div style={{fontSize:14,fontWeight:600,color:c.ink900}}>{r.t}</div><div style={{fontSize:13,color:c.ink500,marginTop:1}}>{r.s}</div></div>
+        </div>)}
+      </div>
+    </div>
+
+    <button style={{height:52,borderRadius:12,border:0,background:c.voice,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+      {SF.mic('#fff',18)} Enable voice cooking
+    </button>
+    <div style={{textAlign:'center',fontSize:12,color:c.ink500,marginTop:10}}>Mic permission required. You can revoke anytime.</div>
+  </div>);
+}
+
+/* ============ Voice states — idle / active / disabled ============ */
+function VoiceStep({dark=false,state='idle'}){
+  const c=u(dark);
+  const stateConfig={
+    idle:    {label:'Listening for "next"',color:c.voice,ring:0.0,rings:false},
+    active:  {label:'"show me the next step"',color:c.voice,ring:1,rings:true,userText:true},
+    disabled:{label:'Voice paused',color:c.ink500,ring:0,rings:false,paused:true},
+  }[state];
+
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+      <div style={{display:'flex',alignItems:'center',gap:6}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.voice,background:c.voiceTint,padding:'4px 8px',borderRadius:999,display:'flex',alignItems:'center',gap:4}}>{SF.sparkles(c.voice,10)} Voice</div>
+      </div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:600,color:c.ink700}}>Aa</button>
+    </div>
+
+    {/* Step card */}
+    <div style={{flex:1,padding:'0 20px',display:'flex',flexDirection:'column'}}>
+      <div style={{fontSize:13,color:c.ink500,marginBottom:6}}>
+        <span style={{color:c.ink700,fontWeight:600}}>Miso-Glazed Salmon</span> · Step 3 of 5
+      </div>
+      <div style={{flex:1,display:'flex',flexDirection:'column',gap:14,padding:'4px 0'}}>
+        <div style={{background:c.paper100,borderRadius:22,border:`1px solid ${c.ink100}`,padding:'22px 22px 20px',display:'flex',flexDirection:'column',gap:12}}>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember}}>Now</div>
+          <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:34,lineHeight:'40px',letterSpacing:'-0.02em',color:c.ink900,textWrap:'balance'}}>
+            Sear the salmon, skin-side down.
+          </div>
+          <div style={{fontSize:16,lineHeight:'24px',color:c.ink700}}>
+            Medium-high, 4 minutes. Press gently. Let it release on its own.
+          </div>
+
+          <div style={{marginTop:4,padding:'10px 14px',background:c.bg,borderRadius:12,border:`1px solid ${c.ember}`,display:'flex',alignItems:'center',gap:12}}>
+            <div style={{width:36,height:36,borderRadius:999,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.timer(c.ember,18)}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>Timer</div>
+              <div style={{fontFamily:'var(--font-mono)',fontSize:22,fontWeight:500,color:c.ink900,fontVariantNumeric:'tabular-nums',lineHeight:1,marginTop:2}}>2:43 <span style={{fontSize:12,color:c.ink500,fontFamily:'var(--font-sans)'}}>/ 4:00</span></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Transcript bubble (active only) */}
+        {state==='active' && (<div style={{background:c.voiceTint,border:`1px solid ${c.voice}`,borderRadius:18,padding:'12px 16px',alignSelf:'stretch',position:'relative'}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.voice,marginBottom:4}}>You said</div>
+          <div style={{fontSize:16,lineHeight:'22px',color:c.ink900,fontFamily:'var(--font-serif)',fontWeight:500}}>
+            "How long should I sear it?"
+          </div>
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${c.voice}33`}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.voice,marginBottom:4}}>Stir</div>
+            <div style={{fontSize:15,lineHeight:'22px',color:c.ink700}}>
+              Four minutes on this side. About two and a half left — I'll tell you when to flip.
+            </div>
+          </div>
+        </div>)}
+
+        {/* Disabled banner */}
+        {state==='disabled' && (<div style={{background:c.amberTint,border:`1px solid ${c.amber}`,borderRadius:14,padding:'14px 16px',display:'flex',gap:12,alignItems:'flex-start'}}>
+          {SF.warn(c.amber,16)}
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Voice is off for this session</div>
+            <div style={{fontSize:13,color:c.ink700,lineHeight:'18px',marginTop:2}}>Loud environment detected — wake word kept missing. Tap-only mode is active. Try again?</div>
+            <button style={{marginTop:8,padding:'6px 12px',borderRadius:8,background:c.voice,color:'#fff',border:0,fontSize:13,fontWeight:600}}>Re-enable voice</button>
+          </div>
+        </div>)}
+      </div>
+
+      {/* Voice pill */}
+      <div style={{margin:'0 0 12px',display:'flex',justifyContent:'center'}}>
+        <div style={{display:'inline-flex',alignItems:'center',gap:10,padding:'10px 16px 10px 12px',background:state==='disabled'?c.paper200:c.voiceTint,border:`1px solid ${state==='disabled'?c.ink100:c.voice}`,borderRadius:999,minWidth:240,position:'relative'}}>
+          {state==='disabled'
+            ? <div style={{width:32,height:32,borderRadius:999,background:c.ink300,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.mic('#fff',16,true)}</div>
+            : <div style={{width:32,height:32,borderRadius:999,background:c.voice,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+                {state==='active' && <><div style={{position:'absolute',inset:-6,borderRadius:999,border:`2px solid ${c.voice}`,opacity:0.4,animation:'vpulse 1.4s ease-out infinite'}}/><div style={{position:'absolute',inset:-12,borderRadius:999,border:`2px solid ${c.voice}`,opacity:0.2,animation:'vpulse 1.4s ease-out 0.4s infinite'}}/></>}
+                {SF.micFill('#fff',16)}
+              </div>
+          }
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:stateConfig.color}}>{state==='idle'?'Idle':state==='active'?'Listening':'Paused'}</div>
+            <div style={{fontSize:13,color:c.ink700,marginTop:1}}>{stateConfig.label}</div>
+          </div>
+          {/* Waveform */}
+          {state==='active' && <div style={{display:'flex',gap:2,alignItems:'flex-end',height:18}}>
+            {[6,14,9,16,11,7,13].map((h,i)=><div key={i} style={{width:2.5,height:h,borderRadius:2,background:c.voice,animation:`vbar 0.9s ease-in-out ${i*0.08}s infinite`}}/>)}
+          </div>}
+        </div>
+      </div>
+
+      <style>{`@keyframes vpulse{0%{transform:scale(1);opacity:0.5}100%{transform:scale(1.5);opacity:0}}@keyframes vbar{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1)}}`}</style>
+    </div>
+
+    <div style={{padding:'14px 18px 18px',borderTop:`1px solid ${c.ink100}`,background:c.bg,display:'flex',gap:10,alignItems:'center'}}>
+      <button style={{width:52,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.chevronL(c.ink700,20)}</button>
+      <button style={{flex:1,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+        Next step {SF.chevronR('#fff',18)}
+      </button>
+    </div>
+  </div>);
+}
+
+/* ============ Voice-fallback banner (VOICE-01 → tap) ============ */
+function VoiceFallback({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{background:c.voiceTint,borderBottom:`1px solid ${c.voice}`,padding:'12px 16px',display:'flex',gap:10,alignItems:'flex-start'}}>
+      {SF.mic(c.voice,16,true)}
+      <div style={{flex:1,fontSize:13,lineHeight:'18px',color:c.ink900}}>
+        <b style={{fontWeight:600}}>Voice couldn't hear you.</b> I switched to tap-only so you're not stuck. Try again when it's quieter?
+      </div>
+      <button style={{background:c.voice,color:'#fff',border:0,padding:'6px 12px',borderRadius:8,fontSize:12,fontWeight:600}}>Retry</button>
+    </div>
+
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Cook Mode</div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:600,color:c.ink700}}>Aa</button>
+    </div>
+
+    <div style={{padding:'0 20px 4px',display:'flex',justifyContent:'space-between'}}>
+      <div style={{fontSize:13,color:c.ink500}}><span style={{color:c.ink700,fontWeight:600}}>Miso-Glazed Salmon</span> · Step 3 of 5</div>
+      <div style={{fontSize:13,color:c.ink500}}>~14 min left</div>
+    </div>
+
+    <div style={{flex:1,padding:'14px 20px 0',display:'flex',flexDirection:'column',gap:14}}>
+      <div style={{background:c.paper100,borderRadius:22,border:`1px solid ${c.ink100}`,padding:'22px 22px 20px',display:'flex',flexDirection:'column',gap:12}}>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember}}>Now</div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:32,lineHeight:'38px',letterSpacing:'-0.02em',color:c.ink900,textWrap:'balance'}}>Flip the salmon. Add glaze.</div>
+        <div style={{fontSize:16,lineHeight:'24px',color:c.ink700}}>Spoon glaze over the top. Two more minutes.</div>
+      </div>
+      <div style={{padding:'12px 14px',border:`1px solid ${c.ink100}`,borderRadius:12,background:c.paper100,display:'flex',alignItems:'center',gap:10}}>
+        {SF.sparkles(c.voice,14)}
+        <div style={{flex:1,fontSize:12,color:c.ink700,lineHeight:'16px'}}>You can use voice in quieter moments — I'll just stay silent until then.</div>
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 18px',borderTop:`1px solid ${c.ink100}`,display:'flex',gap:10}}>
+      <button style={{width:52,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.chevronL(c.ink700,20)}</button>
+      <button style={{flex:1,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>Next step {SF.chevronR('#fff',18)}</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">07 · Cook Mode — Voice</h1>
+      <p className="mock-sub">
+        Premium. Everything from Batch 2's tap surface remains — voice is
+        additive, not replacement. <em>Voice-violet</em> (#5E4AE0) is reserved
+        for the microphone pill, transcript bubbles, and the Premium badge.
+        Every state has a graceful tap fallback; voice never traps the user.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #20–#23</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Tier: Premium+ (trial this week)</span>
+        <span>Specs §9 — Voice</span>
+      </div>
+    </header>
+
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Voice primer</h2>
+        <p className="mock-section-desc">
+          One-time after Premium upgrade, or from the Cook Mode nudge. Sets the
+          vocabulary ("Hey Stir" wake word, four commands), makes the privacy
+          stance explicit (on-device, no transcripts), and uses the Premium
+          badge top-right so the tier context is clear. "Not now" is a
+          first-class dismiss — low-pressure.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Primer</div><Frame><VoicePrimer/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Primer</div><Frame dark><VoicePrimer dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Step card — voice states</h2>
+        <p className="mock-section-desc">
+          Same underlying step card as Package 06, with an additional voice pill
+          above the footer. Idle: calm, violet mic in a waiting state. Active:
+          pulsing rings, a live waveform, and a transcript bubble that shows
+          both what the user said and what Stir replied — the user should
+          always be able to verify the system heard right. Disabled: an amber
+          "voice off for this session" notice with a one-tap re-enable.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Idle — "Listening for 'next'"</div><Frame><VoiceStep state="idle"/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Idle</div><Frame dark><VoiceStep dark state="idle"/></Frame></div>
+        </div>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Active — transcript bubble</div><Frame><VoiceStep state="active"/></Frame>
+            <div className="mock-cell-caption">Transcript shows what Stir heard AND what it replied — so the user can always verify recognition.</div>
+          </div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Active</div><Frame dark><VoiceStep dark state="active"/></Frame></div>
+        </div>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Disabled — noisy kitchen</div><Frame><VoiceStep state="disabled"/></Frame>
+            <div className="mock-cell-caption">After repeated wake-word misses, the system proactively down-shifts to tap-only rather than keep failing. One-tap recovery.</div>
+          </div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Disabled</div><Frame dark><VoiceStep dark state="disabled"/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Fallback banner (VOICE-01 → tap)</h2>
+        <p className="mock-section-desc">
+          When voice misfires mid-step: violet-tinted top banner explains what
+          happened and what the system did about it ("switched to tap-only so
+          you're not stuck"). Retry is one button. The underlying step stays
+          exactly the same so the user never loses their place.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Voice fallback</div><Frame><VoiceFallback/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Voice fallback</div><Frame dark><VoiceFallback dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

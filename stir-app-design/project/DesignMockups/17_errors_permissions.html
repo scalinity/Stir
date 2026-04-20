@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 17 Errors & Permissions</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:820px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',rust:'#A8441F'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',rust:'#E26340'};
+const u=(d)=>d?D:L;
+const SF={
+  wifi:(c,s=14,off=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" opacity={off?0.3:1}><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  x:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>,
+  back:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  refresh:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0115-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 01-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>,
+  mic:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"/><path d="M12 18v3" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>,
+  cam:(c,s=28)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg>,
+  bell:(c,s=28)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 004 0"/></svg>,
+  warn:(c,s=20)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2z" opacity="0.2"/><path d="M12 2L1 21h22L12 2zm0 6v7m0 2.5v1" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  cloud:(c,s=24)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19a4.5 4.5 0 00.4-9 6 6 0 00-11.8.5A4.5 4.5 0 006.5 19h11zM4 4l16 16"/></svg>,
+  chef:(c,s=22)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 3a4 4 0 00-3.9 3.1A3.5 3.5 0 006 13h12a3.5 3.5 0 00-2.1-6.9A4 4 0 0012 3zM7 14h10v3a2 2 0 01-2 2H9a2 2 0 01-2-2v-3z"/></svg>,
+  info:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.5"/></svg>,
+};
+function Bar({dark,offline=false}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>6:44</span><div style={{display:'flex',gap:6,alignItems:'center'}}>{offline?<span style={{fontSize:11,fontWeight:600,color:c,opacity:0.6,letterSpacing:'0.04em'}}>No signal</span>:<svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>}{SF.wifi(c,14,offline)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,offline=false}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:'0 30px 60px rgba(26,22,18,0.18)',boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} offline={offline}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column',minHeight:0}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* 1) Camera permission primer (pre-OS prompt) */
+function PermCamera({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{flex:1,padding:'32px 28px 0',display:'flex',flexDirection:'column'}}>
+      {/* Illustration */}
+      <div style={{height:220,borderRadius:22,background:c.paper100,border:`1px solid ${c.ink100}`,position:'relative',overflow:'hidden',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        {/* Book page mock */}
+        <div style={{width:140,height:180,background:'#E8DFCF',borderRadius:4,boxShadow:'0 10px 30px rgba(26,22,18,0.18)',padding:'16px 18px',display:'flex',flexDirection:'column',gap:5,transform:'rotate(-3deg)'}}>
+          <div style={{fontFamily:'var(--font-serif)',fontSize:11,color:'#3D342C',fontWeight:600,letterSpacing:'-0.01em'}}>Miso butter pasta</div>
+          <div style={{height:1,background:'#3D342C',opacity:0.2,width:'30%'}}/>
+          {[95,85,92,70,88,60,90,50].map((w,i)=><div key={i} style={{height:3,background:'#3D342C',opacity:0.15,width:w+'%',borderRadius:1}}/>)}
+        </div>
+        {/* Camera icon float */}
+        <div style={{position:'absolute',top:24,right:28,width:52,height:52,borderRadius:16,background:c.ember,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:`0 12px 24px ${c.ember}55`}}>
+          {SF.cam('#fff',26)}
+        </div>
+        {/* Scan corners on page */}
+        <div style={{position:'absolute',inset:'16% 22%',borderRadius:4,border:`1.5px dashed ${c.ember}`,opacity:0.5}}/>
+      </div>
+
+      <div style={{fontFamily:'var(--font-serif)',fontSize:30,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:'36px',marginTop:28}}>
+        Stir needs to see<br/>your cookbook.
+      </div>
+      <div style={{fontSize:14.5,color:c.ink500,marginTop:10,lineHeight:'22px'}}>Next you'll see iOS's camera permission prompt. Stir only uses the camera when you open a scan — never in the background.</div>
+
+      <div style={{marginTop:20,padding:'12px 14px',background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`,display:'flex',gap:10,alignItems:'flex-start'}}>
+        {SF.info(c.ink500,16)}
+        <div style={{fontSize:12.5,color:c.ink700,lineHeight:'17px'}}>Pages stay on your device. OCR runs on-device first; you can turn on cloud OCR in Settings for tougher pages.</div>
+      </div>
+    </div>
+    <div style={{padding:'16px 20px 24px',display:'flex',flexDirection:'column',gap:10,flexShrink:0}}>
+      <button style={{height:52,borderRadius:14,background:c.ink900,color:c.bg,border:0,fontSize:15,fontWeight:600}}>Continue</button>
+      <div style={{textAlign:'center',fontSize:13,color:c.ink500,fontWeight:500}}>Paste a link instead</div>
+    </div>
+  </div>);
+}
+
+/* 2) Permission DENIED state — came from settings trip */
+function PermDenied({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Scan cookbook</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,padding:'24px 28px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',textAlign:'center'}}>
+      {/* Muted illustration */}
+      <div style={{width:96,height:96,borderRadius:28,background:c.paper200,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+        {SF.cam(c.ink300,44)}
+        <div style={{position:'absolute',top:-4,right:-4,width:32,height:32,borderRadius:999,background:c.ember,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:700,boxShadow:`0 4px 12px ${c.ember}66`}}>!</div>
+      </div>
+      <div style={{fontFamily:'var(--font-serif)',fontSize:28,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:'34px',marginTop:24,maxWidth:280}}>
+        Camera is turned off for Stir.
+      </div>
+      <div style={{fontSize:14,color:c.ink500,marginTop:10,lineHeight:'21px',maxWidth:300}}>Turn it on in iOS Settings to scan cookbook pages. Takes about three taps.</div>
+
+      {/* Steps card */}
+      <div style={{marginTop:24,width:'100%',background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,padding:'14px 16px',textAlign:'left'}}>
+        {[
+          {n:1,t:'Tap "Open Settings" below'},
+          {n:2,t:'Tap "Camera"'},
+          {n:3,t:'Toggle to on'},
+        ].map((s,i)=><div key={s.n} style={{display:'flex',gap:12,alignItems:'center',paddingTop:i===0?0:10,paddingBottom:i===2?0:10,borderBottom:i===2?'none':`1px solid ${c.ink100}`}}>
+          <div style={{width:22,height:22,borderRadius:999,background:c.ink900,color:c.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,flexShrink:0}}>{s.n}</div>
+          <div style={{fontSize:13.5,color:c.ink700,fontWeight:500}}>{s.t}</div>
+        </div>)}
+      </div>
+    </div>
+    <div style={{padding:'16px 20px 24px',display:'flex',flexDirection:'column',gap:10,flexShrink:0}}>
+      <button style={{height:52,borderRadius:14,background:c.ink900,color:c.bg,border:0,fontSize:15,fontWeight:600}}>Open Settings</button>
+      <div style={{textAlign:'center',fontSize:13,color:c.ink500,fontWeight:500}}>Paste a link instead</div>
+    </div>
+  </div>);
+}
+
+/* 3) Offline — cooking mid-recipe */
+function Offline({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    {/* Persistent offline banner */}
+    <div style={{padding:'8px 14px',background:c.amberTint,borderBottom:`1px solid ${c.amber}33`,display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+      {SF.cloud(c.amber,18)}
+      <div style={{flex:1,fontSize:12.5,color:c.amber,fontWeight:600}}>Offline · working from cache</div>
+      <div style={{fontSize:11,color:c.ink500}}>Retry</div>
+    </div>
+
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Tuesday</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 24px'}}>
+      <div style={{padding:'8px 0 14px'}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Tonight</div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:28,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,marginTop:4,lineHeight:'34px'}}>Miso butter pasta</div>
+      </div>
+
+      {/* Available */}
+      <div style={{padding:'12px 14px',background:c.sageTint,borderRadius:12,border:`1px solid ${c.sage}33`,display:'flex',gap:10,alignItems:'flex-start'}}>
+        <div style={{width:8,height:8,borderRadius:999,background:c.sage,marginTop:6}}/>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:600,color:c.sage}}>Saved for offline · Apr 22</div>
+          <div style={{fontSize:12,color:c.ink700,marginTop:2,lineHeight:'16px'}}>Ingredients, method, timers, pantry — all local. Cook mode works.</div>
+        </div>
+      </div>
+
+      {/* Unavailable */}
+      <div style={{marginTop:12,padding:'14px 14px',background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Not available offline</div>
+        <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:8}}>
+          {[
+            {t:'Solve',sub:'Needs connection · cached answer from Mon'},
+            {t:'New imports',sub:'Links & scans queued — will sync'},
+            {t:'Voice cook',sub:'On-device STT unavailable on your model'},
+          ].map(r=><div key={r.t} style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+            <div style={{width:18,height:18,borderRadius:999,background:c.paper200,color:c.ink500,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,fontSize:11,fontWeight:700}}>–</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>{r.t}</div>
+              <div style={{fontSize:11.5,color:c.ink500,marginTop:1}}>{r.sub}</div>
+            </div>
+          </div>)}
+        </div>
+      </div>
+
+      {/* Queued */}
+      <div style={{marginTop:16,fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Queued for sync · 3</div>
+      <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:6}}>
+        {[
+          {t:'Linked: kenjilopezalt.com/…',s:'2:14 pm'},
+          {t:'Marked cooked: Kimchi fried rice',s:'Yesterday'},
+          {t:'Added to grocery: lemons',s:'Yesterday'},
+        ].map(q=><div key={q.t} style={{display:'flex',gap:10,alignItems:'center',padding:'10px 12px',background:c.paper100,borderRadius:10,border:`1px solid ${c.ink100}`}}>
+          <div style={{width:6,height:6,borderRadius:999,background:c.amber}}/>
+          <div style={{flex:1,fontSize:12.5,color:c.ink700}}>{q.t}</div>
+          <div style={{fontSize:11,color:c.ink500}}>{q.s}</div>
+        </div>)}
+      </div>
+    </div>
+
+    <div style={{padding:'12px 20px 22px',display:'flex',gap:10,borderTop:`1px solid ${c.ink100}`,flexShrink:0,background:c.bg}}>
+      <button style={{flex:1,height:50,borderRadius:13,background:c.ember,border:0,color:'#fff',fontSize:14,fontWeight:600}}>Start cooking</button>
+    </div>
+  </div>);
+}
+
+/* 4) Import failed — recipe not found */
+function ImportFailed({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.x(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Import</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,overflow:'auto',padding:'12px 20px 24px'}}>
+      {/* URL being imported */}
+      <div style={{padding:'10px 12px',background:c.paper100,borderRadius:10,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:8}}>
+        <div style={{width:22,height:22,borderRadius:5,background:'#1A1612',color:'#fff',fontFamily:'var(--font-serif)',fontSize:11,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>NYT</div>
+        <div style={{flex:1,fontFamily:'var(--font-mono)',fontSize:11.5,color:c.ink500,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>nytimes.com/2024/…/chef-miso</div>
+      </div>
+
+      {/* Result card */}
+      <div style={{marginTop:16,padding:'20px 18px',background:c.emberTint,borderRadius:16,border:`1px solid ${c.ember}33`}}>
+        <div style={{display:'flex',gap:10,alignItems:'center'}}>
+          {SF.warn(c.rust,22)}
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.rust}}>Couldn't read this page</div>
+        </div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:22,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:'28px',marginTop:10}}>
+          That URL is behind a paywall.
+        </div>
+        <div style={{fontSize:13,color:c.ink700,marginTop:6,lineHeight:'18px'}}>NYT Cooking requires a subscription. Stir couldn't see the recipe, so there's nothing to import yet.</div>
+
+        {/* What to do */}
+        <div style={{marginTop:14,padding:'12px 14px',background:c.bg,borderRadius:10,border:`1px solid ${c.ink100}`}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500}}>Three ways forward</div>
+          <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:9}}>
+            {[
+              {t:'Paste the recipe text',s:'Copy from NYT app → paste here'},
+              {t:'Scan the page',s:'If you have it in print'},
+              {t:'Sign into NYT in Safari first',s:'Then retry the link'},
+            ].map(x=><div key={x.t} style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+              <div style={{width:5,height:5,borderRadius:999,background:c.ember,marginTop:6,flexShrink:0}}/>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:c.ink900}}>{x.t}</div>
+                <div style={{fontSize:11.5,color:c.ink500,marginTop:1}}>{x.s}</div>
+              </div>
+            </div>)}
+          </div>
+        </div>
+      </div>
+
+      {/* Logs toggle */}
+      <div style={{marginTop:18,padding:'12px 14px',background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:10}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:12,fontWeight:600,color:c.ink700}}>Show import log</div>
+          <div style={{fontSize:11,color:c.ink500,marginTop:2}}>HTTP 402 · 0 ingredients found · parser v3.2</div>
+        </div>
+        <div style={{fontSize:11,color:c.ember,fontWeight:600}}>Copy</div>
+      </div>
+    </div>
+
+    <div style={{padding:'12px 20px 22px',display:'flex',gap:10,flexShrink:0,background:c.bg,borderTop:`1px solid ${c.ink100}`}}>
+      <button style={{flex:1,height:50,borderRadius:13,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:14,fontWeight:600,color:c.ink700,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>{SF.refresh(c.ink700,14)} Retry</button>
+      <button style={{flex:1.3,height:50,borderRadius:13,background:c.ink900,border:0,color:c.bg,fontSize:14,fontWeight:600}}>Paste text instead</button>
+    </div>
+  </div>);
+}
+
+/* 5) Mic permission primer */
+function PermMic({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{flex:1,padding:'24px 28px 0',display:'flex',flexDirection:'column',alignItems:'center',textAlign:'center'}}>
+      {/* Mic with rings */}
+      <div style={{height:200,width:'100%',borderRadius:22,background:`radial-gradient(circle at 50% 50%, ${c.emberTint} 0%, ${c.paper100} 100%)`,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center',position:'relative',overflow:'hidden'}}>
+        {[0,1,2].map(i=><div key={i} style={{position:'absolute',width:80+i*40,height:80+i*40,borderRadius:999,border:`1.5px solid ${c.ember}`,opacity:0.12+i*0.07}}/>)}
+        <div style={{width:72,height:72,borderRadius:999,background:c.ember,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:`0 10px 28px ${c.ember}66`,zIndex:2}}>
+          {SF.mic('#fff',30)}
+        </div>
+      </div>
+
+      <div style={{fontFamily:'var(--font-serif)',fontSize:30,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:'36px',marginTop:24}}>
+        Listen while you cook.
+      </div>
+      <div style={{fontSize:14.5,color:c.ink500,marginTop:10,lineHeight:'22px'}}>Say "next," "back," or "how much butter?" — Stir only listens during cook mode.</div>
+
+      {/* Privacy row */}
+      <div style={{marginTop:22,width:'100%',background:c.sageTint,border:`1px solid ${c.sage}33`,borderRadius:12,padding:'12px 14px',display:'flex',gap:10,alignItems:'flex-start',textAlign:'left'}}>
+        <div style={{width:8,height:8,borderRadius:999,background:c.sage,marginTop:6,flexShrink:0}}/>
+        <div>
+          <div style={{fontSize:12.5,fontWeight:600,color:c.sage}}>On-device recognition</div>
+          <div style={{fontSize:11.5,color:c.ink700,marginTop:2,lineHeight:'16px'}}>Audio never leaves your iPhone. No recordings saved. Mic turns off when you leave cook mode.</div>
+        </div>
+      </div>
+    </div>
+    <div style={{padding:'18px 20px 24px',display:'flex',flexDirection:'column',gap:10,flexShrink:0}}>
+      <button style={{height:52,borderRadius:14,background:c.ember,color:'#fff',border:0,fontSize:15,fontWeight:600}}>Enable microphone</button>
+      <div style={{textAlign:'center',fontSize:13,color:c.ink500,fontWeight:500}}>Tap mode is just fine</div>
+    </div>
+  </div>);
+}
+
+/* 6) Solve failed — model issue */
+function SolveFailed({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.x(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Solve</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,padding:'12px 20px 20px',display:'flex',flexDirection:'column'}}>
+      {/* User query echo */}
+      <div style={{padding:'12px 14px',background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Your ask</div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:18,fontWeight:500,letterSpacing:'-0.01em',color:c.ink900,marginTop:4,lineHeight:'24px',fontStyle:'italic'}}>"Something warm, 30 minutes, no dairy, pantry only"</div>
+      </div>
+
+      {/* Empty-ish hero */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',textAlign:'center',padding:'24px 8px'}}>
+        <div style={{width:80,height:80,borderRadius:999,background:c.paper200,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          {SF.chef(c.ink300,36)}
+        </div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:'32px',marginTop:18,maxWidth:300}}>
+          We couldn't find a good match.
+        </div>
+        <div style={{fontSize:13.5,color:c.ink500,marginTop:8,lineHeight:'20px',maxWidth:300}}>Your pantry has <b style={{color:c.ink900,fontWeight:600}}>7 items</b> right now and they don't line up with any dairy-free warm recipe under 30 min. Not your fault — mine.</div>
+
+        {/* Suggestions */}
+        <div style={{marginTop:18,width:'100%',display:'flex',flexDirection:'column',gap:6}}>
+          {[
+            {t:'Relax "no dairy"',s:'47 matches open up'},
+            {t:'Allow 45 minutes',s:'12 matches under 45'},
+            {t:'Add eggs to pantry',s:'Big unlock'},
+          ].map(s=><div key={s.t} style={{padding:'10px 12px',background:c.paper100,borderRadius:10,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:10,textAlign:'left'}}>
+            <div style={{width:5,height:5,borderRadius:999,background:c.ember}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:c.ink900}}>{s.t}</div>
+              <div style={{fontSize:11,color:c.ink500,marginTop:1}}>{s.s}</div>
+            </div>
+            <div style={{fontSize:11,color:c.ember,fontWeight:600}}>Try</div>
+          </div>)}
+        </div>
+      </div>
+    </div>
+
+    <div style={{padding:'12px 20px 22px',display:'flex',gap:10,flexShrink:0,background:c.bg,borderTop:`1px solid ${c.ink100}`}}>
+      <button style={{flex:1,height:50,borderRadius:13,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:14,fontWeight:600,color:c.ink700}}>Edit ask</button>
+      <button style={{flex:1,height:50,borderRadius:13,background:c.ink900,border:0,color:c.bg,fontSize:14,fontWeight:600}}>Browse saved</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">17 · Errors & Permissions</h1>
+      <p className="mock-sub">
+        Errors aren't punishment — they're handoffs. Every screen here
+        <em> names what went wrong</em>, <em>owns it in the app's voice</em>,
+        and gives at least two paths forward. Permissions use a primer
+        pattern: explain before iOS asks, and leave a graceful fallback if
+        the user says no.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #63–#68</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>No dead ends · fallback always visible</span>
+      </div>
+    </header>
+    <main className="mock-main">
+      <section className="mock-section">
+        <h2 className="mock-section-title">Camera — primer & denied</h2>
+        <p className="mock-section-desc">Primer explains <em>why</em> before iOS prompts — plus a privacy note about on-device OCR. If the user already denied, we don't nag — we give three literal steps and an "Open Settings" button. Escape hatch ("Paste a link instead") is on both screens.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Primer</div><Frame><PermCamera/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Light · Denied</div><Frame><PermDenied/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Primer</div><Frame dark><PermCamera dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Mic — voice primer</h2>
+        <p className="mock-section-desc">Bigger hero because mic asks feel more personal. Sage privacy card covers the three real questions ("Does it record? Does it send? When does it turn off?"). Secondary action is "Tap mode is just fine" — no shame if they decline.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Primer</div><Frame><PermMic/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><PermMic dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Offline — degraded, not broken</h2>
+        <p className="mock-section-desc">Persistent amber banner up top with one-tap retry. A <em>sage</em> card lists what still works (saved recipes, cook mode, timers) and a neutral card lists what doesn't. A queued-for-sync stack shows the user their work isn't lost — it's waiting. Cook button stays active.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Offline</div><Frame offline><Offline/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark offline><Offline dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Import failed — named cause</h2>
+        <p className="mock-section-desc">Specific: "That URL is behind a paywall" — not generic "couldn't import." Three concrete forward paths inside the error card. Collapsible log (with Copy) for debugging without cluttering. Dual CTAs: Retry, or the real fix (paste text).</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · NYT paywall</div><Frame><ImportFailed/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ImportFailed dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Solve — no good match</h2>
+        <p className="mock-section-desc">Echo the user's ask at the top so they know we read it. Take the blame ("not your fault — mine"). Three relaxation suggestions with <em>concrete counts</em> ("47 matches open up") — turns a dead end into a dial. Exit to Browse saved if they'd rather cook something they already know.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · No match</div><Frame><SolveFailed/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><SolveFailed dark/></Frame></div>
+        </div>
+      </section>
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

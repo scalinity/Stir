@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 01 Shell &amp; Launch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  /* -------- Fonts & tokens (mirror Specs/Design-System.md §3–5) -------- */
+  :root {
+    --font-sans: -apple-system, "SF Pro Text", "SF Pro Display", BlinkMacSystemFont,
+                 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-serif: "New York", "NewYork", ui-serif, "Source Serif 4",
+                  "Charter", "Iowan Old Style", "Palatino", Georgia, serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+    /* Light palette — ink / paper / ember / semantic */
+    --ink-900:#1A1612; --ink-700:#3D342C; --ink-500:#6B5F54;
+    --ink-300:#A89E93; --ink-100:#E8E3DD;
+    --paper-50:#FAF7F2; --paper-100:#F3EEE5; --paper-200:#EBE3D6;
+    --ember-600:#C8532B; --ember-500:#E26340; --ember-100:#FBEAE0;
+    --sage-600:#4A7C59; --sage-100:#E4EEE6;
+    --amber-600:#B8860B; --amber-100:#F5ECD5;
+    --crimson-600:#9A2E2E; --crimson-100:#F2DCDC;
+    --voice-600:#5E4AE0; --voice-100:#E8E3FA;
+  }
+
+  /* Page shell (the gallery around the phones) */
+  html, body { margin:0; padding:0; }
+  body {
+    background:#EFEAE1;
+    font-family: var(--font-sans);
+    color: var(--ink-900);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .mock-page { min-height:100vh; padding: 48px 32px 80px; }
+  .mock-header { max-width: 1600px; margin: 0 auto 40px; }
+  .mock-title {
+    font-family: var(--font-serif);
+    font-weight: 600; font-size: 40px;
+    letter-spacing: -0.02em; line-height: 1.1;
+    color: var(--ink-900); margin: 0;
+  }
+  .mock-sub {
+    font-size: 15px; color: #6B5F54;
+    margin: 8px 0 0; max-width: 780px; line-height: 1.55;
+  }
+  .mock-sub em { color:#3D342C; font-style: italic; }
+  .mock-meta {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin-top: 20px; font-size: 11px; color: #6B5F54;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .mock-meta span {
+    padding: 4px 10px; background:#E8E3DD; border-radius:999px;
+  }
+  .mock-main { max-width: 1600px; margin: 0 auto; }
+  .mock-section {
+    margin-top: 56px; padding-top: 24px;
+    border-top: 1px solid #D9D2C4;
+  }
+  .mock-section:first-of-type { border-top:none; padding-top:0; margin-top:24px; }
+  .mock-section-title {
+    font-family: var(--font-serif);
+    font-weight: 600; font-size: 24px;
+    letter-spacing: -0.01em; color: var(--ink-900); margin: 0;
+  }
+  .mock-section-desc {
+    font-size: 14px; color:#6B5F54;
+    margin: 6px 0 0; max-width: 760px; line-height: 1.55;
+  }
+  .mock-row {
+    display: flex; flex-wrap: wrap; gap: 36px; margin-top: 24px;
+    align-items: flex-start;
+  }
+  .mock-cell { display: flex; flex-direction: column; gap: 10px; }
+  .mock-cell-label {
+    font-family: var(--font-sans);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: #6B5F54;
+  }
+  .mock-cell-caption {
+    font-size: 12px; line-height: 1.5; color:#6B5F54;
+    max-width: 410px; margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- =============== StirFrame (inlined) =============== -->
+<script type="text/babel">
+const STIR_LIGHT = { bg:'#FAF7F2', paper100:'#F3EEE5', paper200:'#EBE3D6',
+  ink900:'#1A1612', ink700:'#3D342C', ink500:'#6B5F54', ink300:'#A89E93',
+  ink100:'#E8E3DD', ember:'#C8532B', emberHover:'#E26340', emberTint:'#FBEAE0',
+  sage:'#4A7C59', sageTint:'#E4EEE6', amber:'#B8860B', amberTint:'#F5ECD5',
+  crimson:'#9A2E2E', crimsonTint:'#F2DCDC', voice:'#5E4AE0', voiceTint:'#E8E3FA' };
+
+const STIR_DARK = { bg:'#14100B', paper100:'#1F1A14', paper200:'#2A241C',
+  ink900:'#F5F0E8', ink700:'#D6CEC3', ink500:'#9A8F84', ink300:'#5E5349',
+  ink100:'#2E2822', ember:'#E26340', emberHover:'#F07D5A', emberTint:'#3A1E13',
+  sage:'#6FA07C', sageTint:'#1E2E23', amber:'#D4A21F', amberTint:'#2E2614',
+  crimson:'#C94747', crimsonTint:'#2E1818', voice:'#8473E8', voiceTint:'#1F1A33' };
+
+const useStir = (dark) => dark ? STIR_DARK : STIR_LIGHT;
+
+const SF = {
+  camera:   (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M7 6l2-3h6l2 3"/></svg>,
+  bookmark: (c, s=20, fill=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>,
+  gear:     (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 15l1.5 1-1 2-2-.5M5 15l-1.5 1 1 2 2-.5M19 9l1.5-1-1-2-2 .5M5 9l-1.5-1 1-2 2 .5M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>,
+  fork:     (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v8a2 2 0 002 2v10M10 2v8M6 2h4M18 2c0 4-2 6-2 10v10M18 2s2 2 2 6-2 4-2 4"/></svg>,
+  mic:      (c, s=20, fill=false, slash=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M8 21h8"/>{slash && <path d="M3 3l18 18" stroke={c} strokeWidth="2"/>}</svg>,
+  timer:    (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 8v5l3 2M9 2h6"/></svg>,
+  cart:     (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h2l2 13h12M7 17h12l2-9H6"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>,
+  check:    (c, s=16, fill=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={fill?"#fff":c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{fill && <circle cx="12" cy="12" r="10" fill={c} stroke="none"/>}<path d="M7 12l3.5 3.5L17 9"/></svg>,
+  question: (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 115 0c0 1.5-2.5 2-2.5 4"/><circle cx="12" cy="17" r="0.8" fill={c}/></svg>,
+  warn:     (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2L1 21h22L12 2zm0 6v7m0 2v1" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/></svg>,
+  sparkles: (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8zM20 14l.9 2.1L23 17l-2.1.9L20 20l-.9-2.1L17 17l2.1-.9zM5 14l.9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9z"/></svg>,
+  heart:    (c, s=20, fill=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M12 21s-8-4.5-8-11a5 5 0 019-3 5 5 0 019 3c0 6.5-8 11-8 11z"/></svg>,
+  chevronR: (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  chevronL: (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  close:    (c, s=18) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  download: (c, s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v13m-5-5l5 5 5-5M5 21h14"/></svg>,
+  plus:     (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  star:     (c, s=18, fill=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M12 2l3 7 7.5.6-5.7 5 1.8 7.4L12 18l-6.6 4 1.8-7.4-5.7-5L9 9z"/></svg>,
+  arrowR:   (c, s=18) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>,
+  lock:     (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>,
+  wifi:     (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  wifiSlash:(c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c2.5-2.5 5.5-4 9-4.7M14 4.4c2.8.5 5.5 2 8 4.6M5 13c2-2 4.3-3.2 7-3.6M13.5 9.5c2 .3 4 1.4 5.5 3.5M8.5 16.5c1-1 2-1.7 3.5-2M12 20v.01"/><path d="M3 3l18 18" stroke={c} strokeWidth="2"/></svg>,
+  info:     (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 11v6M12 7.5v.01" strokeLinecap="round"/></svg>,
+  cloudOff: (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 19a5 5 0 01-1-9.9 6 6 0 0110.5-2.5M20 16.5A5 5 0 0018 8"/><path d="M3 3l18 18" strokeWidth="2"/></svg>,
+};
+
+function StirStatusBar({ dark, time='7:42' }) {
+  const c = dark ? '#F5F0E8' : '#1A1612';
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'14px 28px 6px', fontFamily:'var(--font-sans)',
+      fontWeight:600, fontSize:15, color:c, height:44, boxSizing:'border-box' }}>
+      <span style={{ letterSpacing:0.2 }}>{time}</span>
+      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+        <svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>
+        {SF.wifi(c, 14)}
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function StirStatusBarOffline({ dark, time='7:42' }) {
+  const c = dark ? '#F5F0E8' : '#1A1612';
+  const orange = '#C8532B';
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'14px 28px 6px', fontFamily:'var(--font-sans)',
+      fontWeight:600, fontSize:15, color:c, height:44, boxSizing:'border-box' }}>
+      <span style={{ letterSpacing:0.2 }}>{time}</span>
+      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+        {/* No signal */}
+        <svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c} opacity="0.35"/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c} opacity="0.35"/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c} opacity="0.35"/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c} opacity="0.35"/></svg>
+        {SF.wifiSlash(c, 14)}
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function StirDynamicIsland() {
+  return <div style={{ position:'absolute', top:10, left:'50%', transform:'translateX(-50%)',
+    width:120, height:34, borderRadius:20, background:'#000', zIndex:100 }} />;
+}
+
+function StirTabBar({ active='tonight', dark }) {
+  const c = useStir(dark);
+  const items = [
+    { key:'tonight', label:'Tonight', icon: SF.fork },
+    { key:'saved', label:'Saved', icon: (col, s) => SF.bookmark(col, s, active==='saved') },
+    { key:'settings', label:'Settings', icon: SF.gear },
+  ];
+  return (
+    <div style={{ borderTop:`1px solid ${c.ink100}`, background:c.bg,
+      padding:'8px 0 24px', display:'flex', justifyContent:'space-around' }}>
+      {items.map(it => {
+        const on = it.key === active;
+        const col = on ? c.ember : c.ink500;
+        return (
+          <div key={it.key} style={{ display:'flex', flexDirection:'column',
+            alignItems:'center', gap:4, minWidth:64 }}>
+            {it.icon(col, 22)}
+            <span style={{ fontFamily:'var(--font-sans)',
+              fontSize:11, fontWeight:500, color:col, letterSpacing:0.1 }}>{it.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StirFrame({ children, dark=false, time='7:42', showTab=false, activeTab='tonight',
+                     width=390, height=844, offline=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
+      <div style={{ width:width+12, height:height+12, padding:6, boxSizing:'border-box',
+        background: dark ? '#0a0805' : '#f7f3ec',
+        borderRadius:54,
+        boxShadow: `0 2px 0 ${dark?'#2a2520':'#e8e1d4'} inset, 0 30px 60px rgba(26,22,18,0.18)` }}>
+        <div style={{ width, height, borderRadius:48, background:c.bg, overflow:'hidden',
+          position:'relative', fontFamily:'var(--font-sans)',
+          WebkitFontSmoothing:'antialiased', color:c.ink900 }}>
+          <StirDynamicIsland />
+          {offline
+            ? <StirStatusBarOffline dark={dark} time={time} />
+            : <StirStatusBar dark={dark} time={time} />}
+          <div style={{ height: height - 44 - (showTab ? 78 : 0), overflow:'hidden',
+            display:'flex', flexDirection:'column' }}>{children}</div>
+          {showTab && <StirTabBar active={activeTab} dark={dark} />}
+          <div style={{ position:'absolute', bottom:8, left:'50%',
+            transform:'translateX(-50%)', width:134, height:5, borderRadius:999,
+            background: dark ? '#F5F0E8' : '#1A1612', opacity:0.4 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Expose to subsequent Babel blocks
+Object.assign(window, { StirFrame, SF, useStir, STIR_LIGHT, STIR_DARK });
+</script>
+
+<!-- =============== Package screens =============== -->
+<script type="text/babel">
+const { StirFrame, SF, useStir } = window;
+
+/* ---------- Launch Screen (catalog #1) --------------------------------- */
+function LaunchScreen({ dark=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', position:'relative' }}>
+      <div style={{
+        fontFamily:'var(--font-serif)', fontWeight:600, fontSize:96,
+        letterSpacing:'-0.04em', color:c.ink900, lineHeight:1 }}>
+        Stir<span style={{ color:c.ember }}>.</span>
+      </div>
+      <div style={{ position:'absolute', bottom:96 }}>
+        <div style={{ width:24, height:24, borderRadius:999,
+          border:`2px solid ${c.ink100}`, borderTopColor:c.ember,
+          animation:'stirSpin 0.9s linear infinite' }} />
+      </div>
+      <style>{`@keyframes stirSpin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function LaunchRestoreScreen({ dark=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', position:'relative' }}>
+      <div style={{
+        fontFamily:'var(--font-serif)', fontWeight:600, fontSize:96,
+        letterSpacing:'-0.04em', color:c.ink900, lineHeight:1 }}>
+        Stir<span style={{ color:c.ember }}>.</span>
+      </div>
+      <div style={{ position:'absolute', bottom:96, display:'flex',
+        flexDirection:'column', alignItems:'center', gap:12 }}>
+        <div style={{ width:24, height:24, borderRadius:999,
+          border:`2px solid ${c.ink100}`, borderTopColor:c.ember,
+          animation:'stirSpin 0.9s linear infinite' }} />
+        <div style={{ fontSize:13, color:c.ink500, letterSpacing:0.1 }}>
+          Picking up where you left off…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Welcome (catalog #2) --------------------------------------- */
+function WelcomeScreen({ dark=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column',
+      padding:'12px 20px 24px' }}>
+
+      <div style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:22,
+        letterSpacing:'-0.02em', color:c.ink900, paddingLeft:4, paddingTop:4 }}>
+        Stir<span style={{ color:c.ember }}>.</span>
+      </div>
+
+      <div style={{ flex:1, display:'flex', flexDirection:'column',
+        justifyContent:'center', gap:20, paddingBottom:48 }}>
+
+        {/* Simple illustrated bowl motif — NOT a food photo */}
+        <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
+          <svg width="140" height="84" viewBox="0 0 140 84" fill="none">
+            {/* steam */}
+            <path d="M50 18 Q54 8 50 0" stroke={c.ink300} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+            <path d="M70 16 Q74 6 70 -2" stroke={c.ink300} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+            <path d="M90 18 Q94 8 90 0" stroke={c.ink300} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+            {/* rim */}
+            <ellipse cx="70" cy="34" rx="56" ry="8" fill={c.emberTint} stroke={c.ember} strokeWidth="1.5"/>
+            {/* bowl body */}
+            <path d="M16 36 Q70 90 124 36 L118 62 Q70 92 22 62 Z" fill={c.paper200} stroke={c.ember} strokeWidth="1.5" strokeLinejoin="round"/>
+            {/* ingredients */}
+            <circle cx="56" cy="32" r="4" fill={c.ember}/>
+            <circle cx="70" cy="30" r="3" fill={c.amber}/>
+            <circle cx="84" cy="32" r="4" fill={c.sage}/>
+            <circle cx="64" cy="35" r="2" fill={c.ink700}/>
+            <circle cx="78" cy="35" r="2" fill={c.ink700}/>
+          </svg>
+        </div>
+
+        <h1 style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:40,
+          lineHeight:'46px', letterSpacing:'-0.025em', color:c.ink900,
+          margin:0, textWrap:'balance' }}>
+          Cook what you already&nbsp;have.
+        </h1>
+        <p style={{ fontFamily:'var(--font-sans)', fontSize:17, lineHeight:'24px',
+          color:c.ink700, margin:0, maxWidth:330 }}>
+          Scan your kitchen. Stir gives you three dinners, ranked — then walks
+          you through one.
+        </p>
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        <button style={{ height:52, borderRadius:12, border:0, background:c.ember,
+          color:'#fff', fontFamily:'var(--font-sans)', fontSize:17, fontWeight:600,
+          letterSpacing:'-0.01em', cursor:'pointer' }}>
+          Try it now
+        </button>
+        <button style={{ height:44, border:0, background:'transparent', color:c.ember,
+          fontFamily:'var(--font-sans)', fontSize:15, fontWeight:600, cursor:'pointer' }}>
+          See a sample
+        </button>
+      </div>
+
+      <div style={{ textAlign:'center', fontSize:12, color:c.ink500,
+        marginTop:8 }}>
+        No account needed. Your scans stay on device.
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Offline fallback banner state (catalog #3) ----------------- */
+function OfflineFallbackScreen({ dark=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column' }}>
+
+      {/* Banner (info flavor, §8.7) */}
+      <div style={{ background:c.paper200, borderBottom:`1px solid ${c.ink100}`,
+        padding:'10px 16px', display:'flex', alignItems:'center', gap:10, minHeight:44 }}>
+        {SF.cloudOff(c.ink700, 16)}
+        <div style={{ flex:1, fontSize:13, lineHeight:'18px', color:c.ink700 }}>
+          <span style={{ fontWeight:600, color:c.ink900 }}>You're offline.</span>
+          {' '}Saved meals and the last scan still work.
+        </div>
+        <button style={{ background:'transparent', border:0, color:c.ember,
+          fontSize:13, fontWeight:600, padding:4, cursor:'pointer' }}>Retry</button>
+      </div>
+
+      {/* Greeting */}
+      <div style={{ padding:'16px 20px 12px' }}>
+        <div style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:28,
+          lineHeight:'34px', letterSpacing:'-0.015em', color:c.ink900 }}>
+          Tonight
+        </div>
+        <div style={{ fontSize:15, color:c.ink500, marginTop:4 }}>
+          Wednesday · 7:42 PM · <span style={{ color:c.amber, fontWeight:500 }}>Offline</span>
+        </div>
+      </div>
+
+      <div style={{ flex:1, overflow:'hidden', padding:'4px 16px 16px' }}>
+
+        {/* Scan CTA dimmed because it requires network */}
+        <div style={{ background:c.paper100, borderRadius:16,
+          border:`1px solid ${c.ink100}`, padding:18, opacity:0.55 }}>
+          <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:6 }}>
+            {SF.camera(c.ink500, 20)}
+            <span style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:18,
+              color:c.ink900 }}>Scan your kitchen</span>
+          </div>
+          <div style={{ fontSize:14, color:c.ink500, lineHeight:'20px' }}>
+            Needs a connection. I'll pick this up when you're back online.
+          </div>
+        </div>
+
+        <div style={{ marginTop:20, fontSize:12, fontWeight:600, color:c.ink500,
+          letterSpacing:0.12*12/12+'em', textTransform:'uppercase', paddingLeft:4,
+          display:'flex', alignItems:'baseline', gap:8 }}>
+          <span style={{ letterSpacing:'0.12em' }}>Available offline</span>
+          <span style={{ fontSize:11, color:c.ink300, fontWeight:500, letterSpacing:'0.08em' }}>
+            · Last sync 2h ago
+          </span>
+        </div>
+
+        <div style={{ marginTop:10, background:c.paper100, borderRadius:16,
+          border:`1px solid ${c.ink100}`, overflow:'hidden' }}>
+          {[
+            { t:'Sheet Pan Chicken & Crispy Chickpeas', s:'Saved · cooked 3× · 35 min' },
+            { t:'Miso-Butter Salmon', s:'Saved · cooked 1× · 20 min' },
+            { t:'Weeknight Chana Masala', s:'Saved · 28 min' },
+          ].map((r, i, a) => (
+            <div key={r.t} style={{ padding:'14px 16px', display:'flex',
+              gap:12, alignItems:'center',
+              borderBottom: i < a.length-1 ? `1px solid ${c.ink100}`:'none' }}>
+              <div style={{ width:40, height:40, borderRadius:10, background:c.paper200,
+                display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {SF.fork(c.ink700, 18)}
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:15, fontWeight:500, color:c.ink900 }}>{r.t}</div>
+                <div style={{ fontSize:13, color:c.ink500, marginTop:2 }}>{r.s}</div>
+              </div>
+              {SF.chevronR(c.ink300, 14)}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop:22, textAlign:'center', fontSize:13, color:c.ink500 }}>
+          iCloud sync resumes when you're back online.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Page ------------------------------------------------------- */
+function Page() {
+  return (
+    <div className="mock-page">
+      <header className="mock-header">
+        <h1 className="mock-title">01 · Shell &amp; Launch</h1>
+        <p className="mock-sub">
+          The first three surfaces: the launch handoff, the Welcome screen that
+          frames the tagline <em>"Cook what you already have,"</em> and the
+          persistent offline banner state. This package establishes the visual
+          language — warm paper background, New York display face, one ember
+          accent for every primary action, no gradients, no glass.
+        </p>
+        <div className="mock-meta">
+          <span>Catalog #1–#3</span>
+          <span>iPhone 16 Pro · 390×844</span>
+          <span>Dynamic Type default</span>
+          <span>Specs/Design-System.md §3–5</span>
+        </div>
+      </header>
+
+      <main className="mock-main">
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Launch / Session Restore</h2>
+          <p className="mock-section-desc">
+            On-screen &lt;2s. Centered wordmark in New York Semibold — the one
+            ember dot on the <em>i</em> is Stir's only mark of visual character.
+            Subtle 24pt spinner below. No tagline, no illustration. The restore
+            variant adds a single-line caption so returning users know state is
+            being rehydrated.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Cold launch</div>
+              <StirFrame dark={false} time="7:14"><LaunchScreen /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Cold launch</div>
+              <StirFrame dark={true} time="20:42"><LaunchScreen dark /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Session restore</div>
+              <StirFrame dark={false} time="7:42"><LaunchRestoreScreen /></StirFrame>
+              <div className="mock-cell-caption">
+                Shown when there's an in-flight MealSolveRequest or a Cook Mode
+                session to resume.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Welcome</h2>
+          <p className="mock-section-desc">
+            First screen for a fresh install. Tagline is the hero, set in
+            display.xl bumped to 40pt for impact. A restrained illustrated bowl
+            motif — not a food photo — hints at the product's character. Primary
+            "Try it now" advances to Setup 1; "See a sample" opens a pre-baked
+            scan so users can preview without giving camera permission up front.
+            The sub-line defuses the "do I need to log in?" anxiety.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Default</div>
+              <StirFrame dark={false} time="7:31"><WelcomeScreen /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Default</div>
+              <StirFrame dark={true} time="20:48"><WelcomeScreen dark /></StirFrame>
+            </div>
+          </div>
+        </section>
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Offline fallback (SYNC-01)</h2>
+          <p className="mock-section-desc">
+            Persistent top banner, info flavor — not an error, this is expected
+            state. Scan CTA dims to ~55% opacity (the system-wide disabled
+            pattern from §8.1) instead of swapping to a disabled gray fill.
+            Saved meals surface as the offline-accessible destination.
+            Status-bar glyphs swap to no-signal + wifi-slash for realism.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Offline</div>
+              <StirFrame dark={false} time="7:42" showTab activeTab="tonight" offline>
+                <OfflineFallbackScreen />
+              </StirFrame>
+              <div className="mock-cell-caption">
+                Banner clears automatically when reachability returns; Retry
+                re-probes without a full reload.
+              </div>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Offline</div>
+              <StirFrame dark={true} time="21:15" showTab activeTab="tonight" offline>
+                <OfflineFallbackScreen dark />
+              </StirFrame>
+              <div className="mock-cell-caption">
+                Dark mode is the typical "9pm cooking in dim light" context.
+                Paper tones stay warm, never pure black.
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Page />);
+</script>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 04 Scan Flow</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+    --font-serif:"New York","NewYork",ui-serif,"Source Serif 4","Charter",Georgia,serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  html,body{margin:0;padding:0}
+  body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}
+  .mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}
+  .mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}
+  .mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}
+  .mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}
+  .mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+  .mock-cell-caption{font-size:12px;line-height:1.5;color:#6B5F54;max-width:410px;margin-top:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',crimson:'#9A2E2E',crimsonTint:'#F2DCDC'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',crimson:'#C94747',crimsonTint:'#2E1818'};
+const useStir=(d)=>d?D:L;
+const SF={
+  camera:(c,s=20)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M7 6l2-3h6l2 3"/></svg>,
+  check:(c,s=16,fill=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={fill?"#fff":c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{fill&&<circle cx="12" cy="12" r="10" fill={c} stroke="none"/>}<path d="M7 12l3.5 3.5L17 9"/></svg>,
+  x:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  plus:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  chevronL:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  arrowR:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>,
+  flash:(c,s=20,on=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill={on?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>,
+  flip:(c,s=20)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l3 3-3 3M4 11V9a3 3 0 013-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 01-3 3H4"/></svg>,
+  sparkles:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8zM20 14l.9 2.1L23 17l-2.1.9L20 20l-.9-2.1L17 17l2.1-.9z"/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  edit:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>,
+};
+function Bar({dark,time='7:35'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 28px 6px',fontWeight:600,fontSize:15,color:c,height:44,boxSizing:'border-box'}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function BarLight({time='7:35'}){return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 28px 6px',fontWeight:600,fontSize:15,color:'#fff',height:44,boxSizing:'border-box'}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill="#fff"/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill="#fff"/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill="#fff"/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill="#fff"/></svg>{SF.wifi('#fff')}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke="#fff" strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill="#fff"/><rect x="21" y="4" width="2" height="4" rx="1" fill="#fff" opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='7:35',darkChrome=false}){const c=useStir(dark);return(<div style={{width:402,height:856,padding:6,boxSizing:'border-box',background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`}}><div style={{width:390,height:844,borderRadius:48,background:darkChrome?'#000':c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/>{darkChrome?<BarLight time={time}/>:<Bar dark={dark} time={time}/>}<div style={{height:844-44,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:darkChrome?'#fff':(dark?'#F5F0E8':'#1A1612'),opacity:0.4}}/></div></div>);}
+
+/* ==================== SCAN PRIMER ==================== */
+function ScanPrimer({dark=false}){
+  const c=useStir(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',padding:'12px 20px 20px'}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:2,padding:6}}>{SF.chevronL(c.ember,16)} Cancel</button>
+    </div>
+    <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center',gap:18}}>
+      {/* Illustrative scan diagram */}
+      <div style={{display:'flex',justifyContent:'center',marginBottom:10}}>
+        <svg width="200" height="140" viewBox="0 0 200 140" fill="none">
+          <rect x="50" y="30" width="100" height="90" rx="6" fill={c.paper200} stroke={c.ink300} strokeWidth="1.5"/>
+          <rect x="50" y="30" width="100" height="24" rx="6" fill={c.ink100}/>
+          <circle cx="58" cy="42" r="2" fill={c.ink500}/><circle cx="66" cy="42" r="2" fill={c.ink500}/>
+          <rect x="62" y="62" width="18" height="22" rx="2" fill={c.ember} opacity="0.8"/>
+          <rect x="88" y="68" width="14" height="16" rx="2" fill={c.sage} opacity="0.8"/>
+          <circle cx="122" cy="78" r="8" fill={c.amber} opacity="0.8"/>
+          <rect x="62" y="92" width="76" height="18" rx="2" fill={c.crimson} opacity="0.35"/>
+          {/* scan bracket */}
+          <path d="M36 22v-8h8M164 22v-8h-8M36 128v8h8M164 128v8h-8" stroke={c.ember} strokeWidth="2.5" strokeLinecap="round"/>
+          {/* sparkle */}
+          <g transform="translate(170,28)"><path d="M0 -8l1.5 4.5L6 -2l-4.5 1.5L0 4l-1.5-4.5L-6 -2l4.5-1.5z" fill={c.ember}/></g>
+        </svg>
+      </div>
+      <div style={{textAlign:'center'}}>
+        <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:30,lineHeight:'36px',letterSpacing:'-0.02em',color:c.ink900,margin:'0 0 10px'}}>Scan your kitchen</h2>
+        <p style={{fontSize:15,lineHeight:'22px',color:c.ink500,margin:'0 auto',maxWidth:300}}>Aim at your open fridge, pantry shelf, or a spread on the counter. I'll identify what's there. Three to five photos is plenty.</p>
+      </div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,padding:'14px 16px',display:'flex',flexDirection:'column',gap:10}}>
+        {[
+          {t:'Good light helps',s:'Open a cabinet door, turn on the light'},
+          {t:'You can edit after',s:'Missed something? Add or remove on review'},
+          {t:'Stays on your device',s:'Photos aren\'t kept after the scan completes'},
+        ].map(r=>(<div key={r.t} style={{display:'flex',gap:12,alignItems:'flex-start'}}>
+          {SF.check(c.sage,16,true)}
+          <div><div style={{fontSize:14,fontWeight:600,color:c.ink900}}>{r.t}</div><div style={{fontSize:13,color:c.ink500,marginTop:1}}>{r.s}</div></div>
+        </div>))}
+      </div>
+    </div>
+    <button style={{height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{SF.camera('#fff',18)} Open camera</button>
+    <button style={{height:40,border:0,background:'transparent',color:c.ember,fontSize:14,fontWeight:600,marginTop:6}}>Type it in instead</button>
+  </div>);
+}
+
+/* ==================== CAPTURE ==================== */
+function ScanCapture(){
+  return(<div style={{flex:1,background:'#1a1a1a',display:'flex',flexDirection:'column',position:'relative',color:'#fff'}}>
+    {/* Viewfinder — mock fridge scene */}
+    <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg, #3d3630, #1a1612 60%, #0a0805)'}}>
+      {/* fridge shelves */}
+      <div style={{position:'absolute',top:70,left:40,right:40,bottom:120,background:'rgba(38,32,25,0.85)',borderRadius:8,border:'1px solid rgba(255,255,255,0.08)'}}>
+        <div style={{position:'absolute',left:0,right:0,top:'33%',height:1,background:'rgba(255,255,255,0.12)'}}/>
+        <div style={{position:'absolute',left:0,right:0,top:'66%',height:1,background:'rgba(255,255,255,0.12)'}}/>
+        {/* items */}
+        <div style={{position:'absolute',top:14,left:18,width:34,height:60,borderRadius:4,background:'#C8532B',opacity:0.78}}/>
+        <div style={{position:'absolute',top:20,left:62,width:26,height:54,borderRadius:3,background:'#E4EEE6',opacity:0.85}}/>
+        <div style={{position:'absolute',top:18,left:102,width:40,height:56,borderRadius:4,background:'#F5ECD5',opacity:0.8}}/>
+        <div style={{position:'absolute',top:20,right:18,width:52,height:50,borderRadius:6,background:'#6B5F54',opacity:0.6}}/>
+        <div style={{position:'absolute',top:110,left:20,right:20,height:60,borderRadius:4,background:'#4A7C59',opacity:0.55}}/>
+        <div style={{position:'absolute',bottom:14,left:22,width:50,height:50,borderRadius:48,background:'#B8860B',opacity:0.75}}/>
+        <div style={{position:'absolute',bottom:18,left:82,width:36,height:44,borderRadius:4,background:'#9A2E2E',opacity:0.7}}/>
+        <div style={{position:'absolute',bottom:16,right:24,width:44,height:46,borderRadius:4,background:'#E26340',opacity:0.65}}/>
+      </div>
+    </div>
+    {/* Top chrome */}
+    <div style={{position:'relative',zIndex:5,display:'flex',justifyContent:'space-between',padding:'8px 16px'}}>
+      <button style={{width:40,height:40,borderRadius:999,background:'rgba(0,0,0,0.4)',border:0,color:'#fff',fontSize:14,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.x('#fff',18)}</button>
+      <div style={{background:'rgba(0,0,0,0.4)',borderRadius:999,padding:'6px 12px',fontSize:12,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase'}}>Photo 2 of 5</div>
+      <button style={{width:40,height:40,borderRadius:999,background:'rgba(0,0,0,0.4)',border:0,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.flash('#fff',18,false)}</button>
+    </div>
+
+    {/* Reticle */}
+    <div style={{flex:1,position:'relative',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{position:'absolute',width:300,height:360,border:'2px solid rgba(255,255,255,0.7)',borderRadius:20,boxShadow:'0 0 0 9999px rgba(0,0,0,0.25)'}}>
+        {/* corner accents */}
+        <div style={{position:'absolute',top:-2,left:-2,width:28,height:28,borderTop:'3px solid #E26340',borderLeft:'3px solid #E26340',borderTopLeftRadius:20}}/>
+        <div style={{position:'absolute',top:-2,right:-2,width:28,height:28,borderTop:'3px solid #E26340',borderRight:'3px solid #E26340',borderTopRightRadius:20}}/>
+        <div style={{position:'absolute',bottom:-2,left:-2,width:28,height:28,borderBottom:'3px solid #E26340',borderLeft:'3px solid #E26340',borderBottomLeftRadius:20}}/>
+        <div style={{position:'absolute',bottom:-2,right:-2,width:28,height:28,borderBottom:'3px solid #E26340',borderRight:'3px solid #E26340',borderBottomRightRadius:20}}/>
+        {/* guidance */}
+        <div style={{position:'absolute',bottom:-44,left:0,right:0,textAlign:'center',fontSize:13,fontWeight:500,color:'#fff',textShadow:'0 1px 4px rgba(0,0,0,0.8)'}}>
+          Frame one area. Move closer if items look small.
+        </div>
+      </div>
+    </div>
+
+    {/* Thumbnail strip + shutter */}
+    <div style={{position:'relative',zIndex:5,padding:'16px 24px 28px',display:'flex',alignItems:'center',gap:20,justifyContent:'space-between'}}>
+      <div style={{display:'flex',gap:6}}>
+        <div style={{width:44,height:44,borderRadius:8,background:'#C8532B',border:'1.5px solid rgba(255,255,255,0.6)'}}/>
+        <div style={{width:44,height:44,borderRadius:8,background:'#4A7C59',border:'1.5px solid rgba(255,255,255,0.6)'}}/>
+        <div style={{width:44,height:44,borderRadius:8,background:'rgba(255,255,255,0.08)',border:'1.5px dashed rgba(255,255,255,0.4)'}}/>
+      </div>
+      <button style={{width:72,height:72,borderRadius:999,background:'#fff',border:'4px solid rgba(255,255,255,0.35)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{width:56,height:56,borderRadius:999,background:'#fff'}}/>
+      </button>
+      <button style={{height:44,padding:'0 16px',borderRadius:22,background:'#C8532B',border:0,color:'#fff',fontSize:14,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
+        Done {SF.arrowR('#fff',14)}
+      </button>
+    </div>
+  </div>);
+}
+
+/* ==================== REVIEW ==================== */
+function ScanReview({dark=false}){
+  const c=useStir(dark);
+  const groups=[
+    {k:'Proteins',items:[
+      {n:'Salmon fillets',q:'~1 lb',soon:true},
+      {n:'Eggs',q:'8',soon:false},
+      {n:'Firm tofu',q:'14 oz block',soon:false},
+    ]},
+    {k:'Produce',items:[
+      {n:'Scallions',q:'1 bunch',soon:true},
+      {n:'Spinach',q:'~5 oz',soon:false},
+      {n:'Garlic',q:'~5 cloves',soon:false},
+      {n:'Lemon',q:'1',soon:false,low:true},
+      {n:'Ginger',q:'thumb',soon:false},
+    ]},
+    {k:'Pantry',items:[
+      {n:'White miso',q:'small tub',soon:false},
+      {n:'Jasmine rice',q:'~3 cups',soon:false},
+      {n:'Soy sauce',q:'full',soon:false},
+      {n:'Sesame oil',q:'full',soon:false},
+      {n:'Sesame seeds',q:'½ jar',soon:false,low:true},
+    ]},
+  ];
+  const Chip=({item})=>{
+    const bg=item.soon?c.amberTint:item.low?c.paper200:c.paper100;
+    const bd=item.soon?c.amber:c.ink100;
+    const fg=item.soon?c.amber:c.ink700;
+    return(<div style={{display:'inline-flex',alignItems:'center',gap:0,borderRadius:999,background:bg,border:`1px solid ${bd}`,padding:'6px 4px 6px 12px',margin:'0 6px 6px 0'}}>
+      <div style={{display:'flex',flexDirection:'column',lineHeight:1.1,paddingRight:8}}>
+        <span style={{fontSize:13,fontWeight:600,color:item.soon?fg:c.ink900}}>{item.n}</span>
+        <span style={{fontSize:11,color:fg,marginTop:2}}>{item.q}{item.soon?' · use soon':item.low?' · low':''}</span>
+      </div>
+      <button style={{width:22,height:22,borderRadius:999,background:'transparent',border:0,color:c.ink500,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.x(c.ink500,12)}</button>
+    </div>);
+  };
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:2,padding:6}}>{SF.chevronL(c.ember,16)} Retake</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Review</div>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,padding:6,display:'flex',alignItems:'center',gap:4}}>{SF.edit(c.ember,14)} Edit</button>
+    </div>
+
+    <div style={{flex:1,overflow:'hidden',padding:'0 18px'}}>
+      <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:4}}>
+        <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:26,lineHeight:'32px',letterSpacing:'-0.02em',color:c.ink900,margin:0}}>Found 13 things</h2>
+        <div style={{display:'flex',alignItems:'center',gap:4,fontSize:12,color:c.sage,fontWeight:600,letterSpacing:0.1,textTransform:'uppercase'}}>
+          {SF.sparkles(c.sage,12)} AI
+        </div>
+      </div>
+      <div style={{fontSize:13,color:c.ink500,marginBottom:16}}>Tap × to remove. Swipe left on a chip to mark "almost out".</div>
+
+      {groups.map(g=>(<div key={g.k} style={{marginBottom:18}}>
+        <div style={{fontSize:11,fontWeight:600,color:c.ink500,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+          <span>{g.k}</span>
+          <span style={{background:c.paper200,color:c.ink500,fontWeight:500,padding:'1px 6px',borderRadius:999,fontSize:10}}>{g.items.length}</span>
+        </div>
+        <div>{g.items.map(it=><Chip key={it.n} item={it}/>)}
+          <button style={{display:'inline-flex',alignItems:'center',gap:4,padding:'6px 12px',margin:'0 6px 6px 0',borderRadius:999,background:'transparent',color:c.ink500,border:`1px dashed ${c.ink300}`,fontSize:13,fontWeight:500}}>
+            {SF.plus(c.ink500,14)} Add
+          </button>
+        </div>
+      </div>))}
+    </div>
+
+    <div style={{padding:'14px 18px 20px',borderTop:`1px solid ${c.ink100}`,background:c.bg}}>
+      <button style={{width:'100%',height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+        Find me dinner {SF.arrowR('#fff',18)}
+      </button>
+      <div style={{textAlign:'center',fontSize:12,color:c.ink500,marginTop:8}}>
+        I'll match against 4 servings · pescatarian, nut-free
+      </div>
+    </div>
+  </div>);
+}
+
+/* ==================== SAMPLE FALLBACK ==================== */
+function ScanSample({dark=false}){
+  const c=useStir(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:2,padding:6}}>{SF.chevronL(c.ember,16)} Back</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Sample kitchen</div>
+      <div style={{width:50}}/>
+    </div>
+
+    <div style={{padding:'0 18px 16px'}}>
+      <div style={{background:c.voiceTint||c.amberTint,border:`1px solid ${c.amber}`,borderRadius:12,padding:'12px 14px',display:'flex',gap:10,alignItems:'flex-start',marginBottom:16}}>
+        {SF.sparkles(c.amber,16)}
+        <div style={{fontSize:13,lineHeight:'18px',color:c.ink900}}>
+          <b>Just exploring?</b> This is a typical weeknight kitchen. Solve against it, then come back and scan your own.
+        </div>
+      </div>
+
+      <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:24,lineHeight:'30px',letterSpacing:'-0.015em',color:c.ink900,margin:'0 0 4px'}}>Sample inventory</h2>
+      <div style={{fontSize:13,color:c.ink500,marginBottom:18}}>18 items · 3 groups</div>
+
+      {[
+        {k:'Proteins',list:'Chicken thighs · Eggs · Greek yogurt · Firm tofu'},
+        {k:'Produce',list:'Onion · Garlic · Carrots · Bell peppers · Spinach · Lemon · Cilantro · Tomatoes'},
+        {k:'Pantry',list:'Rice · Pasta · Olive oil · Soy sauce · Cumin · Chickpeas · Coconut milk'},
+      ].map(g=>(<div key={g.k} style={{marginBottom:14,padding:'14px 16px',borderRadius:14,background:c.paper100,border:`1px solid ${c.ink100}`}}>
+        <div style={{fontSize:11,fontWeight:600,color:c.ember,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:6}}>{g.k}</div>
+        <div style={{fontSize:14,lineHeight:'22px',color:c.ink700}}>{g.list}</div>
+      </div>))}
+    </div>
+
+    <div style={{flex:1}}/>
+
+    <div style={{padding:'14px 18px 20px',borderTop:`1px solid ${c.ink100}`,display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:'transparent',border:`1px solid ${c.ink100}`,color:c.ink700,fontSize:15,fontWeight:600}}>Scan my own</button>
+      <button style={{flex:2,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:15,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>Solve with sample {SF.arrowR('#fff',16)}</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">04 · Scan Flow</h1>
+      <p className="mock-sub">
+        Four stops: <em>primer → capture → review → solve</em>. Review is where
+        trust is earned or lost — every identified item is a chip the user can
+        dismiss, edit, or add to, grouped by Protein / Produce / Pantry. "Use
+        soon" items are pre-tinted amber so downstream solves can rationally
+        prefer them. The sample kitchen fallback lets evaluation-mode users hit
+        Solve without ever pointing a camera.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #10–#13</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Camera chrome: dark</span>
+        <span>Recovery: on-device OCR if API fails</span>
+      </div>
+    </header>
+
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Camera primer</h2>
+        <p className="mock-section-desc">
+          Dismissable intro, shown only the first time. Confirms privacy
+          ("photos aren't kept"), sets expectations ("3–5 photos"), and offers
+          the type-it-in escape hatch so camera permission isn't a hard gate.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Primer</div><Frame><ScanPrimer/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Primer</div><Frame dark><ScanPrimer dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Capture</h2>
+        <p className="mock-section-desc">
+          Full-bleed live camera feed. Chrome is translucent-on-dark regardless
+          of system theme — the subject lives inside the frame. Ember reticle
+          accents (the only ember in the flow so far) act as a positive
+          confirmation that this is the primary moment. Thumb strip on bottom
+          left shows captured photos; ember <em>Done</em> pill on the right is
+          active after photo 1.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Capture · Photo 2 of 5</div><Frame darkChrome time="7:35"><ScanCapture/></Frame>
+            <div className="mock-cell-caption">Shutter button uses the iOS system treatment. Flash/flip glyphs in the top corners. Counter pill top-center.</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Review &amp; edit</h2>
+        <p className="mock-section-desc">
+          Items land as tappable chips grouped semantically. Quantity is
+          approximate and shown in small type. Amber-tinted "use soon" items
+          carry their urgency down to solve. "AI" micro-tag acknowledges the
+          vision model is doing the identification — honesty about the estimate.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Review</div><Frame><ScanReview/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Review</div><Frame dark><ScanReview dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Sample fallback</h2>
+        <p className="mock-section-desc">
+          Reached from Welcome → "See a sample" or Tonight Empty → "Try the
+          sample instead." Pre-baked inventory with an amber disclosure banner —
+          we're transparent this is a demo. Two-button footer mirrors the
+          real-review footer so the muscle memory transfers.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Sample</div><Frame><ScanSample/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Sample</div><Frame dark><ScanSample dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 05 Solve Flow</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4","Charter",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}
+  body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}
+  .mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}
+  .mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}
+  .mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}
+  .mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}
+  .mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+  .mock-cell-caption{font-size:12px;line-height:1.5;color:#6B5F54;max-width:410px;margin-top:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',crimson:'#9A2E2E',crimsonTint:'#F2DCDC'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',crimson:'#C94747',crimsonTint:'#2E1818'};
+const u=(d)=>d?D:L;
+const SF={
+  close:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  chevronL:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  chevronR:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  chevronD:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>,
+  arrowR:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>,
+  sparkles:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8zM20 14l.9 2.1L23 17l-2.1.9L20 20l-.9-2.1L17 17l2.1-.9z"/></svg>,
+  clock:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
+  bookmark:(c,s=18,fill=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>,
+  heart:(c,s=18,fill=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={c} strokeWidth="1.7" strokeLinejoin="round"><path d="M12 21s-8-4.5-8-11a5 5 0 019-3 5 5 0 019 3c0 6.5-8 11-8 11z"/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  grip:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><circle cx="9" cy="7" r="1.3"/><circle cx="15" cy="7" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="17" r="1.3"/><circle cx="15" cy="17" r="1.3"/></svg>,
+  flame:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2s-1 3-4 6c-3 3-4 6-4 8a8 8 0 0016 0c0-2-1-4-2-5 0 3-2 4-3 4 0-4-3-8-3-13z"/></svg>,
+};
+function Bar({dark,time='7:42'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 28px 6px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='7:42'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,boxSizing:'border-box',background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:800,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4}}/></div></div>);}
+
+/* Plate placeholder (smaller variant than 03) */
+function Plate({c,size=140,tint='salmon'}){
+  const main=tint==='salmon'?c.ember:tint==='curry'?c.amber:tint==='green'?c.sage:c.crimson;
+  return(<svg width={size} height={size} viewBox="0 0 200 200">
+    <circle cx="100" cy="100" r="88" fill={c.paper200}/>
+    <circle cx="100" cy="100" r="76" fill={c.paper100}/>
+    <circle cx="100" cy="100" r="44" fill={main} opacity="0.85"/>
+    <circle cx="72" cy="94" r="12" fill={c.sage} opacity="0.75"/>
+    <circle cx="132" cy="96" r="10" fill={c.amber} opacity="0.85"/>
+    <circle cx="120" cy="128" r="9" fill={c.ink700} opacity="0.35"/>
+    {[...Array(10)].map((_,i)=><ellipse key={i} cx={86+(i%5)*6} cy={148+Math.floor(i/5)*5} rx="2" ry="1.2" fill={c.ink100}/>)}
+  </svg>);
+}
+
+/* ============= Constraints Sheet ============= */
+function Constraints({dark=false}){
+  const c=u(dark);
+  const Row=({label,val,sub,right})=>(
+    <div style={{padding:'14px 16px',borderBottom:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:12}}>
+      <div style={{flex:1}}>
+        <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{label}</div>
+        {sub&&<div style={{fontSize:12,color:c.ink500,marginTop:2}}>{sub}</div>}
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:6,color:c.ink700,fontSize:14,fontWeight:500}}>
+        {val} {right!==false && SF.chevronR(c.ink300,14)}
+      </div>
+    </div>
+  );
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    {/* Sheet handle */}
+    <div style={{display:'flex',justifyContent:'center',padding:'10px 0 4px'}}>
+      <div style={{width:44,height:5,borderRadius:999,background:c.ink300,opacity:0.6}}/>
+    </div>
+    <div style={{padding:'8px 16px 4px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,padding:6,color:c.ember,fontSize:15,fontWeight:500}}>Reset</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Constraints</div>
+      <button style={{width:30,height:30,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+    </div>
+
+    <div style={{padding:'10px 18px 8px'}}>
+      <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:24,lineHeight:'30px',letterSpacing:'-0.015em',color:c.ink900,margin:'4px 0 0'}}>How should I solve?</h2>
+      <p style={{fontSize:13,color:c.ink500,margin:'6px 0 0'}}>Defaults come from your profile. Changes here apply to this solve only.</p>
+    </div>
+
+    <div style={{margin:'16px 14px 0',borderRadius:14,background:c.paper100,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+      <Row label="Time" val="≤ 30 min" sub="Total active + passive"/>
+      <Row label="Servings" val="4"/>
+      <Row label="Effort" val="Weeknight easy" sub="1 pan, &lt; 6 steps"/>
+      <Row label="Lean into" val="Use soon: salmon, scallions" sub="Amber-flagged items"/>
+    </div>
+
+    <div style={{margin:'14px 14px 0',borderRadius:14,background:c.paper100,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+      <Row label="Must include" val="—"/>
+      <Row label="Must avoid" val="cilantro, blue cheese" sub="From your profile"/>
+      <Row label="Cuisine" val="Any"/>
+    </div>
+
+    <div style={{padding:'0 14px',marginTop:14}}>
+      <div style={{padding:'10px 14px',background:c.sageTint,borderRadius:10,border:`1px solid ${c.sage}`,display:'flex',gap:10,alignItems:'flex-start',fontSize:13,color:c.ink900,lineHeight:'18px'}}>
+        {SF.sparkles(c.sage,14)}
+        <div>I'll favor recipes that use your <b>amber-flagged</b> ingredients before they turn.</div>
+      </div>
+    </div>
+
+    <div style={{flex:1}}/>
+    <div style={{padding:'14px 18px 20px',borderTop:`1px solid ${c.ink100}`,background:c.bg}}>
+      <button style={{width:'100%',height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+        {SF.sparkles('#fff',16)} Solve dinner
+      </button>
+    </div>
+  </div>);
+}
+
+/* ============= Dinner Options (streaming) ============= */
+function Options({dark=false,streaming=true}){
+  const c=u(dark);
+  const all=[
+    {title:'Miso-Glazed Salmon with Sesame Rice',why:'Uses salmon expiring tomorrow. 22 min, 1 pan.',time:'22 min',pans:'1 pan',eff:'Easy',tag:'Tonight\'s pick',plate:'salmon',match:'High',tone:'sage'},
+    {title:'Spinach & Scallion Tofu Scramble, Rice Bowl',why:'Vegan swap. Uses scallions, spinach, rice, tofu.',time:'18 min',pans:'1 pan',eff:'Easy',tag:null,plate:'green',match:'High',tone:'sage'},
+    {title:'Everything Fried Rice with Crispy Egg',why:'Clears 6 pantry items. No shopping needed.',time:'15 min',pans:'1 wok',eff:'Easy',tag:'Fast',plate:'curry',match:'Medium',tone:'amber'},
+  ];
+  const shown=streaming?all.slice(0,2):all;
+
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:2,padding:6}}>{SF.chevronL(c.ember,16)} Back</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Dinner options</div>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:14,fontWeight:500,padding:6}}>Tune</button>
+    </div>
+
+    <div style={{padding:'0 20px 6px'}}>
+      <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:26,lineHeight:'32px',letterSpacing:'-0.02em',color:c.ink900,margin:0}}>
+        {streaming?'Thinking through options…':'Three ideas for tonight'}
+      </h2>
+      <div style={{fontSize:13,color:c.ink500,marginTop:6}}>
+        Ranked by fit to your kitchen, preferences, and the clock.
+      </div>
+    </div>
+
+    <div style={{flex:1,overflow:'hidden',padding:'16px 16px 12px',display:'flex',flexDirection:'column',gap:12}}>
+      {shown.map((opt,i)=>(<div key={opt.title} style={{background:c.paper100,borderRadius:16,border:`1px solid ${c.ink100}`,overflow:'hidden',display:'flex',gap:0}}>
+        <div style={{width:104,flexShrink:0,background:c.paper200,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <Plate c={c} size={96} tint={opt.plate}/>
+        </div>
+        <div style={{flex:1,padding:'12px 14px 12px',minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+            {i===0 && opt.tag && <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:c.ember,background:c.emberTint,padding:'2px 7px',borderRadius:999}}>{opt.tag}</div>}
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:opt.tone==='sage'?c.sage:c.amber,background:opt.tone==='sage'?c.sageTint:c.amberTint,padding:'2px 7px',borderRadius:999}}>{opt.match} match</div>
+          </div>
+          <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:16,lineHeight:'20px',color:c.ink900,marginBottom:4,textWrap:'balance'}}>{opt.title}</div>
+          <div style={{fontSize:12,color:c.ink500,lineHeight:'17px',marginBottom:8}}>{opt.why}</div>
+          <div style={{display:'flex',gap:10,fontSize:12,color:c.ink700}}>
+            <span style={{display:'flex',alignItems:'center',gap:3}}>{SF.clock(c.ink500,12)}{opt.time}</span>
+            <span>·</span><span>{opt.pans}</span><span>·</span><span>{opt.eff}</span>
+          </div>
+        </div>
+      </div>))}
+
+      {streaming && (<div style={{background:c.paper100,borderRadius:16,border:`1px dashed ${c.ink300}`,padding:'18px 14px',display:'flex',gap:12,alignItems:'center'}}>
+        <div style={{width:96,height:72,borderRadius:10,background:c.paper200,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          <div style={{width:22,height:22,borderRadius:999,border:`2px solid ${c.ink100}`,borderTopColor:c.ember,animation:'spin 0.9s linear infinite'}}/>
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:c.ember}}>Idea 3 of 3</div>
+          <div style={{fontSize:14,color:c.ink700,marginTop:4}}>Considering what uses your pantry staples…</div>
+        </div>
+      </div>)}
+
+      {!streaming && <div style={{background:'transparent',border:`1.5px dashed ${c.ink300}`,borderRadius:16,padding:'14px',display:'flex',alignItems:'center',gap:10}}>
+        <div style={{width:40,height:40,borderRadius:10,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.sparkles(c.ember,18)}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:600,color:c.ink900}}>Nothing here feels right?</div>
+          <div style={{fontSize:12,color:c.ink500,marginTop:2}}>Broaden the search — assume 1 missing ingredient.</div>
+        </div>
+        <button style={{height:32,padding:'0 12px',borderRadius:8,background:'transparent',border:`1px solid ${c.ember}`,color:c.ember,fontSize:13,fontWeight:600}}>Broaden</button>
+      </div>}
+
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  </div>);
+}
+
+/* ============= Dish Preview ============= */
+function Preview({dark=false}){
+  const c=u(dark);
+  const ingredients=[
+    {n:'Salmon fillets',q:'4 (about 1 lb)',have:true,soon:true},
+    {n:'White miso',q:'3 tbsp',have:true},
+    {n:'Soy sauce',q:'2 tbsp',have:true},
+    {n:'Mirin',q:'1 tbsp',have:false,sub:'rice vinegar + pinch sugar'},
+    {n:'Sesame oil',q:'1 tsp',have:true},
+    {n:'Jasmine rice',q:'1½ cups',have:true},
+    {n:'Scallions',q:'4, thin sliced',have:true,soon:true},
+    {n:'Toasted sesame',q:'1 tbsp',have:true},
+    {n:'Lemon',q:'½ for wedges',have:true},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    {/* Header / hero */}
+    <div style={{position:'relative',height:230,background:c.paper200,overflow:'hidden',flexShrink:0}}>
+      <div style={{position:'absolute',top:6,left:12,right:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <button style={{width:38,height:38,borderRadius:999,background:c.bg,border:0,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 1px 3px rgba(0,0,0,0.12)'}}>{SF.chevronL(c.ink900,16)}</button>
+        <div style={{display:'flex',gap:8}}>
+          <button style={{width:38,height:38,borderRadius:999,background:c.bg,border:0,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 1px 3px rgba(0,0,0,0.12)'}}>{SF.heart(c.ink700,18)}</button>
+          <button style={{width:38,height:38,borderRadius:999,background:c.bg,border:0,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 1px 3px rgba(0,0,0,0.12)'}}>{SF.bookmark(c.ember,18,true)}</button>
+        </div>
+      </div>
+      <div style={{display:'flex',justifyContent:'center',paddingTop:10}}>
+        <Plate c={c} size={210} tint="salmon"/>
+      </div>
+    </div>
+
+    <div style={{flex:1,overflow:'hidden',padding:'14px 20px 0'}}>
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember,display:'flex',alignItems:'center',gap:6}}>
+        {SF.sparkles(c.ember,12)} Why Stir picked this
+      </div>
+      <h2 style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:24,lineHeight:'30px',letterSpacing:'-0.015em',color:c.ink900,margin:'6px 0 4px',textWrap:'balance'}}>
+        Miso-Glazed Salmon with Sesame Rice
+      </h2>
+      <p style={{fontSize:14,color:c.ink500,lineHeight:'20px',margin:'0 0 10px'}}>
+        Your salmon expires tomorrow. Miso, soy, sesame and rice are all already in your pantry. Twenty-two minutes, one sheet pan.
+      </p>
+
+      <div style={{display:'flex',gap:14,marginBottom:14,fontSize:13,color:c.ink500}}>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>{SF.clock(c.ink500,13)}<b style={{color:c.ink700,fontWeight:600}}>22 min</b></div>
+        <span>·</span>
+        <div><b style={{color:c.ink700,fontWeight:600}}>4 servings</b></div>
+        <span>·</span>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>{SF.flame(c.ember,13)}<b style={{color:c.ink700,fontWeight:600}}>Easy</b></div>
+      </div>
+
+      <div style={{fontSize:11,fontWeight:600,color:c.ink500,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:10,display:'flex',alignItems:'baseline',gap:8}}>
+        Ingredients <span style={{fontSize:11,color:c.ink300,letterSpacing:'0.06em'}}>· 9 · 1 swap needed</span>
+      </div>
+
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {ingredients.map((it,i)=>(<div key={it.n} style={{padding:'11px 14px',display:'flex',alignItems:'center',gap:10,borderBottom:i<ingredients.length-1?`1px solid ${c.ink100}`:'none'}}>
+          <div style={{width:18,height:18,borderRadius:999,background:it.have?c.sage:'transparent',border:it.have?'none':`1.5px solid ${c.amber}`,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            {it.have && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M6 12l4 4 8-8"/></svg>}
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:14,color:c.ink900,display:'flex',alignItems:'center',gap:6}}>
+              <span>{it.n}</span>
+              {it.soon && <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:c.amber,background:c.amberTint,padding:'1px 6px',borderRadius:999}}>use soon</span>}
+            </div>
+            {it.sub ? <div style={{fontSize:12,color:c.amber,marginTop:2}}>Sub: {it.sub}</div> : null}
+          </div>
+          <div style={{fontFamily:'var(--font-mono)',fontSize:12,color:c.ink500,fontVariantNumeric:'tabular-nums'}}>{it.q}</div>
+        </div>))}
+      </div>
+
+      <div style={{height:10}}/>
+    </div>
+
+    <div style={{padding:'14px 18px 20px',borderTop:`1px solid ${c.ink100}`,background:c.bg,display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:'transparent',border:`1px solid ${c.ink100}`,color:c.ink700,fontSize:15,fontWeight:600}}>Swap ingredient</button>
+      <button style={{flex:1.8,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:16,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+        Start cooking {SF.arrowR('#fff',16)}
+      </button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">05 · Solve Flow</h1>
+      <p className="mock-sub">
+        The heart of the product. A bottom Constraints sheet frames the solve,
+        the <em>Dinner Options</em> screen streams in three ideas (each with a
+        one-line "why"), and the Dish Preview lays out the full recipe with
+        <em> have it / need to sub</em> rendered per-ingredient. Broaden-search
+        fallback lives inline — no dead ends.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #14–#16</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Streaming: 3 options over ~3s</span>
+        <span>Specs §8 — Solve</span>
+      </div>
+    </header>
+
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Constraints sheet</h2>
+        <p className="mock-section-desc">
+          Bottom sheet. Two grouped tables — "How" (time/servings/effort/lean-into)
+          and "Rules" (include/avoid/cuisine). Sage-tinted callout confirms the
+          use-soon logic so the system's intent is visible before solve.
+          Primary action is the one ember button anchored at the bottom.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Constraints</div><Frame><Constraints/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Constraints</div><Frame dark><Constraints dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Dinner options</h2>
+        <p className="mock-section-desc">
+          Horizontally-laid cards, 1-column. Each card: plate illustration,
+          confidence pill, title in New York, one-line justification, then
+          time/pans/effort meta. Top card owns a subtle <em>Tonight's pick</em>
+          ember tag. Streaming state shows the third slot as a dashed skeleton
+          with rolling narration. Empty third path uses the "broaden" affordance
+          so the user never hits a dead end.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Streaming (2 of 3)</div><Frame><Options/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Settled (3 of 3 + broaden)</div><Frame dark><Options dark streaming={false}/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Dish preview</h2>
+        <p className="mock-section-desc">
+          Recipe detail, pre-cook. Hero plate on a paper-200 pedestal,
+          save/favorite glyphs top-right. "Why Stir picked this" micro-title
+          in ember leads the narrative — the one-paragraph justification must
+          earn the user's trust before they commit. Ingredient list is the
+          functional core: sage check if they have it, amber circle + sub line
+          if they don't. Dual footer: escape hatch left (Swap ingredient),
+          hero ember right.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Preview</div><Frame><Preview/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Preview</div><Frame dark><Preview dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

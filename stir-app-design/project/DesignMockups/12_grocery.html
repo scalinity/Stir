@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 12 Grocery</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:820px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614'};
+const u=(d)=>d?D:L;
+const SF={
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  chev:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  back:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  check:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+  plus:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  search:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>,
+  cart:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h2l2.4 12.6a1.5 1.5 0 001.5 1.2h9.4a1.5 1.5 0 001.5-1.1L21 9H6"/><circle cx="9" cy="21" r="1.2"/><circle cx="18" cy="21" r="1.2"/></svg>,
+  sparkle:(c,s=12)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8z"/></svg>,
+  dots:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>,
+  share:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v14M7 8l5-5 5 5"/><path d="M5 17v3a1 1 0 001 1h12a1 1 0 001-1v-3"/></svg>,
+  pantry:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M4 9h16M4 15h16M12 3v18"/></svg>,
+  mic:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>,
+};
+function Bar({dark,time='6:44'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='6:44'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column',minHeight:0}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* ============ 1) List by recipe (Planning mode) ============ */
+function ListByRecipe({dark=false}){
+  const c=u(dark);
+  const recipes=[
+    {n:'Miso-Glazed Salmon',when:'Tonight',items:[{t:'Salmon fillets (2)',have:false,aisle:'Fish'},{t:'White miso',have:true,pantry:true},{t:'Mirin',have:false,aisle:'Asian'},{t:'Asparagus, 1 bunch',have:false,aisle:'Produce'}]},
+    {n:'Kale & Farro Salad',when:'Wed',items:[{t:'Lacinato kale',have:false,aisle:'Produce'},{t:'Farro',have:true,pantry:true},{t:'Parmesan',have:false,aisle:'Dairy'},{t:'Lemon (2)',have:false,aisle:'Produce'}]},
+    {n:'Turkey Meatball Soup',when:'Fri',items:[{t:'Ground turkey, 1 lb',have:false,aisle:'Meat'},{t:'Chicken stock',have:true,pantry:true},{t:'Pastina',have:false,aisle:'Pasta'}]},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    {/* Header */}
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.pantry(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Grocery</div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.share(c.ink700,15)}</button>
+    </div>
+
+    {/* Toggle */}
+    <div style={{padding:'0 20px 10px',display:'flex',gap:6,flexShrink:0}}>
+      {[{t:'Recipe',on:true},{t:'Aisle'},{t:'Pantry'}].map(r=>
+        <div key={r.t} style={{flex:1,height:34,borderRadius:10,background:r.on?c.ink900:c.paper100,color:r.on?c.bg:c.ink700,fontSize:13,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{r.t}</div>)}
+    </div>
+
+    {/* Count strip */}
+    <div style={{padding:'0 20px 10px',display:'flex',gap:12,alignItems:'baseline',flexShrink:0}}>
+      <div style={{fontFamily:'var(--font-serif)',fontSize:28,fontWeight:600,letterSpacing:'-0.01em',color:c.ink900}}>11</div>
+      <div style={{fontSize:13,color:c.ink500,flex:1}}>items to buy · 4 already in pantry</div>
+      <div style={{fontSize:11,color:c.sage,fontWeight:600}}>~$38</div>
+    </div>
+
+    {/* List */}
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 12px',minHeight:0}}>
+      {recipes.map((r,i)=><div key={i} style={{marginBottom:16}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:6}}>
+          <div style={{fontFamily:'var(--font-serif)',fontSize:16,fontWeight:600,color:c.ink900}}>{r.n}</div>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>{r.when}</div>
+        </div>
+        <div style={{background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+          {r.items.map((it,k)=><div key={k} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderTop:k===0?'none':`1px solid ${c.ink100}`}}>
+            <div style={{width:20,height:20,borderRadius:5,background:it.have?c.sageTint:'transparent',border:`1.5px solid ${it.have?c.sage:c.ink300}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              {it.have && SF.check(c.sage,12)}
+            </div>
+            <div style={{flex:1,fontSize:14,color:it.have?c.ink500:c.ink900,textDecoration:it.have?'line-through':'none'}}>{it.t}</div>
+            {it.pantry && <div style={{fontSize:10,color:c.sage,fontWeight:600,letterSpacing:'0.06em',textTransform:'uppercase'}}>Pantry</div>}
+            {!it.pantry && <div style={{fontSize:11,color:c.ink500}}>{it.aisle}</div>}
+          </div>)}
+        </div>
+      </div>)}
+    </div>
+
+    {/* Add */}
+    <div style={{padding:'10px 20px 28px',display:'flex',gap:10,borderTop:`1px solid ${c.ink100}`,background:c.bg,flexShrink:0}}>
+      <div style={{flex:1,height:44,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:8,padding:'0 12px'}}>
+        {SF.plus(c.ink500,14)}
+        <div style={{fontSize:13,color:c.ink500}}>Add item…</div>
+        <div style={{marginLeft:'auto'}}>{SF.mic(c.ink500,14)}</div>
+      </div>
+    </div>
+  </div>);
+}
+
+/* ============ 2) List by aisle (Store mode) ============ */
+function ListByAisle({dark=false}){
+  const c=u(dark);
+  const aisles=[
+    {a:'Produce',items:[{t:'Asparagus, 1 bunch',recipe:'Salmon'},{t:'Lacinato kale',recipe:'Kale salad'},{t:'Lemon (2)',recipe:'Kale salad'},{t:'Yellow onion, checked',recipe:'Soup',done:true}]},
+    {a:'Fish & Meat',items:[{t:'Salmon fillets (2)',recipe:'Salmon'},{t:'Ground turkey, 1 lb',recipe:'Soup'}]},
+    {a:'Dairy',items:[{t:'Parmesan, wedge',recipe:'Kale salad'}]},
+    {a:'Asian',items:[{t:'Mirin',recipe:'Salmon'}]},
+    {a:'Pasta & Grains',items:[{t:'Pastina',recipe:'Soup'}]},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.pantry(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Grocery</div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.share(c.ink700,15)}</button>
+    </div>
+
+    <div style={{padding:'0 20px 10px',display:'flex',gap:6}}>
+      {[{t:'Recipe'},{t:'Aisle',on:true},{t:'Pantry'}].map(r=>
+        <div key={r.t} style={{flex:1,height:34,borderRadius:10,background:r.on?c.ink900:c.paper100,color:r.on?c.bg:c.ink700,fontSize:13,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{r.t}</div>)}
+    </div>
+
+    {/* Store cart strip */}
+    <div style={{margin:'0 20px 12px',padding:'12px 14px',background:c.amberTint,border:`1px solid ${c.amber}66`,borderRadius:12,display:'flex',alignItems:'center',gap:10}}>
+      <div style={{width:32,height:32,borderRadius:999,background:c.amber,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{SF.cart('#fff',16)}</div>
+      <div style={{flex:1}}>
+        <div style={{fontSize:13,fontWeight:700,color:c.ink900}}>Shopping at Whole Foods — Gowanus</div>
+        <div style={{fontSize:11,color:c.ink500,marginTop:1}}>Sorted by this store's layout · 1 checked</div>
+      </div>
+    </div>
+
+    <div style={{flex:1,overflow:'hidden',padding:'0 20px'}}>
+      {aisles.map((a,i)=><div key={i} style={{marginBottom:12}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:6}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>{a.a}</div>
+          <div style={{fontSize:11,color:c.ink500}}>{a.items.length}</div>
+          <div style={{flex:1,height:1,background:c.ink100}}/>
+        </div>
+        {a.items.map((it,k)=><div key={k} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0'}}>
+          <div style={{width:22,height:22,borderRadius:6,background:it.done?c.sageTint:'transparent',border:`1.5px solid ${it.done?c.sage:c.ink300}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            {it.done && SF.check(c.sage,12)}
+          </div>
+          <div style={{flex:1,fontSize:14,fontWeight:500,color:it.done?c.ink500:c.ink900,textDecoration:it.done?'line-through':'none'}}>{it.t}</div>
+          <div style={{fontSize:11,color:c.ink500,fontStyle:'italic'}}>{it.recipe}</div>
+        </div>)}
+      </div>)}
+    </div>
+
+    <div style={{padding:'0 20px 28px',display:'flex',gap:10,alignItems:'center'}}>
+      <div style={{flex:1,height:44,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',gap:8,padding:'0 12px'}}>
+        {SF.plus(c.ink500,14)}
+        <div style={{fontSize:13,color:c.ink500}}>Add item…</div>
+        <div style={{marginLeft:'auto'}}>{SF.mic(c.ink500,14)}</div>
+      </div>
+    </div>
+  </div>);
+}
+
+/* ============ 3) Pantry ============ */
+function Pantry({dark=false}){
+  const c=u(dark);
+  const cats=[
+    {n:'Staples',items:[{t:'Olive oil',level:'full'},{t:'Kosher salt',level:'full'},{t:'Soy sauce',level:'low',note:'~3 tbsp left'},{t:'Honey',level:'full'}]},
+    {n:'Dry goods',items:[{t:'Farro',level:'full'},{t:'Pastina',level:'low'},{t:'Panko',level:'out',note:'Auto-added to list'}]},
+    {n:'Fridge',items:[{t:'Parmesan',level:'full'},{t:'Miso (white)',level:'full'},{t:'Eggs (4)',level:'low'}]},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Pantry</div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.search(c.ink700,15)}</button>
+    </div>
+
+    {/* Hero stat */}
+    <div style={{padding:'4px 20px 16px',display:'flex',gap:18,alignItems:'baseline'}}>
+      <div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:34,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:1}}>34</div>
+        <div style={{fontSize:11,color:c.ink500,marginTop:4,letterSpacing:'0.06em',textTransform:'uppercase'}}>Tracked</div>
+      </div>
+      <div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:34,fontWeight:600,letterSpacing:'-0.015em',color:c.amber,lineHeight:1}}>4</div>
+        <div style={{fontSize:11,color:c.ink500,marginTop:4,letterSpacing:'0.06em',textTransform:'uppercase'}}>Low</div>
+      </div>
+      <div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:34,fontWeight:600,letterSpacing:'-0.015em',color:c.ember,lineHeight:1}}>2</div>
+        <div style={{fontSize:11,color:c.ink500,marginTop:4,letterSpacing:'0.06em',textTransform:'uppercase'}}>Out</div>
+      </div>
+    </div>
+
+    {/* Auto-replenish callout */}
+    <div style={{margin:'0 20px 14px',padding:'12px 14px',background:c.emberTint,border:`1px solid ${c.ember}44`,borderRadius:12,display:'flex',alignItems:'center',gap:10}}>
+      <div style={{width:28,height:28,borderRadius:999,background:c.ember,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{SF.sparkle('#fff',14)}</div>
+      <div style={{flex:1}}>
+        <div style={{fontSize:13,fontWeight:600,color:c.ink900}}>2 staples auto-added to grocery</div>
+        <div style={{fontSize:11,color:c.ink500,marginTop:1}}>Panko, olive oil — based on your usage pace</div>
+      </div>
+      {SF.chev(c.ember,12)}
+    </div>
+
+    <div style={{flex:1,overflow:'hidden',padding:'0 20px'}}>
+      {cats.map((cat,i)=><div key={i} style={{marginBottom:14}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:6}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink700}}>{cat.n}</div>
+          <div style={{flex:1,height:1,background:c.ink100}}/>
+        </div>
+        {cat.items.map((it,k)=>{
+          const col=it.level==='full'?c.sage:(it.level==='low'?c.amber:c.ember);
+          const fill=it.level==='full'?'100%':(it.level==='low'?'25%':'0%');
+          return(<div key={k} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0'}}>
+            {/* Level bar */}
+            <div style={{width:32,height:8,borderRadius:4,background:c.ink100,overflow:'hidden',flexShrink:0}}>
+              <div style={{width:fill,height:'100%',background:col}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{it.t}</div>
+              {it.note && <div style={{fontSize:11,color:col,marginTop:1}}>{it.note}</div>}
+            </div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:col}}>{it.level}</div>
+          </div>);
+        })}
+      </div>)}
+    </div>
+
+    <div style={{padding:'0 20px 28px'}}>
+      <button style={{width:'100%',height:44,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:14,fontWeight:600,color:c.ink700,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{SF.plus(c.ink700,14)} Add to pantry</button>
+    </div>
+  </div>);
+}
+
+/* ============ 4) Add via voice/text quick entry ============ */
+function QuickAdd({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',position:'relative'}}>
+    {/* Dim */}
+    <div style={{position:'absolute',inset:0,background:c.bg,opacity:1}}/>
+    <div style={{position:'absolute',inset:0,padding:'8px 20px'}}>
+      <div style={{padding:'0 0 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{width:36,height:36,borderRadius:999,background:c.paper200}}/>
+        <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Grocery</div>
+        <div style={{width:36,height:36,borderRadius:999,background:c.paper200}}/>
+      </div>
+      <div style={{opacity:0.28}}>
+        <div style={{padding:'0 0 10px',display:'flex',gap:6}}>
+          {[{t:'Recipe'},{t:'Aisle',on:true},{t:'Pantry'}].map(r=>
+            <div key={r.t} style={{flex:1,height:34,borderRadius:10,background:r.on?c.ink900:c.paper100}}/>)}
+        </div>
+        {[...Array(6)].map((_,k)=><div key={k} style={{display:'flex',gap:10,padding:'10px 0'}}>
+          <div style={{width:22,height:22,borderRadius:6,border:`1.5px solid ${c.ink300}`}}/>
+          <div style={{flex:1,height:14,background:c.ink100,borderRadius:3}}/>
+        </div>)}
+      </div>
+    </div>
+    <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.45)'}}/>
+
+    {/* Voice sheet */}
+    <div style={{position:'absolute',left:8,right:8,bottom:28,background:c.bg,borderRadius:22,padding:'16px 18px 18px',boxShadow:'0 -10px 30px rgba(0,0,0,0.2)'}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+        <div style={{width:28,height:28,borderRadius:999,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.mic(c.ember,14)}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>Listening</div>
+          <div style={{fontSize:11,color:c.ink500,marginTop:1}}>Say items separated by "and"</div>
+        </div>
+        {/* waveform */}
+        <div style={{display:'flex',alignItems:'center',gap:2.5}}>
+          {[4,11,7,14,8,4].map((h,i)=><div key={i} style={{width:3,height:h,borderRadius:2,background:c.ember}}/>)}
+        </div>
+      </div>
+
+      <div style={{fontFamily:'var(--font-serif)',fontSize:19,lineHeight:'26px',letterSpacing:'-0.01em',color:c.ink900,padding:'10px 0 6px'}}>
+        "Add <span style={{color:c.ember}}>milk</span>, a <span style={{color:c.ember}}>dozen eggs</span>, and some <span style={{color:c.ember}}>ripe bananas</span>."
+      </div>
+
+      {/* Parsed preview */}
+      <div style={{marginTop:10,padding:'10px 12px',background:c.paper100,borderRadius:10,border:`1px solid ${c.ink100}`}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500,marginBottom:6}}>Parsed → 3 items</div>
+        {[
+          {t:'Milk, 1 gal',a:'Dairy'},
+          {t:'Eggs, 1 dozen',a:'Dairy'},
+          {t:'Bananas, ripe',a:'Produce'},
+        ].map((x,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderTop:i===0?'none':`1px solid ${c.ink100}`,fontSize:13}}>
+          <span style={{color:c.ink900,fontWeight:500}}>{x.t}</span>
+          <span style={{color:c.ember,fontSize:11,fontWeight:600}}>{x.a}</span>
+        </div>)}
+      </div>
+
+      <div style={{display:'flex',gap:8,marginTop:12}}>
+        <button style={{flex:1,height:44,borderRadius:11,background:c.paper200,border:`1px solid ${c.ink100}`,fontSize:14,fontWeight:600,color:c.ink700}}>Cancel</button>
+        <button style={{flex:2,height:44,borderRadius:11,border:0,background:c.ember,color:'#fff',fontSize:14,fontWeight:600}}>Add 3 items</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">12 · Grocery</h1>
+      <p className="mock-sub">
+        Not a dumb list. Grocery is <em>two views of the same data</em> — 
+        by recipe (planning, at home) and by aisle (shopping, in the store) — 
+        plus a Pantry that auto-replenishes staples. The app knows what you have,
+        what you're cooking this week, and where your store puts things.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #37–#40</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Pantry ↔ list auto-reconcile</span>
+        <span>Specs §14 — Grocery</span>
+      </div>
+    </header>
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Planning view — grouped by recipe</h2>
+        <p className="mock-section-desc">
+          Home screen for the list. Items live under the recipe that asked for
+          them, dated to when you're cooking. Pantry items show as
+          already-checked with a "Pantry" tag — no duplicate buying. Cost
+          estimate in the header builds trust.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 3 recipes · 11 items</div><Frame><ListByRecipe/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ListByRecipe dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Store view — grouped by aisle</h2>
+        <p className="mock-section-desc">
+          Flip to "Aisle" when you walk into the store. Ordered by your
+          store's actual layout (Whole Foods Gowanus). Each item still shows
+          which recipe needs it — small, italic, right-aligned. Location
+          context via the amber "Shopping at…" strip.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Sorted for Whole Foods</div><Frame><ListByAisle/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ListByAisle dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Pantry</h2>
+        <p className="mock-section-desc">
+          The pantry is the <em>source of truth</em> that makes everything
+          else honest. Level bars (full / low / out) in three colors. Auto-
+          replenish surfaces what Stir added to grocery for you, and why —
+          based on your cadence, not a schedule.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 34 tracked, 2 out</div><Frame><Pantry/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Pantry dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Voice quick-add</h2>
+        <p className="mock-section-desc">
+          The hands-are-full case. Long-press the mic, speak a grocery run.
+          The LLM normalizes quantities and assigns aisles before anything
+          lands in the list — review + confirm, never blind dictation.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Parsing 3 items</div><Frame><QuickAdd/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><QuickAdd dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

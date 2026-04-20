@@ -145,6 +145,18 @@ test-results/
 screenshots/
 
 # -----------------------------------------------------------------------------
+# Design mockup scratch (Claude Design handoff bundle — the canonical
+# HTML mockups, shared CSS, INDEX.md, and EXTRACTED_TOKENS.md audit live
+# in the repo as the visual source of truth; review/scratch/uploads
+# subfolders are per-session process artifacts that aren't part of the
+# design truth)
+# -----------------------------------------------------------------------------
+stir-app-design/project/_review/
+stir-app-design/project/scratch/
+stir-app-design/project/uploads/
+stir-app-design/project/DesignMockups/review/
+
+# -----------------------------------------------------------------------------
 # Editors & IDEs
 # -----------------------------------------------------------------------------
 .vscode/*

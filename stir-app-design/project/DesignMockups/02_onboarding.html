@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 02 Onboarding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-sans: -apple-system, "SF Pro Text", "SF Pro Display", BlinkMacSystemFont,
+                 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-serif: "New York", "NewYork", ui-serif, "Source Serif 4",
+                  "Charter", "Iowan Old Style", "Palatino", Georgia, serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    --ink-900:#1A1612; --ink-700:#3D342C; --ink-500:#6B5F54;
+    --ink-300:#A89E93; --ink-100:#E8E3DD;
+    --paper-50:#FAF7F2; --paper-100:#F3EEE5; --paper-200:#EBE3D6;
+    --ember-600:#C8532B; --ember-500:#E26340; --ember-100:#FBEAE0;
+    --sage-600:#4A7C59; --sage-100:#E4EEE6;
+    --amber-600:#B8860B; --amber-100:#F5ECD5;
+    --crimson-600:#9A2E2E; --crimson-100:#F2DCDC;
+    --voice-600:#5E4AE0; --voice-100:#E8E3FA;
+  }
+  html, body { margin:0; padding:0; }
+  body { background:#EFEAE1; font-family:var(--font-sans); color:var(--ink-900);
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  .mock-page { min-height:100vh; padding:48px 32px 80px; }
+  .mock-header { max-width:1600px; margin:0 auto 40px; }
+  .mock-title { font-family:var(--font-serif); font-weight:600; font-size:40px;
+    letter-spacing:-0.02em; line-height:1.1; color:var(--ink-900); margin:0; }
+  .mock-sub { font-size:15px; color:#6B5F54; margin:8px 0 0; max-width:780px; line-height:1.55; }
+  .mock-sub em { color:#3D342C; font-style:italic; }
+  .mock-meta { display:flex; gap:10px; flex-wrap:wrap; margin-top:20px;
+    font-size:11px; color:#6B5F54; letter-spacing:0.06em; text-transform:uppercase; }
+  .mock-meta span { padding:4px 10px; background:#E8E3DD; border-radius:999px; }
+  .mock-main { max-width:1600px; margin:0 auto; }
+  .mock-section { margin-top:56px; padding-top:24px; border-top:1px solid #D9D2C4; }
+  .mock-section:first-of-type { border-top:none; padding-top:0; margin-top:24px; }
+  .mock-section-title { font-family:var(--font-serif); font-weight:600;
+    font-size:24px; letter-spacing:-0.01em; color:var(--ink-900); margin:0; }
+  .mock-section-desc { font-size:14px; color:#6B5F54; margin:6px 0 0;
+    max-width:760px; line-height:1.55; }
+  .mock-row { display:flex; flex-wrap:wrap; gap:36px; margin-top:24px; align-items:flex-start; }
+  .mock-cell { display:flex; flex-direction:column; gap:10px; }
+  .mock-cell-label { font-size:11px; font-weight:600; letter-spacing:0.14em;
+    text-transform:uppercase; color:#6B5F54; }
+  .mock-cell-caption { font-size:12px; line-height:1.5; color:#6B5F54;
+    max-width:410px; margin-top:2px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- ========== Stir Frame (shared) ========== -->
+<script type="text/babel">
+const STIR_LIGHT = { bg:'#FAF7F2', paper100:'#F3EEE5', paper200:'#EBE3D6',
+  ink900:'#1A1612', ink700:'#3D342C', ink500:'#6B5F54', ink300:'#A89E93',
+  ink100:'#E8E3DD', ember:'#C8532B', emberHover:'#E26340', emberTint:'#FBEAE0',
+  sage:'#4A7C59', sageTint:'#E4EEE6', amber:'#B8860B', amberTint:'#F5ECD5',
+  crimson:'#9A2E2E', crimsonTint:'#F2DCDC', voice:'#5E4AE0', voiceTint:'#E8E3FA' };
+const STIR_DARK = { bg:'#14100B', paper100:'#1F1A14', paper200:'#2A241C',
+  ink900:'#F5F0E8', ink700:'#D6CEC3', ink500:'#9A8F84', ink300:'#5E5349',
+  ink100:'#2E2822', ember:'#E26340', emberHover:'#F07D5A', emberTint:'#3A1E13',
+  sage:'#6FA07C', sageTint:'#1E2E23', amber:'#D4A21F', amberTint:'#2E2614',
+  crimson:'#C94747', crimsonTint:'#2E1818', voice:'#8473E8', voiceTint:'#1F1A33' };
+const useStir = (d) => d ? STIR_DARK : STIR_LIGHT;
+
+const SF = {
+  check:    (c, s=16, fill=false) => <svg width={s} height={s} viewBox="0 0 24 24" fill={fill?c:"none"} stroke={fill?"#fff":c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{fill && <circle cx="12" cy="12" r="10" fill={c} stroke="none"/>}<path d="M7 12l3.5 3.5L17 9"/></svg>,
+  chevronR: (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  chevronL: (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  arrowR:   (c, s=18) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>,
+  plus:     (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  minus:    (c, s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M5 12h14"/></svg>,
+  wifi:     (c, s=14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+};
+
+function StirStatusBar({ dark, time='7:42' }) {
+  const c = dark ? '#F5F0E8' : '#1A1612';
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'14px 28px 6px', fontFamily:'var(--font-sans)', fontWeight:600, fontSize:15,
+      color:c, height:44, boxSizing:'border-box' }}>
+      <span style={{ letterSpacing:0.2 }}>{time}</span>
+      <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+        <svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>
+        {SF.wifi(c, 14)}
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg>
+      </div>
+    </div>
+  );
+}
+
+function StirFrame({ children, dark=false, time='7:42', width=390, height=844 }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ width:width+12, height:height+12, padding:6, boxSizing:'border-box',
+      background: dark ? '#0a0805' : '#f7f3ec', borderRadius:54,
+      boxShadow:`0 2px 0 ${dark?'#2a2520':'#e8e1d4'} inset, 0 30px 60px rgba(26,22,18,0.18)` }}>
+      <div style={{ width, height, borderRadius:48, background:c.bg, overflow:'hidden',
+        position:'relative', fontFamily:'var(--font-sans)', color:c.ink900 }}>
+        <div style={{ position:'absolute', top:10, left:'50%', transform:'translateX(-50%)',
+          width:120, height:34, borderRadius:20, background:'#000', zIndex:100 }} />
+        <StirStatusBar dark={dark} time={time} />
+        <div style={{ height: height-44, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+          {children}
+        </div>
+        <div style={{ position:'absolute', bottom:8, left:'50%', transform:'translateX(-50%)',
+          width:134, height:5, borderRadius:999, background: dark ? '#F5F0E8' : '#1A1612', opacity:0.4 }} />
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { StirFrame, SF, useStir });
+</script>
+
+<!-- ========== Onboarding Screens ========== -->
+<script type="text/babel">
+const { StirFrame, SF, useStir } = window;
+
+// Shared progress indicator (dots)
+function StepDots({ step, total=2, c }) {
+  return (
+    <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+      {[...Array(total)].map((_, i) => (
+        <div key={i} style={{
+          width: i === step-1 ? 20 : 6, height:6, borderRadius:999,
+          background: i < step ? c.ember : c.ink100,
+          transition:'width 200ms ease-out' }} />
+      ))}
+    </div>
+  );
+}
+
+// ---------- Setup 1 — Preferences (catalog #4) ----------
+function Setup1({ dark=false }) {
+  const c = useStir(dark);
+
+  const dietRules = [
+    { k:'vegetarian', on:false }, { k:'vegan', on:false }, { k:'pescatarian', on:true },
+    { k:'gluten-free', on:false }, { k:'dairy-free', on:false }, { k:'nut-free', on:true },
+    { k:'halal', on:false }, { k:'kosher', on:false },
+  ];
+  const dislikes = [
+    { k:'cilantro', on:true }, { k:'olives', on:false }, { k:'mushrooms', on:false },
+    { k:'blue cheese', on:true }, { k:'anchovies', on:false },
+  ];
+  const goals = [
+    { k:'quicker weeknights', on:true }, { k:'less food waste', on:true },
+    { k:'eat more vegetables', on:false }, { k:'spend less', on:false },
+    { k:'cook new cuisines', on:false },
+  ];
+
+  const Chip = ({ label, on, tone='default' }) => {
+    const tones = {
+      default: on
+        ? { bg:c.emberTint, fg:c.ember, bd:c.ember }
+        : { bg:c.paper100, fg:c.ink700, bd:c.ink100 },
+      danger: on
+        ? { bg:c.crimsonTint, fg:c.crimson, bd:c.crimson }
+        : { bg:c.paper100, fg:c.ink700, bd:c.ink100 },
+    };
+    const t = tones[tone];
+    return (
+      <div style={{
+        display:'inline-flex', alignItems:'center', gap:6,
+        padding:'9px 14px', borderRadius:999,
+        background:t.bg, color:t.fg,
+        border:`1px solid ${t.bd}`,
+        fontSize:14, fontWeight:on ? 600 : 500, letterSpacing:'-0.005em' }}>
+        {on && SF.check(t.fg, 14, false)}
+        {label}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column' }}>
+
+      {/* Nav: back + progress */}
+      <div style={{ padding:'8px 16px 10px', display:'flex', alignItems:'center',
+        justifyContent:'space-between' }}>
+        <button style={{ background:'transparent', border:0, padding:6, color:c.ember,
+          fontSize:15, fontWeight:500, display:'flex', alignItems:'center', gap:2, cursor:'pointer' }}>
+          {SF.chevronL(c.ember, 16)} Back
+        </button>
+        <StepDots step={1} c={c} />
+        <div style={{ fontSize:13, color:c.ink500, width:38, textAlign:'right' }}>Skip</div>
+      </div>
+
+      {/* Scrollable body */}
+      <div style={{ flex:1, overflow:'hidden', padding:'8px 20px 0' }}>
+        <div style={{ fontSize:12, fontWeight:600, color:c.ember, letterSpacing:'0.14em',
+          textTransform:'uppercase' }}>Step 1 of 2</div>
+        <h2 style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:28,
+          lineHeight:'34px', letterSpacing:'-0.015em', color:c.ink900, margin:'8px 0 4px' }}>
+          A bit about how you eat.
+        </h2>
+        <p style={{ fontSize:15, lineHeight:'22px', color:c.ink500, margin:0 }}>
+          I'll use these to filter every meal suggestion. You can change them later.
+        </p>
+
+        {/* Diet rules */}
+        <div style={{ marginTop:24 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:c.ink700,
+            letterSpacing:'0.14em', textTransform:'uppercase' }}>Diet rules</div>
+          <div style={{ fontSize:13, color:c.ink500, marginTop:2 }}>Hard rules — I'll never break these.</div>
+          <div style={{ marginTop:12, display:'flex', flexWrap:'wrap', gap:8 }}>
+            {dietRules.map(d => <Chip key={d.k} label={d.k} on={d.on} />)}
+          </div>
+        </div>
+
+        {/* Dislikes */}
+        <div style={{ marginTop:22 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:c.ink700,
+            letterSpacing:'0.14em', textTransform:'uppercase' }}>Dislikes</div>
+          <div style={{ fontSize:13, color:c.ink500, marginTop:2 }}>Strong preferences — I'll avoid unless you override.</div>
+          <div style={{ marginTop:12, display:'flex', flexWrap:'wrap', gap:8 }}>
+            {dislikes.map(d => <Chip key={d.k} label={d.k} on={d.on} tone="danger" />)}
+            <div style={{ display:'inline-flex', alignItems:'center', gap:6,
+              padding:'9px 14px', borderRadius:999, background:'transparent',
+              color:c.ink500, border:`1px dashed ${c.ink300}`,
+              fontSize:14, fontWeight:500 }}>
+              {SF.plus(c.ink500, 14)} Add
+            </div>
+          </div>
+        </div>
+
+        {/* Goals */}
+        <div style={{ marginTop:22 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:c.ink700,
+            letterSpacing:'0.14em', textTransform:'uppercase' }}>Goals</div>
+          <div style={{ fontSize:13, color:c.ink500, marginTop:2 }}>I'll lean toward these when ranking options.</div>
+          <div style={{ marginTop:12, display:'flex', flexWrap:'wrap', gap:8 }}>
+            {goals.map(g => <Chip key={g.k} label={g.k} on={g.on} />)}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding:'16px 20px 20px', borderTop:`1px solid ${c.ink100}` }}>
+        <button style={{ width:'100%', height:52, borderRadius:12, border:0,
+          background:c.ember, color:'#fff', fontSize:17, fontWeight:600,
+          letterSpacing:'-0.01em', display:'flex', alignItems:'center', justifyContent:'center',
+          gap:8, cursor:'pointer' }}>
+          Continue {SF.arrowR('#fff', 18)}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Setup 2 — Kitchen & Servings (catalog #5) ----------
+function Setup2({ dark=false }) {
+  const c = useStir(dark);
+
+  const equipment = [
+    { k:'Oven',       on:true,  g:'oven' },
+    { k:'Stovetop',   on:true,  g:'stove' },
+    { k:'Sheet pan',  on:true,  g:'pan' },
+    { k:'Skillet',    on:true,  g:'skillet' },
+    { k:'Dutch oven', on:false, g:'pot' },
+    { k:'Blender',    on:true,  g:'blender' },
+    { k:'Air fryer',  on:false, g:'airfry' },
+    { k:'Microwave',  on:true,  g:'micro' },
+    { k:'Rice cooker',on:false, g:'rice' },
+  ];
+
+  const EqGlyph = ({ g, on }) => {
+    const stroke = on ? c.ember : c.ink500;
+    const common = { fill:'none', stroke, strokeWidth:1.6, strokeLinecap:'round', strokeLinejoin:'round' };
+    switch (g) {
+      case 'oven':    return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><rect x="4" y="4" width="20" height="20" rx="2"/><path d="M4 10h20M8 14h6M18 14h2"/></svg>;
+      case 'stove':   return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><circle cx="10" cy="10" r="3.5"/><circle cx="18" cy="10" r="3.5"/><circle cx="10" cy="18" r="3.5"/><circle cx="18" cy="18" r="3.5"/></svg>;
+      case 'pan':     return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><rect x="4" y="10" width="16" height="10" rx="1"/><path d="M20 14h4"/></svg>;
+      case 'skillet': return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><circle cx="12" cy="14" r="7"/><path d="M19 14h6"/></svg>;
+      case 'pot':     return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><path d="M5 9h18v9a3 3 0 01-3 3H8a3 3 0 01-3-3V9z"/><path d="M3 9h22M9 6v3M19 6v3"/></svg>;
+      case 'blender': return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><path d="M10 3h8l-1 6h-6z"/><rect x="8" y="12" width="12" height="11" rx="2"/></svg>;
+      case 'airfry':  return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><rect x="6" y="4" width="16" height="20" rx="2"/><circle cx="14" cy="12" r="3"/><path d="M10 20h8"/></svg>;
+      case 'micro':   return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><rect x="3" y="6" width="22" height="16" rx="2"/><rect x="5" y="8" width="12" height="12"/><circle cx="21" cy="12" r="0.8" fill={stroke}/></svg>;
+      case 'rice':    return <svg width="28" height="28" viewBox="0 0 28 28" {...common}><path d="M5 10h18M7 10v10a2 2 0 002 2h10a2 2 0 002-2V10"/><circle cx="14" cy="6" r="2"/></svg>;
+      default:        return null;
+    }
+  };
+
+  const Serv = 4;
+
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column' }}>
+      <div style={{ padding:'8px 16px 10px', display:'flex', alignItems:'center',
+        justifyContent:'space-between' }}>
+        <button style={{ background:'transparent', border:0, padding:6, color:c.ember,
+          fontSize:15, fontWeight:500, display:'flex', alignItems:'center', gap:2 }}>
+          {SF.chevronL(c.ember, 16)} Back
+        </button>
+        <StepDots step={2} c={c} />
+        <div style={{ fontSize:13, color:c.ink500, width:38, textAlign:'right' }}>Skip</div>
+      </div>
+
+      <div style={{ flex:1, overflow:'hidden', padding:'8px 20px 0' }}>
+        <div style={{ fontSize:12, fontWeight:600, color:c.ember, letterSpacing:'0.14em',
+          textTransform:'uppercase' }}>Step 2 of 2</div>
+        <h2 style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:28,
+          lineHeight:'34px', letterSpacing:'-0.015em', color:c.ink900, margin:'8px 0 4px' }}>
+          What's your kitchen like?
+        </h2>
+        <p style={{ fontSize:15, lineHeight:'22px', color:c.ink500, margin:0 }}>
+          Tap what you have. I'll never suggest a recipe that needs something you don't.
+        </p>
+
+        {/* Equipment grid */}
+        <div style={{ marginTop:22, display:'grid',
+          gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+          {equipment.map(e => (
+            <div key={e.k} style={{
+              padding:'14px 8px', borderRadius:14,
+              background: e.on ? c.emberTint : c.paper100,
+              border:`1px solid ${e.on ? c.ember : c.ink100}`,
+              display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
+              <EqGlyph g={e.g} on={e.on} />
+              <div style={{ fontSize:13, fontWeight:500,
+                color: e.on ? c.ember : c.ink700 }}>{e.k}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Servings */}
+        <div style={{ marginTop:24 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:c.ink700,
+            letterSpacing:'0.14em', textTransform:'uppercase' }}>Usual servings</div>
+          <div style={{ fontSize:13, color:c.ink500, marginTop:2 }}>
+            Default servings for solves. Scale per recipe later.
+          </div>
+
+          <div style={{ marginTop:14, background:c.paper100, borderRadius:14,
+            border:`1px solid ${c.ink100}`, padding:12,
+            display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <button style={{ width:44, height:44, borderRadius:12, border:`1px solid ${c.ink100}`,
+              background:c.bg, color:c.ink700, display:'flex', alignItems:'center',
+              justifyContent:'center', cursor:'pointer' }}>
+              {SF.minus(c.ink700, 18)}
+            </button>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontFamily:'var(--font-mono)', fontSize:36, fontWeight:500,
+                color:c.ink900, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{Serv}</div>
+              <div style={{ fontSize:12, color:c.ink500, marginTop:4 }}>servings</div>
+            </div>
+            <button style={{ width:44, height:44, borderRadius:12, border:0,
+              background:c.ember, color:'#fff', display:'flex', alignItems:'center',
+              justifyContent:'center', cursor:'pointer' }}>
+              {SF.plus('#fff', 18)}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding:'16px 20px 20px', borderTop:`1px solid ${c.ink100}` }}>
+        <button style={{ width:'100%', height:52, borderRadius:12, border:0,
+          background:c.ember, color:'#fff', fontSize:17, fontWeight:600,
+          letterSpacing:'-0.01em', display:'flex', alignItems:'center', justifyContent:'center',
+          gap:8, cursor:'pointer' }}>
+          Set up my kitchen {SF.arrowR('#fff', 18)}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Completion transition (catalog #6) ----------
+function OnboardingComplete({ dark=false }) {
+  const c = useStir(dark);
+  return (
+    <div style={{ flex:1, background:c.bg, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', padding:'0 28px', textAlign:'center' }}>
+
+      {/* Check ring with sweep */}
+      <div style={{ position:'relative', width:96, height:96, marginBottom:28 }}>
+        <svg width="96" height="96" viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="44" stroke={c.ink100} strokeWidth="3" fill="none" />
+          <circle cx="48" cy="48" r="44" stroke={c.ember} strokeWidth="3" fill="none"
+            strokeLinecap="round" strokeDasharray="276" strokeDashoffset="40"
+            transform="rotate(-90 48 48)" />
+          <path d="M32 48l11 11 22-22" stroke={c.ember} strokeWidth="4"
+            strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      </div>
+
+      <h2 style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:26,
+        lineHeight:'32px', letterSpacing:'-0.015em', color:c.ink900, margin:'0 0 14px' }}>
+        Setting up your kitchen
+      </h2>
+      <p style={{ fontSize:15, lineHeight:'22px', color:c.ink500, margin:0, maxWidth:300 }}>
+        Tuning suggestions to your pescatarian, nut-free diet and your weeknight goals.
+      </p>
+
+      {/* Tiny checklist — gives substance to the "setting up" beat */}
+      <div style={{ marginTop:32, display:'flex', flexDirection:'column', gap:10,
+        alignItems:'flex-start', fontSize:14, color:c.ink700 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          {SF.check(c.sage, 16, true)} <span>Preferences saved</span>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          {SF.check(c.sage, 16, true)} <span>Kitchen profile ready</span>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, opacity:0.7 }}>
+          <div style={{ width:16, height:16, borderRadius:999,
+            border:`2px solid ${c.ink100}`, borderTopColor:c.ember,
+            animation:'stirSpin 0.9s linear infinite' }} />
+          <span>Loading a starter meal…</span>
+        </div>
+      </div>
+
+      <style>{`@keyframes stirSpin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+/* ---------- Page ---------------------------------------------------------- */
+function Page() {
+  return (
+    <div className="mock-page">
+      <header className="mock-header">
+        <h1 className="mock-title">02 · Onboarding</h1>
+        <p className="mock-sub">
+          Two short setup screens plus a brief completion transition. The entire
+          flow is skippable — and skipping drops the user onto Tonight Home with
+          sensible defaults. Chips carry the load: diet rules (ember when
+          selected), dislikes (crimson when selected — different visual grammar
+          because the semantics are "avoid, not prefer"), and equipment as a
+          3-column grid with small geometric glyphs.
+        </p>
+        <div className="mock-meta">
+          <span>Catalog #4–#6</span>
+          <span>iPhone 16 Pro · 390×844</span>
+          <span>Skippable · ≤90s to complete</span>
+          <span>Specs/Stir-Full-Spec.md §7</span>
+        </div>
+      </header>
+
+      <main className="mock-main">
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Setup 1 — Preferences</h2>
+          <p className="mock-section-desc">
+            Three chip groups. Diet rules use the <em>selected</em> chip pattern in
+            ember. Dislikes share the shape but get a crimson tint on selection to
+            signal "avoid" without a second color. Goals round out the list.
+            Progress appears as a two-dot indicator at the top so the user always
+            knows how much is left.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Setup 1</div>
+              <StirFrame dark={false} time="7:38"><Setup1 /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Setup 1</div>
+              <StirFrame dark={true} time="21:04"><Setup1 dark /></StirFrame>
+            </div>
+          </div>
+        </section>
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Setup 2 — Kitchen &amp; Servings</h2>
+          <p className="mock-section-desc">
+            Equipment as a 3-column tappable grid with stroked iconography — the
+            user should be able to scan-pick their whole kitchen in under 20 seconds.
+            Selected cells fill in ember tint. Servings stepper lives below: minus /
+            count / plus, count in the mono display weight so scaling feels
+            mechanical and precise, not approximate.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Setup 2</div>
+              <StirFrame dark={false} time="7:40"><Setup2 /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Setup 2</div>
+              <StirFrame dark={true} time="21:05"><Setup2 dark /></StirFrame>
+            </div>
+          </div>
+        </section>
+
+        <section className="mock-section">
+          <h2 className="mock-section-title">Completion transition</h2>
+          <p className="mock-section-desc">
+            Brief, intentional beat — roughly 1.5 seconds — between Setup 2 and
+            Tonight Home. Circular progress ring sweeps to ~85% as a visual
+            metaphor for "almost ready." Tiny checklist reassures the user that
+            their answers landed. Per §7, the last row starts as a spinner and
+            flips to a ✓ once the starter meal pre-loads; if the pre-load is slow,
+            the transition exits anyway after 1.5s and the starter meal streams
+            into Tonight Home.
+          </p>
+          <div className="mock-row">
+            <div className="mock-cell">
+              <div className="mock-cell-label">Light · Completing</div>
+              <StirFrame dark={false} time="7:41"><OnboardingComplete /></StirFrame>
+            </div>
+            <div className="mock-cell">
+              <div className="mock-cell-label">Dark · Completing</div>
+              <StirFrame dark={true} time="21:06"><OnboardingComplete dark /></StirFrame>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Page />);
+</script>
+</body>
+</html>

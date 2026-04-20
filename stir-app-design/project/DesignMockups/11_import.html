@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 11 Import</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',voice:'#5E4AE0'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',voice:'#8473E8'};
+const u=(d)=>d?D:L;
+const SF={
+  close:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  link:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><path d="M10 14a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 10a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg>,
+  camera:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19V8a2 2 0 00-2-2h-3.2L16 3H8L6.2 6H3a2 2 0 00-2 2v11a2 2 0 002 2h18a2 2 0 002-2z"/><circle cx="12" cy="13" r="4"/></svg>,
+  photo:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>,
+  text:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>,
+  chev:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  back:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  check:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+  sparkle:(c,s=12)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8z"/></svg>,
+  stir:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><ellipse cx="12" cy="16" rx="8" ry="3"/><path d="M15 6l2 10M13 4a2 2 0 014 0v2"/></svg>,
+};
+function Bar({dark,time='6:44'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='6:44'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* ============ 1) Import Entry ============ */
+function ImportEntry({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 20px 6px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Import recipe</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,padding:'18px 20px 0',display:'flex',flexDirection:'column',gap:18}}>
+      <div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:28,lineHeight:'34px',letterSpacing:'-0.02em',color:c.ink900}}>Bring anything in.</div>
+        <div style={{fontSize:14,color:c.ink500,marginTop:6,lineHeight:'20px'}}>Stir parses the recipe and adapts it to your kitchen.</div>
+      </div>
+
+      {/* URL field */}
+      <div style={{background:c.paper100,border:`1.5px solid ${c.ember}`,borderRadius:14,padding:'14px 16px'}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember,marginBottom:6}}>Link</div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {SF.link(c.ink500,16)}
+          <div style={{flex:1,fontSize:15,color:c.ink900,fontFamily:'var(--font-mono)'}}>nytimes.com/recipes/salmon-mis...</div>
+        </div>
+        <div style={{fontSize:12,color:c.sage,marginTop:8,display:'flex',alignItems:'center',gap:4}}>{SF.check(c.sage,12)} Recognized: NYT Cooking</div>
+      </div>
+
+      {/* Other sources */}
+      <div>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Or</div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {[
+            {i:SF.photo(c.ember,18),t:'Photo from Library',s:'JPG, HEIC. Multi-page cookbook OK.'},
+            {i:SF.camera(c.ember,18),t:'Camera',s:'Shoot a page or a handwritten card.'},
+            {i:SF.text(c.ember,18),t:'Paste text',s:'From a screenshot, email, or anywhere.'},
+          ].map(r=><button key={r.t} style={{textAlign:'left',padding:'14px 16px',background:c.paper100,border:`1px solid ${c.ink100}`,borderRadius:14,display:'flex',gap:12,alignItems:'center',cursor:'pointer'}}>
+            <div style={{width:40,height:40,borderRadius:10,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{r.i}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:15,fontWeight:600,color:c.ink900}}>{r.t}</div>
+              <div style={{fontSize:12,color:c.ink500,marginTop:1}}>{r.s}</div>
+            </div>
+            {SF.chev(c.ink500,14)}
+          </button>)}
+        </div>
+      </div>
+
+      <div style={{background:c.paper100,borderRadius:10,padding:'10px 12px',fontSize:12,color:c.ink500,lineHeight:'16px'}}>
+        Anything you import stays private to your account. We don't train on your cookbook.
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 18px'}}>
+      <button style={{width:'100%',height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600}}>Import link</button>
+    </div>
+  </div>);
+}
+
+/* ============ 2) Share Extension (iOS) ============ */
+function ShareExt({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',position:'relative'}}>
+    {/* Fake host app behind */}
+    <div style={{position:'absolute',inset:0,background:c.paper200,padding:'12px 20px'}}>
+      <div style={{fontSize:15,fontWeight:600,color:c.ink300}}>NYT Cooking</div>
+      <div style={{marginTop:8,height:180,borderRadius:14,background:c.paper100,opacity:0.5}}/>
+      <div style={{marginTop:12,fontFamily:'var(--font-serif)',fontSize:22,color:c.ink300,opacity:0.7}}>Miso-Glazed Salmon…</div>
+    </div>
+    <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.5)'}}/>
+
+    {/* Share sheet */}
+    <div style={{position:'absolute',left:8,right:8,bottom:12,background:c.bg,borderRadius:22,padding:'12px 16px 18px',boxShadow:'0 -8px 24px rgba(0,0,0,0.2)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 4px 12px'}}>
+        <div style={{fontSize:13,fontWeight:600,color:c.ink500}}>NYT Cooking</div>
+        <button style={{width:28,height:28,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,14)}</button>
+      </div>
+
+      {/* Preview */}
+      <div style={{padding:'10px 12px',background:c.paper100,borderRadius:12,display:'flex',gap:10,alignItems:'center',marginBottom:12}}>
+        <div style={{width:40,height:40,borderRadius:8,background:'#C8532B22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>🐟</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:600,color:c.ink900,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>Miso-Glazed Salmon</div>
+          <div style={{fontSize:11,color:c.ink500,marginTop:1}}>cooking.nytimes.com</div>
+        </div>
+      </div>
+
+      {/* App row */}
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Send to</div>
+      <div style={{display:'flex',gap:14,paddingBottom:14,borderBottom:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {[
+          {n:'Stir',emoji:<div style={{width:56,height:56,borderRadius:14,background:c.ember,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.stir('#fff',22)}</div>,sel:true},
+          {n:'Notes',emoji:<div style={{width:56,height:56,borderRadius:14,background:'#FFCC00',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28}}>📝</div>},
+          {n:'Messages',emoji:<div style={{width:56,height:56,borderRadius:14,background:'#34C759',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28}}>💬</div>},
+          {n:'Mail',emoji:<div style={{width:56,height:56,borderRadius:14,background:'#007AFF',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28}}>✉️</div>},
+        ].map(a=><div key={a.n} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,flexShrink:0,padding:a.sel?6:0,borderRadius:16,background:a.sel?c.emberTint:'transparent',border:a.sel?`1.5px solid ${c.ember}`:'none'}}>
+          {a.emoji}
+          <div style={{fontSize:11,fontWeight:a.sel?700:500,color:a.sel?c.ember:c.ink700}}>{a.n}</div>
+        </div>)}
+      </div>
+
+      {/* Stir options */}
+      <div style={{padding:'12px 0 0'}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember,marginBottom:8,display:'flex',alignItems:'center',gap:4}}>{SF.sparkle(c.ember,11)} Stir options</div>
+        {[
+          {t:'Import & adapt to my kitchen',sub:'Scale, swap, align to allergens',sel:true},
+          {t:'Import raw',sub:"Save as-is. I'll adapt when I cook."},
+        ].map((r,i)=><div key={r.t} style={{padding:'10px 12px',background:r.sel?c.emberTint:'transparent',border:`1px solid ${r.sel?c.ember:c.ink100}`,borderRadius:10,display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+          <div style={{width:18,height:18,borderRadius:999,background:r.sel?c.ember:'transparent',border:`1.5px solid ${r.sel?c.ember:c.ink300}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            {r.sel && <div style={{width:8,height:8,borderRadius:999,background:'#fff'}}/>}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:600,color:c.ink900}}>{r.t}</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:1}}>{r.sub}</div>
+          </div>
+        </div>)}
+      </div>
+
+      <button style={{width:'100%',height:48,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:15,fontWeight:600,marginTop:6}}>Send to Stir</button>
+    </div>
+  </div>);
+}
+
+/* ============ 3) Import Review (processed) ============ */
+function ImportReview({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 20px 6px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Review import</div>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:14,fontWeight:500,padding:6}}>Edit raw</button>
+    </div>
+
+    <div style={{flex:1,padding:'12px 20px 0',display:'flex',flexDirection:'column',gap:14,overflow:'hidden'}}>
+      <div>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.sage,display:'flex',alignItems:'center',gap:4}}>{SF.check(c.sage,12)} Parsed · from NYT Cooking</div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:26,letterSpacing:'-0.01em',color:c.ink900,marginTop:6,lineHeight:'32px'}}>Miso-Glazed Salmon</div>
+        <div style={{fontSize:12,color:c.ink500,marginTop:3}}>4 servings · ~35 min · 9 ingredients · 5 steps</div>
+      </div>
+
+      {/* Adapted chips */}
+      <div style={{padding:'12px 14px',background:c.emberTint,border:`1px solid ${c.ember}`,borderRadius:14}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember,marginBottom:8,display:'flex',alignItems:'center',gap:4}}>{SF.sparkle(c.ember,11)} Adapted for your kitchen</div>
+        {[
+          {was:'Sake',now:'Dry white wine',why:'You don\'t stock sake'},
+          {was:'Sugar (brown)',now:'Honey',why:'Matches your sweetener default'},
+          {was:'4 servings',now:'2 servings',why:'Household size'},
+        ].map((r,i)=><div key={i} style={{display:'flex',gap:10,padding:'6px 0',borderTop:i===0?'none':`1px solid ${c.ember}22`,fontSize:13,alignItems:'center'}}>
+          <span style={{color:c.ink500,textDecoration:'line-through',minWidth:100}}>{r.was}</span>
+          <span style={{color:c.ember,fontWeight:600,flex:1}}>→ {r.now}</span>
+          <span style={{color:c.ink500,fontSize:11}}>{r.why}</span>
+        </div>)}
+      </div>
+
+      {/* Ingredients preview */}
+      <div>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500,marginBottom:6}}>Ingredients</div>
+        <div style={{fontSize:13,color:c.ink700,lineHeight:'20px'}}>2 salmon fillets · 2 tbsp white miso · 2 tbsp mirin · 2 tbsp <b style={{color:c.ember}}>dry white wine</b> · 1 tsp <b style={{color:c.ember}}>honey</b> · rice · asparagus</div>
+      </div>
+
+      <div style={{fontSize:11,color:c.ink500,lineHeight:'15px'}}>You can revert any adaptation with one tap after import.</div>
+    </div>
+
+    <div style={{padding:'14px 18px 18px',display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:15,fontWeight:600,color:c.ink700}}>Save raw</button>
+      <button style={{flex:2,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600}}>Save adapted</button>
+    </div>
+  </div>);
+}
+
+/* ============ 4) Async processing (photo/multi-page) ============ */
+function AsyncProcess({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 20px 6px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Processing</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,padding:'24px 24px 0',display:'flex',flexDirection:'column',alignItems:'center',gap:20}}>
+      {/* Pages stack */}
+      <div style={{position:'relative',width:180,height:200,marginTop:12}}>
+        {[2,1,0].map(i=><div key={i} style={{position:'absolute',top:i*8,left:i*10,width:160,height:200,background:c.paper100,border:`1px solid ${c.ink100}`,borderRadius:10,boxShadow:`0 6px 14px rgba(26,22,18,${0.08-i*0.02})`,padding:12,display:'flex',flexDirection:'column',gap:5,opacity:1-i*0.2}}>
+          {[...Array(8)].map((_,k)=><div key={k} style={{height:5,background:c.ink100,borderRadius:2,width:`${80-k*5}%`,opacity:i===0?1:0.5}}/>)}
+        </div>)}
+        <div style={{position:'absolute',top:-4,right:-6,background:c.ember,color:'#fff',fontSize:11,fontWeight:700,padding:'4px 8px',borderRadius:999}}>3 pages</div>
+      </div>
+
+      <div style={{textAlign:'center',maxWidth:300}}>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:24,letterSpacing:'-0.01em',color:c.ink900}}>Reading your cookbook.</div>
+        <div style={{fontSize:14,color:c.ink500,marginTop:6,lineHeight:'20px'}}>~40 seconds. Keep using the app — I'll ping you when the recipe is ready.</div>
+      </div>
+
+      {/* Progress */}
+      <div style={{alignSelf:'stretch',background:c.paper100,borderRadius:12,border:`1px solid ${c.ink100}`,padding:14}}>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:6,fontSize:12}}>
+          <span style={{color:c.ink500,fontWeight:600}}>Parsing</span>
+          <span style={{color:c.ember,fontFamily:'var(--font-mono)',fontWeight:600}}>62%</span>
+        </div>
+        <div style={{height:6,background:c.ink100,borderRadius:3,overflow:'hidden'}}>
+          <div style={{height:'100%',width:'62%',background:c.ember,borderRadius:3}}/>
+        </div>
+        <div style={{marginTop:12,display:'flex',flexDirection:'column',gap:6,fontSize:12}}>
+          {[
+            {t:'Scan pages',done:true},
+            {t:'Stitch & deskew',done:true},
+            {t:'Read ingredients',done:false,active:true},
+            {t:'Adapt to your kitchen',done:false},
+          ].map((s,i)=><div key={s.t} style={{display:'flex',alignItems:'center',gap:8}}>
+            <div style={{width:16,height:16,borderRadius:999,background:s.done?c.sage:(s.active?c.ember:'transparent'),border:s.done||s.active?'none':`1.5px solid ${c.ink300}`,display:'flex',alignItems:'center',justifyContent:'center'}}>
+              {s.done && SF.check('#fff',10)}
+              {s.active && <div style={{width:6,height:6,borderRadius:999,background:'#fff',animation:'pulse 1s ease-in-out infinite'}}/>}
+            </div>
+            <div style={{color:s.done?c.ink500:c.ink700,fontWeight:s.active?600:400}}>{s.t}</div>
+          </div>)}
+        </div>
+      </div>
+
+      <div style={{fontSize:12,color:c.ink500,textAlign:'center',maxWidth:280,lineHeight:16}}>Pages are processed on-device. Original photos aren't sent anywhere.</div>
+      <style>{`@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(0.6);opacity:0.6}}`}</style>
+    </div>
+
+    <div style={{padding:'14px 18px 18px'}}>
+      <button style={{width:'100%',height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:15,fontWeight:600,color:c.ink700}}>Leave it running</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">11 · Import</h1>
+      <p className="mock-sub">
+        Stir's input surface. Four ways in: <em>link, photo, camera, paste</em>.
+        The AI's job is not to copy a recipe — it's to <em>adapt</em> one to
+        your kitchen at import time (swaps, scale, allergens), and show its
+        work so the user can revert. Multi-page cookbook scans are async and
+        processed on-device.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #33–#36</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>On-device parsing · No cloud upload</span>
+        <span>Specs §13 — Import</span>
+      </div>
+    </header>
+    <main className="mock-main">
+      <section className="mock-section">
+        <h2 className="mock-section-title">Import entry</h2>
+        <p className="mock-section-desc">
+          URL field is the hero — it's the most common path. Recognition badge
+          under the field confirms the source parser ("NYT Cooking"). Other
+          sources below as equal-status buttons. Privacy footnote is explicit
+          and un-apologetic.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · URL recognized</div><Frame><ImportEntry/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ImportEntry dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Share Extension</h2>
+        <p className="mock-section-desc">
+          iOS share sheet invoked from any browser or mail. Stir appears with
+          the ember tile and two options — adapt-at-import or raw save.
+          "Adapt" is the default because it's what makes Stir different from
+          a bookmark.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Share sheet w/ Stir</div><Frame><ShareExt/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ShareExt dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Import review</h2>
+        <p className="mock-section-desc">
+          Shown after parsing. "Adapted for your kitchen" panel lists each
+          swap with the reason — honest about what the AI changed.
+          Ingredients preview highlights adapted items in ember so they're
+          visible at a glance. "Save raw" is a first-class option.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 3 adaptations shown</div><Frame><ImportReview/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><ImportReview dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Async processing — cookbook scan</h2>
+        <p className="mock-section-desc">
+          When input is big (multi-page cookbook). Non-blocking: user can
+          leave and a notification lands when ready. Progress + step list
+          builds trust in what's happening. On-device claim is re-asserted at
+          the bottom.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 62%, step 3 of 4</div><Frame><AsyncProcess/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><AsyncProcess dark/></Frame></div>
+        </div>
+      </section>
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

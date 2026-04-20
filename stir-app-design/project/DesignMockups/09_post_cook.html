@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 09 Post-Cook</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',crimson:'#9A2E2E',crimsonTint:'#F2DCDC'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',crimson:'#C94747',crimsonTint:'#2E1818'};
+const u=(d)=>d?D:L;
+const SF={
+  close:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  check:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+  chev:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  box:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7l9-4 9 4v10l-9 4-9-4V7zM3 7l9 4 9-4M12 11v10"/></svg>,
+  clock:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
+  sparkle:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8z"/></svg>,
+  plus:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  flame:(c,s=30)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><g transform="translate(0,5)"><path d="M12 2c1 3 4 4 4 8a4 4 0 01-8 0c0-1.5.5-2.5 1.5-3.5C10 8 11 5 12 2z"/><path d="M8 14a4 4 0 108 0"/></g></svg>,
+  thumb:(c,s=22)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 21V10M7 10l4-7a2 2 0 012 2v4h5a2 2 0 012 2l-1.5 8a2 2 0 01-2 1.5H7"/><path d="M3 10h4v11H3z"/></svg>,
+  minus:(c,s=22)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8" strokeWidth="2"/></svg>,
+  skipArr:(c,s=22)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l10 8-10 8V4z"/><path d="M18 4v16"/></svg>,
+};
+function Bar({dark,time='8:12'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='8:12'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* ============ 1) Outcome Feedback sheet ============ */
+function Feedback({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',position:'relative'}}>
+    {/* Dimmed "finished plate" illustration header */}
+    <div style={{height:280,background:`linear-gradient(180deg, ${c.paper200} 0%, ${c.paper100} 100%)`,display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+      <div style={{width:180,height:180,borderRadius:999,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center',border:`1px solid ${c.ember}33`}}>
+        <div style={{fontSize:60}}>🍽️</div>
+      </div>
+      <div style={{position:'absolute',top:14,right:14}}>
+        <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+      </div>
+    </div>
+
+    <div style={{flex:1,padding:'24px 24px 0',display:'flex',flexDirection:'column',gap:16}}>
+      <div>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>Dinner · 42 minutes</div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:32,lineHeight:'38px',letterSpacing:'-0.02em',color:c.ink900,marginTop:8,textWrap:'balance'}}>
+          How was the salmon?
+        </div>
+        <div style={{fontSize:14,color:c.ink500,marginTop:6,lineHeight:'20px'}}>One tap. I'll learn for next time.</div>
+      </div>
+
+      <div style={{display:'flex',gap:10}}>
+        {[
+          {icon:'flame',label:'Loved it'},
+          {icon:'thumb',label:'Good'},
+          {icon:'minus',label:'Meh'},
+          {icon:'skipArr',label:'Skip next'},
+        ].map((r,i)=><button key={r.label} style={{flex:1,padding:'16px 4px 12px',background:i===0?c.emberTint:c.paper100,border:`1px solid ${i===0?c.ember:c.ink100}`,borderRadius:14,display:'flex',flexDirection:'column',alignItems:'center',gap:8,cursor:'pointer'}}>
+          <div style={{height:24,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF[r.icon](i===0?c.ember:c.ink700,24)}</div>
+          <div style={{fontSize:11,fontWeight:600,color:i===0?c.ember:c.ink700,letterSpacing:'0.02em'}}>{r.label}</div>
+        </button>)}
+      </div>
+
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,padding:'12px 14px'}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Anything to note?</div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {['Too salty','Needs more time','Kids loved it','Do again','Halve the glaze'].map((t,i)=>
+            <div key={t} style={{padding:'6px 10px',background:i===2?c.sageTint:c.bg,border:`1px solid ${i===2?c.sage:c.ink100}`,borderRadius:999,fontSize:12,color:i===2?c.sage:c.ink700,fontWeight:i===2?600:400,display:'flex',alignItems:'center',gap:4}}>
+              {i===2 && SF.check(c.sage,11)} {t}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 30px',display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:15,fontWeight:600,color:c.ink700}}>Skip</button>
+      <button style={{flex:2,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600}}>Save & continue</button>
+    </div>
+  </div>);
+}
+
+/* ============ 2) Leftovers prompt ============ */
+function Leftovers({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Leftovers</div>
+      <div style={{width:36}}/>
+    </div>
+
+    <div style={{flex:1,padding:'20px 24px 0',display:'flex',flexDirection:'column',gap:20}}>
+      <div>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.sage,display:'flex',alignItems:'center',gap:6}}>{SF.box(c.sage,14)} Log what's left</div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:30,lineHeight:'36px',letterSpacing:'-0.02em',color:c.ink900,marginTop:10,textWrap:'balance'}}>
+          Anything left over?
+        </div>
+        <div style={{fontSize:14,color:c.ink500,marginTop:6,lineHeight:'20px'}}>Logged leftovers surface in "Use Soon" and keep Tonight honest.</div>
+      </div>
+
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {[
+          {name:'Salmon',portions:2,sel:true,exp:'3 days'},
+          {name:'Rice',portions:3,sel:true,exp:'4 days'},
+          {name:'Asparagus',portions:1,sel:false,exp:'2 days'},
+        ].map((r,i)=><div key={r.name} style={{padding:'14px 16px',background:r.sel?c.sageTint:c.paper100,border:`1px solid ${r.sel?c.sage:c.ink100}`,borderRadius:14,display:'flex',alignItems:'center',gap:12}}>
+          <div style={{width:22,height:22,borderRadius:6,background:r.sel?c.sage:'transparent',border:`1.5px solid ${r.sel?c.sage:c.ink300}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            {r.sel && SF.check('#fff',13)}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:15,fontWeight:600,color:c.ink900}}>{r.name}</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:2,display:'flex',alignItems:'center',gap:6}}>
+              {SF.clock(c.ink500,12)} Best within {r.exp}
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:6,background:c.bg,border:`1px solid ${c.ink100}`,borderRadius:999,padding:'4px 4px 4px 10px'}}>
+            <span style={{fontSize:13,color:c.ink700,fontWeight:600}}>{r.portions}</span>
+            <span style={{fontSize:11,color:c.ink500}}>portions</span>
+            <button style={{width:24,height:24,borderRadius:999,background:c.paper200,border:0,color:c.ink700,fontWeight:600,fontSize:13,cursor:'pointer'}}>−</button>
+            <button style={{width:24,height:24,borderRadius:999,background:c.ember,border:0,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>{SF.plus('#fff',12)}</button>
+          </div>
+        </div>)}
+        <button style={{padding:'12px',background:'transparent',border:`1.5px dashed ${c.ink300}`,borderRadius:14,color:c.ink500,fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+          {SF.plus(c.ink500,14)} Add other
+        </button>
+      </div>
+
+      <div style={{background:c.paper100,borderRadius:10,padding:'10px 12px',fontSize:12,color:c.ink500,lineHeight:'16px'}}>
+        <b style={{color:c.ink700,fontWeight:600}}>Tomorrow:</b> salmon works in a rice bowl with cucumber. I'll remind you.
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 30px',display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:15,fontWeight:600,color:c.ink700}}>None</button>
+      <button style={{flex:2,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600}}>Log 2 leftovers</button>
+    </div>
+  </div>);
+}
+
+/* ============ 3) Leftovers solve — tomorrow's options ============ */
+function LeftoverSolve({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,padding:6}}>Back</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Use what's left</div>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,padding:6}}>Skip</button>
+    </div>
+
+    <div style={{padding:'12px 20px 8px'}}>
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.sage,display:'flex',alignItems:'center',gap:6}}>{SF.sparkle(c.sage,12)} 2 leftovers · Best in 3 days</div>
+      <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:28,letterSpacing:'-0.01em',color:c.ink900,marginTop:6,lineHeight:'34px'}}>Tomorrow, built from tonight.</div>
+    </div>
+
+    <div style={{padding:'4px 20px 0',display:'flex',gap:8,marginBottom:10}}>
+      {['Salmon · 2','Rice · 3'].map(t=><div key={t} style={{padding:'6px 10px',background:c.sageTint,border:`1px solid ${c.sage}`,color:c.sage,fontSize:12,fontWeight:600,borderRadius:999}}>{t}</div>)}
+    </div>
+
+    <div style={{flex:1,padding:'0 20px 0',display:'flex',flexDirection:'column',gap:10,overflow:'hidden'}}>
+      {[
+        {title:'Salmon rice bowls with quick pickled cucumber',time:'15 min',save:'Saves 2 portions of salmon, 2 of rice',color:c.ember,rec:true},
+        {title:'Miso-glazed salmon fried rice',time:'18 min',save:'Uses everything',color:c.ink100},
+        {title:'Flake-into-salad + rice on the side',time:'10 min',save:'Lightest lift',color:c.ink100},
+      ].map((o,i)=><div key={o.title} style={{padding:'14px 16px',background:o.rec?c.emberTint:c.paper100,border:`1.5px solid ${o.rec?c.ember:c.ink100}`,borderRadius:16,display:'flex',gap:12,alignItems:'center'}}>
+        <div style={{width:52,height:52,borderRadius:12,background:c.paper200,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:22}}>{['🍚','🥘','🥗'][i]}</div>
+        <div style={{flex:1,minWidth:0}}>
+          {o.rec && <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember,marginBottom:2}}>Best fit</div>}
+          <div style={{fontSize:15,fontWeight:600,color:c.ink900,lineHeight:'19px'}}>{o.title}</div>
+          <div style={{fontSize:12,color:c.ink500,marginTop:3,display:'flex',gap:8}}>
+            <span style={{display:'flex',alignItems:'center',gap:3}}>{SF.clock(c.ink500,11)} {o.time}</span>
+            <span>·</span>
+            <span>{o.save}</span>
+          </div>
+        </div>
+        {SF.chev(c.ink500,14)}
+      </div>)}
+
+      <div style={{marginTop:4,padding:'10px 12px',background:c.paper100,borderRadius:10,fontSize:12,color:c.ink500,lineHeight:'16px'}}>
+        Saving one of these adds it to tomorrow's Tonight. Change anytime.
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 30px',display:'flex',gap:10}}>
+      <button style={{flex:1,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:15,fontWeight:600,color:c.ink700}}>Not tomorrow</button>
+      <button style={{flex:2,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600}}>Save for tomorrow</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">09 · Post-Cook</h1>
+      <p className="mock-sub">
+        The three screens after the last step. Feedback is <em>one tap</em> —
+        emoji rating plus optional tags — because no one fills out a form at
+        8pm. Leftovers logging feeds the "Use Soon" card back on Home.
+        Leftover-solve closes the loop: tonight's cook becomes tomorrow's
+        dinner without the planning tax.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #27–#29</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Specs §11 — Outcomes & Leftovers</span>
+      </div>
+    </header>
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Outcome Feedback</h2>
+        <p className="mock-section-desc">
+          Large emoji buttons over a warm header. Quick-tag strip below —
+          optional, never mandatory. Secondary "Skip" is present so the user
+          isn't held hostage for a rating. The feedback trains what we solve
+          next time; the UI makes the trade honest.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · "Loved it" selected</div><Frame><Feedback/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Feedback dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Leftovers prompt</h2>
+        <p className="mock-section-desc">
+          Auto-detected from the recipe's finished yield vs. servings cooked.
+          Per-item toggle + portion stepper. Each logged leftover shows a
+          "Best within" hint sourced from food-safety defaults. Secondary
+          "None" dismisses cleanly.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 2 of 3 selected</div><Frame><Leftovers/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Leftovers dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Leftover Solve — tomorrow's options</h2>
+        <p className="mock-section-desc">
+          Three options, ranked by how much of tonight they use. Sage chips
+          show what's in the fridge; ember highlights the recommended path.
+          A tap saves the selection to tomorrow's Tonight slot — the user is
+          never forced to commit now.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 3 options</div><Frame><LeftoverSolve/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><LeftoverSolve dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

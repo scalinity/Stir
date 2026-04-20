@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 15 Plan & Billing</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}.mock-header{max-width:1600px;margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:820px;line-height:1.55}.mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}.mock-main{max-width:1600px;margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}.mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start;justify-content:center}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}.mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614'};
+const u=(d)=>d?D:L;
+const SF={
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  back:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  chev:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M9 6l6 6-6 6"/></svg>,
+  check:(c,s=12)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.6" strokeLinecap="round"><path d="M5 12l4 4 10-10"/></svg>,
+  sparkle:(c,s=12)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2l1.8 4.2L18 8l-4.2 1.8L12 14l-1.8-4.2L6 8l4.2-1.8z"/></svg>,
+};
+function Bar({dark}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>6:44</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:'0 30px 60px rgba(26,22,18,0.18)',boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column',minHeight:0}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* 1) Plan overview (current Pro) */
+function PlanOverview({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Plan</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 24px'}}>
+      {/* Current plan hero */}
+      <div style={{padding:'16px 18px',background:`linear-gradient(135deg, ${c.ember} 0%, #8F3B1D 100%)`,borderRadius:18,color:'#fff',marginTop:6}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.16em',textTransform:'uppercase',opacity:0.8,display:'flex',alignItems:'center',gap:4}}>{SF.sparkle('#fff',11)} Current plan</div>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:30,fontWeight:600,letterSpacing:'-0.02em',marginTop:6}}>Stir Pro</div>
+        <div style={{fontSize:12,opacity:0.85,marginTop:4}}>$8/mo · renews May 28</div>
+        <div style={{marginTop:14,display:'flex',gap:8,flexWrap:'wrap'}}>
+          {['Unlimited solve','Voice cook','Cookbook scan'].map(t=><div key={t} style={{fontSize:11,fontWeight:600,padding:'5px 9px',background:'rgba(255,255,255,0.18)',borderRadius:999}}>{t}</div>)}
+        </div>
+      </div>
+
+      {/* This month usage */}
+      <div style={{marginTop:20,fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>This month</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {[
+          {t:'Meals cooked',v:'23',s:'+4 vs last month'},
+          {t:'Solves',v:'47',s:'Unlimited on Pro'},
+          {t:'Imports',v:'12',s:'9 links · 3 scans'},
+          {t:'Voice minutes',v:'3h 42m'},
+        ].map((r,i)=><div key={r.t} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{r.t}</div>
+            {r.s && <div style={{fontSize:11,color:c.ink500,marginTop:1}}>{r.s}</div>}
+          </div>
+          <div style={{fontFamily:'var(--font-serif)',fontSize:20,fontWeight:600,color:c.ink900}}>{r.v}</div>
+        </div>)}
+      </div>
+
+      {/* Manage */}
+      <div style={{marginTop:20,fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Manage</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {['Billing & receipts','Switch to annual ($72/yr · save 25%)','Pause subscription','Cancel'].map((t,i)=><div key={t} style={{display:'flex',alignItems:'center',gap:10,padding:'13px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1,fontSize:14,fontWeight:500,color:i===3?c.ember:c.ink900}}>{t}</div>
+          {SF.chev(i===3?c.ember:c.ink500,12)}
+        </div>)}
+      </div>
+    </div>
+  </div>);
+}
+
+/* 2) Billing & receipts */
+function Billing({dark=false}){
+  const c=u(dark);
+  const receipts=[
+    {d:'Apr 28, 2026',a:'$8.00',s:'Visa ••4488',st:'Paid'},
+    {d:'Mar 28, 2026',a:'$8.00',s:'Visa ••4488',st:'Paid'},
+    {d:'Feb 28, 2026',a:'$8.00',s:'Visa ••4488',st:'Paid'},
+    {d:'Jan 28, 2026',a:'$8.00',s:'Apple Pay',st:'Paid'},
+    {d:'Dec 28, 2025',a:'$0.00',s:'Trial',st:'Free'},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Billing</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 24px'}}>
+      {/* Next charge */}
+      <div style={{marginTop:10,padding:'16px 18px',background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Next charge</div>
+        <div style={{display:'flex',alignItems:'baseline',gap:10,marginTop:8}}>
+          <div style={{fontFamily:'var(--font-serif)',fontSize:34,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:1}}>$8.00</div>
+          <div style={{fontSize:13,color:c.ink500}}>on May 28</div>
+        </div>
+        <div style={{marginTop:12,display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:c.bg,borderRadius:10,border:`1px solid ${c.ink100}`}}>
+          <div style={{width:34,height:22,borderRadius:4,background:'#1A1F71',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:9,fontWeight:700,letterSpacing:'0.05em'}}>VISA</div>
+          <div style={{flex:1,fontSize:13,color:c.ink900,fontFamily:'var(--font-mono)'}}>•••• 4488</div>
+          <div style={{fontSize:11,color:c.ember,fontWeight:600}}>Change</div>
+        </div>
+      </div>
+
+      {/* Annual upsell */}
+      <div style={{marginTop:16,padding:'12px 14px',background:c.emberTint,borderRadius:12,border:`1px solid ${c.ember}44`,display:'flex',alignItems:'center',gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700,color:c.ember,letterSpacing:'0.04em'}}>Switch to annual — save $24/yr</div>
+          <div style={{fontSize:11,color:c.ink500,marginTop:2}}>$72 billed yearly · same features</div>
+        </div>
+        <button style={{height:34,padding:'0 14px',borderRadius:10,background:c.ember,border:0,color:'#fff',fontSize:12,fontWeight:600}}>Switch</button>
+      </div>
+
+      {/* Receipts */}
+      <div style={{marginTop:20,fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Receipts</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {receipts.map((r,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{r.d}</div>
+            <div style={{fontSize:11,color:c.ink500,marginTop:1}}>{r.s}</div>
+          </div>
+          <div style={{fontFamily:'var(--font-mono)',fontSize:13,color:c.ink900,fontWeight:500}}>{r.a}</div>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:r.st==='Paid'?c.sage:c.ink500,padding:'3px 8px',background:r.st==='Paid'?c.sageTint:c.paper200,borderRadius:999,minWidth:44,textAlign:'center'}}>{r.st}</div>
+        </div>)}
+      </div>
+      <div style={{fontSize:11,color:c.ink500,marginTop:12,textAlign:'center'}}>All receipts also emailed to maya@stir.kitchen</div>
+    </div>
+  </div>);
+}
+
+/* 3) Switch plan */
+function SwitchPlan({dark=false}){
+  const c=u(dark);
+  const plans=[
+    {n:'Free',p:'$0',sub:'3 solves/day',feats:['Save & cook','Manual grocery','Light substitutions'],on:false},
+    {n:'Pro',p:'$8',sub:'/mo',feats:['Unlimited solve','Voice cook','Cookbook scan','Pantry auto-replenish','Household (up to 4)'],on:true,cur:true},
+    {n:'Pro Annual',p:'$72',sub:'/yr · save 25%',feats:['Everything in Pro','2 months free','Priority parser'],on:false,save:true},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Switch plan</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 24px'}}>
+      <div style={{padding:'8px 0 16px'}}>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:24,fontWeight:600,letterSpacing:'-0.015em',color:c.ink900,lineHeight:'30px'}}>Pick your plan.</div>
+        <div style={{fontSize:13,color:c.ink500,marginTop:4}}>Change anytime. Credited prorated.</div>
+      </div>
+
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {plans.map(p=><div key={p.n} style={{padding:'16px 18px',borderRadius:16,background:p.cur?c.emberTint:c.paper100,border:`${p.cur?1.5:1}px solid ${p.cur?c.ember:c.ink100}`,position:'relative'}}>
+          {p.save && <div style={{position:'absolute',top:-9,right:18,fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:'#fff',background:c.sage,padding:'3px 9px',borderRadius:999}}>Save 25%</div>}
+          {p.cur && <div style={{position:'absolute',top:-9,right:18,fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:'#fff',background:c.ember,padding:'3px 9px',borderRadius:999}}>Current</div>}
+          <div style={{display:'flex',alignItems:'baseline',gap:6}}>
+            <div style={{fontFamily:'var(--font-serif)',fontSize:22,fontWeight:600,color:c.ink900,letterSpacing:'-0.01em'}}>{p.n}</div>
+            <div style={{flex:1}}/>
+            <div style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,color:c.ink900,letterSpacing:'-0.015em'}}>{p.p}</div>
+            <div style={{fontSize:11,color:c.ink500}}>{p.sub}</div>
+          </div>
+          <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:5}}>
+            {p.feats.map(f=><div key={f} style={{display:'flex',gap:7,alignItems:'center',fontSize:12,color:c.ink700}}>
+              <div style={{width:16,height:16,borderRadius:999,background:p.cur?c.ember:c.sage,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{SF.check('#fff',10)}</div>
+              {f}
+            </div>)}
+          </div>
+          {!p.cur && <button style={{marginTop:12,width:'100%',height:40,borderRadius:10,background:p.n==='Free'?'transparent':c.ink900,border:p.n==='Free'?`1px solid ${c.ink300}`:'none',color:p.n==='Free'?c.ink700:c.bg,fontSize:13,fontWeight:600}}>{p.n==='Free'?'Downgrade':'Switch to '+p.n}</button>}
+        </div>)}
+      </div>
+
+      <div style={{fontSize:11,color:c.ink500,marginTop:14,lineHeight:'16px',textAlign:'center',padding:'0 8px'}}>Subscriptions billed through Apple. Cancel anytime in App Store settings.</div>
+    </div>
+  </div>);
+}
+
+/* 4) Cancel flow */
+function Cancel({dark=false}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column',minHeight:0,overflow:'hidden'}}>
+    <div style={{padding:'8px 20px 10px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.back(c.ink700,16)}</button>
+      <div style={{fontSize:14,fontWeight:600,color:c.ink900}}>Cancel Pro</div>
+      <div style={{width:36}}/>
+    </div>
+    <div style={{flex:1,overflow:'auto',padding:'0 20px 24px'}}>
+      <div style={{padding:'10px 0 16px'}}>
+        <div style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,letterSpacing:'-0.02em',color:c.ink900,lineHeight:'32px'}}>Sorry to see you go.</div>
+        <div style={{fontSize:14,color:c.ink500,marginTop:6,lineHeight:'20px'}}>You'll keep Pro through <b style={{color:c.ink900}}>May 28</b>. After that, your account goes back to Free. Recipes, pantry, and history stay exactly where you left them.</div>
+      </div>
+
+      {/* What you lose */}
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>You'll lose access to</div>
+      <div style={{background:c.paper100,borderRadius:14,border:`1px solid ${c.ink100}`,overflow:'hidden'}}>
+        {[
+          {t:'Unlimited solve',sub:'Back to 3/day'},
+          {t:'Voice cook mode',sub:'Tap-only cook'},
+          {t:'Cookbook scan',sub:'Link & paste only'},
+          {t:'Pantry auto-replenish',sub:'Manual tracking'},
+          {t:'Household sharing',sub:'Solo account'},
+        ].map((r,i)=><div key={r.t} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 14px',borderTop:i===0?'none':`1px solid ${c.ink100}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:500,color:c.ink900}}>{r.t}</div>
+            <div style={{fontSize:12,color:c.ink500,marginTop:1}}>→ {r.sub}</div>
+          </div>
+        </div>)}
+      </div>
+
+      {/* Reason */}
+      <div style={{marginTop:20,fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500,marginBottom:8}}>Tell us why (optional)</div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+        {['Too expensive','Not cooking enough','Missing a feature','Switching apps','Other'].map((t,i)=>
+          <div key={t} style={{padding:'8px 12px',background:i===1?c.ink900:c.paper100,color:i===1?c.bg:c.ink700,borderRadius:999,fontSize:12,fontWeight:500,border:i===1?'none':`1px solid ${c.ink100}`}}>{t}</div>)}
+      </div>
+
+      {/* Alternative */}
+      <div style={{marginTop:20,padding:'14px 16px',background:c.emberTint,borderRadius:14,border:`1px solid ${c.ember}44`}}>
+        <div style={{fontSize:13,fontWeight:700,color:c.ember,letterSpacing:'0.04em'}}>Pause instead?</div>
+        <div style={{fontSize:12,color:c.ink700,marginTop:4,lineHeight:'17px'}}>Pause Pro for up to 3 months. Keep your data, skip the bill. You can come back anytime.</div>
+        <button style={{marginTop:10,height:36,padding:'0 14px',borderRadius:10,background:'transparent',border:`1.5px solid ${c.ember}`,color:c.ember,fontSize:12,fontWeight:600}}>Pause for 1 month</button>
+      </div>
+    </div>
+    <div style={{padding:'12px 20px 20px',display:'flex',gap:10,borderTop:`1px solid ${c.ink100}`,flexShrink:0,background:c.bg}}>
+      <button style={{flex:1,height:48,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,fontSize:14,fontWeight:600,color:c.ink700}}>Keep Pro</button>
+      <button style={{flex:1,height:48,borderRadius:12,background:'transparent',border:`1.5px solid ${c.ember}`,color:c.ember,fontSize:14,fontWeight:600}}>Cancel on May 28</button>
+    </div>
+  </div>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">15 · Plan & Billing</h1>
+      <p className="mock-sub">
+        Four screens. Subscription is a <em>kitchen tool subscription</em> —
+        honest, receipt-itemized, easy to leave. Pause exists as a real
+        alternative to cancel. No dark patterns, no retention walls.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #53–#56</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Apple IAP + web billing</span>
+      </div>
+    </header>
+    <main className="mock-main">
+      <section className="mock-section">
+        <h2 className="mock-section-title">Plan overview</h2>
+        <p className="mock-section-desc">Hero ember card for current plan. Below: <em>this month</em> usage with real numbers (meals cooked, solves, imports, voice minutes) — builds a sense of value. Manage group last.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Pro active</div><Frame><PlanOverview/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><PlanOverview dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Billing & receipts</h2>
+        <p className="mock-section-desc">Next charge at top with payment method card. Annual upsell as a non-intrusive accent. Full receipt history — including a "Trial" line so the first month is visible. Email confirmation as a footnote.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · $8/mo</div><Frame><Billing/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Billing dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Switch plan</h2>
+        <p className="mock-section-desc">Three tiers stacked, current clearly marked. Annual gets a sage "Save 25%" badge, current gets ember. Feature lists concise — what you <em>actually</em> get. Footnote clarifies Apple IAP.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · 3 tiers</div><Frame><SwitchPlan/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><SwitchPlan dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Cancel flow</h2>
+        <p className="mock-section-desc">No guilt, no walls. Lead with "you'll keep Pro through May 28." Concrete downgrade list so the tradeoff is visible. <em>Pause</em> as a first-class alternative — stated with the honest "keep your data, skip the bill" framing. Both buttons treated as equal weight.</p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Reason chips</div><Frame><Cancel/></Frame></div>
+          <div className="mock-cell"><div className="mock-cell-label">Dark · Same</div><Frame dark><Cancel dark/></Frame></div>
+        </div>
+      </section>
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script>
+</body>
+</html>

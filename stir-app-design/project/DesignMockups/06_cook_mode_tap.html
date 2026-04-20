@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stir — 06 Cook Mode (Tap)</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root{--font-sans:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;--font-serif:"New York","NewYork",ui-serif,"Source Serif 4","Charter",Georgia,serif;--font-mono:ui-monospace,"SF Mono",Menlo,monospace}
+  html,body{margin:0;padding:0}
+  body{background:#EFEAE1;font-family:var(--font-sans);color:#1A1612;-webkit-font-smoothing:antialiased}
+  .mock-page{min-height:100vh;padding:48px 32px 80px}
+  .mock-header{max-width:var(--page-max,1600px);margin:0 auto 40px}
+  .mock-title{font-family:var(--font-serif);font-weight:600;font-size:40px;letter-spacing:-0.02em;line-height:1.1;margin:0}
+  .mock-sub{font-size:15px;color:#6B5F54;margin:8px 0 0;max-width:780px;line-height:1.55}
+  .mock-sub em{color:#3D342C;font-style:italic}
+  .mock-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;font-size:11px;color:#6B5F54;letter-spacing:0.06em;text-transform:uppercase}
+  .mock-meta span{padding:4px 10px;background:#E8E3DD;border-radius:999px}
+  .mock-main{max-width:var(--page-max,1600px);margin:0 auto}
+  .mock-section{margin-top:56px;padding-top:24px;border-top:1px solid #D9D2C4}
+  .mock-section:first-of-type{border-top:none;padding-top:0;margin-top:24px}
+  .mock-section-title{font-family:var(--font-serif);font-weight:600;font-size:24px;letter-spacing:-0.01em;margin:0}
+  .mock-section-desc{font-size:14px;color:#6B5F54;margin:6px 0 0;max-width:760px;line-height:1.55}
+  .mock-row{display:flex;flex-wrap:wrap;gap:36px;margin-top:24px;align-items:flex-start}
+  .mock-cell{display:flex;flex-direction:column;gap:10px}
+  .mock-cell-label{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6B5F54}
+  .mock-cell-caption{font-size:12px;line-height:1.5;color:#6B5F54;max-width:410px;margin-top:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+const L={bg:'#FAF7F2',paper100:'#F3EEE5',paper200:'#EBE3D6',ink900:'#1A1612',ink700:'#3D342C',ink500:'#6B5F54',ink300:'#A89E93',ink100:'#E8E3DD',ember:'#C8532B',emberTint:'#FBEAE0',sage:'#4A7C59',sageTint:'#E4EEE6',amber:'#B8860B',amberTint:'#F5ECD5',crimson:'#9A2E2E',crimsonTint:'#F2DCDC',voice:'#5E4AE0',voiceTint:'#E8E3FA'};
+const D={bg:'#14100B',paper100:'#1F1A14',paper200:'#2A241C',ink900:'#F5F0E8',ink700:'#D6CEC3',ink500:'#9A8F84',ink300:'#5E5349',ink100:'#2E2822',ember:'#E26340',emberTint:'#3A1E13',sage:'#6FA07C',sageTint:'#1E2E23',amber:'#D4A21F',amberTint:'#2E2614',crimson:'#C94747',crimsonTint:'#2E1818',voice:'#8473E8',voiceTint:'#1F1A33'};
+const u=(d)=>d?D:L;
+const SF={
+  close:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>,
+  pause:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/></svg>,
+  play:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M7 4l14 8-14 8z"/></svg>,
+  chevronL:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  chevronR:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>,
+  timer:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 8v5l3 2M9 2h6"/></svg>,
+  eye:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>,
+  mic:(c,s=18,slash=false)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M8 21h8"/>{slash && <path d="M3 3l18 18" strokeWidth="2"/>}</svg>,
+  swap:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M7 4l-3 3 3 3M4 7h12M17 14l3 3-3 3M20 17H8"/></svg>,
+  question:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 115 0c0 1.5-2.5 2-2.5 4"/><circle cx="12" cy="17" r="0.8" fill={c}/></svg>,
+  wifi:(c,s=14)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round"><path d="M2 9c6-6 14-6 20 0M5 13c4.5-4.5 10-4.5 14.5 0M8.5 16.5c2.5-2.5 5-2.5 7.5 0"/><circle cx="12" cy="20" r="1" fill={c}/></svg>,
+  flame:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 2s-1 3-4 6c-3 3-4 6-4 8a8 8 0 0016 0c0-2-1-4-2-5 0 3-2 4-3 4 0-4-3-8-3-13z"/></svg>,
+  bell:(c,s=18)=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><path d="M12 3a7 7 0 00-7 7v4l-2 3h18l-2-3v-4a7 7 0 00-7-7zM10 20a2 2 0 004 0"/></svg>,
+  plus:(c,s=16)=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+};
+function Bar({dark,time='7:48'}){const c=dark?'#F5F0E8':'#1A1612';return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0 28px',fontWeight:600,fontSize:15,color:c,height:44}}><span>{time}</span><div style={{display:'flex',gap:6,alignItems:'center'}}><svg width="16" height="10" viewBox="0 0 16 10"><rect x="0" y="7" width="2.5" height="3" rx="0.5" fill={c}/><rect x="4" y="5" width="2.5" height="5" rx="0.5" fill={c}/><rect x="8" y="3" width="2.5" height="7" rx="0.5" fill={c}/><rect x="12" y="1" width="2.5" height="9" rx="0.5" fill={c}/></svg>{SF.wifi(c)}<svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3" fill="none" stroke={c} strokeOpacity="0.45"/><rect x="2" y="2" width="11" height="8" rx="1.5" fill={c}/><rect x="21" y="4" width="2" height="4" rx="1" fill={c} opacity="0.45"/></svg></div></div>);}
+function Frame({children,dark=false,time='7:48'}){const c=u(dark);return(<div style={{width:402,height:856,padding:6,background:dark?'#0a0805':'#f7f3ec',borderRadius:54,boxShadow:`0 30px 60px rgba(26,22,18,0.18)`,boxSizing:'border-box'}}><div style={{width:390,height:844,borderRadius:48,background:c.bg,overflow:'hidden',position:'relative',fontFamily:'var(--font-sans)',color:c.ink900}}><div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',width:120,height:34,borderRadius:20,background:'#000',zIndex:100}}/><Bar dark={dark} time={time}/><div style={{height:808,overflow:'hidden',display:'flex',flexDirection:'column'}}>{children}</div><div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',width:134,height:5,borderRadius:999,background:dark?'#F5F0E8':'#1A1612',opacity:0.4,zIndex:101}}/></div></div>);}
+
+/* Step progress dots */
+function StepDots({step,total,c}){
+  return(<div style={{display:'flex',gap:4,alignItems:'center'}}>
+    {[...Array(total)].map((_,i)=><div key={i} style={{width:i===step-1?18:5,height:5,borderRadius:999,background:i<step?c.ember:c.ink100,transition:'width 200ms'}}/>)}
+  </div>);
+}
+
+/* =========== Cook Mode — Step card (default) =========== */
+function CookStep({dark=false,step=3}){
+  const c=u(dark);
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    {/* Top chrome */}
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ink500}}>Cook mode · Tap</div>
+        <StepDots step={step} total={5} c={c}/>
+      </div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.eye(c.ink700,16)}</button>
+    </div>
+
+    {/* Recipe strip */}
+    <div style={{padding:'0 20px 4px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <div style={{fontSize:13,color:c.ink500}}>
+        <span style={{color:c.ink700,fontWeight:600}}>Miso-Glazed Salmon</span> · Step {step} of 5
+      </div>
+      <div style={{fontSize:13,color:c.ink500}}>~14 min left</div>
+    </div>
+
+    {/* Hero step card */}
+    <div style={{flex:1,padding:'14px 20px 0',display:'flex',flexDirection:'column'}}>
+      <div style={{background:c.paper100,borderRadius:24,border:`1px solid ${c.ink100}`,padding:'26px 24px 22px',display:'flex',flexDirection:'column',gap:14}}>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember}}>Now</div>
+        <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:36,lineHeight:'42px',letterSpacing:'-0.02em',color:c.ink900,textWrap:'balance'}}>
+          Sear the salmon, skin-side down.
+        </div>
+        <div style={{fontSize:16,lineHeight:'24px',color:c.ink700}}>
+          Medium-high heat. Press gently so the skin crisps. Don't move it — let it release on its own, about 4 minutes.
+        </div>
+
+        {/* Active timer inline */}
+        <div style={{marginTop:4,padding:'14px 16px',background:c.bg,borderRadius:14,border:`1px solid ${c.ember}`,display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:44,height:44,borderRadius:999,background:c.emberTint,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            {SF.timer(c.ember,22)}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',color:c.ember}}>Timer running</div>
+            <div style={{fontFamily:'var(--font-mono)',fontSize:28,fontWeight:500,color:c.ink900,fontVariantNumeric:'tabular-nums',lineHeight:1,marginTop:2}}>
+              2:43 <span style={{fontSize:14,color:c.ink500,fontFamily:'var(--font-sans)'}}>/ 4:00</span>
+            </div>
+          </div>
+          <button style={{width:44,height:44,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.pause(c.ink700,16)}</button>
+        </div>
+
+        {/* Ingredient recap */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:4}}>
+          {['salmon fillets × 4','1 tbsp sesame oil','salt'].map(t=><div key={t} style={{fontSize:12,color:c.ink700,background:c.paper200,padding:'5px 10px',borderRadius:999}}>{t}</div>)}
+        </div>
+      </div>
+
+      {/* Secondary actions — Help / Sub / Next */}
+      <div style={{marginTop:14,display:'flex',gap:8}}>
+        <button style={{flex:1,height:48,borderRadius:12,background:'transparent',border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center',gap:6,color:c.ink700,fontSize:13,fontWeight:500}}>
+          {SF.question(c.ink700,14)} Help
+        </button>
+        <button style={{flex:1,height:48,borderRadius:12,background:'transparent',border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center',gap:6,color:c.ink700,fontSize:13,fontWeight:500}}>
+          {SF.swap(c.ink700,14)} Swap
+        </button>
+        <button style={{flex:1,height:48,borderRadius:12,background:'transparent',border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center',gap:6,color:c.ink700,fontSize:13,fontWeight:500}}>
+          {SF.bell(c.ink700,14)} +Timer
+        </button>
+      </div>
+
+      {/* Voice unlock nudge (subtle) */}
+      <div style={{marginTop:10,padding:'10px 14px',background:c.voiceTint,borderRadius:12,display:'flex',alignItems:'center',gap:10}}>
+        {SF.mic(c.voice,16,true)}
+        <div style={{flex:1,fontSize:12,color:c.ink700,lineHeight:'16px'}}>
+          <b style={{color:c.voice,fontWeight:600}}>Voice Cook Mode</b> reads steps aloud and hears "next step." Free this week.
+        </div>
+        {SF.chevronR(c.voice,14)}
+      </div>
+    </div>
+
+    {/* Footer nav */}
+    <div style={{padding:'14px 18px 18px',borderTop:`1px solid ${c.ink100}`,background:c.bg,display:'flex',gap:10,alignItems:'center'}}>
+      <button style={{width:52,height:52,borderRadius:12,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.chevronL(c.ink700,20)}</button>
+      <button style={{flex:1,height:52,borderRadius:12,border:0,background:c.ember,color:'#fff',fontSize:17,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+        Next step {SF.chevronR('#fff',18)}
+      </button>
+    </div>
+  </div>);
+}
+
+/* =========== Cook Mode — Timer-active (fullscreen) =========== */
+function TimerActive({dark=false}){
+  const c=u(dark);
+  // arc progress — 2:43 of 4:00 = 67.9% elapsed
+  const r=88,circ=2*Math.PI*r,elapsed=0.679;
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    <div style={{padding:'8px 16px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+      <button style={{background:'transparent',border:0,color:c.ember,fontSize:15,fontWeight:500,display:'flex',alignItems:'center',gap:2,padding:6}}>{SF.chevronL(c.ember,16)} Step</button>
+      <div style={{fontSize:13,fontWeight:600,color:c.ink700}}>Timer</div>
+      <button style={{width:36,height:36,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,16)}</button>
+    </div>
+
+    <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'0 24px',gap:28}}>
+      <div style={{fontSize:12,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>Searing · step 3 of 5</div>
+
+      {/* Ring */}
+      <div style={{position:'relative',width:260,height:260}}>
+        <svg width="260" height="260" viewBox="0 0 260 260" style={{transform:'rotate(-90deg)'}}>
+          <circle cx="130" cy="130" r={r} stroke={c.ink100} strokeWidth="6" fill="none"/>
+          <circle cx="130" cy="130" r={r} stroke={c.ember} strokeWidth="6" fill="none"
+            strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ*(1-elapsed)}/>
+        </svg>
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6}}>
+          <div style={{fontFamily:'var(--font-mono)',fontSize:56,fontWeight:400,color:c.ink900,fontVariantNumeric:'tabular-nums',letterSpacing:'-0.02em',lineHeight:1}}>2:43</div>
+          <div style={{fontSize:12,color:c.ink500,textAlign:'center',maxWidth:140,lineHeight:'15px'}}>of 4:00<br/>salmon skin-side</div>
+        </div>
+      </div>
+
+      <div style={{fontSize:15,color:c.ink700,lineHeight:'22px',textAlign:'center',maxWidth:280}}>
+        Don't flip yet. Let the skin release on its own.
+      </div>
+
+      <div style={{display:'flex',gap:12,alignItems:'center'}}>
+        <button style={{width:64,height:64,borderRadius:999,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <span style={{fontSize:13,fontWeight:600,color:c.ink700}}>+30s</span>
+        </button>
+        <button style={{width:84,height:84,borderRadius:999,background:c.ember,border:0,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:`0 6px 20px ${c.ember}44`}}>
+          {SF.pause('#fff',28)}
+        </button>
+        <button style={{width:64,height:64,borderRadius:999,background:c.paper100,border:`1px solid ${c.ink100}`,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          {SF.bell(c.ink700,22)}
+        </button>
+      </div>
+    </div>
+
+    <div style={{padding:'14px 18px 18px',borderTop:`1px solid ${c.ink100}`,display:'flex',justifyContent:'center'}}>
+      <div style={{fontSize:12,color:c.ink500}}>Keeps running if you leave the app.</div>
+    </div>
+  </div>);
+}
+
+/* =========== Cook Mode — Substitution sheet (Free tier, inline) =========== */
+function SubSheet({dark=false}){
+  const c=u(dark);
+  const opts=[
+    {title:'Rice vinegar + ½ tsp sugar',note:'Closest match. In your pantry.',tone:'sage',rec:true},
+    {title:'Dry white wine + ½ tsp sugar',note:'Works. Not in your kitchen.',tone:'amber'},
+    {title:'Skip it',note:'Glaze will be less glossy but still good.',tone:'default'},
+  ];
+  return(<div style={{flex:1,background:c.bg,display:'flex',flexDirection:'column'}}>
+    {/* Dim recipe behind */}
+    <div style={{position:'absolute',inset:0,background:'rgba(26,22,18,0.45)',zIndex:1,pointerEvents:'none'}}/>
+
+    {/* Step teaser behind */}
+    <div style={{padding:'60px 20px 0',opacity:0.35}}>
+      <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:28,lineHeight:'32px',letterSpacing:'-0.02em',color:c.ink900}}>
+        Whisk the glaze.
+      </div>
+      <div style={{fontSize:14,color:c.ink700,marginTop:6}}>
+        Combine miso, soy, mirin, and sesame oil.
+      </div>
+    </div>
+
+    <div style={{flex:1}}/>
+
+    {/* Sheet */}
+    <div style={{position:'relative',zIndex:2,background:c.bg,borderTopLeftRadius:22,borderTopRightRadius:22,border:`1px solid ${c.ink100}`,padding:'12px 20px 24px',boxShadow:'0 -10px 40px rgba(26,22,18,0.12)'}}>
+      <div style={{display:'flex',justifyContent:'center',marginBottom:6}}>
+        <div style={{width:44,height:5,borderRadius:999,background:c.ink300,opacity:0.6}}/>
+      </div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:'0.14em',textTransform:'uppercase',color:c.ember}}>Out of mirin?</div>
+        <button style={{width:28,height:28,borderRadius:999,background:c.paper200,border:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{SF.close(c.ink700,14)}</button>
+      </div>
+      <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:22,lineHeight:'28px',letterSpacing:'-0.015em',color:c.ink900,marginBottom:14}}>
+        Here's what I'd swap in.
+      </div>
+
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {opts.map(o=>{
+          const badgeFg=o.tone==='sage'?c.sage:o.tone==='amber'?c.amber:c.ink500;
+          const badgeBg=o.tone==='sage'?c.sageTint:o.tone==='amber'?c.amberTint:c.paper200;
+          return(<button key={o.title} style={{textAlign:'left',padding:'14px 16px',background:o.rec?c.emberTint:c.paper100,border:`1px solid ${o.rec?c.ember:c.ink100}`,borderRadius:14,display:'flex',gap:12,alignItems:'center',cursor:'pointer'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                {o.rec && <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:c.ember}}>Recommended</div>}
+              </div>
+              <div style={{fontSize:15,fontWeight:600,color:c.ink900,marginBottom:3}}>{o.title}</div>
+              <div style={{fontSize:13,color:badgeFg,display:'flex',alignItems:'center',gap:5}}>
+                <span style={{width:6,height:6,borderRadius:999,background:badgeFg,display:'inline-block'}}/>
+                {o.note}
+              </div>
+            </div>
+            {SF.chevronR(c.ink500,14)}
+          </button>);
+        })}
+      </div>
+
+      <div style={{marginTop:14,padding:'10px 14px',background:c.paper100,border:`1px solid ${c.ink100}`,borderRadius:10,fontSize:12,color:c.ink500,lineHeight:'17px',display:'flex',gap:8,alignItems:'flex-start'}}>
+        {SF.question(c.ink500,14)}
+        <div>Based on allergens, stock, and what works in a miso glaze. Not medical advice.</div>
+      </div>
+    </div>
+  </div>);
+}
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "pageMaxWidth": 1600,
+  "pagePaddingX": 32,
+  "align": "center",
+  "cellGap": 36,
+  "showDarkFrames": true
+}/*EDITMODE-END*/;
+
+function TweaksPanel({open,onClose,values,onChange}){
+  if(!open) return null;
+  const row={display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,fontSize:12,color:'#3D342C'};
+  const label={fontSize:11,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'#6B5F54'};
+  return(<div style={{position:'fixed',right:20,bottom:20,width:300,background:'#FAF7F2',border:'1px solid #D9D2C4',borderRadius:14,boxShadow:'0 20px 40px rgba(26,22,18,0.18)',padding:16,zIndex:9999,fontFamily:'var(--font-sans)'}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+      <div style={{fontFamily:'var(--font-serif)',fontWeight:600,fontSize:18,color:'#1A1612'}}>Tweaks</div>
+      <button onClick={onClose} style={{width:28,height:28,borderRadius:999,background:'#EBE3D6',border:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3D342C" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
+      </button>
+    </div>
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+      <div>
+        <div style={{...row,marginBottom:4}}><span style={label}>Page width</span><span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'#6B5F54'}}>{values.pageMaxWidth}px</span></div>
+        <input type="range" min="900" max="2400" step="20" value={values.pageMaxWidth} onChange={e=>onChange({pageMaxWidth:+e.target.value})} style={{width:'100%',accentColor:'#C8532B'}}/>
+      </div>
+      <div>
+        <div style={{...row,marginBottom:4}}><span style={label}>Side padding</span><span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'#6B5F54'}}>{values.pagePaddingX}px</span></div>
+        <input type="range" min="0" max="120" step="4" value={values.pagePaddingX} onChange={e=>onChange({pagePaddingX:+e.target.value})} style={{width:'100%',accentColor:'#C8532B'}}/>
+      </div>
+      <div>
+        <div style={{...label,marginBottom:6}}>Alignment</div>
+        <div style={{display:'flex',gap:6}}>
+          {['left','center'].map(a=>
+            <button key={a} onClick={()=>onChange({align:a})} style={{flex:1,padding:'8px 10px',borderRadius:8,border:'1px solid '+(values.align===a?'#C8532B':'#D9D2C4'),background:values.align===a?'#FBEAE0':'#fff',color:values.align===a?'#C8532B':'#3D342C',fontSize:12,fontWeight:600,cursor:'pointer',textTransform:'capitalize'}}>{a}</button>
+          )}
+        </div>
+      </div>
+      <div>
+        <div style={{...row,marginBottom:4}}><span style={label}>Cell gap</span><span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'#6B5F54'}}>{values.cellGap}px</span></div>
+        <input type="range" min="12" max="80" step="2" value={values.cellGap} onChange={e=>onChange({cellGap:+e.target.value})} style={{width:'100%',accentColor:'#C8532B'}}/>
+      </div>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:'#3D342C',cursor:'pointer'}}>
+        <input type="checkbox" checked={values.showDarkFrames} onChange={e=>onChange({showDarkFrames:e.target.checked})} style={{accentColor:'#C8532B'}}/>
+        Show dark-mode frames
+      </label>
+    </div>
+  </div>);
+}
+
+function App(){
+  const [tweaks,setTweaks]=React.useState(TWEAK_DEFAULTS);
+  const [panelOpen,setPanelOpen]=React.useState(false);
+
+  React.useEffect(()=>{
+    const handler=(e)=>{
+      if(!e.data||typeof e.data!=='object') return;
+      if(e.data.type==='__activate_edit_mode') setPanelOpen(true);
+      if(e.data.type==='__deactivate_edit_mode') setPanelOpen(false);
+    };
+    window.addEventListener('message',handler);
+    window.parent.postMessage({type:'__edit_mode_available'},'*');
+    return()=>window.removeEventListener('message',handler);
+  },[]);
+
+  React.useEffect(()=>{
+    const r=document.documentElement;
+    r.style.setProperty('--page-max',tweaks.pageMaxWidth+'px');
+    document.querySelectorAll('.mock-page').forEach(el=>{el.style.paddingLeft=tweaks.pagePaddingX+'px';el.style.paddingRight=tweaks.pagePaddingX+'px';});
+    document.querySelectorAll('.mock-header, .mock-main').forEach(el=>{
+      if(tweaks.align==='left'){el.style.marginLeft='0';el.style.marginRight='auto';}
+      else{el.style.marginLeft='auto';el.style.marginRight='auto';}
+    });
+    document.querySelectorAll('.mock-row').forEach(el=>{el.style.gap=tweaks.cellGap+'px';});
+    document.querySelectorAll('[data-dark-frame]').forEach(el=>{el.style.display=tweaks.showDarkFrames?'':'none';});
+  },[tweaks]);
+
+  const update=(edits)=>{
+    setTweaks(t=>({...t,...edits}));
+    window.parent.postMessage({type:'__edit_mode_set_keys',edits},'*');
+  };
+
+  return(<React.Fragment>
+    <Page/>
+    <TweaksPanel open={panelOpen} onClose={()=>setPanelOpen(false)} values={tweaks} onChange={update}/>
+  </React.Fragment>);
+}
+
+function Page(){
+  return(<div className="mock-page">
+    <header className="mock-header">
+      <h1 className="mock-title">06 · Cook Mode — Tap</h1>
+      <p className="mock-sub">
+        Free-tier Cook Mode. The entire surface is built for two conditions:
+        greasy fingers and divided attention. Single step in view, giant type,
+        ember progress ring, inline timer you can run without leaving the step,
+        and a bottom "Next step" that's the hero. <em>Voice</em> is the
+        upsell — a single calm Premium nudge in voice-violet, never a banner.
+      </p>
+      <div className="mock-meta">
+        <span>Catalog #17–#19</span>
+        <span>iPhone 16 Pro · 390×844</span>
+        <span>Keep-screen-on: always</span>
+        <span>Specs §9 — Cook Mode (Free)</span>
+      </div>
+    </header>
+
+    <main className="mock-main">
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Step card — default</h2>
+        <p className="mock-section-desc">
+          Title in 36pt New York for readability at arm's length. The body copy
+          carries exact craft instructions: heat, motion, time. Timer lives in
+          the card (not a separate screen) because "4 min" is part of the step,
+          not an errand. Three secondary chips below — Help, Swap, +Timer — for
+          recovery, without cluttering the chrome.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Step 3 of 5, timer running</div><Frame><CookStep/></Frame></div>
+          <div className="mock-cell" data-dark-frame><div className="mock-cell-label">Dark · Same step</div><Frame dark><CookStep dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Timer — active full-screen</h2>
+        <p className="mock-section-desc">
+          Accessed by tapping the timer card. Giant circular progress ring,
+          mono 64pt readout, contextual caption ("salmon skin-side"). Primary
+          control is pause (ember). +30s and "add timer" on the flanks. A
+          reassuring footnote: the timer persists when the user backgrounds
+          the app (via Live Activity — see package 13).
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Timer active</div><Frame><TimerActive/></Frame></div>
+          <div className="mock-cell" data-dark-frame><div className="mock-cell-label">Dark · Timer active</div><Frame dark><TimerActive dark/></Frame></div>
+        </div>
+      </section>
+
+      <section className="mock-section">
+        <h2 className="mock-section-title">Substitution sheet (Free-tier)</h2>
+        <p className="mock-section-desc">
+          Invoked by tapping the Swap chip on any ingredient. Bottom sheet; the
+          recipe step dims behind it. Three options max, ranked with a
+          semantic dot (sage = recommended + in kitchen; amber = works but
+          you don't have it; neutral = skip / workaround). Top option gets
+          ember fill so the default path is obvious. Full voice-enabled
+          substitution lives in package 08.
+        </p>
+        <div className="mock-row">
+          <div className="mock-cell"><div className="mock-cell-label">Light · Substitution sheet</div><Frame><SubSheet/></Frame></div>
+          <div className="mock-cell" data-dark-frame><div className="mock-cell-label">Dark · Substitution sheet</div><Frame dark><SubSheet dark/></Frame></div>
+        </div>
+      </section>
+
+    </main>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

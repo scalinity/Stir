@@ -1,0 +1,238 @@
+/* ==========================================================================
+   Stir — Design System foundation tokens
+   Source of truth: Specs/Design-System.md (v1, 2026-04-19)
+   iPhone v1. Two-face system: SF Pro (body) + New York (display).
+   ========================================================================== */
+
+/* -------- Typography families ---------------------------------------- */
+:root {
+  /* SF Pro → system sans with sensible fallbacks when running off-device */
+  --font-sans: -apple-system, "SF Pro Text", "SF Pro Display", BlinkMacSystemFont,
+               "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* New York → Apple's modern serif. Fallback to Charter/Georgia; substitute is
+     Source Serif 4 on Google Fonts when running outside Apple platforms. */
+  --font-serif: "New York", "NewYork", ui-serif, "Source Serif 4",
+                "Charter", "Iowan Old Style", "Palatino", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
+               "Liberation Mono", monospace;
+}
+
+/* -------- Type scale (points→px, 1pt ≈ 1px on mockups) ---------------- */
+:root {
+  /* Display (New York, Semibold) */
+  --display-xl-size: 34px;  --display-xl-lh: 40px;
+  --display-lg-size: 28px;  --display-lg-lh: 34px;
+  --display-md-size: 22px;  --display-md-lh: 28px;
+
+  /* Body (SF Pro) */
+  --body-lg-size: 17px;     --body-lg-lh: 24px;
+  --body-md-size: 15px;     --body-md-lh: 22px;
+  --body-sm-size: 13px;     --body-sm-lh: 18px;
+
+  /* Labels (SF Pro, Medium) */
+  --label-lg-size: 15px;    --label-lg-lh: 20px;
+  --label-md-size: 13px;    --label-md-lh: 18px;
+
+  /* Monospace */
+  --mono-md-size: 15px;     --mono-md-lh: 22px;
+  --mono-lg-size: 44px;     --mono-lg-lh: 48px;  /* Cook Mode hero timer */
+}
+
+/* -------- Color palette — LIGHT (default) ----------------------------- */
+:root {
+  /* Ink — text + high-stakes UI */
+  --ink-900: #1A1612;
+  --ink-700: #3D342C;
+  --ink-500: #6B5F54;
+  --ink-300: #A89E93;
+  --ink-100: #E8E3DD;
+
+  /* Paper — warm off-white backgrounds */
+  --paper-50:  #FAF7F2;
+  --paper-100: #F3EEE5;
+  --paper-200: #EBE3D6;
+
+  /* Ember — the single primary action family */
+  --ember-600: #C8532B;
+  --ember-500: #E26340;
+  --ember-100: #FBEAE0;
+
+  /* Sage — success / positive */
+  --sage-600: #4A7C59;
+  --sage-100: #E4EEE6;
+
+  /* Amber — warning / needs attention */
+  --amber-600: #B8860B;
+  --amber-100: #F5ECD5;
+
+  /* Crimson — critical / allergen */
+  --crimson-600: #9A2E2E;
+  --crimson-100: #F2DCDC;
+
+  /* Voice — QUARANTINED. Voice UI only. */
+  --voice-600: #5E4AE0;
+  --voice-100: #E8E3FA;
+
+  /* Semantic aliases — what views should reference */
+  --fg-1: var(--ink-900);        /* primary text */
+  --fg-2: var(--ink-700);        /* secondary */
+  --fg-3: var(--ink-500);        /* tertiary / captions */
+  --fg-disabled: var(--ink-300);
+  --divider: var(--ink-100);
+
+  --bg-1: var(--paper-50);       /* screen */
+  --bg-2: var(--paper-100);      /* card surface */
+  --bg-3: var(--paper-200);      /* grouped list */
+
+  --accent: var(--ember-600);
+  --accent-hover: var(--ember-500);
+  --accent-tint: var(--ember-100);
+
+  --success: var(--sage-600);    --success-tint: var(--sage-100);
+  --warning: var(--amber-600);   --warning-tint: var(--amber-100);
+  --danger:  var(--crimson-600); --danger-tint:  var(--crimson-100);
+  --voice:   var(--voice-600);   --voice-tint:   var(--voice-100);
+}
+
+/* -------- Color palette — DARK ---------------------------------------- */
+.dark, [data-theme="dark"] {
+  --ink-900: #F5F0E8;
+  --ink-700: #D6CEC3;
+  --ink-500: #9A8F84;
+  --ink-300: #5E5349;
+  --ink-100: #2E2822;
+
+  --paper-50:  #14100B;
+  --paper-100: #1F1A14;
+  --paper-200: #2A241C;
+
+  --ember-600: #E26340;
+  --ember-500: #F07D5A;
+  --ember-100: #3A1E13;
+
+  --sage-600: #6FA07C;
+  --sage-100: #1E2E23;
+
+  --amber-600: #D4A21F;
+  --amber-100: #2E2614;
+
+  --crimson-600: #C94747;
+  --crimson-100: #2E1818;
+
+  --voice-600: #8473E8;
+  --voice-100: #1F1A33;
+}
+
+/* -------- Spacing (base unit 4pt) ------------------------------------- */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;   /* screen horizontal margin */
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --screen-margin: 16px;
+  --screen-margin-hero: 20px;
+}
+
+/* -------- Corner radius ---------------------------------------------- */
+:root {
+  --radius-sm: 8px;    /* chips */
+  --radius-md: 12px;   /* buttons, inputs */
+  --radius-lg: 16px;   /* cards */
+  --radius-xl: 24px;   /* sheets, modals */
+  --radius-full: 999px;
+}
+
+/* -------- Icon sizing ------------------------------------------------- */
+:root {
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 28px;
+  --icon-xl: 44px;
+}
+
+/* -------- Motion ------------------------------------------------------ */
+:root {
+  --dur-fast: 150ms;       /* exits */
+  --dur-default: 200ms;    /* most state changes */
+  --dur-sheet: 300ms;      /* sheet presentation — ceiling */
+  --ease-out: cubic-bezier(0.2, 0.0, 0.2, 1);   /* SwiftUI .easeOut feel */
+  --ease-in:  cubic-bezier(0.4, 0.0, 1.0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-default: 0ms;
+    --dur-sheet: 0ms;
+  }
+}
+
+/* -------- Elevation --------------------------------------------------- */
+/* Light: NO drop shadows. Elevation via 1pt hairline + fill step-up.
+   Dark: one subtle shadow on Cook Mode step card only. */
+:root {
+  --hairline: 1px solid var(--divider);
+  --shadow-step-card-dark: 0 4px 12px rgba(0,0,0,0.35);
+}
+
+/* ======================================================================
+   SEMANTIC TYPE STYLES
+   ====================================================================== */
+.display-xl { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-xl-size); line-height: var(--display-xl-lh);
+  color: var(--fg-1); letter-spacing: -0.02em; }
+.display-lg { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-lg-size); line-height: var(--display-lg-lh);
+  color: var(--fg-1); letter-spacing: -0.015em; }
+.display-md { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-md-size); line-height: var(--display-md-lh);
+  color: var(--fg-1); letter-spacing: -0.01em; }
+
+.body-lg { font-family: var(--font-sans); font-weight: 400;
+  font-size: var(--body-lg-size); line-height: var(--body-lg-lh); color: var(--fg-1); }
+.body-md { font-family: var(--font-sans); font-weight: 400;
+  font-size: var(--body-md-size); line-height: var(--body-md-lh); color: var(--fg-1); }
+.body-sm { font-family: var(--font-sans); font-weight: 400;
+  font-size: var(--body-sm-size); line-height: var(--body-sm-lh); color: var(--fg-2); }
+
+.label-lg { font-family: var(--font-sans); font-weight: 500;
+  font-size: var(--label-lg-size); line-height: var(--label-lg-lh); color: var(--fg-1); }
+.label-md { font-family: var(--font-sans); font-weight: 500;
+  font-size: var(--label-md-size); line-height: var(--label-md-lh); color: var(--fg-1); }
+
+.mono-md { font-family: var(--font-mono); font-weight: 400;
+  font-size: var(--mono-md-size); line-height: var(--mono-md-lh);
+  font-variant-numeric: tabular-nums; }
+.mono-lg { font-family: var(--font-mono); font-weight: 500;
+  font-size: var(--mono-lg-size); line-height: var(--mono-lg-lh);
+  font-variant-numeric: tabular-nums; }
+
+/* Mapping convenience — semantic h* map to display tokens */
+h1, .h1 { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-xl-size); line-height: var(--display-xl-lh);
+  color: var(--fg-1); letter-spacing: -0.02em; margin: 0; }
+h2, .h2 { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-lg-size); line-height: var(--display-lg-lh);
+  color: var(--fg-1); letter-spacing: -0.015em; margin: 0; }
+h3, .h3 { font-family: var(--font-serif); font-weight: 600;
+  font-size: var(--display-md-size); line-height: var(--display-md-lh);
+  color: var(--fg-1); letter-spacing: -0.01em; margin: 0; }
+p  { font-family: var(--font-sans); font-size: var(--body-md-size);
+  line-height: var(--body-md-lh); color: var(--fg-1); margin: 0; }
+small { font-family: var(--font-sans); font-size: var(--body-sm-size);
+  line-height: var(--body-sm-lh); color: var(--fg-2); }
+code { font-family: var(--font-mono); font-size: var(--mono-md-size);
+  font-variant-numeric: tabular-nums; }
+
+/* Base page defaults */
+html, body {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-lh);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
