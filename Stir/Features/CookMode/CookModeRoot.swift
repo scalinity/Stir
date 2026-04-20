@@ -195,6 +195,25 @@ struct CookModeRoot: View {
                 // Reconcile any leftover timers from a cross-device
                 // arrival. No-op on fresh sessions.
                 await vm.reconcileTimersOnForeground()
+
+                // C.5: `cook_voice_default_on` (spec §15 client flag) —
+                // Premium+ only; auto-begin the first voice turn so the
+                // user doesn't have to tap mic on Cook Mode entry.
+                //
+                // Gated on:
+                //   - flag=true (PostHog-sourced)
+                //   - canVoice (resolved earlier — Premium+ with entitlement)
+                //   - driverForVM != nil (pre-warm didn't hard-fail to no-driver)
+                //   - !killSwitch (kill switch never auto-engages)
+                // The VM routes the tap normally — permission prompts,
+                // telemetry, the works — so we don't short-circuit any
+                // of its guards. Auto-engage is just "simulated first
+                // tap on entry", not a separate code path.
+                let autoEngage = entitlements.flagBool(forKey: "cook_voice_default_on") ?? false
+                if autoEngage && canVoice && driverForVM != nil && !killSwitch {
+                    Logger.voice.info("cook_mode_voice_auto_engage")
+                    await vm.handleMicTap()
+                }
             } catch {
                 initError = "Couldn't start Cook Mode. Please try again."
                 Logger.ui.error("CookModeRoot createSession failed: \(error.localizedDescription, privacy: .public)")

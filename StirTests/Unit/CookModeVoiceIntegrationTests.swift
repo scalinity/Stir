@@ -367,6 +367,54 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
         XCTAssertEqual(screenErrors.first?.properties["error_code"] as? String, "NET-01")
     }
 
+    // MARK: - cook_voice_default_on (auto-engage) — C.5
+
+    func test_autoEngage_simulatesFirstMicTap_andFiresVoiceStartedTelemetry() async throws {
+        // C.5 contract: CookModeRoot reads `cook_voice_default_on` and,
+        // when true + Premium+ + pre-warmed driver + !killSwitch, calls
+        // `vm.handleMicTap()` once on Cook Mode entry. That tap takes
+        // the same happy path as a user tap — we pin that the telemetry
+        // result matches (`voice_started`) and beginTurn fires exactly
+        // once. The flag itself is consumed in CookModeRoot; at this
+        // layer we exercise the "simulated first tap" invariant.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+        // Simulate what CookModeRoot.task does post-pre-warm.
+        await vm.handleMicTap()
+
+        XCTAssertEqual(driver.beginTurnCallCount, 1,
+                       "auto-engage must trigger exactly one beginTurn")
+        let affordances = telemetrySpy.events.filter { $0.event == .voiceAffordanceTapped }
+        XCTAssertEqual(affordances.count, 1)
+        XCTAssertEqual(affordances.first?.properties["result"] as? String, "voice_started",
+                       "auto-engage uses the same success result as a user tap")
+    }
+
+    func test_autoEngage_freeTierWouldRouteToPaywall_butCookModeRootGatesBeforeThis() async throws {
+        // Belt-and-suspenders check: even if CookModeRoot's canVoice
+        // check somehow let a Free user through, the VM's paywall
+        // routing still fires. Documents the gate ordering so nobody
+        // re-adds a Free-tier auto-engage path by mistake.
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .free, billingState: .none)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        var paywallTriggers: [PaywallTrigger] = []
+
+        let vm = makeVM(
+            session: session,
+            entitlements: entitlements,
+            voiceDriver: driver,
+            presentPaywall: { paywallTriggers.append($0) },
+        )
+        await vm.handleMicTap()
+
+        XCTAssertEqual(paywallTriggers, [.voiceAffordanceTapped])
+        XCTAssertEqual(driver.beginTurnCallCount, 0)
+    }
+
     // MARK: - disable_cook_realtime plumbing
 
     func test_disableCookRealtime_flag_capturedAtEntry() throws {
