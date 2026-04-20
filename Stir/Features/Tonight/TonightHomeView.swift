@@ -18,7 +18,6 @@ struct TonightHomeView: View {
     @State private var showScanFlow = false
     @State private var showSavedMeals = false
     @State private var resumableSession: CookingSession?
-    @State private var resumeCookMode: CookingSession?
     @State private var recentCompleted: [CookingSession] = []
 
     var body: some View {
@@ -61,58 +60,60 @@ struct TonightHomeView: View {
                     )
                 }
             }
+            // Single unified fullScreenCover for ALL Cook Mode entry
+            // paths. Multiple concurrent fullScreenCover modifiers on
+            // the same view — even when at most one has a non-nil
+            // item — trip iOS 18/26's "Currently, only presenting a
+            // single sheet is supported" warning and queue later
+            // presentations indefinitely. Consolidating to one cover
+            // driven by a coordinator-owned enum avoids that entirely.
             .fullScreenCover(item: Binding(
-                get: { coordinator.activeFreshCook },
-                set: { coordinator.activeFreshCook = $0 },
-            )) { request in
-                // Fresh Cook Mode launched from Scan → DishPreview.
-                // Presented HERE (not nested inside ScanFlow) so iOS
-                // doesn't queue the presentation behind ScanFlow's
-                // fullScreenCover. DishPreview dismisses ScanFlow
-                // first, then this cover takes over.
-                CookModeRoot(
-                    recipePlan: request.recipePlan,
-                    household: request.household,
-                    aiDispatch: coordinator.aiDispatch,
-                    source: .solve,
-                    onDismiss: {
-                        coordinator.dismissCookMode()
-                        Task { await refreshCookingState() }
-                    },
-                )
-            }
-            .fullScreenCover(item: $resumeCookMode) { session in
-                if let plan = session.recipePlan,
-                   let household = session.household {
+                get: { coordinator.activeCookLaunch },
+                set: { coordinator.activeCookLaunch = $0 },
+            )) { launch in
+                switch launch {
+                case let .fresh(plan, household, _):
                     CookModeRoot(
                         recipePlan: plan,
                         household: household,
                         aiDispatch: coordinator.aiDispatch,
-                        source: .saved,
-                        existingSession: session,
+                        source: .solve,
                         onDismiss: {
-                            resumeCookMode = nil
+                            coordinator.dismissCookMode()
                             Task { await refreshCookingState() }
                         },
                     )
-                } else {
-                    // Guard: a CookingSession can legitimately arrive with
-                    // nil recipePlan/household via CloudKit's Nullify
-                    // deletion rule (cross-device sync where the plan was
-                    // deleted before we received it). Without this branch,
-                    // fullScreenCover would render empty — a blank,
-                    // undismissable modal. Mirror DishPreviewView's
-                    // fallback copy + close button.
-                    VStack(spacing: 12) {
-                        Text("Couldn't load this dish")
-                            .font(.headline)
-                        Button("Close") {
-                            resumeCookMode = nil
-                            Task { await refreshCookingState() }
+                case let .resume(session):
+                    if let plan = session.recipePlan,
+                       let household = session.household {
+                        CookModeRoot(
+                            recipePlan: plan,
+                            household: household,
+                            aiDispatch: coordinator.aiDispatch,
+                            source: .saved,
+                            existingSession: session,
+                            onDismiss: {
+                                coordinator.dismissCookMode()
+                                Task { await refreshCookingState() }
+                            },
+                        )
+                    } else {
+                        // Guard: CloudKit Nullify delete can leave a
+                        // CookingSession with nil recipePlan/household
+                        // (cross-device race). Without this branch
+                        // fullScreenCover renders a blank undismissable
+                        // modal. Mirrors DishPreview's fallback copy.
+                        VStack(spacing: 12) {
+                            Text("Couldn't load this dish")
+                                .font(.headline)
+                            Button("Close") {
+                                coordinator.dismissCookMode()
+                                Task { await refreshCookingState() }
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .padding(40)
                     }
-                    .padding(40)
                 }
             }
             .task { await refreshCookingState() }
@@ -255,7 +256,7 @@ struct TonightHomeView: View {
             // of silently no-op'ing so the user knows the tap landed
             // (CA2-R7).
             if let fresh = makeFreshSessionIfPossible(from: session) {
-                resumeCookMode = fresh
+                coordinator.resumeCookMode(fresh)
             } else {
                 toastMessage = "Couldn't start this one again. Try from Saved or pick another meal."
             }
@@ -302,7 +303,7 @@ struct TonightHomeView: View {
     private var resumableBanner: some View {
         if let session = resumableSession, let plan = session.recipePlan {
             Button {
-                resumeCookMode = session
+                coordinator.resumeCookMode(session)
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "play.circle.fill")

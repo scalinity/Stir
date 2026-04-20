@@ -74,28 +74,36 @@ final class RootCoordinator {
     /// drives presentation from this.
     var activePaywallTrigger: PaywallTrigger?
 
-    /// Fresh-cook request signal. Set by DishPreview's "Start Cooking"
-    /// button on the Solve flow, cleared when Cook Mode dismisses.
-    /// Drives a `.fullScreenCover(item:)` at the TonightHome layer —
-    /// NOT nested inside ScanFlowRoot — so Cook Mode doesn't collide
-    /// with ScanFlow's own fullScreenCover (iOS queues the second
-    /// presentation forever, silently hanging).
-    var activeFreshCook: FreshCookRequest?
+    /// Unified Cook Mode launch signal. Drives a SINGLE
+    /// `.fullScreenCover(item:)` at TonightHome covering every path
+    /// into Cook Mode (fresh from Solve, resume from banner, cook-
+    /// again from recents). Multiple concurrent fullScreenCover
+    /// modifiers on the same view — even with at-most-one item set —
+    /// provoke iOS 18/26's "Currently, only presenting a single
+    /// sheet is supported" warning and queue the later-arriving
+    /// presentation silently. One cover modifier keeps presentations
+    /// predictable.
+    var activeCookLaunch: CookModeLaunch?
 
-    /// Identifiable wrapper for `activeFreshCook`. SwiftUI's
-    /// `.fullScreenCover(item:)` needs an `Identifiable`, and passing
-    /// a `RecipePlan` directly leaks Core Data into the coordinator
-    /// surface. Struct-by-UUID keeps the coordinator framework-free.
-    struct FreshCookRequest: Identifiable, Equatable {
-        let id: UUID
-        let recipePlan: RecipePlan
-        let household: HouseholdProfile
-        init(recipePlan: RecipePlan, household: HouseholdProfile) {
-            self.id = UUID()
-            self.recipePlan = recipePlan
-            self.household = household
+    enum CookModeLaunch: Identifiable, Equatable {
+        /// Fresh Cook Mode launched from DishPreview → Start Cooking.
+        /// Recipe plan + household are resolved at DishPreview time;
+        /// CookModeRoot's .task creates the CookingSession.
+        case fresh(recipePlan: RecipePlan, household: HouseholdProfile, id: UUID = UUID())
+        /// Resumed or re-opened session (resumable banner, Cook Again
+        /// on a recent). CookingSession already exists.
+        case resume(session: CookingSession)
+
+        var id: String {
+            switch self {
+            case let .fresh(_, _, id): return "fresh-\(id)"
+            case let .resume(session): return "resume-\(session.id?.uuidString ?? "unknown")"
+            }
         }
-        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+
+        static func == (lhs: CookModeLaunch, rhs: CookModeLaunch) -> Bool {
+            lhs.id == rhs.id
+        }
     }
 
     init(
@@ -497,19 +505,25 @@ final class RootCoordinator {
     /// Called by DishPreview when the user taps "Start Cooking". The
     /// caller is expected to also dismiss any presenting modal (e.g.
     /// ScanFlowRoot via `@Environment(\.dismiss)`) on the same
-    /// runloop tick. SwiftUI will complete that dismiss, then the
-    /// `.fullScreenCover(item: $activeFreshCook)` at TonightHome
-    /// picks up and presents Cook Mode cleanly — avoiding the
+    /// runloop tick. SwiftUI completes that dismiss, then the
+    /// `.fullScreenCover(item: $activeCookLaunch)` at TonightHome
+    /// picks up and presents Cook Mode — avoiding the
     /// "Currently, only presenting a single sheet is supported"
     /// warning that nested fullScreenCovers trigger.
     func startCookMode(recipePlan: RecipePlan, household: HouseholdProfile) {
-        activeFreshCook = FreshCookRequest(recipePlan: recipePlan, household: household)
+        activeCookLaunch = .fresh(recipePlan: recipePlan, household: household)
     }
 
-    /// Dismissal hook from CookModeRoot. Clears the request so the
-    /// fullScreenCover drops.
+    /// Resume / re-open an existing CookingSession. Used by the
+    /// TonightHome resumable banner and "Cook Again" on recents.
+    func resumeCookMode(_ session: CookingSession) {
+        activeCookLaunch = .resume(session: session)
+    }
+
+    /// Dismissal hook from CookModeRoot. Clears the active launch
+    /// so the fullScreenCover drops.
     func dismissCookMode() {
-        activeFreshCook = nil
+        activeCookLaunch = nil
     }
 
     /// Build a PaywallViewModel bound to this coordinator's RC + entitlement
