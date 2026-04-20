@@ -232,6 +232,32 @@ Deno.test('TRANSFER ignores when transferred_to is empty (no fallback to app_use
   assertEquals(action.kind, 'ignore');
 });
 
+Deno.test('TRANSFER ignores when transferred_from is empty (symmetric to transferred_to guard)', () => {
+  // Defense-in-depth: both arrays must be populated. An absent
+  // transferred_from would strand the entitlement on a phantom source.
+  const action = resolveEventAction(event({
+    type: 'TRANSFER',
+    app_user_id: 'ck:_abcdef1234567890abcdef1234567890ab',
+    transferred_from: [],
+    transferred_to: ['ck:_abcdef1234567890abcdef1234567890ab'],
+  }));
+  assertEquals(action.kind, 'ignore');
+});
+
+Deno.test('TRANSFER where from === to is ignored (noop transfer)', () => {
+  // Edge case: RC can fire a same-value transfer on boundary crossings
+  // where the subscription didn't actually move. Ignoring avoids a pointless
+  // write that would re-bump updated_at for no reason.
+  const key = 'ck:_abcdef1234567890abcdef1234567890ab';
+  const action = resolveEventAction(event({
+    type: 'TRANSFER',
+    app_user_id: key,
+    transferred_from: [key],
+    transferred_to: [key],
+  }));
+  assertEquals(action.kind, 'ignore');
+});
+
 Deno.test('BILLING_ISSUE → billing_state=grace, tier preserved', () => {
   const action = resolveEventAction(event({
     type: 'BILLING_ISSUE',

@@ -137,16 +137,26 @@ final class RootCoordinator {
                 "is_cloudkit": canonicalKey.isCloudKit ? "true" : "false",
             ],
         )
-        (sentry as? SentryReporter)?.setUserContext(keyHash: keyHash)
+        sentry.setUserContext(keyHash: keyHash)
         PostHogClient.shared.identify(distinctID: keyHash)
 
-        // 3. Bootstrap Supabase session.
+        // 3. Bootstrap Supabase session. Wrapped in withTimeout so a TCP
+        //    partial-response hang at the Edge Function doesn't park the
+        //    entire launch sequence indefinitely — URLSession's default
+        //    resource timeout is effectively infinite (7 days), which
+        //    would leave a hung first launch in .loading forever without
+        //    this outer cap. 20s allows for a retry cycle (0.5 + 1.5 + 3s
+        //    backoffs + one final attempt) while still bounding the
+        //    user's wait before we surface an offline fallback.
         var bootstrapSucceeded = false
+        let localSessionClient = sessionClient
         do {
-            let response = try await sessionClient.bootstrap(
-                installationID: installationID,
-                cloudKitRecordName: canonicalKey.cloudKitRecordName,
-            )
+            let response = try await withTimeout(seconds: 20, operation: "sessionBootstrap") {
+                try await localSessionClient.bootstrap(
+                    installationID: installationID,
+                    cloudKitRecordName: canonicalKey.cloudKitRecordName,
+                )
+            }
             entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
             bootstrapSucceeded = true
             Logger.coordinator.info(
@@ -244,16 +254,15 @@ final class RootCoordinator {
     /// (RC logIn short-circuits when the key is unchanged; the observer
     /// cancels its prior task before starting a new one).
     private func handlePostBootstrapEntitlement(canonicalKey: String) async {
-        // 1. Keep RC's identity in sync with ours.
-        do {
-            try await revenueCat.logIn(canonicalUserKey: canonicalKey)
-        } catch {
-            Logger.coordinator.warning(
-                "RC logIn failed: \(error.localizedDescription, privacy: .public)",
-            )
-            // Non-fatal: paywall offerings fetch will surface the real
-            // issue if RC is actually unreachable.
-        }
+        // 1. Keep RC's identity in sync with ours. Partial-success risk
+        //    called out by the CA2 audit: Supabase bootstrap already
+        //    succeeded, so the local entitlement snapshot is authoritative
+        //    for this launch. A dropped `Purchases.logIn` call would
+        //    leave RC aliased to the previous key (typically the old
+        //    install:<uuid>), so future RC webhooks would route to the
+        //    wrong canonical_user_key — the exact failure CLAUDE.md
+        //    §Aliasing warns about. Retry with bounded backoff.
+        await logInWithRetries(canonicalKey: canonicalKey)
 
         // 2. Seed lastEmittedAccountState without emitting (initial-state
         //    isn't a transition). Subsequent `emitAccountStateChangeIfNeeded`
@@ -320,6 +329,51 @@ final class RootCoordinator {
         } else {
             trialReminders.cancel()
         }
+    }
+
+    /// Attempt `revenueCat.logIn` with bounded retries so a transient RC
+    /// outage doesn't desync identity between Supabase (our source of
+    /// truth) and RC (source of entitlement webhooks). Three attempts with
+    /// exponential backoff (0.5s, 1.5s) match the SupabaseSessionClient
+    /// 5xx retry cadence; a genuinely-down RC will still eventually be
+    /// caught by the next app foreground or by `refreshEntitlementsOnForeground`
+    /// calling the paywall offerings path, which surfaces PAY-01 visibly.
+    ///
+    /// Each call is wrapped in a 10s timeout so a hung RC request doesn't
+    /// block bootstrap completion. Non-fatal on final exhaustion — the
+    /// coordinator continues to `.ready`; the mismatch self-heals on the
+    /// next successful launch or on any subsequent `logIn` call.
+    private func logInWithRetries(canonicalKey: String) async {
+        let maxAttempts = 3
+        let rc = self.revenueCat
+        for attempt in 0..<maxAttempts {
+            do {
+                try await withTimeout(seconds: 10, operation: "rc.logIn") {
+                    try await rc.logIn(canonicalUserKey: canonicalKey)
+                }
+                if attempt > 0 {
+                    Logger.coordinator.info("RC logIn succeeded on attempt \(attempt + 1, privacy: .public)")
+                }
+                return
+            } catch {
+                let remaining = maxAttempts - attempt - 1
+                Logger.coordinator.warning(
+                    "RC logIn attempt \(attempt + 1, privacy: .public) failed (\(remaining, privacy: .public) remaining): \(error.localizedDescription, privacy: .public)",
+                )
+                if remaining == 0 { break }
+                // Exponential-ish backoff: 0.5s, 1.5s.
+                let backoffMs: UInt64 = attempt == 0 ? 500 : 1_500
+                try? await Task.sleep(nanoseconds: backoffMs * 1_000_000)
+            }
+        }
+        Logger.coordinator.error(
+            "RC logIn exhausted after \(maxAttempts, privacy: .public) attempts — RC alias may be stale until next successful call",
+        )
+        sentry.breadcrumb(
+            category: "launch",
+            message: "rc_login_exhausted",
+            data: ["canonical_key_hash": CanonicalKeyHash.hash(canonicalKey)],
+        )
     }
 
     // MARK: - Foreground refresh (scenePhase .active)

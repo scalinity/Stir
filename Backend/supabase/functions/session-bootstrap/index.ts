@@ -187,7 +187,42 @@ Deno.serve(async (req) => {
       if (error) throw error;
     }
 
-    // 3b. Alias-forward check: winning key is ck: and an install: row
+    // 3b. Status gates — run BEFORE alias-forward so a banned winning row
+    //     can't have install-scoped data merged into it, and a merged-forward
+    //     winning row resolves to its terminal identity first.
+    //
+    //     Security invariant (SA2 review): alias-forward is a mutation that
+    //     moves usage counters, AI logs, device rows, and (possibly) an
+    //     entitlement into the winning CK row. If we ran alias-forward
+    //     before the banned check, we'd leak the install user's quota
+    //     snapshot + ai_request_log history into a banned account (making
+    //     unban ambiguous) and permanently merge the install row into a
+    //     dead end. Status resolution belongs first.
+    if (userRow.status === 'banned') {
+      userLog.warn('banned_user_blocked');
+      return jsonError(
+        ErrorCode.BILL_01,
+        403,
+        { message: 'Account is not eligible for Stir.', state: 'banned' },
+        requestId,
+      );
+    }
+    if (userRow.merged_into != null) {
+      userRow = await followMergedInto(client, userRow);
+      // followMergedInto already bans nested chains; banned terminal is
+      // also re-checked here defensively.
+      if (userRow.status === 'banned') {
+        userLog.warn('banned_user_blocked_post_merge');
+        return jsonError(
+          ErrorCode.BILL_01,
+          403,
+          { message: 'Account is not eligible for Stir.', state: 'banned' },
+          requestId,
+        );
+      }
+    }
+
+    // 3c. Alias-forward check: winning key is ck: and an install: row
     //     for the same installation still exists active → merge.
     if (
       resolution.source_type === 'cloudkit' &&
@@ -215,19 +250,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3c. Banned check + merged-chain follow (one hop max).
-    if (userRow.status === 'banned') {
-      userLog.warn('banned_user_blocked');
-      return jsonError(
-        ErrorCode.BILL_01,
-        403,
-        { message: 'Account is not eligible for Stir.', state: 'banned' },
-        requestId,
-      );
-    }
-    if (userRow.merged_into != null) {
-      userRow = await followMergedInto(client, userRow);
-    }
     const winningKey = userRow.canonical_user_key;
 
     // 3d. Upsert device_installations.

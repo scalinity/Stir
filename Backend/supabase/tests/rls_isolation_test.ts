@@ -130,6 +130,26 @@ Deno.test('RLS: prompt_versions denies all authenticated reads', async () => {
   assertEquals((data ?? []).length, 0);
 });
 
+Deno.test('RLS: webhook_log denies all authenticated reads', async () => {
+  // Step 5 added the webhook_log table. It's an ops-only audit trail;
+  // authenticated users must see zero rows (empty result set, NOT 403 —
+  // RLS is a row filter, not an access check per CLAUDE.md).
+  const { userA } = await setupTwoUsers();
+  const aClient = userClient(userA.session_jwt);
+  const { data, error } = await aClient.from('webhook_log').select('event_id');
+  assertEquals(error, null);
+  assertEquals((data ?? []).length, 0);
+});
+
+Deno.test('RLS: processed_webhook_events denies all authenticated reads', async () => {
+  // Step 5 idempotency ledger. Same ops-only rule as webhook_log.
+  const { userA } = await setupTwoUsers();
+  const aClient = userClient(userA.session_jwt);
+  const { data, error } = await aClient.from('processed_webhook_events').select('event_id');
+  assertEquals(error, null);
+  assertEquals((data ?? []).length, 0);
+});
+
 Deno.test('RLS: service_role bypasses RLS (sanity check)', async () => {
   // Sanity: verify the service-role client in our test helpers actually
   // bypasses RLS. If this ever fails, our RLS tests are meaningless.

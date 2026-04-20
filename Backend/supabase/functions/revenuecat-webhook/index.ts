@@ -30,6 +30,7 @@
 // side. Only signature verify (a real security boundary) returns 401.
 
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import {
   HANDLED_EVENT_TYPES,
@@ -99,7 +100,10 @@ Deno.serve(async (req) => {
     // the secret set — they'll keep delivering while we fix it.
     log.error('webhook_secret_missing_or_short');
     return new Response(
-      JSON.stringify({ error: 'webhook_secret_unconfigured' }),
+      JSON.stringify({
+        error: 'webhook_secret_unconfigured',
+        message: 'Server is not configured to accept RevenueCat webhooks.',
+      }),
       { status: 500, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -110,7 +114,11 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     log.warn('method_not_allowed', { method: req.method });
     return new Response(
-      JSON.stringify({ error: 'method_not_allowed', allowed: ['POST'] }),
+      JSON.stringify({
+        error: 'METHOD-NOT-ALLOWED-01',
+        message: `Method ${req.method} not allowed; webhook accepts POST only.`,
+        allowed: ['POST'],
+      }),
       { status: 405, headers: { 'content-type': 'application/json', allow: 'POST' } },
     );
   }
@@ -132,7 +140,10 @@ Deno.serve(async (req) => {
     // potentially hostile; logging their body would burn storage and
     // could leak attacker-chosen content into dashboards.
     return new Response(
-      JSON.stringify({ error: 'unauthorized' }),
+      JSON.stringify({
+        error: 'unauthorized',
+        message: 'Authorization header missing or does not match expected webhook secret.',
+      }),
       { status: 401, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -144,7 +155,11 @@ Deno.serve(async (req) => {
   if (!contentType.toLowerCase().startsWith('application/json')) {
     log.warn('unsupported_media_type', { content_type: contentType });
     return new Response(
-      JSON.stringify({ error: 'unsupported_media_type', expected: 'application/json' }),
+      JSON.stringify({
+        error: 'unsupported_media_type',
+        message: `Unsupported content-type '${contentType}'; expected application/json.`,
+        expected: 'application/json',
+      }),
       { status: 415, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -154,7 +169,11 @@ Deno.serve(async (req) => {
   if (contentLength > MAX_BODY_BYTES) {
     log.warn('body_too_large_header', { content_length: contentLength, limit: MAX_BODY_BYTES });
     return new Response(
-      JSON.stringify({ error: 'payload_too_large', limit_bytes: MAX_BODY_BYTES }),
+      JSON.stringify({
+        error: 'payload_too_large',
+        message: `Request body exceeds ${MAX_BODY_BYTES} byte limit.`,
+        limit_bytes: MAX_BODY_BYTES,
+      }),
       { status: 413, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -183,7 +202,11 @@ Deno.serve(async (req) => {
   if (rawBody.length > MAX_BODY_BYTES) {
     log.warn('body_too_large_actual', { actual: rawBody.length, limit: MAX_BODY_BYTES });
     return new Response(
-      JSON.stringify({ error: 'payload_too_large', limit_bytes: MAX_BODY_BYTES }),
+      JSON.stringify({
+        error: 'payload_too_large',
+        message: `Buffered body (${rawBody.length} bytes) exceeds ${MAX_BODY_BYTES} limit.`,
+        limit_bytes: MAX_BODY_BYTES,
+      }),
       { status: 413, headers: { 'content-type': 'application/json' } },
     );
   }
@@ -361,10 +384,17 @@ Deno.serve(async (req) => {
           userLog.info('idempotent_replay_alias', { event_id: event.id });
         } else {
           status = 'alias_processed';
+          // Never log raw canonical_user_keys as meta fields — spec §11
+          // redaction requires hashed keys only. The `userLog` already
+          // carries `canonical_key_hash` (of action.to via event.app_user_id),
+          // but the alias `from` is a different identity, so hash it
+          // separately for cross-referencing in dashboards.
+          const fromHash = await hashCanonicalKey(action.from);
+          const toHash = await hashCanonicalKey(action.to);
           userLog.info('alias_forwarded', {
             event_id: event.id,
-            from: action.from,
-            to: action.to,
+            from_key_hash: fromHash,
+            to_key_hash: toHash,
             result: aliasData,
           });
         }
@@ -373,10 +403,14 @@ Deno.serve(async (req) => {
 
       case 'transfer': {
         canonicalUserKey = action.to;
+        // Hash both sides — `from` and `to` are distinct identities; only
+        // `to` is covered by userLog's canonical_key_hash.
+        const fromHash = await hashCanonicalKey(action.from);
+        const toHash = await hashCanonicalKey(action.to);
         userLog.warn('transfer_event', {
           event_id: event.id,
-          from: action.from,
-          to: action.to,
+          from_key_hash: fromHash,
+          to_key_hash: toHash,
         });
         const { error: transferError } = await client.rpc(
           'stir_transfer_entitlement',
@@ -442,7 +476,10 @@ Deno.serve(async (req) => {
     // Return 500 so RC retries — this is a server-side problem we want
     // to recover from. All the known-bad paths above are handled at 200.
     return new Response(
-      JSON.stringify({ error: 'internal_error' }),
+      JSON.stringify({
+        error: 'internal_error',
+        message: 'Unexpected server error processing webhook; RC should retry.',
+      }),
       { status: 500, headers: { 'content-type': 'application/json' } },
     );
   }

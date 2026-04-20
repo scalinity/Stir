@@ -1,8 +1,9 @@
 // ProComparisonSheet
 //
-// Modal presented from the PaywallView's "Compare plans" link. Lists all
-// four SKUs with a side-by-side Premium vs Pro feature table so power
-// users can self-upgrade without the paywall leading them to Premium.
+// Compare-plans modal launched from PaywallView. Side-by-side Premium vs
+// Pro so power users can self-upgrade without the paywall steering them
+// to Premium. Visual tokens resolve through Color.Stir / Font.Stir /
+// CGFloat.Stir — zero raw hex, font, or spacing literals.
 
 import SwiftUI
 
@@ -13,18 +14,21 @@ struct ProComparisonSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: CGFloat.Stir.space5) {
                     header
                     comparisonTable
                     proCTAs
                     proDisclosure
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.horizontal, CGFloat.Stir.space5)
+                .padding(.vertical, CGFloat.Stir.space4)
             }
+            .background(Color.Stir.backgroundPrimary)
+            .tint(Color.Stir.ember600)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .stirFont(.labelMd)
                 }
             }
             .navigationTitle("Compare plans")
@@ -33,75 +37,86 @@ struct ProComparisonSheet: View {
     }
 
     private var header: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: CGFloat.Stir.space2) {
             Text("Premium or Pro?")
-                .font(.title2.bold())
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.textPrimary)
             Text("Premium covers most weeknight cooks. Pro adds more Solves, longer memory, and multi-image scans.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.textTertiary)
                 .multilineTextAlignment(.center)
         }
     }
 
     /// Used for the Pro column's minimum width so the column expands with
-    /// Dynamic Type instead of clipping at accessibility sizes. 48pt at
-    /// default body size; grows proportionally.
+    /// Dynamic Type instead of clipping at accessibility sizes.
     @ScaledMetric(relativeTo: .footnote) private var proColumnMinWidth: CGFloat = 48
 
     private var comparisonTable: some View {
         VStack(spacing: 0) {
-            // Column header row. Needed so a sighted user knows which
-            // number is Premium vs Pro, and so VoiceOver users can hear
-            // "Premium column" before the data rows are read.
+            // Column header row. Sighted users see which number is Premium
+            // vs Pro; VoiceOver hears "Premium column" before the data rows.
             headerRow
-            Divider()
+            tableDivider
             row(label: "Dinner Solves / month", premium: "40", pro: "120")
-            Divider()
+            tableDivider
             row(label: "Voice Cook Sessions / month", premium: "20", pro: "40")
-            Divider()
+            tableDivider
             row(label: "Remembered pantry items", premium: "250", pro: "1,000")
-            Divider()
+            tableDivider
             row(label: "Multi-image scan", premium: "—", pro: "✓")
-            Divider()
+            tableDivider
             row(label: "Priority inference queue", premium: "—", pro: "✓")
-            Divider()
+            tableDivider
             row(label: "Household memory", premium: "90 days", pro: "365 days")
         }
-        .padding(.vertical, 4)
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, CGFloat.Stir.space1)
+        .background(Color.Stir.backgroundCard)
+        .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+    }
+
+    private var tableDivider: some View {
+        Rectangle()
+            .fill(Color.Stir.divider)
+            .frame(height: 1)
     }
 
     private var headerRow: some View {
         HStack {
-            Text("").font(.caption.bold())
+            Text("Feature")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.textTertiary)
             Spacer()
             Text("Premium")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.textTertiary)
             Text("Pro")
-                .font(.caption.bold())
-                .foregroundStyle(.tint)
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ember600)
                 .frame(minWidth: proColumnMinWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space2 + 2) // 10pt — labels sit tight to table border
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Feature, Premium, Pro")
     }
 
     private func row(label: String, premium: String, pro: String) -> some View {
         HStack {
-            Text(label).font(.footnote)
+            Text(label)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textPrimary)
             Spacer()
-            Text(premium).font(.footnote.monospacedDigit())
+            Text(premium)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textSecondary)
             Text(pro)
-                .font(.footnote.monospacedDigit().bold())
-                .foregroundStyle(.tint)
+                .stirFont(.labelMd)
+                .foregroundStyle(Color.Stir.ember600)
                 .frame(minWidth: proColumnMinWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space2 + 2) // 10pt — matches headerRow
         // Combine children so VoiceOver reads each row as a single
         // phrase rather than three disconnected tokens. Previously the
         // screen reader voiced "Dinner Solves per month", silence,
@@ -112,33 +127,51 @@ struct ProComparisonSheet: View {
     }
 
     private var proCTAs: some View {
-        VStack(spacing: 10) {
-            if case .displaying(let offerings) = viewModel.state {
+        VStack(spacing: CGFloat.Stir.space2 + 2) {
+            if let offerings = viewModel.currentOfferings() {
                 if let pkg = offerings.proAnnualPackage {
                     Button {
                         Task { await viewModel.purchase(productID: pkg.productID) }
                     } label: {
-                        VStack(spacing: 2) {
-                            Text("Pro annual").font(.callout.bold())
-                            Text("\(pkg.displayPrice) / year").font(.caption).foregroundStyle(.white.opacity(0.85))
+                        VStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight title/price pairing
+                            Text("Pro annual")
+                                .stirFont(.labelLg)
+                            Text("\(pkg.displayPrice) / year")
+                                .stirFont(.bodySm)
+                                .foregroundStyle(Color.Stir.paper50.opacity(0.85))
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
-                        .background(.tint)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, CGFloat.Stir.controlVerticalPadding)
+                        .background(Color.Stir.ink900)
+                        .foregroundStyle(Color.Stir.paper50)
+                        .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
                     }
+                    .accessibilityLabel("Upgrade to Pro annual, \(pkg.displayPrice) per year")
                 }
                 if let pkg = offerings.proMonthlyPackage {
                     Button {
                         Task { await viewModel.purchase(productID: pkg.productID) }
                     } label: {
                         Text("Pro monthly — \(pkg.displayPrice)/mo")
-                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                            .stirFont(.labelLg)
+                            .foregroundStyle(Color.Stir.textPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary)
+                            .background(Color.Stir.backgroundCard)
+                            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
+                                    .stroke(Color.Stir.divider, lineWidth: 1),
+                            )
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pro monthly, \(pkg.displayPrice) per month")
                 }
             } else {
-                ProgressView().frame(maxWidth: .infinity)
+                ProgressView()
+                    .tint(Color.Stir.ember600)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, CGFloat.Stir.space4)
             }
         }
     }
@@ -147,8 +180,8 @@ struct ProComparisonSheet: View {
         Text(
             "Pro renews automatically. Cancel anytime in Settings > Apple ID > Subscriptions."
         )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .stirFont(.bodySm)
+        .foregroundStyle(Color.Stir.textTertiary)
         .multilineTextAlignment(.center)
     }
 }

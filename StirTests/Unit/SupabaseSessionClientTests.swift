@@ -106,6 +106,7 @@ final class SupabaseSessionClientTests: XCTestCase {
                 _captured.append((error, context))
             }
             func breadcrumb(category: String, message: String, data: [String: String]) {}
+            func setUserContext(keyHash: String) {}
         }
 
         MockURLProtocol.handler = { request in

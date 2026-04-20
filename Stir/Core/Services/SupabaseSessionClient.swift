@@ -174,7 +174,11 @@ actor SupabaseSessionClient {
             let errData = try await readAllBytes(bytes)
             let body = try? parseErrorBody(errData)
             let reason = AuthReason(rawValue: body?.reason ?? "missing") ?? .missing
-            Logger.supabase.info("stream AUTH-01 reason=\(reason.rawValue, privacy: .public)")
+            logAuth01(
+                reason: reason,
+                message: body?.message ?? "stream 401",
+                endpoint: inRequest.url?.path ?? "?",
+            )
             if !retriedAuth, let identity = lastBootstrapIdentity {
                 _ = try await bootstrap(
                     installationID: identity.installationID,
@@ -350,7 +354,7 @@ actor SupabaseSessionClient {
         case 401:
             let body = try parseErrorBody(data)
             let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
-            Logger.supabase.info("AUTH-01 reason=\(reason.rawValue, privacy: .public)")
+            logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
             if !retriedAuth {
                 // Silent re-bootstrap + retry ONCE.
                 guard let identity = lastBootstrapIdentity else {
@@ -398,6 +402,35 @@ actor SupabaseSessionClient {
         }
     }
 
+    /// Differentiated AUTH-01 logging per CLAUDE.md §"AUTH-01 response shape":
+    ///
+    ///   missing | expired | user_stale  → `info` (silent-retry path)
+    ///   malformed | signature_invalid   → `error` + Sentry capture (client
+    ///                                      bug or backend-secret rotation;
+    ///                                      needs operator attention)
+    ///
+    /// Central helper so both the stream + non-stream 401 handlers use the
+    /// same severity map. Adding a new AuthReason must update this switch.
+    private func logAuth01(reason: AuthReason, message: String, endpoint: String) {
+        switch reason {
+        case .missing, .expired, .userStale:
+            Logger.supabase.info(
+                "AUTH-01 reason=\(reason.rawValue, privacy: .public) endpoint=\(endpoint, privacy: .public)",
+            )
+        case .malformed, .signatureInvalid:
+            Logger.supabase.error(
+                "AUTH-01 reason=\(reason.rawValue, privacy: .public) endpoint=\(endpoint, privacy: .public) message=\(message, privacy: .public)",
+            )
+            sentry.captureError(
+                StirError.auth(reason: reason, message: message),
+                context: [
+                    "endpoint": endpoint,
+                    "auth_reason": reason.rawValue,
+                ],
+            )
+        }
+    }
+
     private func parseErrorBody(_ data: Data) throws -> ErrorResponseBody {
         do {
             return try JSONDecoder.stir.decode(ErrorResponseBody.self, from: data)
@@ -421,17 +454,28 @@ actor SupabaseSessionClient {
 }
 
 // MARK: - JSON coding helpers
+//
+// Shared encoder/decoder instances. `JSONEncoder`/`JSONDecoder` are thread-safe
+// when used in a read-only configuration — Apple's Foundation team confirmed
+// this for Swift 5+ (`JSONEncoder.encode` is re-entrant). The prior `static var`
+// computed pattern allocated a fresh encoder on every access, which hits hot
+// paths: snapshot persist on every hydrate, AIDispatch request body encoding,
+// bootstrap response decode, and every Core Data JSON column read (pantry
+// snapshot / constraints / source asset IDs). `static let` caches a single
+// configured instance per-process, eliminating the allocation cost and the
+// `static_var_encoder_nonisolated_race` pattern where a concurrent reader
+// could observe a partially-initialized encoder on first access.
 
 extension JSONEncoder {
-    static var stir: JSONEncoder {
+    static let stir: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
-    }
+    }()
 }
 
 extension JSONDecoder {
-    static var stir: JSONDecoder {
+    static let stir: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -447,7 +491,7 @@ extension JSONDecoder {
             )
         }
         return decoder
-    }
+    }()
 }
 
 extension ISO8601DateFormatter {

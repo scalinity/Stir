@@ -256,3 +256,87 @@ Deno.test('session-bootstrap: VAL-01 on invalid JSON body', async () => {
   assertEquals(res.status, 400);
   assertEquals((res.body as { error: string }).error, 'VAL-01');
 });
+
+// SA2 regression: banned user is rejected with BILL-01 BEFORE alias-forward
+// mutations run. Blocks two attacks:
+//   1. Banned CK row receiving install-scoped data via the merge.
+//   2. Install row being merged into a banned CK and left unrecoverable
+//      (merged_into is terminal; un-merging isn't supported).
+Deno.test('session-bootstrap: banned ck row rejects BEFORE alias-forward runs', async () => {
+  const installId = testInstallId();
+  const ck = testCkRecord();
+  const client = serviceClient();
+
+  // 1. Bootstrap the install-only user. Gives us an install row + counters.
+  const first = await quickBootstrap({ installation_id: installId });
+  const installKey = first.canonical_user_key;
+
+  // 2. Seed some usage that a merge WOULD move if it ran.
+  await client
+    .from('usage_counters')
+    .update({ used_count: 2 })
+    .eq('canonical_user_key', installKey)
+    .eq('feature_key', 'dinner_solve');
+
+  // 3. Create the CK row in `banned` status out-of-band.
+  const { error: insertErr } = await client.from('app_users').insert({
+    canonical_user_key: `ck:${ck}`,
+    source_type: 'cloudkit',
+    revenuecat_app_user_id: `ck:${ck}`,
+    status: 'banned',
+  });
+  if (insertErr) throw insertErr;
+
+  // 4. Bootstrap install+ck. Expect BILL-01 403, NOT a merge.
+  const res = await callBootstrap({
+    installation_id: installId,
+    cloudkit_user_record_name: ck,
+    build: '1.0.0',
+    os_version: '17',
+  });
+  assertEquals(res.status, 403);
+  assertEquals((res.body as { error: string }).error, 'BILL-01');
+
+  // 5. Verify NO merge happened. Install row still active, counters intact.
+  const { data: installRow } = await client
+    .from('app_users')
+    .select('status, merged_into')
+    .eq('canonical_user_key', installKey)
+    .single();
+  assertEquals(installRow?.status, 'active', 'install must NOT be merged into banned ck');
+  assertEquals(installRow?.merged_into, null);
+
+  const { data: installCounter } = await client
+    .from('usage_counters')
+    .select('used_count')
+    .eq('canonical_user_key', installKey)
+    .eq('feature_key', 'dinner_solve')
+    .single();
+  assertEquals(installCounter?.used_count, 2, 'install counters must not leak to banned ck');
+});
+
+Deno.test('session-bootstrap: banned install-only user rejects with BILL-01', async () => {
+  const installId = testInstallId();
+  const client = serviceClient();
+
+  // Bootstrap once to create the row.
+  await quickBootstrap({ installation_id: installId });
+
+  // Flip status to banned out-of-band.
+  const { error: updateErr } = await client
+    .from('app_users')
+    .update({ status: 'banned' })
+    .eq('canonical_user_key', `install:${installId}`);
+  if (updateErr) throw updateErr;
+
+  // Next bootstrap should 403 without issuing a session JWT.
+  const res = await callBootstrap({
+    installation_id: installId,
+    build: '1.0.0',
+    os_version: '17',
+  });
+  assertEquals(res.status, 403);
+  const body = res.body as { error: string; state?: string };
+  assertEquals(body.error, 'BILL-01');
+  assertEquals(body.state, 'banned');
+});

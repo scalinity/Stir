@@ -201,11 +201,15 @@ function isTrialPeriod(periodType: string | undefined): boolean {
 }
 
 /**
- * Known RC event types. Anything not in this list routes to `ignore` with
- * a warning log in the handler. Ordering here mirrors CLAUDE.md §"RC event
- * → billing_state transition" table for easy cross-checking.
+ * Known RC event types. Ordering mirrors CLAUDE.md §"RC event → billing_state
+ * transition" table for easy cross-checking.
+ *
+ * `as const` + `HandledEventType` union: any case added to the switch in
+ * `resolveEventAction` that isn't listed here is a TS error (the switch's
+ * `case` strings are checked against this union below). Prevents the drift
+ * the step-5 review flagged where `HANDLED_EVENT_TYPES` was a loose Set<string>.
  */
-export const HANDLED_EVENT_TYPES = new Set([
+export const HANDLED_EVENT_TYPE_LIST = [
   'INITIAL_PURCHASE',
   'RENEWAL',
   'CANCELLATION',
@@ -216,7 +220,11 @@ export const HANDLED_EVENT_TYPES = new Set([
   'NON_RENEWING_PURCHASE', // explicitly ignored — spec has no NR SKUs
   'SUBSCRIBER_ALIAS',
   'TRANSFER',
-]);
+] as const;
+
+export type HandledEventType = typeof HANDLED_EVENT_TYPE_LIST[number];
+
+export const HANDLED_EVENT_TYPES: ReadonlySet<string> = new Set<string>(HANDLED_EVENT_TYPE_LIST);
 
 /**
  * Maximum accepted delivery age, in milliseconds. An event whose

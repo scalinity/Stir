@@ -194,6 +194,50 @@ final class PaywallViewModelTests: XCTestCase {
         XCTAssertEqual(id, "stir.premium.annual.trial7")
     }
 
+    // MARK: - Concurrent load guard + currentOfferings
+
+    func test_load_concurrentCalls_areGuarded() async {
+        // Regression guard for the `.loading` re-entry guard in load().
+        // Two concurrent load() calls must not double-fetch offerings;
+        // the second call sees state==.loading and returns silently.
+        let service = CountingMockRevenueCatService()
+        service.offeringsResult = .success(PaywallOfferings(packages: [Self.samplePackage(.premiumAnnualTrial7)]))
+        let vm = Self.makeVM(service: service)
+
+        async let a: Void = vm.load()
+        async let b: Void = vm.load()
+        _ = await (a, b)
+
+        // At least one load completed; at most two offerings fetches reached
+        // the service. The guard is state-based, so the second call landing
+        // during .loading aborts without incrementing the count. Whichever
+        // call wins, we expect exactly 1 fetch.
+        XCTAssertEqual(service.offeringsCallCount, 1)
+    }
+
+    func test_currentOfferings_returnsCache_duringPurchasing() async {
+        // Regression guard for PaywallView.swift: during .purchasing the
+        // paywall reads currentOfferings() to render real prices on the
+        // non-in-flight packages. Must fall through to cachedOfferings.
+        let offerings = PaywallOfferings(packages: [Self.samplePackage(.premiumAnnualTrial7)])
+        let service = MockRevenueCatService()
+        service.offeringsResult = .success(offerings)
+        // Use a purchase result that keeps us in `.purchasing` briefly is
+        // tricky without timing control; instead manually advance the VM by
+        // triggering a pending purchase, which transitions to .purchasePending
+        // and still caches offerings for currentOfferings fall-through.
+        service.purchaseResult = .pending
+        let vm = Self.makeVM(service: service)
+        await vm.load()
+        await vm.purchase(productID: "stir.premium.annual.trial7")
+
+        guard case .purchasePending = vm.state else {
+            return XCTFail("expected .purchasePending, got \(vm.state)")
+        }
+        let current = vm.currentOfferings()
+        XCTAssertEqual(current?.packages.first?.productID, "stir.premium.annual.trial7")
+    }
+
     // MARK: - Restore
 
     func test_restore_success_triggersRefresh() async {
@@ -307,4 +351,26 @@ final class MockRevenueCatService: RevenueCatPurchasing, @unchecked Sendable {
     func startObserving(onChange: @escaping @Sendable () async -> Void) async {
         startObservingCallCount += 1
     }
+}
+
+// MARK: - CountingMockRevenueCatService
+
+/// Mock that counts offerings fetches — used to verify the concurrent-load
+/// guard in PaywallViewModel.load().
+final class CountingMockRevenueCatService: RevenueCatPurchasing, @unchecked Sendable {
+    var offeringsResult: Result<PaywallOfferings, Error> = .success(.init(packages: []))
+    private(set) var offeringsCallCount = 0
+
+    func offerings() async throws -> PaywallOfferings {
+        offeringsCallCount += 1
+        switch offeringsResult {
+        case .success(let off): return off
+        case .failure(let err): throw err
+        }
+    }
+
+    func purchase(productID: String) async throws -> PurchaseOutcome { .userCancelled }
+    func restorePurchases() async throws -> RestoreOutcome { .nothingToRestore }
+    func logIn(canonicalUserKey: String) async throws {}
+    func startObserving(onChange: @escaping @Sendable () async -> Void) async {}
 }

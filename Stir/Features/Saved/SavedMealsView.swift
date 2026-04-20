@@ -59,9 +59,14 @@ struct SavedMealsView: View {
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .top) {
             filterBar
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(.bar)
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.vertical, CGFloat.Stir.space2)
+                .background(Color.Stir.backgroundCard)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.Stir.divider)
+                        .frame(height: 1)
+                }
         }
         .task {
             await load()
@@ -111,16 +116,18 @@ struct SavedMealsView: View {
 
     private var list: some View {
         List(filteredRows) { row in
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
                 Button {
                     if let plan = row.plan { cookAgainPlan = plan }
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(row.title).font(.headline)
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                        Text(row.title)
+                            .stirFont(.displaySm)
+                            .foregroundStyle(Color.Stir.textPrimary)
                         if let lastCooked = row.lastCookedAt {
                             Text(lastCooked, format: .relative(presentation: .named))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .stirFont(.bodySm)
+                                .foregroundStyle(Color.Stir.textTertiary)
                         }
                         ratingLine(rating: row.rating)
                     }
@@ -132,7 +139,7 @@ struct SavedMealsView: View {
 
                 favoriteButton(for: row)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, CGFloat.Stir.space1)
         }
         .listStyle(.plain)
     }
@@ -140,12 +147,15 @@ struct SavedMealsView: View {
     // MARK: - Favorite toggle (per row)
 
     private func favoriteButton(for row: CookingSessionRepository.SavedMealEntry) -> some View {
+        // Favorite tint uses `ember600` on active and `ink300` (disabled-
+        // ink) on inactive. The mockup's star affordance is ember — not
+        // the iOS-default yellow — to stay on-brand in the warm palette.
         let isFavorite = row.plan?.isFavorite ?? false
         return Button {
             handleFavoriteTap(row: row)
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
-                .foregroundStyle(isFavorite ? .yellow : .secondary)
+                .foregroundStyle(isFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
                 // HIG-minimum 44×44 hit target — previous inline padding
                 // left the effective tap region ~28pt wide, easy to miss
                 // next to the larger Cook-Again button.
@@ -180,11 +190,11 @@ struct SavedMealsView: View {
     @ViewBuilder
     private func ratingLine(rating: Int?) -> some View {
         if let rating, rating > 0 {
-            HStack(spacing: 2) {
+            HStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight 5-star cluster
                 ForEach(1...5, id: \.self) { index in
                     Image(systemName: index <= rating ? "star.fill" : "star")
-                        .font(.caption)
-                        .foregroundStyle(index <= rating ? .yellow : .secondary)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(index <= rating ? Color.Stir.ember600 : Color.Stir.ink300)
                         .accessibilityHidden(true)
                 }
             }
@@ -196,21 +206,23 @@ struct SavedMealsView: View {
     // MARK: - Empty / loading
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: CGFloat.Stir.space3 + 2) { // 14pt — airy but not lonely
             Image(systemName: showFavoritesOnly ? "star" : "tray")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
+                .font(.system(size: CGFloat.Stir.iconXl))
+                .foregroundStyle(Color.Stir.textTertiary)
+                .accessibilityHidden(true)
             Text(showFavoritesOnly ? "No favorites yet" : "No saved meals yet")
-                .font(.headline)
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.textPrimary)
             Text(showFavoritesOnly
                  ? "Tap the star on a recipe to save a favorite."
                  : "Cook a dish to see it here for one-tap replay.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textTertiary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, CGFloat.Stir.space6 + CGFloat.Stir.space2) // 40pt
         }
-        .padding(40)
+        .padding(CGFloat.Stir.space6 + CGFloat.Stir.space2) // 40pt
     }
 
     // MARK: - Load

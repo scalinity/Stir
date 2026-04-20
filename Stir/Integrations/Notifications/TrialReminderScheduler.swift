@@ -25,7 +25,7 @@ import OSLog
 /// ID under which the trial reminder is scheduled. Singleton — one
 /// reminder per user per trial. If multiple trials are started (upgrade
 /// then downgrade), the latest wins.
-private let kTrialReminderID = "stir.trial.reminder.2d"
+private let trialReminderID = "stir.trial.reminder.2d"
 
 @MainActor
 final class TrialReminderScheduler {
@@ -65,6 +65,12 @@ final class TrialReminderScheduler {
             return
         }
 
+        // Snapshot any existing pending reminder BEFORE cancelling so a
+        // failed `center.add(...)` below can roll back to the prior state
+        // instead of leaving the user with no reminder at all
+        // (pattern `notification_schedule_no_rollback`).
+        let prior = await pendingReminder()
+
         // Only now that we know we can + will schedule a fresh reminder
         // do we clear the prior pending one.
         cancel()
@@ -77,7 +83,7 @@ final class TrialReminderScheduler {
             "stir_notification_kind": "trial_reminder",
             "days_remaining": 2,
         ]
-        content.interruptionLevel = .timeSensitive
+        content.interruptionLevel = .active
 
         let components = calendar.dateComponents(
             [.year, .month, .day, .hour, .minute, .second],
@@ -86,7 +92,7 @@ final class TrialReminderScheduler {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
 
         let request = UNNotificationRequest(
-            identifier: kTrialReminderID,
+            identifier: trialReminderID,
             content: content,
             trigger: trigger,
         )
@@ -98,15 +104,38 @@ final class TrialReminderScheduler {
             )
         } catch {
             Logger.trialReminder.warning(
-                "trial reminder add failed: \(error.localizedDescription, privacy: .public)",
+                "trial reminder add failed: \(error.localizedDescription, privacy: .public) — rolling back",
             )
+            // Rollback: re-add the snapshot we cancelled. Best-effort —
+            // if re-add also fails, we're no worse off than after the
+            // initial `cancel()` call. Skipping this rollback path was the
+            // latent `notification_schedule_no_rollback` bug flagged in
+            // CA2 audit: a transient UN failure would silently destroy the
+            // user's previously-scheduled 2-day reminder.
+            if let prior {
+                do {
+                    try await center.add(prior)
+                    Logger.trialReminder.info("trial reminder rollback restored prior request")
+                } catch {
+                    Logger.trialReminder.warning(
+                        "trial reminder rollback failed: \(error.localizedDescription, privacy: .public)",
+                    )
+                }
+            }
         }
     }
 
     /// Cancel any pending trial reminder. Safe to call when none exists.
     func cancel() {
-        center.removePendingNotificationRequests(withIdentifiers: [kTrialReminderID])
+        center.removePendingNotificationRequests(withIdentifiers: [trialReminderID])
         Logger.trialReminder.debug("cancelled trial reminder (if present)")
+    }
+
+    /// Return the currently-pending trial reminder request, if any. Used by
+    /// `ensureReminder` to snapshot pre-cancellation state for rollback.
+    private func pendingReminder() async -> UNNotificationRequest? {
+        let pending = await center.pendingNotificationRequests()
+        return pending.first { $0.identifier == trialReminderID }
     }
 
     /// Returns true if the user has authorization to schedule notifications.
@@ -121,7 +150,7 @@ final class TrialReminderScheduler {
             return false
         case .notDetermined:
             do {
-                return try await center.requestAuthorization(options: [.alert, .sound, .timeSensitive])
+                return try await center.requestAuthorization(options: [.alert, .sound])
             } catch {
                 Logger.trialReminder.warning(
                     "auth request failed: \(error.localizedDescription, privacy: .public)",

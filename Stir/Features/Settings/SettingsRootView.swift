@@ -83,22 +83,24 @@ struct SettingsRootView: View {
 
     private var planHeader: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                 Text(entitlements.tier.displayName)
-                    .font(.headline)
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.textPrimary)
                 Text(entitlements.billingStateHelpText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textTertiary)
             }
             Spacer()
             // Free uses `sparkles` (not `star`) to keep `star` reserved
             // for the favorites metaphor across the app. Paid tiers get
-            // the crown.
+            // the crown, colored ember to match the mockup's premium-
+            // emphasis hue rather than the gold/yellow SF default.
             Image(systemName: entitlements.tier == .free ? "sparkles" : "crown.fill")
                 .foregroundStyle(
                     entitlements.tier == .free
-                        ? AnyShapeStyle(.secondary)
-                        : AnyShapeStyle(.yellow),
+                        ? Color.Stir.textTertiary
+                        : Color.Stir.ember600,
                 )
         }
     }
@@ -108,7 +110,13 @@ struct SettingsRootView: View {
         Button {
             coordinator.presentPaywall(.settingsUpgrade)
         } label: {
-            Label("Upgrade to Premium", systemImage: "sparkles")
+            Label {
+                Text("Upgrade to Premium")
+                    .stirFont(.labelLg)
+            } icon: {
+                Image.Stir.sparkles
+            }
+            .foregroundStyle(Color.Stir.ember600)
         }
     }
 
@@ -117,23 +125,36 @@ struct SettingsRootView: View {
         Button {
             openManageSubscriptions()
         } label: {
-            Label("Manage subscription", systemImage: "person.crop.circle.badge.checkmark")
+            Label {
+                Text("Manage subscription")
+                    .stirFont(.labelLg)
+            } icon: {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+            }
+            .foregroundStyle(Color.Stir.ember600)
         }
     }
 
     // Grace: billing retry in progress. Show alert + manage link to fix payment.
     private var graceFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            HStack(spacing: CGFloat.Stir.space2) {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.Stir.amber600)
                 Text("Apple couldn't renew your subscription. Update billing to keep Premium features.")
-                    .font(.footnote)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textSecondary)
             }
             Button {
                 openManageSubscriptions()
             } label: {
-                Label("Update payment method", systemImage: "creditcard")
+                Label {
+                    Text("Update payment method")
+                        .stirFont(.labelLg)
+                } icon: {
+                    Image(systemName: "creditcard")
+                }
+                .foregroundStyle(Color.Stir.ember600)
             }
         }
     }
@@ -142,33 +163,45 @@ struct SettingsRootView: View {
     // earlier version had "Keep Premium" + "Manage" both linking to the
     // same apps.apple.com URL, which is redundant.
     private var cancelledFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
             if let expires = entitlements.expiresAt {
                 Text("Cancels \(expires.formatted(date: .abbreviated, time: .omitted)). You still have Premium until then.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textTertiary)
             }
             Button {
                 openManageSubscriptions()
             } label: {
-                Label("Keep Premium", systemImage: "arrow.uturn.backward.circle")
+                Label {
+                    Text("Keep Premium")
+                        .stirFont(.labelLg)
+                } icon: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                }
             }
             .buttonStyle(.borderedProminent)
+            .tint(Color.Stir.ember600)
         }
     }
 
     // Expired: full win-back CTA.
     private var expiredFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
             Text("Your Premium plan ended. Start again?")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textTertiary)
             Button {
                 coordinator.presentPaywall(.settingsUpgrade)
             } label: {
-                Label("Resubscribe", systemImage: "arrow.clockwise.circle.fill")
+                Label {
+                    Text("Resubscribe")
+                        .stirFont(.labelLg)
+                } icon: {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                }
             }
             .buttonStyle(.borderedProminent)
+            .tint(Color.Stir.ember600)
         }
     }
 
@@ -178,9 +211,18 @@ struct SettingsRootView: View {
             Task { await restore() }
         } label: {
             HStack {
-                Label("Restore purchases", systemImage: "arrow.down.circle")
+                Label {
+                    Text("Restore purchases")
+                        .stirFont(.labelLg)
+                } icon: {
+                    Image(systemName: "arrow.down.circle")
+                }
+                .foregroundStyle(Color.Stir.ember600)
                 Spacer()
-                if isRestoring { ProgressView() }
+                if isRestoring {
+                    ProgressView()
+                        .tint(Color.Stir.ember600)
+                }
             }
         }
         .disabled(isRestoring)
@@ -191,13 +233,16 @@ struct SettingsRootView: View {
     private var trialReminderSection: some View {
         Section {
             Toggle(isOn: $trialReminderEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight title/subtitle pairing
                     Text("Trial ending reminder")
+                        .stirFont(.labelLg)
+                        .foregroundStyle(Color.Stir.textPrimary)
                     Text("Get a notification 2 days before your trial ends.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
                 }
             }
+            .tint(Color.Stir.ember600)
             .onChange(of: trialReminderEnabled) { _, newValue in
                 Task {
                     if newValue, let expires = entitlements.expiresAt {
@@ -222,7 +267,14 @@ struct SettingsRootView: View {
     private var householdSection: some View {
         Section {
             NavigationLink(destination: HouseholdPreferencesView()) {
-                Label("Household preferences", systemImage: "person.crop.circle")
+                Label {
+                    Text("Household preferences")
+                        .stirFont(.labelLg)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                } icon: {
+                    Image.Stir.profile
+                        .foregroundStyle(Color.Stir.ember600)
+                }
             }
         } header: {
             Text("Household")
@@ -232,20 +284,26 @@ struct SettingsRootView: View {
     // MARK: - Sync
 
     private var syncSection: some View {
+        // Status dot uses sage (success) / amber (warning) — Design-System
+        // §3 semantic pairing. Previous version used `.green`/`.orange`
+        // which reads too-saturated against the warm paper palette.
         Section {
-            HStack(spacing: 10) {
+            HStack(spacing: CGFloat.Stir.space3) {
                 Circle()
-                    .fill(cloudKit.isAvailable ? Color.green : Color.orange)
-                    .frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 2) {
+                    .fill(cloudKit.isAvailable ? Color.Stir.sage600 : Color.Stir.amber600)
+                    .frame(width: CGFloat.Stir.space3 - 2, height: CGFloat.Stir.space3 - 2) // 10pt dot
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
                     Text(cloudKit.isAvailable ? "iCloud synced" : "Local only")
-                        .font(.headline)
+                        .stirFont(.labelLg)
+                        .foregroundStyle(Color.Stir.textPrimary)
                     Text(cloudKit.isAvailable ? "Your kitchen syncs across your devices."
                                               : "iCloud Sync isn't available. Stir will work on this device only for now.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
                 }
             }
+            .accessibilityElement(children: .combine)
         } header: {
             Text("Sync")
         }
@@ -258,8 +316,14 @@ struct SettingsRootView: View {
             // Privacy + ToS are placeholder destinations; hosted URLs
             // land before beta (step 9).
             Link("Privacy Policy", destination: URL(string: "https://stir.app/privacy")!)
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ember600)
             Link("Terms of Service", destination: URL(string: "https://stir.app/terms")!)
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ember600)
             Link("Support", destination: URL(string: "mailto:scalinity.ai@gmail.com")!)
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ember600)
         } header: {
             Text("About")
         }
@@ -267,14 +331,16 @@ struct SettingsRootView: View {
 
     private var versionSection: some View {
         Section {
-            LabeledContent("Build") {
-                // Single .secondary foreground (previously mixed .secondary +
-                // .tertiary which read as two different levels of importance
-                // for what is one value).
+            LabeledContent {
                 let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
                 let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
                 Text("\(short) (\(build))")
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textTertiary)
+            } label: {
+                Text("Build")
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.textSecondary)
             }
         }
     }

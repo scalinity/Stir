@@ -17,6 +17,12 @@ protocol SentryReporting: Sendable {
 
     /// Record a breadcrumb (not a captured event) for timeline context.
     func breadcrumb(category: String, message: String, data: [String: String])
+
+    /// Bind the session's user context to the canonical-key hash.
+    /// Protocol-level so tests + the NoOp path participate. Prior code
+    /// downcast to the concrete `SentryReporter`, which silently skipped
+    /// identity tagging in any non-prod wiring.
+    func setUserContext(keyHash: String)
 }
 
 struct NoOpSentryReporter: SentryReporting {
@@ -27,6 +33,10 @@ struct NoOpSentryReporter: SentryReporting {
     }
 
     func breadcrumb(category: String, message: String, data: [String: String]) {
+        // no-op
+    }
+
+    func setUserContext(keyHash: String) {
         // no-op
     }
 }

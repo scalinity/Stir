@@ -104,9 +104,11 @@ export interface AliasForwardResult {
   /**
    * ck had no entitlement row; install's row was renamed to ck. Added in
    * migration 20260419000004 to preserve entitlements purchased under an
-   * install-scoped identity when the user later gains iCloud.
+   * install-scoped identity when the user later gains iCloud. The RPC
+   * always populates this field (FALSE when the discard branch fires), so
+   * this is required — prior `?:` optionality drifted from the DB shape.
    */
-  entitlement_row_promoted?: boolean;
+  entitlement_row_promoted: boolean;
   ai_log_rows_rewritten: number;
   device_rows_rewritten: number;
 }

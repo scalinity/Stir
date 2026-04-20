@@ -40,8 +40,12 @@ struct DishPreviewView: View {
                 Button {
                     handleFavoriteTap()
                 } label: {
+                    // Favorite star uses `ember600` on active, `ink300` on
+                    // inactive — the warm-palette counterpart to SwiftUI's
+                    // default yellow. Stays on-brand across the paywall-
+                    // trigger surfaces (DishPreview, Saved, Cook).
                     Image(systemName: localFavorite ? "star.fill" : "star")
-                        .foregroundStyle(localFavorite ? .yellow : .secondary)
+                        .foregroundStyle(localFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
                 }
                 .accessibilityLabel(localFavorite ? "Remove from favorites" : "Save to favorites")
             }

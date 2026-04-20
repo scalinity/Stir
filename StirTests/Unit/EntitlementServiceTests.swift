@@ -191,6 +191,41 @@ final class EntitlementServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Feature flags
+
+    func test_flagBool_returnsNil_whenFlagDisabled() {
+        // Regression guard for the EntitlementService.flagBool contract:
+        // a flag with is_enabled=false must return nil so callers fall back
+        // to default behavior, even if `value` holds a valid bool.
+        let service = EntitlementService(keychain: MockKeychain())
+        let disabledFlag = BootstrapResponse.FeatureFlag(
+            key: "disable_scan_parse", value: .bool(true), isEnabled: false, rolloutPct: 100,
+        )
+        service.hydrate(
+            from: Self.entitlements(tier: .free, billingState: .none),
+            flags: [disabledFlag],
+        )
+        XCTAssertNil(service.flagBool(forKey: "disable_scan_parse"))
+    }
+
+    func test_flagBool_returnsValue_whenFlagEnabled() {
+        let service = EntitlementService(keychain: MockKeychain())
+        let enabledFlag = BootstrapResponse.FeatureFlag(
+            key: "disable_scan_parse", value: .bool(true), isEnabled: true, rolloutPct: 100,
+        )
+        service.hydrate(
+            from: Self.entitlements(tier: .free, billingState: .none),
+            flags: [enabledFlag],
+        )
+        XCTAssertEqual(service.flagBool(forKey: "disable_scan_parse"), true)
+    }
+
+    func test_flagBool_returnsNil_whenFlagMissing() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .free, billingState: .none))
+        XCTAssertNil(service.flagBool(forKey: "nonexistent_flag"))
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [

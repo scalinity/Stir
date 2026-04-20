@@ -148,7 +148,24 @@ struct KeychainStorage: KeychainStoring {
             var addQuery = baseQuery
             for (k, v) in attributes { addQuery[k] = v }
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            if addStatus != errSecSuccess {
+            switch addStatus {
+            case errSecSuccess:
+                return
+            case errSecDuplicateItem:
+                // TOCTOU: between the update-not-found and add, another
+                // caller (test parallelism, extension, or reinstall replay)
+                // wrote the item. Fall back to update — which will now
+                // succeed against the row we just raced with. If it STILL
+                // fails, surface the error honestly.
+                let retryStatus = SecItemUpdate(
+                    baseQuery as CFDictionary,
+                    attributes as CFDictionary,
+                )
+                if retryStatus != errSecSuccess {
+                    Logger.identity.error("keychain add→update retry failed, OSStatus=\(retryStatus, privacy: .public)")
+                    throw KeychainStorageError.osStatus(retryStatus)
+                }
+            default:
                 Logger.identity.error("keychain add failed, OSStatus=\(addStatus, privacy: .public)")
                 throw KeychainStorageError.osStatus(addStatus)
             }
