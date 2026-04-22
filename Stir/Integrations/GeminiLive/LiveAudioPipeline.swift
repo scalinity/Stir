@@ -125,26 +125,91 @@ final class LiveAudioPipeline {
         // overhead; longer = more perceptible talk-to-send lag.
         let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hwFormat.sampleRate * 0.02)
 
+        Logger.voice.info(
+            "mic_tap_installing rate=\(hwFormat.sampleRate, privacy: .public) channels=\(hwFormat.channelCount, privacy: .public) buffer=\(bufferSize, privacy: .public)",
+        )
+
+        // Counters shared with the tap callback — these MUST be class
+        // storage (not closure-local) so the callback can mutate them
+        // across invocations. Wrapped in a tiny helper class rather
+        // than globals so the state is cleared on every startCapture.
+        let counter = TapCallCounter()
+
+        // Capture the dependencies by value so the tap callback
+        // doesn't need to touch @MainActor-isolated self at all.
+        // Converter is documented safe for serialized access; we only
+        // ever run it from a single audio thread.
+        guard let converter = self.converter else {
+            throw PipelineError.notPrepared
+        }
+        let target = self.targetInputFormat
+        let continuation = self.micContinuation
+
         audioEngine.inputNode.installTap(
             onBus: 0,
             bufferSize: bufferSize,
             format: hwFormat,
-        ) { [weak self] buffer, _ in
-            // Tap callback runs on a real-time audio thread; we do the
-            // convert + base64 synchronously here but yield onto the
-            // MainActor-bound continuation via `Task`. Fast path: the
-            // convert is cheap (a few KB); no allocations in the hot
-            // loop beyond the output buffer and a base64 String.
-            guard let self else { return }
-            Task { @MainActor [weak self] in
-                self?.processInputBuffer(buffer)
+        ) { buffer, _ in
+            // Process synchronously on the audio thread. Earlier draft
+            // hopped to the MainActor via `Task { @MainActor ... }` —
+            // under load (and on iOS 26 with main thread doing SwiftUI
+            // reconciliation) those Tasks apparently queued and never
+            // ran, producing zero mic frames over 23 s of active speech
+            // (observed 2026-04-22). AsyncStream.Continuation.yield is
+            // documented thread-safe, AVAudioConverter is safe for
+            // serialized access from a single thread, so there's no
+            // reason to hop to the main actor.
+            //
+            // buffer is valid only for the duration of this callback.
+            // All reads + the copy-into-Data happen synchronously here
+            // so nothing leaks out to stale memory.
+            counter.total &+= 1
+            let fl = buffer.frameLength
+            if fl == 0 {
+                if counter.total % 50 == 0 {
+                    Logger.voice.warning(
+                        "mic_tap_zero_length count=\(counter.total, privacy: .public)",
+                    )
+                }
+                return
             }
+            // Sample peak amplitude — tells us whether real speech is
+            // arriving (peak > ~0.01) vs dead silence (peak ~0).
+            var peak: Float = 0
+            if let ch = buffer.floatChannelData?[0] {
+                let n = Int(fl)
+                for i in 0..<n {
+                    let a = abs(ch[i])
+                    if a > peak { peak = a }
+                }
+            }
+            if counter.total == 1 || counter.total % 50 == 0 {
+                Logger.voice.info(
+                    "mic_tap_fired count=\(counter.total, privacy: .public) frames=\(fl, privacy: .public) peak=\(peak, privacy: .public)",
+                )
+            }
+            Self.convertAndYield(
+                buffer,
+                converter: converter,
+                target: target,
+                continuation: continuation,
+            )
         }
 
         if !audioEngine.isRunning {
             try audioEngine.start()
         }
         isMicRunning = true
+        Logger.voice.info(
+            "mic_tap_installed engine_running=\(self.audioEngine.isRunning, privacy: .public)",
+        )
+    }
+
+    /// Tiny class so the audio-thread tap callback can mutate a
+    /// counter across invocations without capturing the whole pipeline
+    /// by reference just for the int.
+    private final class TapCallCounter: @unchecked Sendable {
+        var total: UInt64 = 0
     }
 
     /// Stop the mic tap. Engine stays alive so playback can continue;
@@ -238,18 +303,29 @@ final class LiveAudioPipeline {
 
     // MARK: - Internals
 
-    private func processInputBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let converter else { return }
-
+    /// Convert the audio-thread-provided buffer and yield a MicFrame.
+    /// `nonisolated` so it can run on the audio thread without a
+    /// MainActor hop; all parameters are thread-safe:
+    /// - AVAudioConverter: documented safe for serialized access
+    ///   from one thread (we only ever run it from the audio thread).
+    /// - AVAudioFormat: immutable value-type metadata.
+    /// - AsyncStream<MicFrame>.Continuation: `yield` is thread-safe
+    ///   per Swift Concurrency docs.
+    nonisolated private static func convertAndYield(
+        _ buffer: AVAudioPCMBuffer,
+        converter: AVAudioConverter,
+        target: AVAudioFormat,
+        continuation: AsyncStream<MicFrame>.Continuation?,
+    ) {
         // Output buffer capacity: target rate × buffer duration. We
         // overallocate slightly (2x) so the converter always has room
         // for rate-change rounding artifacts.
         let targetFrames = AVAudioFrameCount(
-            Double(buffer.frameLength) * targetInputFormat.sampleRate / buffer.format.sampleRate,
+            Double(buffer.frameLength) * target.sampleRate / buffer.format.sampleRate,
         )
         let capacity = max(targetFrames * 2, 320)
         guard let outBuffer = AVAudioPCMBuffer(
-            pcmFormat: targetInputFormat,
+            pcmFormat: target,
             frameCapacity: capacity,
         ) else {
             Logger.voice.warning("live_audio_out_buffer_alloc_failed")
@@ -267,13 +343,21 @@ final class LiveAudioPipeline {
             return buffer
         }
 
-        guard status == .haveData || status == .inputRanDry else { return }
-        guard let int16Ptr = outBuffer.int16ChannelData?[0] else { return }
+        guard status == .haveData || status == .inputRanDry else {
+            Logger.voice.warning(
+                "live_audio_convert_unexpected_status status=\(status.rawValue, privacy: .public)",
+            )
+            return
+        }
+        guard let int16Ptr = outBuffer.int16ChannelData?[0] else {
+            Logger.voice.warning("live_audio_convert_no_int16_data")
+            return
+        }
 
         let byteCount = Int(outBuffer.frameLength) * 2
         let outData = Data(bytes: int16Ptr, count: byteCount)
         let base64 = outData.base64EncodedString()
-        micContinuation?.yield(
+        continuation?.yield(
             MicFrame(base64: base64, mimeType: "audio/pcm;rate=16000"),
         )
     }
