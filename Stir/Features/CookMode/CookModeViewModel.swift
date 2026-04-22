@@ -134,6 +134,16 @@ final class CookModeViewModel {
     /// Closure the root passes in to present the paywall. Avoids
     /// leaking RootCoordinator into the view model's imports.
     private let presentPaywall: ((PaywallTrigger) -> Void)?
+    /// Closure the root passes in AFTER VM construction so the VM can
+    /// ask for a fresh voice driver when the user reopens voice mode
+    /// after a `closeVoiceSession()` teardown. Without this, the user
+    /// would see "Voice isn't available on this device" on every
+    /// re-tap post-close because the driver had been nilled — observed
+    /// 2026-04-22. The root runs the same preWarm logic it used at
+    /// Cook Mode entry and then calls `attachVoiceDriver(_:)` to wire
+    /// the new instance back into the VM. Nil in tests that stub
+    /// `voiceDriver` directly — driver rebuild isn't exercised there.
+    var onRequestNewVoiceSession: (@MainActor () async -> Void)?
 
     // MARK: - Init
 
@@ -538,8 +548,29 @@ final class CookModeViewModel {
             }
         }
 
-        // Idle/ready path → begin listening. Emit the success telemetry
-        // after beginTurn() actually starts; on failure, map the typed
+        // Idle / post-close path — user wants to (re)start voice.
+        //
+        // If we have no driver (either Cook Mode preWarm never
+        // succeeded OR the user just closed a prior session via
+        // closeVoiceSession() which nulls the reference), ask the
+        // root for a fresh one before we try to begin a turn. Without
+        // this, every "Ask with voice" tap after a close throws
+        // .recognizerUnavailable and surfaces "Voice isn't available
+        // on this device" — the exact trap observed 2026-04-22.
+        //
+        // The root's closure does the same driver-selection logic
+        // .task runs at Cook Mode entry (killSwitch → C.3, Premium+
+        // Live → preWarm → fallback). When it returns, either
+        // voiceDriver is populated (via attachVoiceDriver) or the
+        // driver build genuinely failed, in which case
+        // beginVoiceTurnInner below surfaces recognizerUnavailable
+        // as the legitimate outcome.
+        if voiceDriver == nil, let rebuild = onRequestNewVoiceSession {
+            await rebuild()
+        }
+
+        // Begin listening. Emit the success telemetry after
+        // beginTurn() actually starts; on failure, map the typed
         // error to copy + emit permission_denied OR forward to the
         // server-error presentation path.
         do {
@@ -604,6 +635,20 @@ final class CookModeViewModel {
     /// without any VM method call.
     func applyDriverStateChange(_ state: VoiceSessionState) {
         voiceState = state
+    }
+
+    /// External setter used by CookModeRoot's rebuild closure.
+    /// voiceDriver is `private` so the root can't assign directly;
+    /// this method is the only external mutation point. Also sync
+    /// voiceState to the new driver's current state so the button
+    /// label reflects reality immediately.
+    func attachVoiceDriver(_ driver: (any VoiceSessionDriver)?) {
+        self.voiceDriver = driver
+        if let driver {
+            self.voiceState = driver.currentState
+        } else {
+            self.voiceState = .closed
+        }
     }
 
     /// States in which a voice session is "live" — mic is hot, WS is
