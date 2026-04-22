@@ -69,6 +69,30 @@ final class LiveAudioPipeline {
     private var converter: AVAudioConverter?
     private var isMicRunning = false
 
+    /// Stable format the playerNode is connected with AND every
+    /// scheduled buffer must use. Mono Float32 at 24 kHz matches
+    /// Gemini Live's documented output (`audio/pcm;rate=24000`, mono),
+    /// and AVAudioPlayerNode auto-resamples + auto-mixes to the
+    /// hardware output format via the mainMixer stage — so we only
+    /// need to pin the *input* side of the node.
+    ///
+    /// Earlier draft connected with `format: nil`, which inherited the
+    /// mainMixer's native format (stereo Float32 at 48 kHz on real
+    /// devices). Scheduling a mono Int16 buffer on a stereo-formatted
+    /// node triggers an NSException at scheduleBuffer:
+    ///   "required condition is false:
+    ///    _outputFormat.channelCount == buffer.format.channelCount"
+    /// Observed 2026-04-22 as a fatal crash on the first model audio
+    /// chunk.
+    private let playerFormat: AVAudioFormat = {
+        AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 24000,
+            channels: 1,
+            interleaved: false,
+        )!
+    }()
+
     // MARK: - Init
 
     init() {
@@ -104,14 +128,13 @@ final class LiveAudioPipeline {
         }
         self.converter = conv
 
-        // Player node attaches to output; connect with nil format lets
-        // the engine pick the output's native format (typically 48 kHz
-        // stereo). AVAudioPlayerNode handles the resample internally
-        // when we schedule buffers with a different format.
+        // Pin playerNode → mainMixer with our own `playerFormat` so
+        // every scheduled buffer matches. See `playerFormat` doc
+        // comment for the crash that motivated this.
         audioEngine.connect(
             playerNode,
             to: audioEngine.mainMixerNode,
-            format: nil,
+            format: playerFormat,
         )
     }
 
@@ -224,39 +247,49 @@ final class LiveAudioPipeline {
 
     /// Schedule a base64-encoded audio chunk to play. Gemini Live
     /// emits these in `serverContent.modelTurn.parts[].inlineData`
-    /// with `mimeType: audio/pcm;rate=<N>`. We parse the rate and
-    /// feed the player at that rate.
+    /// with `mimeType: audio/pcm;rate=<N>` — documented as mono Int16
+    /// at 24 kHz.
+    ///
+    /// Scheduled buffer MUST match the format that `playerNode` was
+    /// connected with (see `playerFormat` — mono Float32 24 kHz).
+    /// We convert Int16 samples to Float32 in [-1, 1] on the fly;
+    /// AVAudioPlayerNode auto-resamples + auto-mixes to the hardware
+    /// output channel layout via the mainMixer stage.
     func enqueuePlayback(_ chunk: LiveAudioChunk) throws {
         guard let data = Data(base64Encoded: chunk.base64) else {
             throw PipelineError.malformedAudioChunk(reason: "not base64")
         }
-        let sampleRate = parseSampleRate(from: chunk.mimeType) ?? 24000
-
-        // Gemini's audio is Int16 mono PCM. Build a PCMBuffer from the
-        // raw Int16 samples.
-        guard let bufferFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Double(sampleRate),
-            channels: 1,
-            interleaved: true,
-        ) else {
-            throw PipelineError.malformedAudioChunk(reason: "can't build AVAudioFormat at \(sampleRate) Hz")
+        let incomingRate = parseSampleRate(from: chunk.mimeType) ?? 24000
+        if Int(playerFormat.sampleRate) != incomingRate {
+            // Gemini hasn't shipped a non-24kHz chunk in testing, but
+            // guard for the day it does: logging here means we'll see
+            // the drift before users do. Playing it at our fixed
+            // `playerFormat` rate would make speech sound pitched.
+            Logger.voice.warning(
+                "live_playback_rate_mismatch incoming=\(incomingRate, privacy: .public) expected=\(Int(self.playerFormat.sampleRate), privacy: .public)",
+            )
         }
 
-        let frameCount = AVAudioFrameCount(data.count / 2)  // 2 bytes per Int16 sample
+        // 2 bytes per Int16 sample; frame count is sample count (mono).
+        let frameCount = AVAudioFrameCount(data.count / 2)
         guard frameCount > 0,
-              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: bufferFormat, frameCapacity: frameCount)
+              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount)
         else {
             throw PipelineError.malformedAudioChunk(reason: "empty buffer")
         }
         pcmBuffer.frameLength = frameCount
 
-        // Copy the raw Int16 bytes into the buffer's Int16ChannelData.
+        // Convert Int16 [-32768, 32767] → Float32 [-1, 1] directly
+        // into the buffer's Float32ChannelData. Division by 32768.0
+        // matches Apple's documented normalization factor.
         data.withUnsafeBytes { rawPtr in
-            guard let src = rawPtr.baseAddress, let dst = pcmBuffer.int16ChannelData?[0] else {
-                return
+            guard let int16Src = rawPtr.bindMemory(to: Int16.self).baseAddress,
+                  let floatDst = pcmBuffer.floatChannelData?[0]
+            else { return }
+            let n = Int(frameCount)
+            for i in 0..<n {
+                floatDst[i] = Float(int16Src[i]) / 32768.0
             }
-            memcpy(dst, src, data.count)
         }
 
         if !audioEngine.isRunning {
