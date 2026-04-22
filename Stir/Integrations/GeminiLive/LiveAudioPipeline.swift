@@ -335,7 +335,19 @@ final class LiveAudioPipeline {
         var inputDone = false
         let status = converter.convert(to: outBuffer, error: nil) { _, statusPtr in
             if inputDone {
-                statusPtr.pointee = .endOfStream
+                // `.noDataNow` = "I'm out of input for THIS convert
+                // call; you may call me again later." This keeps the
+                // converter alive across tap callbacks.
+                //
+                // DO NOT use `.endOfStream` here: that tells the
+                // converter the whole stream is done, and it
+                // persistently returns `.endOfStream` for every
+                // subsequent `convert()` call — zero output for the
+                // rest of the session. Observed 2026-04-22: hundreds
+                // of `live_audio_convert_unexpected_status status=2`
+                // warnings across 18 s of real speech, zero MicFrames
+                // yielded, zero audio reached Gemini.
+                statusPtr.pointee = .noDataNow
                 return nil
             }
             statusPtr.pointee = .haveData
@@ -343,12 +355,19 @@ final class LiveAudioPipeline {
             return buffer
         }
 
-        guard status == .haveData || status == .inputRanDry else {
-            Logger.voice.warning(
-                "live_audio_convert_unexpected_status status=\(status.rawValue, privacy: .public)",
-            )
+        // Status interpretation:
+        //   .haveData     → output buffer is full or has enough for now
+        //   .inputRanDry  → output buffer not full but converter consumed
+        //                   all our input; whatever's in outBuffer is valid
+        //   .endOfStream  → shouldn't happen with `.noDataNow`, but tolerate
+        //   .error        → log and drop this frame
+        // In all non-error cases, trust `outBuffer.frameLength` as the
+        // ground truth for how much valid output we have.
+        if status == .error {
+            Logger.voice.warning("live_audio_convert_error")
             return
         }
+        guard outBuffer.frameLength > 0 else { return }
         guard let int16Ptr = outBuffer.int16ChannelData?[0] else {
             Logger.voice.warning("live_audio_convert_no_int16_data")
             return
