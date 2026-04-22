@@ -247,9 +247,35 @@ final class SolveViewModel {
             )
             self.persistedSolveID = outcome.solveRequestId
             self.persistedSuggestedDishIDs = outcome.suggestedDishIds
+            writeTonightSnapshot(
+                solveId: outcome.solveRequestId,
+                suggestedDishIds: outcome.suggestedDishIds,
+            )
         } catch {
             Logger.solveFeature.error("persist solve failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Project slots into a widget-ready snapshot and hand off to the
+    /// shared App Group store. Runs after persistence so the
+    /// SuggestedDish ids are authoritative; failed persistence skips
+    /// this path (the previous widget snapshot stays valid).
+    private func writeTonightSnapshot(solveId: UUID, suggestedDishIds: [UUID]) {
+        let projections: [TonightSnapshotService.DishProjection] = slots.compactMap { slot in
+            guard let d = slot.dish else { return nil }
+            return TonightSnapshotService.DishProjection(
+                title: d.title,
+                totalTimeMin: d.totalTimeMinutes,
+                ingredientCount: d.recipePlan.ingredients.count,
+                ingredientNames: d.recipePlan.ingredients.map(\.displayName),
+                cuisine: d.recipePlan.cuisine,
+            )
+        }
+        TonightSnapshotService().write(
+            solveId: solveId,
+            suggestedDishIds: suggestedDishIds,
+            dishes: projections,
+        )
     }
 
     // MARK: - Selection

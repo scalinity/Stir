@@ -74,6 +74,7 @@ targets:
       - path: Stir
         excludes:
           - "**/README.md"
+      - path: Shared
 
     info:
       path: Stir/App/Info.plist
@@ -95,8 +96,24 @@ targets:
         PostHogPublicAPIKey: $(POSTHOG_PUBLIC_API_KEY)
         SentryDSNPublic: $(SENTRY_DSN_PUBLIC)
         RevenueCatPublicAPIKey: $(REVENUECAT_PUBLIC_API_KEY)
+        # Live Activity hosting (main app starts activities via
+        # LiveActivityManager; StirWidgets renders them).
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
         # Permission usage strings. Presented inside the system prompt.
         NSCameraUsageDescription: "Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options."
+        NSMicrophoneUsageDescription: "Stir listens hands-free during Cook Mode so you can ask questions without touching your phone."
+        NSPhotoLibraryUsageDescription: "Stir reads recipe screenshots you pick so it can turn them into steps you can cook from."
+        NSRemindersUsageDescription: "Stir writes your missing-ingredients list to Reminders so it shows up next time you're at the store."
+        NSUserActivityTypes:
+          - StartNewDinnerSolveIntent
+          - ShowTonightsIdeaIntent
+          - AddToGroceryIntent
+        # Deep-link URL scheme used by widgets + share extension.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.scalinity.stir
+            CFBundleURLSchemes:
+              - stir
 
     entitlements:
       path: Stir/App/Stir.entitlements
@@ -107,7 +124,8 @@ targets:
           - CloudKit
         com.apple.developer.ubiquity-container-identifiers:
           - iCloud.com.scalinity.stir
-        com.apple.security.application-groups: []
+        com.apple.security.application-groups:
+          - group.com.scalinity.stir
 
     settings:
       base:
@@ -135,6 +153,67 @@ targets:
         product: Sentry
       - package: purchases-ios-spm
         product: RevenueCat
+      - target: StirWidgets
+        embed: true
+        copy:
+          destination: plugins
+
+  StirWidgets:
+    # App extension hosting Home Screen widgets (TonightWidget) and
+    # Live Activities (TimerLiveActivity). Compiled with the `Shared`
+    # source path so it sees SharedStorage + TonightSnapshot +
+    # TimerActivityAttributes without a separate framework target.
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    configFiles:
+      Debug: Config.xcconfig
+      Release: Config.xcconfig
+
+    sources:
+      - path: Extensions/StirWidgets
+      - path: Shared
+
+    info:
+      path: Extensions/StirWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Stir Widgets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+
+    entitlements:
+      path: Extensions/StirWidgets/StirWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.scalinity.stir
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scalinity.stir.widgets
+        PRODUCT_NAME: StirWidgets
+        DEVELOPMENT_TEAM: 25H5DDPKAC
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: Extensions/StirWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Extensions/StirWidgets/StirWidgets.entitlements
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: NO
+        # Must match parent Stir app. Xcode warns otherwise.
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -O
+
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: WidgetKit.framework
+      - sdk: ActivityKit.framework
 
   StirTests:
     type: bundle.unit-test
@@ -143,6 +222,7 @@ targets:
 
     sources:
       - path: StirTests
+      - path: Shared
 
     settings:
       base:
@@ -161,6 +241,7 @@ schemes:
     build:
       targets:
         Stir: all
+        StirWidgets: all
         StirTests: [test]
     run:
       config: Debug

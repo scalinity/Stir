@@ -18,17 +18,36 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.scalinity.stir</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>stir</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Stir listens while you cook so you can advance steps, start timers, and ask for substitutions without touching your phone.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Stir transcribes your voice on-device to understand kitchen commands when hands-free Cook Mode is unavailable.</string>
-	<key>UIBackgroundModes</key>
+	<string>Stir listens hands-free during Cook Mode so you can ask questions without touching your phone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Stir reads recipe screenshots you pick so it can turn them into steps you can cook from.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Stir writes your missing-ingredients list to Reminders so it shows up next time you're at the store.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
+	<key>NSUserActivityTypes</key>
 	<array>
-		<string>remote-notification</string>
+		<string>StartNewDinnerSolveIntent</string>
+		<string>ShowTonightsIdeaIntent</string>
+		<string>AddToGroceryIntent</string>
 	</array>
 	<key>PostHogPublicAPIKey</key>
 	<string>$(POSTHOG_PUBLIC_API_KEY)</string>

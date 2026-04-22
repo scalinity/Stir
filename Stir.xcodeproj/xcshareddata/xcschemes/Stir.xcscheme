@@ -35,6 +35,20 @@
                ReferencedContainer = "container:Stir.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AAF1C8B8021D75022077B038"
+               BuildableName = "StirWidgets.appex"
+               BlueprintName = "StirWidgets"
+               ReferencedContainer = "container:Stir.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

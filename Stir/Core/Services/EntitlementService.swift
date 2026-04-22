@@ -121,6 +121,11 @@ final class EntitlementService {
         self.expiresAt = entitlements.expiresAt
         self.voiceEnabled = entitlements.voiceEnabled
         self.billingRetryBanner = entitlements.billingRetryBanner
+        // Mirror the tier into the App Group so StirWidgets can gate
+        // Premium content without a Supabase round-trip from the widget
+        // process. Written on every hydrate so webhook/tier-change
+        // refreshes propagate to the widget surface within one bootstrap.
+        SharedStorage().writeTier(entitlements.tier.rawValue)
 
         var map: [FeatureKey: QuotaSnapshot] = [:]
         for quota in entitlements.quotas {
