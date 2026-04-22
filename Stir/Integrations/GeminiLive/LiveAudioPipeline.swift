@@ -110,10 +110,38 @@ final class LiveAudioPipeline {
     /// and received mic permission. Pre-warm path: call once per
     /// session; start/stop cycles via `startCapture`/`stopCapture`.
     func prepare() throws {
-        // Snapshot the hardware input format once — installing a tap
-        // requires a concrete format, and the input format can only be
-        // read after the engine is prepared.
         let inputNode = audioEngine.inputNode
+
+        // Enable the voice-processing IO unit BEFORE touching the
+        // input format. This routes BOTH the engine's input and the
+        // playerNode's output through Apple's system AEC stage, which
+        // is the only defense against our own TTS audio being picked
+        // up by the mic and sent back to Gemini as "user" input.
+        //
+        // Observed 2026-04-22 on a full 5-turn session: without AEC,
+        // every turn after the first was Gemini transcribing its own
+        // previous response played through the speaker ("Yes, I can
+        // hear you great. Ready to get started?" came back verbatim
+        // as transcription.user on turn 2). Session looped forever
+        // with the model talking to itself.
+        //
+        // setVoiceProcessingEnabled(_:) can fail on older/unsupported
+        // hardware — log + continue. We also install a client-side
+        // half-duplex gate in RealtimeSession.startMicForwarding
+        // (drops frames while .modelSpeaking) as a belt-and-suspenders
+        // safety net regardless of whether AEC is active.
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            Logger.voice.info("mic_voice_processing_enabled")
+        } catch {
+            Logger.voice.warning(
+                "mic_voice_processing_enable_failed error=\(error.localizedDescription, privacy: .public)",
+            )
+        }
+
+        // Snapshot the hardware input format AFTER enabling voice
+        // processing — the VP IO unit may change the input format
+        // (typically to mono 24 kHz or similar).
         let hwFormat = inputNode.inputFormat(forBus: 0)
         guard hwFormat.sampleRate > 0 else {
             throw PipelineError.noInputDevice

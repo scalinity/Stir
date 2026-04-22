@@ -1085,10 +1085,38 @@ final class RealtimeSession: VoiceSessionDriver {
             #if DEBUG
             var framesSent = 0
             var bytesSent = 0
+            var framesMuted: UInt64 = 0
             var nextLogAtFrame = 50 // ~1 s at 20 ms per frame
             #endif
             for await frame in pipeline.micFrames {
                 if Task.isCancelled { break }
+                // Half-duplex gate. Drop mic frames while the model
+                // is speaking — prevents the speaker's audio from
+                // being picked up by the mic and sent back to Gemini
+                // as "user" input, which produced an infinite echo
+                // loop (turn-N = Gemini transcribing turn-(N-1)'s own
+                // response, observed 2026-04-22). AEC (enabled via
+                // AVAudioEngine voice processing) suppresses most of
+                // the echo signal, but this gate is the hard backstop
+                // — even at -40 dB the VAD can trigger on it given
+                // enough time.
+                //
+                // Cost: user can't "barge in" while model is speaking.
+                // Acceptable for MVP — the model's response cap is
+                // 150 audio tokens (~2 s), so mute windows are brief.
+                // Barge-in can be re-enabled later if AEC quality
+                // proves sufficient in D.1 validation.
+                if stateMachine.state == .modelSpeaking {
+                    #if DEBUG
+                    framesMuted &+= 1
+                    if framesMuted % 50 == 1 {
+                        VoiceSessionLog.log("mic.muted_during_modelSpeaking", [
+                            "frames_muted": framesMuted,
+                        ])
+                    }
+                    #endif
+                    continue
+                }
                 do {
                     try await transport.send(.realtimeInputAudio(
                         base64: frame.base64,
