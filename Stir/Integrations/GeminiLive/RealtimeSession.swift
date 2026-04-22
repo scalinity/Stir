@@ -114,6 +114,16 @@ final class RealtimeSession: VoiceSessionDriver {
     var onAdvanceStepRequested: (() -> Void)?
     var onStartTimerRequested: ((_ seconds: Int, _ label: String?) -> Void)?
 
+    /// Notifies the VM on every state-machine advance. Critical for
+    /// hands-free UX: the driver auto-transitions userSpeaking →
+    /// modelSpeaking → ready internally (VAD-driven), and without this
+    /// callback the VM's `voiceState` mirror goes stale — mic button
+    /// label reads "Listening…" while Stir is actually speaking,
+    /// "Thinking…" persists after turn-complete, etc. Set by
+    /// CookModeRoot when wiring up the driver; always invoked on
+    /// MainActor.
+    var onVoiceStateChange: (@MainActor (VoiceSessionState) -> Void)?
+
     // MARK: - Init
 
     init(
@@ -158,17 +168,24 @@ final class RealtimeSession: VoiceSessionDriver {
         }
         #if DEBUG
         VoiceSessionLog.sessionStart()
-        // Wire the state machine to echo every advance to the console
-        // transcript. Must go through `onTransition` (not advance())
-        // so illegal transitions also surface — the state machine
-        // logs those separately at warning but D.1 wants a unified view.
-        stateMachine.onTransition = { from, to in
+        #endif
+        // Wire the state machine's transition hook to drive BOTH the
+        // DEBUG console log (so D.1 has the unified timeline) AND the
+        // VM's `onVoiceStateChange` subscription (so the mic button
+        // label reflects reality during hands-free auto-advances —
+        // userSpeaking → modelSpeaking → ready cycles without any
+        // VM method call). `[weak self]` because the state machine
+        // holds the closure and would otherwise retain the session
+        // past its natural lifetime.
+        stateMachine.onTransition = { [weak self] from, to in
+            #if DEBUG
             VoiceSessionLog.log("state.advance", [
                 "from": from.rawValue,
                 "to": to.rawValue,
             ])
+            #endif
+            self?.onVoiceStateChange?(to)
         }
-        #endif
         stateMachine.advance(to: .connecting)
 
         do {

@@ -260,15 +260,28 @@ struct StepCardView: View {
         }
         .buttonStyle(.bordered)
         .tint(micTint)
-        .disabled(viewModel.micButtonRole == .busy)
+        // Button stays enabled during `.busy` — hands-free contract
+        // says tap = "exit voice mode", and users were getting stuck
+        // in a spinning state when the button was `.disabled` with
+        // no other escape hatch (observed 2026-04-22). Disable only
+        // when there's genuinely nothing the tap can do (no driver
+        // yet, still connecting).
+        .disabled(micButtonDisabled)
         .accessibilityLabel(micAccessibilityLabel)
         .accessibilityHint(micAccessibilityHint)
+    }
+
+    private var micButtonDisabled: Bool {
+        // Only disable while we're still bringing the driver up —
+        // once ready, every state is user-actionable (start session
+        // / end session).
+        viewModel.voiceState == .connecting
     }
 
     private var micIconName: String {
         switch viewModel.micButtonRole {
         case .submit:        return "stop.circle.fill"
-        case .busy:          return "waveform.circle"
+        case .busy:          return "stop.circle.fill"
         case .askWithVoice:  return "mic.circle.fill"
         }
     }
@@ -276,32 +289,37 @@ struct StepCardView: View {
     private var micLabel: String {
         switch viewModel.micButtonRole {
         case .submit:
-            return "Tap when you're done"
+            // In hands-free mode the turn ends via VAD, not a tap —
+            // so this button during .userSpeaking is actually a
+            // "stop voice mode" affordance. Label matches meaning.
+            return "Stop voice"
         case .busy:
-            // Distinguish the three in-flight sub-states for the user.
-            // Fine-grained voiceState read is local to label copy only —
-            // not logic. The button's role binding still controls
-            // disabled / tint / icon.
+            // Show what Stir is DOING (listening, thinking, speaking)
+            // so the user knows whether to keep talking or wait. The
+            // word "Stop" stays on the button via the accessibility
+            // hint — tap always means stop voice mode.
             if viewModel.voiceState == .thinking { return "Thinking…" }
-            if viewModel.voiceState == .modelSpeaking { return "Speaking" }
+            if viewModel.voiceState == .modelSpeaking { return "Stir speaking…" }
             if viewModel.voiceState == .transcribing { return "Getting that…" }
-            return "Working…"
+            return "Listening…"
         case .askWithVoice:
             return "Ask with voice"
         }
     }
 
     private var micTint: Color {
-        // Listening → red so the "tap to submit" affordance reads as an
-        // active recording state at a glance. Everything else uses the
-        // app accent.
-        viewModel.micButtonRole == .submit ? .red : .accentColor
+        // Active session → red (matches "tap to stop" expectation,
+        // mirrors a recording/mute indicator). Idle → app accent.
+        switch viewModel.micButtonRole {
+        case .submit, .busy: return .red
+        case .askWithVoice:  return .accentColor
+        }
     }
 
     private var micAccessibilityLabel: String {
         switch viewModel.micButtonRole {
-        case .submit:       return "Stop listening and send"
-        case .busy:         return "Voice busy"
+        case .submit:       return "Stop voice mode"
+        case .busy:         return "Stop voice mode"
         case .askWithVoice: return "Ask with voice"
         }
     }
@@ -309,9 +327,9 @@ struct StepCardView: View {
     private var micAccessibilityHint: String {
         switch viewModel.micButtonRole {
         case .submit:
-            return "Taps end your turn and sends the question."
+            return "Taps stop voice mode. Stir hears you automatically when you pause — no tap needed."
         case .busy:
-            return "Waiting for the assistant to finish."
+            return "Taps stop voice mode."
         case .askWithVoice:
             return "Opens microphone for hands-free cooking questions. Premium feature."
         }

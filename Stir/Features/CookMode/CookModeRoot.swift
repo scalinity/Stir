@@ -230,6 +230,21 @@ struct CookModeRoot: View {
                             await vm?.startTimerFromVoice(seconds: seconds, label: label)
                         }
                     }
+                    // Real-time state mirror: driver fires this on every
+                    // state advance so the mic button label tracks the
+                    // session instead of lagging until a VM method
+                    // returns. Without this, VAD-driven .userSpeaking →
+                    // .modelSpeaking → .ready cycles were invisible to
+                    // the UI — button stayed labeled "Listening…" the
+                    // whole time Stir was talking back.
+                    liveDriver.onVoiceStateChange = { [weak vm] state in
+                        vm?.applyDriverStateChange(state)
+                    }
+                }
+                if let fallbackDriver = driverForVM as? SpeechFallbackService {
+                    fallbackDriver.onVoiceStateChange = { [weak vm] state in
+                        vm?.applyDriverStateChange(state)
+                    }
                 }
 
                 // Reconcile any leftover timers from a cross-device

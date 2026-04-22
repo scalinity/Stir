@@ -132,8 +132,18 @@ final class SpeechFallbackService: VoiceSessionDriver {
         self.speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         stateMachine.onTransition = { [weak self] _, next in
             self?.currentState = next
+            // Chain to the VM's optional subscriber so the mic button
+            // label stays in sync during internal state changes (e.g.
+            // the state advances inside beginTurn/endTurn without the
+            // VM being able to read currentState until those methods
+            // return). Mirror of RealtimeSession's hook.
+            self?.onVoiceStateChange?(next)
         }
     }
+
+    /// See `RealtimeSession.onVoiceStateChange` — same contract. Set
+    /// by CookModeRoot when wiring the driver; invoked on MainActor.
+    var onVoiceStateChange: (@MainActor (VoiceSessionState) -> Void)?
 
     // MARK: - Pre-warm
 

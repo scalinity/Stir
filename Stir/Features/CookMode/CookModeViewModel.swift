@@ -506,44 +506,34 @@ final class CookModeViewModel {
             return
         }
 
-        // Premium+ path. State-branch on what the current turn is doing.
-        if voiceIsListening {
-            // Flip the VM's voiceState to `.thinking` BEFORE awaiting
-            // endVoiceTurn. Without this the mic button stays on its
-            // .submit role (red "send") for the full duration of the
-            // driver's endTurn await (up to 30 s) — user perceives it
-            // as stuck, taps again, and each subsequent tap used to
-            // stack another endVoiceTurn call (observed 2026-04-22:
-            // 8 rapid taps within 15 s, all racing on the same turn
-            // and leaking continuations). Pre-setting the VM-side
-            // state to `.thinking` flips the button to `.busy`
-            // (disabled) immediately. The driver also advances its
-            // internal state to `.thinking` inside endTurn; the two
-            // lines are pinning the same outcome from different
-            // sides.
-            voiceState = .thinking
-            await endVoiceTurn()
-            return
-        }
-        if voiceIsBusy {
-            // Tap while modelSpeaking cancels + begins a fresh turn.
-            // Tap while thinking/transcribing/etc. is a no-op with a
-            // subtle toast so the user isn't left wondering why the
-            // mic went dead.
-            if voiceState == .modelSpeaking {
-                // cancelSpeaking() awaits the state machine's
-                // transition back to .ready — prevents the race where
-                // beginTurn() below would throw .busy because the
-                // synthesizer's didCancel delegate hadn't fired yet.
-                await voiceDriver?.cancelSpeaking()
-                voiceState = voiceDriver?.currentState
-                // Fall through to start a fresh turn below.
-            } else {
-                // Emit `busy` result so the funnel sees every tap, not
-                // just the ones that succeed/fail cleanly — matters
-                // for "user gave up mid-thinking" signal.
-                emitVoiceAffordance(tier: tier, result: "busy")
-                voiceToastMessage = "One moment — finishing up."
+        // Premium+ path. Hands-free model: VAD drives turn boundaries,
+        // so the user never NEEDS to tap mid-session. Taps during an
+        // active session have TWO meanings depending on state:
+        //
+        //   .userSpeaking / .transcribing → "I'm done, submit this turn"
+        //       — backward compat for explicit-submit UX and the
+        //         tap-only fallback flow (C.3 without VAD).
+        //   any other active state        → "Stop voice mode entirely"
+        //       — prevents the trap Daniel hit 2026-04-22 where the
+        //         mic button was `.disabled` during .busy states, so
+        //         tapping it during .thinking/.modelSpeaking did
+        //         nothing visible and the user was stuck.
+        if let driver = voiceDriver, isActiveVoiceState(driver.currentState) {
+            switch driver.currentState {
+            case .userSpeaking, .transcribing:
+                // Flip VM voiceState to .thinking BEFORE awaiting so
+                // the button stops reading as .submit for the full
+                // 30s endTurn wait (observed spam-tap scenario
+                // 2026-04-22). Driver also advances internally.
+                voiceState = .thinking
+                await endVoiceTurn()
+                return
+            default:
+                // .connecting, .ready, .thinking, .modelSpeaking,
+                // .toolCalling, .refreshing, .fallingBack — tap
+                // closes the session.
+                await closeVoiceSession()
+                emitVoiceAffordance(tier: tier, result: "voice_stopped")
                 return
             }
         }
@@ -605,6 +595,59 @@ final class CookModeViewModel {
         }
         try await voiceDriver.beginTurn()
         voiceState = voiceDriver.currentState
+    }
+
+    /// Driver-to-VM state mirror. Called from CookModeRoot's
+    /// `onVoiceStateChange` wiring on every state-machine advance so
+    /// the mic button label tracks hands-free VAD-driven transitions
+    /// (userSpeaking → modelSpeaking → ready etc.) that happen
+    /// without any VM method call.
+    func applyDriverStateChange(_ state: VoiceSessionState) {
+        voiceState = state
+    }
+
+    /// States in which a voice session is "live" — mic is hot, WS is
+    /// connected, or work is in flight. The ONLY state that is not
+    /// live is the pre/post-session ones (`.idle` before preWarm,
+    /// `.closed` / `.error` after teardown).
+    private func isActiveVoiceState(_ state: VoiceSessionState) -> Bool {
+        switch state {
+        case .idle, .closed, .error:
+            return false
+        case .connecting, .ready, .userSpeaking, .transcribing,
+             .thinking, .modelSpeaking, .toolCalling, .refreshing,
+             .fallingBack:
+            return true
+        }
+    }
+
+    /// Tear down the voice session entirely and drop back to tap
+    /// cooking. Called when the user taps the mic button during an
+    /// active session — the hands-free contract says VAD drives
+    /// turn boundaries, so any user-initiated button tap is a
+    /// session-level action, not a turn-level one.
+    ///
+    /// Idempotent: safe to call with no active driver (guard early).
+    /// The mic button's `handleMicTap` is the only caller for now;
+    /// CookModeRoot's `.onDisappear` uses driver.close() directly
+    /// because it doesn't care about the VM-side state cleanup.
+    private func closeVoiceSession() async {
+        guard let driver = voiceDriver else { return }
+        // Cancel any in-flight playback synchronously — gives
+        // immediate audible feedback that the stop registered even
+        // before the WS tears down.
+        await driver.cancelSpeaking()
+        // Driver close: WS disconnect, mic tap removal, audio engine
+        // stop, continuations drained. Idempotent within the driver.
+        driver.close()
+        voiceDriver = nil
+        voiceState = .closed
+        // Deactivate the AVAudioSession we activated for Cook Mode so
+        // other apps can take the audio stack. CookModeRoot's
+        // .onDisappear also calls deactivate; this is defense in
+        // depth for the "exit voice but stay in Cook Mode" path.
+        AVAudioSessionConfigurator.deactivate()
+        Logger.ui.info("voice_session_closed_by_user_tap")
     }
 
     private func endVoiceTurn() async {

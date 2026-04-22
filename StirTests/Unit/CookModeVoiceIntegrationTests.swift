@@ -290,29 +290,37 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
 
     // MARK: - handleMicTap — tap-while-busy telemetry
 
-    func test_handleMicTap_whileThinking_emitsBusyResult_andShowsToast() async throws {
-        // Suggestion #1 from re-review: the tap-while-thinking branch
-        // previously set a toast with no telemetry. Now it emits
-        // voice_affordance_tapped(result=busy) so the funnel sees every
-        // tap, not just the ones that hit success/fail cleanly.
+    func test_handleMicTap_whileThinking_closesSession_andEmitsVoiceStopped() async throws {
+        // Behavior changed 2026-04-22 after the user reported being
+        // trapped in voice mode: the mic button was `.disabled` during
+        // `.busy` states, so tapping did nothing visible and there was
+        // no other way to exit voice mode without leaving Cook Mode
+        // entirely. New contract: tap during any non-speaking active
+        // state (.thinking / .modelSpeaking / .toolCalling / etc.)
+        // closes the voice session, emitting
+        // `voice_affordance_tapped(result=voice_stopped)`.
         let session = try freshSession()
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         let driver = MockVoiceSessionDriver(path: .geminiFallback)
 
         let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
-        // Put the VM into .thinking without having to drive a full
-        // turn. The mock's state is also poked so driver reads stay
-        // consistent if the VM re-syncs mid-flow.
+        // Put the driver (and mirror the VM) into .thinking so the
+        // tap hits the non-speaking-active branch.
         driver.stubState(.thinking)
         vm._testForceVoiceState(.thinking)
 
         await vm.handleMicTap()
 
-        XCTAssertNotNil(vm.voiceToastMessage,
-                        "busy tap must surface a reassurance toast")
+        XCTAssertNil(vm.voiceToastMessage,
+                     "closing the session should not pop a toast — it's a real teardown, not a soft no-op")
+        XCTAssertEqual(vm.voiceState, .closed,
+                       "voiceState must reflect the torn-down session so the button returns to .askWithVoice")
+        XCTAssertEqual(driver.closeCallCount, 1,
+                       "driver.close must fire as part of the teardown")
         let affordances = telemetrySpy.events.filter { $0.event == .voiceAffordanceTapped }
         XCTAssertEqual(affordances.count, 1)
-        XCTAssertEqual(affordances.first?.properties["result"] as? String, "busy")
+        XCTAssertEqual(affordances.first?.properties["result"] as? String, "voice_stopped",
+                       "spec §15 `voice_affordance_tapped.result` gains 'voice_stopped' for the close path")
     }
 
     // MARK: - presentStirError — typed error routing
