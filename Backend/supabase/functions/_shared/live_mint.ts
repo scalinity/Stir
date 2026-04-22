@@ -151,9 +151,47 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
     systemInstruction: { parts: [{ text: config.systemInstruction }] },
     tools: [{ functionDeclarations: COOK_MODE_TOOLS }],
     realtimeInputConfig: {
-      automaticActivityDetection: { disabled: false },
+      // Automatic VAD — hands-free is the core Premium UX (dirty
+      // hands, cooking, can't tap a button to end each utterance).
+      //
+      // Empirical testing 2026-04-20..22 with `{ disabled: false }`
+      // alone (no explicit params, no transcription) got zero
+      // server response over 40 s on good audio. Hypothesis:
+      // default silence-duration / sensitivity doesn't fire on
+      // iPhone mic noise floors with just speech + room ambience.
+      // Explicit values below match the ranges the Gemini reference
+      // app ships with, widened slightly for kitchen noise tolerance.
+      //
+      //   silenceDurationMs=800   — ~natural pause; short enough to
+      //                              feel responsive, long enough to
+      //                              not clip multi-clause queries.
+      //   prefixPaddingMs=300     — include ~300 ms before VAD-
+      //                              detected speech (catches soft
+      //                              onsets).
+      //   startOfSpeechSensitivity=LOW — less likely to trigger on
+      //                              ambient kitchen noise.
+      //   endOfSpeechSensitivity=LOW   — only fire on clear pauses,
+      //                              not mid-utterance micropauses.
+      automaticActivityDetection: {
+        disabled: false,
+        silenceDurationMs: 800,
+        prefixPaddingMs: 300,
+        startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+      },
       turnCoverage,
     },
+    // Transcription: diagnostic + long-term VoiceTurn persistence.
+    // With this on, `serverContent.inputTranscription` tells us
+    // EXACTLY what Gemini heard (if anything — silence means the
+    // audio pipeline is broken, not VAD). `outputTranscription`
+    // gives us the text of what Gemini spoke back for logs.
+    //
+    // Tiny token cost per turn (~25-50 input, similar output) and
+    // gives us the observability we've been missing while debugging
+    // the "no reply" problem.
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
   };
 
   const body = {

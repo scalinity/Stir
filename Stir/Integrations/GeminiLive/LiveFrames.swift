@@ -157,6 +157,14 @@ struct LiveServerContent: Sendable, Equatable {
     /// where the model surfaces a typed response — we don't render it
     /// but log it for Sentry triage).
     var inlineText: String?
+    /// Server-provided transcript of what the USER just said. Only
+    /// populated when `inputAudioTranscription: {}` is in the setup.
+    /// Extremely useful as a diagnostic: if Gemini isn't "hearing"
+    /// the audio, this stays nil even on a speaking user.
+    var inputTranscription: LiveTranscription?
+    /// Server-provided transcript of what the MODEL is speaking back.
+    /// Gated on `outputAudioTranscription: {}` in the setup.
+    var outputTranscription: LiveTranscription?
     /// Server signals end-of-turn. iOS uses this to advance the state
     /// machine from `.modelSpeaking` back to `.ready`.
     var turnComplete: Bool = false
@@ -180,6 +188,12 @@ struct LiveServerContent: Sendable, Equatable {
                 }
             }
         }
+        if let input = obj["inputTranscription"] as? [String: Any] {
+            result.inputTranscription = LiveTranscription.parse(input)
+        }
+        if let output = obj["outputTranscription"] as? [String: Any] {
+            result.outputTranscription = LiveTranscription.parse(output)
+        }
         if let done = obj["turnComplete"] as? Bool, done {
             result.turnComplete = true
         }
@@ -190,6 +204,20 @@ struct LiveServerContent: Sendable, Equatable {
             result.hasGroundingMetadata = true
         }
         return result
+    }
+}
+
+/// Partial transcription frame. `text` accumulates across frames in the
+/// same turn; `finished` flips true on the last delta.
+struct LiveTranscription: Sendable, Equatable {
+    let text: String
+    let finished: Bool
+
+    static func parse(_ obj: [String: Any]) -> LiveTranscription {
+        LiveTranscription(
+            text: obj["text"] as? String ?? "",
+            finished: obj["finished"] as? Bool ?? false,
+        )
     }
 }
 

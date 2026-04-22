@@ -316,6 +316,23 @@ final class RealtimeSession: VoiceSessionDriver {
         currentStepNumber: Int,
         recipePlanId: UUID,
     ) async throws -> CookTurnResult {
+        // Re-entry guard. Repeat taps (user impatient, tapping the
+        // "end" button several times) used to create a new
+        // `turnCompleteContinuation` per call, overwriting the prior
+        // one without resuming — tripping Swift's "continuation
+        // leaked" runtime warning AND leaving previous awaiters
+        // suspended forever. Observed 2026-04-22: 8 rapid taps in
+        // `.thinking` produced 8 leak warnings in 15 s. If a turn is
+        // already in flight, return the running snapshot without
+        // spinning up a second wait.
+        if turnCompleteContinuation != nil {
+            #if DEBUG
+            VoiceSessionLog.log("end_turn.reentry_ignored", [
+                "state": stateMachine.state.rawValue,
+            ])
+            #endif
+            return lastTurnResult ?? makeEmptyTurnResult()
+        }
         // Hands-free tolerance: VAD may have auto-advanced us past
         // .userSpeaking before the VM's endTurn landed. Accept any
         // live turn state — handleServerContent and the turnComplete
@@ -839,6 +856,33 @@ final class RealtimeSession: VoiceSessionDriver {
         if let text = content.inlineText, !text.isEmpty {
             currentTurnInlineText = (currentTurnInlineText ?? "") + text
         }
+        // Diagnostic + long-term transcript source. When
+        // `inputAudioTranscription` is in the mint setup, the server
+        // returns per-delta transcripts of what it heard from the
+        // user. Zero-transcription output over several seconds of
+        // apparent speech = audio pipeline problem, not a VAD problem.
+        if let input = content.inputTranscription, !input.text.isEmpty {
+            #if DEBUG
+            VoiceSessionLog.log("transcription.user", [
+                "text": input.text,
+                "finished": input.finished,
+            ])
+            #endif
+        }
+        if let output = content.outputTranscription, !output.text.isEmpty {
+            // Accumulate model transcript into currentTurnInlineText
+            // so VoiceTurn persistence gets a real string instead of
+            // empty. Don't double-count inlineText (rare on AUDIO) +
+            // outputTranscription on the same turn — prefer the
+            // latter since it matches what was actually spoken.
+            currentTurnInlineText = (currentTurnInlineText ?? "") + output.text
+            #if DEBUG
+            VoiceSessionLog.log("transcription.model", [
+                "text": output.text,
+                "finished": output.finished,
+            ])
+            #endif
+        }
         if content.turnComplete {
             // Advance all the way to `.ready` so the hands-free loop
             // is self-sustaining — the next user utterance lands on a
@@ -1038,6 +1082,11 @@ final class RealtimeSession: VoiceSessionDriver {
         // teardown. Earlier drafts carried `[weak self]` + `_ = self`
         // to silence the unused-capture warning, which was misleading.
         micForwardTask = Task {
+            #if DEBUG
+            var framesSent = 0
+            var bytesSent = 0
+            var nextLogAtFrame = 50 // ~1 s at 20 ms per frame
+            #endif
             for await frame in pipeline.micFrames {
                 if Task.isCancelled { break }
                 do {
@@ -1045,6 +1094,23 @@ final class RealtimeSession: VoiceSessionDriver {
                         base64: frame.base64,
                         mimeType: frame.mimeType,
                     ))
+                    #if DEBUG
+                    framesSent += 1
+                    bytesSent += frame.base64.count
+                    // Log every ~1 s of audio so we can see in the
+                    // console whether the mic pipeline is actually
+                    // pushing bytes. If this log never appears while
+                    // user is obviously speaking, the AVAudioEngine
+                    // tap callback isn't firing and the whole
+                    // "silence from Gemini" problem is on iOS side.
+                    if framesSent >= nextLogAtFrame {
+                        VoiceSessionLog.log("mic.sent", [
+                            "frames": framesSent,
+                            "b64_bytes": bytesSent,
+                        ])
+                        nextLogAtFrame = framesSent + 50
+                    }
+                    #endif
                 } catch {
                     Logger.voice.warning("live_mic_send_failed")
                     #if DEBUG

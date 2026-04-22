@@ -508,7 +508,20 @@ final class CookModeViewModel {
 
         // Premium+ path. State-branch on what the current turn is doing.
         if voiceIsListening {
-            // Second tap → end the turn and dispatch.
+            // Flip the VM's voiceState to `.thinking` BEFORE awaiting
+            // endVoiceTurn. Without this the mic button stays on its
+            // .submit role (red "send") for the full duration of the
+            // driver's endTurn await (up to 30 s) — user perceives it
+            // as stuck, taps again, and each subsequent tap used to
+            // stack another endVoiceTurn call (observed 2026-04-22:
+            // 8 rapid taps within 15 s, all racing on the same turn
+            // and leaking continuations). Pre-setting the VM-side
+            // state to `.thinking` flips the button to `.busy`
+            // (disabled) immediately. The driver also advances its
+            // internal state to `.thinking` inside endTurn; the two
+            // lines are pinning the same outcome from different
+            // sides.
+            voiceState = .thinking
             await endVoiceTurn()
             return
         }
