@@ -163,19 +163,49 @@ export async function geminiGenerate(args: GeminiGenerateArgs): Promise<GeminiGe
   const startedAt = performance.now();
   const fetchImpl = args.fetchImpl ?? fetch;
 
-  const res = await fetchImpl(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-goog-api-key': GEMINI_API_KEY,
-    },
-    body: JSON.stringify(body),
-  });
+  // P0-K (2026-04-23): 30 s timeout on generateContent. Gemini's
+  // `generateContent` calls are primary-user-path (dinner-solve,
+  // cook-turn fallback, substitution, recipe-import, etc.) and the
+  // Supabase Edge Function platform timeout of ~150 s would otherwise
+  // mask Gemini degradation behind a 3-minute iOS stall. 30 s is
+  // generous — most calls complete in 1-4 s, dinner-solve streaming
+  // endpoints use their own budgets — but tight enough to fail fast
+  // when Gemini is non-responsive. AbortError maps to a 504-shaped
+  // GeminiError so handler retry logic sees a well-typed failure.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new GeminiError(504, '', `Gemini generateContent exceeded 30s timeout`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   const latencyMs = Math.round(performance.now() - startedAt);
 
   const rawText = await res.text();
   if (!res.ok) {
-    throw new GeminiError(res.status, rawText, `Gemini ${res.status}: ${rawText.slice(0, 500)}`);
+    // P1-C / SA3-W1 (2026-04-23): do NOT embed the upstream body in the
+    // thrown error message. Gemini's 4xx response body commonly echoes
+    // fragments of the rendered system prompt (transcript + household
+    // dietary rules + pantry snapshot) — structured-JSON loggers then
+    // ship that content to Edge Function logs on every refusal. The
+    // body is still available on `err.body` for env-gated dev debugging
+    // via `shouldLogGeminiBodies()`; the default log line stays PII-safe.
+    // Mirrors the same fix already applied in `_shared/live_mint.ts`.
+    throw new GeminiError(res.status, rawText);
   }
 
   let parsed: ApiResponse;
@@ -217,26 +247,6 @@ export async function geminiGenerate(args: GeminiGenerateArgs): Promise<GeminiGe
 }
 
 // ---------------------------------------------------------------------------
-// Live auth token mint (step 6 — still stubbed)
+// Live auth token mint
 // ---------------------------------------------------------------------------
-
-export interface GeminiLiveAuthTokenArgs {
-  systemInstruction: string;
-  tools: unknown[];
-  maxOutputTokens: number;
-  thinkingLevel: GeminiThinkingLevel;
-  sessionLifetimeSeconds: number;
-  openWindowSeconds: number;
-}
-
-export interface GeminiLiveAuthToken {
-  token: string;
-  expires_at: string;
-}
-
-/** Gemini Live ephemeral-token mint. Implemented in step 6. */
-export function geminiMintLiveAuthToken(
-  _args: GeminiLiveAuthTokenArgs,
-): Promise<GeminiLiveAuthToken> {
-  throw new Error('Gemini Live auth-token mint wired in step 6.');
-}
+// Lives in `_shared/live_mint.ts`. Step-6 stub deleted (P2-D, 2026-04-23).

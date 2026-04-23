@@ -285,14 +285,36 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
     bidiGenerateContentSetup,
   };
 
-  const res = await fetch(MINT_URL, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  // P0-K (2026-04-23): 10 s timeout on the Gemini mint call. Without
+  // this, a Gemini outage or partial-network stall hangs the Edge
+  // Function until Supabase's platform request timeout fires (~150 s),
+  // stretching the user-visible voice-start path from ~500 ms to 150 s
+  // during upstream degradation. 10 s matches the iOS client-side
+  // timeout on /v1/ai/realtime-session, so iOS and backend converge on
+  // the same failure mode instead of one hanging while the other has
+  // already given up. AbortError is mapped to a typed 504 below so the
+  // handler returns AI-01 502 consistently.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  let res: Response;
+  try {
+    res = await fetch(MINT_URL, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new LiveMintError(504, 'Gemini mint request exceeded 10s timeout');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const text = await res.text();
