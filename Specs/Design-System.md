@@ -563,41 +563,39 @@ Every component and screen verified against:
 
 ## 12. File layout
 
-All tokens live in SwiftUI:
+**Tokens live in `/Shared/`** so the main app target, widget extension, and share extension all consume the same vocabulary via XcodeGen multi-target `sources:` membership. See [ADR 0016](../docs/decisions/0016-design-tokens-in-shared-folder.md) for the rationale, including rejected alternatives (duplicate files, SwiftPM package, partial-share). **Components live in `Stir/DesignSystem/Components/`** — main-app-only; widgets write their own WidgetKit-compatible views consuming the shared tokens directly.
 
 ```
+Shared/                               # Multi-target tokens (main app + widgets + share extension + tests)
+  Colors.swift                        # Color.Stir.* — full palette from §3, light + dark adaptive
+  Typography.swift                    # StirTypeStyle + .stirFont() — scale from §4.1, Dynamic Type via @ScaledMetric
+  Spacing.swift                       # CGFloat.Stir.space1...space7 + screen margins
+  Radius.swift                        # CGFloat.Stir.radius* — 8-token scale from §5.4
+  Icons.swift                         # Image.Stir.* — semantic → SF Symbol map from §6
+  Shadow.swift                        # StirShadow — sheetEdge, modal, cookStepCardDark, emberGlow, softPress (§5.5)
+  Motion.swift                        # Animation.Stir.* — standard/exit/sheet/voiceMicActivation (§7), Reduce-Motion-aware modifier
+
 Stir/DesignSystem/
-  Tokens/                             # Phase 3 of token integration — delivered
-    Colors.swift                      # Color.Stir.* — full palette from §3, light + dark adaptive
-    Typography.swift                  # Font.Stir.* — scale from §4.1 with baked tracking
-    Spacing.swift                     # CGFloat.Stir.space1...space7 + screen margins
-    Radius.swift                      # CGFloat.Stir.radius* — 8-token scale from §5.4
-    Icons.swift                       # Image.Stir.* — semantic → SF Symbol map from §6
-  Motion/                             # Phase 5 (Cook Mode) — stubbed
-    Durations.swift                   # .fast 150ms, .default 200ms, .sheet 300ms
-    Easings.swift                     # .out, .in per §7.2
-  Shadows/                            # Phase 5 (Cook Mode) — stubbed
-    StirShadow.swift                  # sheetEdge, modal, cookStepCardDark, emberGlow, softPress
-  Components/                         # Land per-feature as build steps consume them, NOT up-front
-    PrimaryButton.swift
-    SecondaryButton.swift
-    TextButton.swift
-    Chip.swift
-    DishOptionCard.swift
-    SavedMealCard.swift
-    FitLabel.swift
-    InputField.swift
-    Banner.swift
-    EmptyState.swift
-    StepCard.swift                    # Cook Mode
-    PaywallCard.swift
+  Components/                         # Main-app-only reusable SwiftUI views consuming shared tokens
+    PrimaryButton.swift               # ember.600 fill, 48pt min-height, 12pt radius (§8.1)
+    SecondaryButton.swift             # paper.100 fill + ink.100 border (§8.1)
+    TextButton.swift                  # ember.600 label only (§8.1)
+    Chip.swift                        # default/selected/confidence variants (§8.2)
+    FitLabel.swift                    # Fastest / Least waste / Best fit / Missing X (§8.4)
+    InputField.swift                  # 48pt height, focused + error states (§8.5)
+    Banner.swift                      # Info / Warning / Error (§8.7)
+    EmptyState.swift                  # icon.xl + display.md + body.md + optional CTA (§8.8)
+    DishOptionCard.swift              # Dinner Options hero card (§8.3)
+    SavedMealCard.swift               # Saved library card (§8.3)
+    StepCard.swift                    # Cook Mode step surface (§8.9)
+    PaywallCard.swift                 # Premium / Pro tier comparison card (§8.10)
   Modifiers/
     StirBackground.swift              # applies paper.50/100/200
 ```
 
 No view in `Stir/Features/*` hard-codes a hex, a pt value, or a font size. Everything goes through design system tokens. Lint rule: `grep -rE '#[0-9A-Fa-f]{6}' Stir/Features/` must return zero results.
 
-**Tokens vs components:** tokens ship as a single layer (Phase 3). Components land feature-by-feature as build steps need them — there is no "build the component library up front" sprint. The `Components/` tree above is the eventual shape, not a green-field to-do list.
+**Tokens vs components:** tokens ship as a single layer in `/Shared/`. Components land in `Stir/DesignSystem/Components/` during the step-9 design pass — they are all built up-front (not feature-by-feature) because the mockup migration in Phase 3 consumes them uniformly across screens; partial adoption creates visible inconsistency between tokenized and non-tokenized views. The up-front component build is the step-9 design sprint; prior guidance ("land feature-by-feature") applied before the step-9 design work existed.
 
 ---
 
