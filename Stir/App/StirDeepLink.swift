@@ -36,14 +36,20 @@ enum StirDeepLink: Equatable {
     /// Parse a URL into a typed destination. Returns `.unknown` for
     /// anything not in the above set. Never throws — widgets can't
     /// recover from parse errors so we swallow.
+    ///
+    /// Uses URLComponents (not URL.host/pathComponents) so step-8 can
+    /// add query-string tagging — e.g. `stir://paywall/widget?source=
+    /// tonight_small_widget` — without restructuring this parse (S14).
     static func parse(_ url: URL) -> StirDeepLink {
-        guard url.scheme?.lowercased() == "stir" else {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "stir" else {
             return .unknown(raw: url.absoluteString)
         }
-        // URLComponents splits host + path differently than URL for
-        // custom schemes; use a simple component split.
-        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
-        let segments = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        let host = components.host?.lowercased() ?? ""
+        // URLComponents.path is the leading-slash absolute path; split
+        // on "/" and drop empties to get the segment array the match
+        // below expects.
+        let segments = components.path.split(separator: "/").map(String.init)
 
         switch (host, segments) {
         case ("scan", ["start"]):

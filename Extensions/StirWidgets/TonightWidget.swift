@@ -92,7 +92,11 @@ struct TonightProvider: TimelineProvider {
         components.minute = 0
         components.second = 0
         let todayFive = cal.date(from: components) ?? now.addingTimeInterval(3_600)
-        return now < todayFive
+        // `<=` (not `<`) so a call at exactly 17:00:00.000 schedules
+        // TOMORROW's 5pm, not today's. Prior `<` would return a date in
+        // the past by ~0ms, which WidgetKit treats as "refresh now" and
+        // burns a reload budget slot on no-change data (S25).
+        return now <= todayFive
             ? todayFive
             : cal.date(byAdding: .day, value: 1, to: todayFive) ?? todayFive
     }

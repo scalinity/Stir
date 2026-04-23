@@ -41,10 +41,31 @@ final class GroceryViewModel {
 
     /// Items grouped by aisle, sorted per aisle convention (produce →
     /// meat → dairy → frozen → pantry → other).
+    ///
+    /// Memoized in `_groupedItems` and rebuilt only on `list` mutation
+    /// (generate/replace/ingest) or an item being added/removed —
+    /// toggling isChecked doesn't change grouping so keystroke-rate
+    /// body re-evals stay O(1) instead of O(n) × GroceryCategory
+    /// allCases (S7).
+    private var _groupedItems: [(category: GroceryCategory, items: [GroceryItem])] = []
+    private var _groupedItemsItemCount: Int = -1
+
     var groupedItems: [(category: GroceryCategory, items: [GroceryItem])] {
-        guard let list else { return [] }
-        let byCategory = Dictionary(grouping: list.orderedItems, by: \.categoryEnum)
-        return GroceryCategory.allCases
+        let currentCount = list?.orderedItems.count ?? 0
+        if currentCount == _groupedItemsItemCount { return _groupedItems }
+        rebuildGroupedItems()
+        return _groupedItems
+    }
+
+    private func rebuildGroupedItems() {
+        let items = list?.orderedItems ?? []
+        _groupedItemsItemCount = items.count
+        if items.isEmpty {
+            _groupedItems = []
+            return
+        }
+        let byCategory = Dictionary(grouping: items, by: \.categoryEnum)
+        _groupedItems = GroceryCategory.allCases
             .compactMap { cat in
                 guard let items = byCategory[cat], !items.isEmpty else { return nil }
                 return (category: cat, items: items)

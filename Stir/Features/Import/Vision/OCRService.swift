@@ -10,10 +10,11 @@
 //
 // Runs OFF the main thread: `VNImageRequestHandler.perform` is
 // synchronous + blocking (500–2000 ms typical for a recipe screenshot).
-// Callers are on @MainActor; we bounce to a detached Task so the
+// Callers are on @MainActor; we bounce to a structured Task so the
 // progress spinner in `ImportEntryView`'s footer animates through
-// the OCR window. Result hops back to the caller's actor implicitly
-// via `.value`.
+// the OCR window AND cancellation propagates — if the user backs
+// out of the import sheet mid-OCR, the Task cancels before perform()
+// fires and we don't burn a CPU core on a result nothing consumes (S8).
 
 import UIKit
 import Vision
@@ -46,19 +47,24 @@ struct OCRService: Sendable {
 
     func recognizeText(in image: UIImage) async throws -> Result {
         // Extract the CGImage on the caller's actor so we pass a
-        // Sendable handle into the detached task. UIImage itself is
+        // Sendable handle into the background task. UIImage itself is
         // not Sendable; CGImage is (immutable Core Foundation type).
         guard let cgImage = image.cgImage else {
             throw Failure.imageDecodeFailed
         }
-        return try await Task.detached(priority: .userInitiated) {
-            try Self.performOCR(on: cgImage)
+        // Structured Task inherits cancellation from the caller —
+        // `Task.detached` cut that link and kept running after the
+        // caller bailed. `.userInitiated` priority preserved so the
+        // OCR window matches the detached-task wall-clock behavior.
+        return try await Task(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try Self.performOCR(on: cgImage)
         }.value
     }
 
-    /// Synchronous Vision work — runs on the detached task's background
+    /// Synchronous Vision work — runs on the task's background
     /// thread. Stays a `static` so it doesn't capture self (keeps the
-    /// detached closure free of actor references).
+    /// closure free of actor references).
     private static func performOCR(on cgImage: CGImage) throws -> Result {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate

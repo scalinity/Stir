@@ -2,10 +2,18 @@
 //
 // Wraps `Intent.donate()` calls with a 24h cooldown per intent so
 // we don't spam Siri's suggestion engine on power users who solve
-// nightly. Cooldown is tracked in SharedStorage (not UserDefaults)
-// so reinstalls reset it cleanly.
+// nightly. Cooldown is tracked in the App Group UserDefaults (same
+// suite SharedStorage reads) so a reinstall clears it and widget /
+// share-ext / main-app observers all see the same timestamp.
 //
 // Step-7 prompt default: "don't donate if last donation was <24h ago".
+//
+// Suite-fallback posture: if the App Group suite isn't reachable
+// (ENTITLEMENT bug only — production builds always have it), we log
+// at error severity and no-op the donation. Falling through to
+// UserDefaults.standard would let the cooldown read from local-only
+// state, diverging from the rest of SharedStorage and hiding the
+// misconfiguration (S1).
 
 import AppIntents
 import Foundation
@@ -14,14 +22,14 @@ import OSLog
 @MainActor
 struct IntentDonationService {
     private let clock: () -> Date
-    private let storage: UserDefaults
+    private let storage: UserDefaults?
 
     init(
         clock: @escaping () -> Date = Date.init,
         suiteName: String = AppGroup.identifier,
     ) {
         self.clock = clock
-        self.storage = UserDefaults(suiteName: suiteName) ?? .standard
+        self.storage = UserDefaults(suiteName: suiteName)
     }
 
     /// Donate `StartNewDinnerSolveIntent` after a successful solve.
@@ -46,13 +54,23 @@ struct IntentDonationService {
 
     // MARK: - Private
 
+    /// Static so tests + callers can reuse the same hardcoded window
+    /// without reaching into an instance. 24 hours in seconds.
+    private static let cooldownSeconds: TimeInterval = 24 * 3_600
+
     private func donateIfEligible<I: AppIntent>(
         intent: I,
         key: String,
     ) async -> Bool {
+        guard let storage else {
+            Logger.app.error(
+                "IntentDonationService: App Group suite missing — donation skipped. Check entitlement.",
+            )
+            return false
+        }
         let now = clock()
         if let lastDonatedAt = storage.object(forKey: key) as? Date,
-           now.timeIntervalSince(lastDonatedAt) < 24 * 3_600 {
+           now.timeIntervalSince(lastDonatedAt) < Self.cooldownSeconds {
             return false
         }
         do {

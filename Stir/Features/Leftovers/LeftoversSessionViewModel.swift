@@ -71,7 +71,6 @@ final class LeftoversSessionViewModel {
     init(
         recipePlan: RecipePlan,
         household: HouseholdProfile,
-        seededFrom outcome: OutcomeFeedback?,
         aiDispatch: AIDispatch,
         analytics: PostHogClient = .shared,
         entitlements: EntitlementService? = nil,
@@ -89,10 +88,13 @@ final class LeftoversSessionViewModel {
         // carried through. User can toggle off items they don't have
         // leftover, adjust portions, or type custom items.
         //
-        // `leftoverCount` from OutcomeFeedback is a serving count, not
-        // ingredient count — it's surfaced in the prompt sheet's
-        // header ("You said X servings") but doesn't shape the item
-        // list directly.
+        // OutcomeFeedback is NOT used to seed the list — the yield-hint
+        // field (`leftoverCount`) is a serving count, not an ingredient
+        // count, so it's surfaced in the prompt sheet's header but
+        // doesn't shape the items array. If future work needs an
+        // outcome-aware seed, re-add it as an explicit `outcomeHint:
+        // OutcomeFeedback?` parameter (S19 — dropped the previous
+        // `seededFrom outcome` param that was unused).
         let ings = (recipePlan.ingredients as? Set<RecipeIngredient>) ?? []
         let orderedIngs = ings.sorted { ($0.sortOrder) < ($1.sortOrder) }
         self.items = orderedIngs.compactMap { ing in
@@ -104,7 +106,6 @@ final class LeftoversSessionViewModel {
                 isSelected: false,      // user must opt in — keeps the default list honest
             )
         }
-        _ = outcome  // reserved for future "expected yield" hint; referenced to avoid unused-param warning
     }
 
     // MARK: - User actions

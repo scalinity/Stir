@@ -31,7 +31,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         XCTAssertEqual(vm.items.count, 3)
@@ -50,7 +49,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         XCTAssertEqual(vm.items.count, 1)
@@ -66,7 +64,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         let entry = vm.items[0]
@@ -84,7 +81,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         let entry = vm.items[0]
@@ -101,7 +97,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         vm.addCustomItem(name: "Kale", amount: "half a bunch")
@@ -120,7 +115,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         vm.addCustomItem(name: "   ", amount: "1 cup")
@@ -138,7 +132,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         vm.toggle(vm.items[0])
@@ -157,7 +150,6 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         let vm = LeftoversSessionViewModel(
             recipePlan: plan,
             household: household,
-            seededFrom: nil,
             aiDispatch: AIDispatch.stub,
         )
         XCTAssertEqual(vm.stage, .prompt)
