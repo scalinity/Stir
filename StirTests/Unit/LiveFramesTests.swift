@@ -23,7 +23,7 @@ final class LiveFramesTests: XCTestCase {
             base64: "AAECAw==",
             mimeType: "audio/pcm;rate=16000",
         )
-        let json = frame.asJSONObject()
+        let json = try XCTUnwrap(frame.asJSONObject())
         let ri = try XCTUnwrap(json["realtimeInput"] as? [String: Any])
         let audio = try XCTUnwrap(ri["audio"] as? [String: Any])
         XCTAssertEqual(audio["data"] as? String, "AAECAw==")
@@ -36,7 +36,7 @@ final class LiveFramesTests: XCTestCase {
         // CLAUDE.md §sharp-edge #11: clientContent is history-only on
         // 3.1 Flash Live. Injected text must go via realtimeInput.text.
         let frame = LiveOutboundFrame.realtimeInputText("step advanced")
-        let json = frame.asJSONObject()
+        let json = try XCTUnwrap(frame.asJSONObject())
         XCTAssertNil(json["clientContent"],
                      "in-session text MUST NOT use clientContent on 3.1 Flash Live")
         let ri = try XCTUnwrap(json["realtimeInput"] as? [String: Any])
@@ -54,7 +54,7 @@ final class LiveFramesTests: XCTestCase {
             name: "substitution_check",
             response: ["ok": true, "text": "use olive oil"],
         )
-        let json = frame.asJSONObject()
+        let json = try XCTUnwrap(frame.asJSONObject())
         XCTAssertNil(json["clientContent"],
                      "tool responses MUST NOT use clientContent")
         let tr = try XCTUnwrap(json["toolResponse"] as? [String: Any])

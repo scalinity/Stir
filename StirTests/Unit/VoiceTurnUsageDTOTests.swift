@@ -128,6 +128,7 @@ final class VoiceTurnUsageDTOTests: XCTestCase {
             responseTokensText: 10,
             responseTokensAudio: 140,
             responseTokensTotal: 160,
+            submittedAt: Date(timeIntervalSince1970: 1_700_000_000),
             latencyMs: 1800,
             latencyTtfaMs: 250,
             containedToolCall: false,

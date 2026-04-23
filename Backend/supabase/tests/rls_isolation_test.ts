@@ -153,8 +153,22 @@ Deno.test('RLS: processed_webhook_events denies all authenticated reads', async 
 Deno.test('RLS: service_role bypasses RLS (sanity check)', async () => {
   // Sanity: verify the service-role client in our test helpers actually
   // bypasses RLS. If this ever fails, our RLS tests are meaningless.
+  //
+  // P1-M (2026-04-23): assert that a SPECIFIC seeded flag is readable
+  // rather than the aggregate seed count. Prior assertion
+  // (`length === 8`) coupled this sanity test to the total flag count
+  // — any new seeded flag broke the test for reasons unrelated to RLS.
+  // The question we really want to answer is "does service_role
+  // actually bypass RLS" — checking that we can read a known-seeded
+  // row (`disable_cook_realtime`) proves that far more directly than
+  // counting.
   await quickBootstrap({ installation_id: testInstallId() });
   const admin = serviceClient();
-  const { data } = await admin.from('feature_flags').select('key');
-  assertEquals((data ?? []).length, 8);
+  const { data, error } = await admin
+    .from('feature_flags')
+    .select('key')
+    .eq('key', 'disable_cook_realtime')
+    .maybeSingle();
+  assertEquals(error, null);
+  assertEquals(data?.key, 'disable_cook_realtime');
 });
