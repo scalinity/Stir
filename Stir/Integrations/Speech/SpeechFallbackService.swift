@@ -151,6 +151,14 @@ final class SpeechFallbackService: VoiceSessionDriver {
     private var cachedVoice: AVSpeechSynthesisVoice?
     private static let preferredVoiceID = "com.apple.voice.enhanced.en-US.Samantha"
 
+    /// P0-D (2026-04-23): observes AVAudioSession interruption /
+    /// route-change / media-services-reset events. Fallback-path recovery
+    /// is strictly "cancel + surface the AI-VOICE-01 banner" — unlike
+    /// the Live path, we don't attempt any in-place refresh because
+    /// SFSpeechRecognizer recognitionTask state after an interruption
+    /// is undocumented and we'd rather degrade cleanly than half-work.
+    private var audioInterruptionObserver: AudioInterruptionObserver?
+
     // MARK: Init
 
     init(
@@ -198,7 +206,9 @@ final class SpeechFallbackService: VoiceSessionDriver {
     /// "tap Cook Mode still works" copy.
     func preWarm() async throws {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else {
-            Logger.voice.warning("speech_recognizer_unavailable_on_prewarm")
+            // P2-H (2026-04-23): voice_fallback_* log prefix convention
+            // so ops dashboards can filter fallback-path logs uniformly.
+            Logger.voice.warning("voice_fallback_recognizer_unavailable_on_prewarm")
             throw SpeechFallbackError.recognizerUnavailable
         }
         // On-device recognition matches CLAUDE.md privacy invariant:
@@ -207,7 +217,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
         // for `supportsOnDeviceRecognition` — we hard-fail rather
         // than silently upload.
         guard recognizer.supportsOnDeviceRecognition else {
-            Logger.voice.warning("speech_recognizer_no_on_device_support")
+            Logger.voice.warning("voice_fallback_no_on_device_support")
             throw SpeechFallbackError.recognizerUnavailable
         }
 
@@ -249,12 +259,48 @@ final class SpeechFallbackService: VoiceSessionDriver {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         cachedVoice = voice
         Logger.voice.info(
-            "speech_fallback_prewarm ok voice=\(voice?.identifier ?? "nil", privacy: .public) on_device=true",
+            "voice_fallback_prewarm_ok voice=\(voice?.identifier ?? "nil", privacy: .public) on_device=true",
         )
 
         // Transition to `ready` — mic isn't hot yet, but the service is
         // prepared to begin a turn on the first tap.
         stateMachine.advance(to: .ready)
+
+        // P0-D (2026-04-23): observe system audio events so phone calls
+        // / Siri / AirPods-yanks tear down cleanly instead of silently
+        // leaving the fallback service in a broken-mid-turn state. The
+        // observer handler flips us to `.error` + surfaces AI-VOICE-01.
+        audioInterruptionObserver?.stop()
+        audioInterruptionObserver = AudioInterruptionObserver { [weak self] event in
+            self?.handleAudioInterruption(event)
+        }
+        audioInterruptionObserver?.start()
+    }
+
+    /// React to system audio events. The fallback path's recovery is
+    /// always "cancel + advance to .error" — SFSpeechRecognizer state
+    /// after an interruption is not documented as safe to resume, and
+    /// the user's next tap will re-initialize the whole path cleanly.
+    private func handleAudioInterruption(_ event: AudioInterruptionObserver.Event) {
+        Logger.voice.info(
+            "voice_fallback_audio_interruption event=\(String(describing: event), privacy: .public)",
+        )
+        switch event {
+        case .interruptionBegan, .routeOldDeviceUnavailable, .mediaServicesReset:
+            // Cancel any in-flight recognition + speech. No-op if idle.
+            recognitionTask?.cancel()
+            recognitionTask = nil
+            recognitionRequest = nil
+            if synthesizer.isSpeaking {
+                synthesizer.stopSpeaking(at: .immediate)
+            }
+            if stateMachine.state != .closed && stateMachine.state != .error {
+                stateMachine.advance(to: .error)
+            }
+        case .interruptionEnded:
+            // Fallback: user's next tap re-initializes via preWarm.
+            break
+        }
     }
 
     // MARK: - Turn lifecycle
@@ -290,12 +336,12 @@ final class SpeechFallbackService: VoiceSessionDriver {
             switch currentState {
             case .userSpeaking, .transcribing, .thinking, .modelSpeaking:
                 Logger.voice.warning(
-                    "begin_turn_called_while_active state=\(self.currentState.rawValue, privacy: .public)",
+                    "voice_fallback_begin_turn_while_active state=\(self.currentState.rawValue, privacy: .public)",
                 )
                 throw SpeechFallbackError.busy(state: currentState)
             default:
                 Logger.voice.warning(
-                    "begin_turn_called_before_ready state=\(self.currentState.rawValue, privacy: .public)",
+                    "voice_fallback_begin_turn_before_ready state=\(self.currentState.rawValue, privacy: .public)",
                 )
                 throw SpeechFallbackError.recognizerUnavailable
             }
@@ -354,7 +400,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
                 }
                 if let error {
                     Logger.voice.warning(
-                        "stt_error: \(error.localizedDescription, privacy: .public)",
+                        "voice_fallback_stt_error: \(error.localizedDescription, privacy: .public)",
                     )
                 }
             }
@@ -421,7 +467,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
         } catch {
             userRowPersisted = false
             Logger.voice.error(
-                "speech_fallback_user_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+                "voice_fallback_user_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
             )
         }
 
@@ -460,7 +506,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
                     ))
                 } catch {
                     Logger.voice.error(
-                        "speech_fallback_error_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+                        "voice_fallback_error_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
                     )
                 }
             }
@@ -491,7 +537,7 @@ final class SpeechFallbackService: VoiceSessionDriver {
                 ))
             } catch {
                 Logger.voice.error(
-                    "speech_fallback_model_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+                    "voice_fallback_model_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
                 )
             }
         }
@@ -535,18 +581,51 @@ final class SpeechFallbackService: VoiceSessionDriver {
         utterance.pitchMultiplier = 1.0
         utterance.postUtteranceDelay = 0.05
 
+        // P0-H (2026-04-23): single-resume latch + bounded timeout.
+        // AVSpeechSynthesizer can silently no-op if the voice install is
+        // corrupt or the audio session is in a weird interruption state
+        // — didFinish never fires and the prior continuation hung
+        // forever, pinning the session in `.modelSpeaking`. 10s covers
+        // the p95 tail for ~25-30 token responses (~8s at default rate
+        // + postUtteranceDelay); anything longer than that means the
+        // synthesizer is broken and we should recover rather than wait.
+        //
+        // Re-entrancy: if a prior `speak()` call stranded a continuation
+        // because its delegate was overwritten, this run's
+        // `self.synthesisDelegate = delegate` would lose the reference.
+        // The new delegate's closure guards single-resume via the
+        // `hasResumed` box so even if both fire, the continuation
+        // resumes exactly once. Preserving the prior delegate's
+        // resume semantics via explicit drain before overwrite.
+        final class ResumeLatch: @unchecked Sendable {
+            private var resumed = false
+            private let lock = NSLock()
+            func tryResume() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if resumed { return false }
+                resumed = true
+                return true
+            }
+        }
+        let latch = ResumeLatch()
+
+        // `speak()` is called serially from `endTurn`'s await chain,
+        // so `self.synthesisDelegate` is nil on entry under normal
+        // flow. The latch + timeout below are the backstops against
+        // synthesizer misbehavior (no-ops, silent failures) rather
+        // than against re-entrancy, which the call-site ordering
+        // already prevents.
+
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             // Retain the delegate as a stored prop so it outlives the
             // closure scope — AVSpeechSynthesizer weakly references
             // its delegate, and the delegate needs to survive until
-            // didFinish fires. Last-one-wins is fine since only one
-            // speak() runs at a time per service.
+            // didFinish fires.
             let delegate = SynthesisDelegate { [weak self] in
+                guard latch.tryResume() else { return }
                 Task { @MainActor [weak self] in
                     self?.synthesisDelegate = nil
                     cont.resume()
-                    // If we were modelSpeaking, fall back to ready.
-                    // Anything else (error, closed) stays put.
                     if self?.stateMachine.state == .modelSpeaking {
                         self?.stateMachine.advance(to: .ready)
                     }
@@ -555,6 +634,20 @@ final class SpeechFallbackService: VoiceSessionDriver {
             self.synthesisDelegate = delegate
             self.synthesizer.delegate = delegate
             self.synthesizer.speak(utterance)
+
+            // Timeout guard. 10s ceiling; resumes the continuation once
+            // via the shared latch so both paths (delegate-fires-first
+            // vs timeout-fires-first) are race-safe.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                guard latch.tryResume() else { return }
+                Logger.ui.warning("voice_fallback_synthesizer_timeout — didFinish never fired after 10s")
+                self?.synthesisDelegate = nil
+                cont.resume()
+                if self?.stateMachine.state == .modelSpeaking {
+                    self?.stateMachine.advance(to: .ready)
+                }
+            }
         }
     }
 
@@ -610,6 +703,10 @@ final class SpeechFallbackService: VoiceSessionDriver {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
+        // P0-D (2026-04-23): stop AVAudioSession observers so no late
+        // notification fires callbacks into a torn-down service.
+        audioInterruptionObserver?.stop()
+        audioInterruptionObserver = nil
 
         // Transition the state machine. The mirror closure set in init
         // writes `self.currentState = .closed` synchronously. Belt-and-

@@ -157,7 +157,15 @@ struct CookModeRoot: View {
                 // prior driver was nilled out (observed 2026-04-22).
                 vm.onRequestNewVoiceSession = { [weak vm] in
                     guard let vm else { return }
-                    let newDriver = await self.buildVoiceDriver(session: session)
+                    // P1-K (2026-04-23): if a post-commit refresh failure
+                    // earlier in this Cook Mode entry pinned fallback,
+                    // skip Live and go straight to C.3. See
+                    // `CookModeViewModel.pinFallbackForCookSession`.
+                    let forceFallback = vm.pinFallbackForCookSession
+                    let newDriver = await self.buildVoiceDriver(
+                        session: session,
+                        forceFallback: forceFallback,
+                    )
                     vm.attachVoiceDriver(newDriver)
                     self.wireVoiceDriver(newDriver, vm: vm)
                 }
@@ -265,9 +273,24 @@ struct CookModeRoot: View {
     /// Self is a SwiftUI View struct; writes to `@State self.voiceDriver`
     /// flow through the property wrapper normally.
     @MainActor
-    private func buildVoiceDriver(session: CookingSession) async -> (any VoiceSessionDriver)? {
+    private func buildVoiceDriver(
+        session: CookingSession,
+        forceFallback: Bool = false,
+    ) async -> (any VoiceSessionDriver)? {
         let killSwitch = entitlements.flagBool(forKey: "disable_cook_realtime") ?? false
         let canVoice = entitlements.canAccess(.voiceCookMode) == .allowed
+
+        // P1-K (2026-04-23): caller pinned fallback (post-commit refresh
+        // failure handoff). Skip Live preWarm entirely and route to C.3.
+        // Saves ~2 s of handshake latency the user would otherwise
+        // perceive on every subsequent tap before landing in C.3 anyway.
+        if forceFallback {
+            Logger.voice.info("cook_mode_voice_force_fallback → c3")
+            #if DEBUG
+            VoiceSessionLog.log("cookmode.driver_selected", ["path": "c3", "reason": "force_fallback"])
+            #endif
+            return await tryC3Fallback(session: session)
+        }
 
         if canVoice && !killSwitch {
             do {
@@ -391,6 +414,14 @@ struct CookModeRoot: View {
                     sessionID: sessionID,
                     success: success,
                 )
+            }
+            // P1-K (2026-04-23): pin C.3 fallback for the rest of this
+            // Cook Mode entry when a post-commit refresh failure lands.
+            // Fresh Live preWarm after the same class of failure tends
+            // to repeat; pinning saves ~2 s of handshake ping-pong the
+            // user would perceive on every subsequent tap.
+            liveDriver.onVoiceFallbackRequired = { [weak vm] reason in
+                vm?.setPinFallbackForCookSession(reason: reason)
             }
             liveDriver.onSubstitutionRequestedFromVoice = { [weak vm] subEventID in
                 vm?.recordVoiceSubstitutionRequested(subEventID: subEventID)

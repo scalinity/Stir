@@ -202,6 +202,26 @@ final class CookModeViewModel {
     /// `voiceDriver` directly — driver rebuild isn't exercised there.
     var onRequestNewVoiceSession: (@MainActor () async -> Void)? = nil
 
+    /// P1-K (2026-04-23): set to true when `RealtimeSession.onVoiceFallbackRequired`
+    /// fires — i.e., a post-commit refresh failure rendered the current
+    /// Live session unrecoverable AND a fresh Live preWarm is likely to
+    /// fail the same way. `CookModeRoot.onRequestNewVoiceSession` reads
+    /// this on every rebuild and, if true, skips Live entirely and goes
+    /// straight to C.3 for the remainder of this Cook Mode entry.
+    /// Resets to `false` on Cook Mode exit (new VM instance on re-entry).
+    private(set) var pinFallbackForCookSession: Bool = false
+
+    /// Called by driver callbacks when Live becomes unrecoverable. Public
+    /// so `CookModeRoot.wireVoiceDriver` can set it as the Live driver's
+    /// `onVoiceFallbackRequired` handler.
+    func setPinFallbackForCookSession(reason: String) {
+        guard !pinFallbackForCookSession else { return }
+        pinFallbackForCookSession = true
+        Logger.voice.info(
+            "voice_pin_fallback_for_cook_session reason=\(reason, privacy: .public) — further rebuilds route to C.3",
+        )
+    }
+
     /// Single-flight sentinel for the driver-rebuild path. When the user
     /// taps "Ask with voice" after a `closeVoiceSession()` teardown, the
     /// VM asks the root for a fresh driver via `onRequestNewVoiceSession`.
@@ -571,6 +591,19 @@ final class CookModeViewModel {
         let totalSeconds: Int         // original duration; 0 if no timer exists
         let label: String?
         let stepNumber: Int?          // 1-indexed
+        /// P0-C (2026-04-23): restart-path bookkeeping. nil for non-restart
+        /// flows (start / pause / resume / cancel / status). On the restart
+        /// path, `true` means "the cancel-before-start loop completed AND
+        /// the new timer is live"; `false` means the pre-restart timer
+        /// cancel partially failed and the returned snapshot reflects a
+        /// stale still-running timer, NOT the intended restart.
+        ///
+        /// Prior bug: `restart_timer` dispatch checked only `state ==
+        /// .running || .pending` → returned ok=true when the old timer
+        /// was still ticking; model narrated "I restarted the timer"
+        /// while the original alarm kept its original fire date. Device-
+        /// reproduced 2026-04-23.
+        var restartSucceeded: Bool? = nil
     }
 
     /// Snapshot of the current step's most relevant timer for voice
@@ -746,12 +779,28 @@ final class CookModeViewModel {
                 "step_number": Int(step.stepNumber),
                 "attempted_cancels": existingAll.count,
             ])
+            // Return the stale snapshot but explicitly flag the restart
+            // as failed so `dispatchTool`'s restart_timer case maps to
+            // ok=false / error=cancel_failed rather than narrating a
+            // bogus "restarted" to the user. The original timer is
+            // still the live one and its original fire date stands.
+            var snap = currentStepTimerSnapshot()
+            snap.restartSucceeded = false
+            return snap
         }
         // Prefer the explicit label; fall back to the prior timer's
         // label so "restart" keeps the same display string.
         let resolvedLabel: String? = label?.isEmpty == false ? label : fallbackSource?.label
         await startTimerFromVoice(seconds: secs, label: resolvedLabel)
-        return currentStepTimerSnapshot()
+        var snap = currentStepTimerSnapshot()
+        // Happy-path sentinel: caller knows the restart pipeline
+        // completed cleanly (cancel loop drained + new timer started).
+        // Dispatch still double-checks `state == .running || .pending`
+        // because `startTimerFromVoice` has its own failure modes
+        // (out-of-range seconds, Core Data write failure) that'd leave
+        // state at .none even on a clean cancel.
+        snap.restartSucceeded = true
+        return snap
     }
 
     /// Call on foreground or Cook Mode re-entry. Natural-completion
@@ -1083,7 +1132,7 @@ final class CookModeViewModel {
             // at Cook Mode entry, not mic tap). Route StirError via
             // the presenter so copy is consistent with the rest of
             // the app.
-            let presented = presentStirError(error, screen: "cook_mode_voice_begin")
+            let presented = await presentStirError(error, screen: "cook_mode_voice_begin")
             if !presented {
                 Logger.ui.error("voice begin failed: \(error.localizedDescription, privacy: .public)")
                 showVoiceError(
@@ -1225,7 +1274,12 @@ final class CookModeViewModel {
         // 0012's split TTFA thresholds. Tap-to-end paths on the fallback
         // path keep their endVoiceTurn emission; the Live path's
         // endVoiceTurn skips emission to avoid double-firing.
-        let submittedAt = Date(timeIntervalSince1970: summary.endedAt.timeIntervalSince1970 - Double(summary.latencyMs) / 1000.0)
+        // P2-A (2026-04-23): read carried `submittedAt` from the
+        // LiveTurnSummary rather than reconstructing via `endedAt -
+        // latencyMs` subtraction. Prior reconstruction path was
+        // susceptible to NTP drift mid-session producing negative
+        // latency_total_ms values that polluted PostHog p95 dashboards.
+        let submittedAt = summary.submittedAt
         let pathLabel = voiceDriver?.pathLabel.rawValue ?? "live_api"
         analytics.capture(.cookTurnSubmitted, properties: [
             "turn_type": "voice",
@@ -1594,7 +1648,7 @@ final class CookModeViewModel {
             emitResolved("error", 0, ErrorCode.ai02)
         } catch {
             voiceState = voiceDriver.currentState
-            let presented = presentStirError(error, screen: "cook_mode_voice_end")
+            let presented = await presentStirError(error, screen: "cook_mode_voice_end")
             // Surface a best-effort error code for the resolved event —
             // StirError's presentableCode if typed, NET-01 otherwise.
             let errorCode: ErrorCode = (error as? StirError)?.presentableCode ?? .net01
@@ -1648,7 +1702,7 @@ final class CookModeViewModel {
     /// rest of the app instead of getting swallowed by a generic catch.
     /// Returns true if the error was handled; false if the caller
     /// should fall through to a generic toast.
-    private func presentStirError(_ error: any Error, screen: String) -> Bool {
+    private func presentStirError(_ error: any Error, screen: String) async -> Bool {
         guard let stirError = error as? StirError else { return false }
         // Breadcrumb every typed error for Sentry — voice failures are
         // otherwise hard to triage from user reports alone.
@@ -1668,12 +1722,21 @@ final class CookModeViewModel {
         case .rateLimited:
             // User hit voice_cook_session monthly cap — Pro-upsell path.
             emitVoiceAffordance(tier: entitlements?.tier ?? .free, result: "paywall_shown")
+            // P0-J (2026-04-23): close the live voice session BEFORE
+            // presenting the paywall. Mid-cook paywall triggers land
+            // while the WebSocket + mic + audio engine are live; if we
+            // just flip the paywall state, the audio keeps billing to
+            // Gemini behind the sheet (observed review finding CA2-H1).
+            // closeVoiceSession is idempotent and no-ops when no driver.
+            await closeVoiceSession()
             presentPaywall?(.voiceCookQuotaExhausted)
             return true
         case .entitlementRequired(let code, _) where code == .entVoice01:
             // Entitlement slipped mid-session (RC webhook lag, grace
             // period expired during a running cook). Route to upgrade
-            // paywall rather than a generic toast.
+            // paywall rather than a generic toast. Close the live
+            // session first (see P0-J comment above).
+            await closeVoiceSession()
             presentPaywall?(.voiceAffordanceTapped)
             return true
         case .server(let code, _, _) where code == .aiVoice01:
@@ -1766,29 +1829,12 @@ final class CookModeViewModel {
     }
 
     private func buildRealtimeHouseholdContext() -> RealtimeHouseholdContext {
-        let dietaryRules = (household.dietaryRules as? Set<DietaryRule>)?.map {
-            DinnerSolveRequest.DietaryRuleLite(
-                kind: $0.kind ?? "",
-                value: $0.value ?? "",
-                severity: $0.severity ?? "soft",
-            )
-        } ?? []
-        let equipment = (household.kitchenEquipment as? Set<KitchenEquipment>)?
-            .filter { $0.isAvailable }
-            .compactMap { $0.code } ?? []
-        let pantry = (household.pantryItems as? Set<PantryItem>)?
-            .filter { $0.deletedAt == nil && $0.userConfirmed }
-            .map {
-                RealtimeHouseholdContext.PantrySnapshotItem(
-                    displayName: $0.displayName ?? "",
-                    canonicalSlug: $0.canonicalIngredientSlug,
-                )
-            } ?? []
-        return RealtimeHouseholdContext(
-            dietaryRules: dietaryRules,
-            availableEquipment: equipment,
-            pantrySnapshot: pantry,
-        )
+        // P2-I (2026-04-23): routed through `HouseholdProfile.voiceContextSnapshot()`
+        // shared seam. Filter rules are the canonical
+        // `deletedAt == nil && userConfirmed && !displayName.isEmpty`
+        // set regardless of caller; prior inline projections had drift
+        // (substitution accepted unconfirmed items).
+        return RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot())
     }
 
     private func emitVoiceAffordance(tier: Tier, result: String) {

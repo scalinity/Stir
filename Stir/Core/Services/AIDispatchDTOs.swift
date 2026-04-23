@@ -345,6 +345,39 @@ struct SubstitutionRequest: Encodable, Sendable {
         let availableEquipment: [String]
         let pantrySnapshot: [PantrySnapshotItem]
 
+        /// P2-I (2026-04-23): construct from shared
+        /// `VoiceContextSnapshot` projection so this endpoint sees
+        /// exactly the same pantry filter as the Realtime mint.
+        /// Prior inline builder accepted unconfirmed items — a latent
+        /// correctness gap that could reach the hard-rule validator.
+        init(snapshot: VoiceContextSnapshot) {
+            self.dietaryRules = snapshot.dietaryRules.map {
+                DinnerSolveRequest.DietaryRuleLite(
+                    kind: $0.kind,
+                    value: $0.value,
+                    severity: $0.severity,
+                )
+            }
+            self.availableEquipment = snapshot.availableEquipment
+            self.pantrySnapshot = snapshot.pantry.map {
+                PantrySnapshotItem(
+                    displayName: $0.displayName,
+                    canonicalSlug: $0.canonicalSlug,
+                )
+            }
+        }
+
+        /// Legacy memberwise init retained for tests.
+        init(
+            dietaryRules: [DinnerSolveRequest.DietaryRuleLite],
+            availableEquipment: [String],
+            pantrySnapshot: [PantrySnapshotItem],
+        ) {
+            self.dietaryRules = dietaryRules
+            self.availableEquipment = availableEquipment
+            self.pantrySnapshot = pantrySnapshot
+        }
+
         enum CodingKeys: String, CodingKey {
             case dietaryRules = "dietary_rules"
             case availableEquipment = "available_equipment"
@@ -551,6 +584,39 @@ struct RealtimeHouseholdContext: Encodable, Sendable {
     let dietaryRules: [DinnerSolveRequest.DietaryRuleLite]
     let availableEquipment: [String]
     let pantrySnapshot: [PantrySnapshotItem]
+
+    /// P2-I (2026-04-23): construct from the shared
+    /// `VoiceContextSnapshot` projection so Realtime mint + VM use
+    /// identical filters.
+    init(snapshot: VoiceContextSnapshot) {
+        self.dietaryRules = snapshot.dietaryRules.map {
+            DinnerSolveRequest.DietaryRuleLite(
+                kind: $0.kind,
+                value: $0.value,
+                severity: $0.severity,
+            )
+        }
+        self.availableEquipment = snapshot.availableEquipment
+        self.pantrySnapshot = snapshot.pantry.map {
+            PantrySnapshotItem(
+                displayName: $0.displayName,
+                canonicalSlug: $0.canonicalSlug,
+            )
+        }
+    }
+
+    /// Legacy field-wise initializer retained for tests that stub a
+    /// context without a real Core Data HouseholdProfile. Production
+    /// code paths should prefer `init(snapshot:)`.
+    init(
+        dietaryRules: [DinnerSolveRequest.DietaryRuleLite],
+        availableEquipment: [String],
+        pantrySnapshot: [PantrySnapshotItem],
+    ) {
+        self.dietaryRules = dietaryRules
+        self.availableEquipment = availableEquipment
+        self.pantrySnapshot = pantrySnapshot
+    }
 
     enum CodingKeys: String, CodingKey {
         case dietaryRules = "dietary_rules"

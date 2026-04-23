@@ -80,11 +80,29 @@ final class LiveAudioPipeline {
     /// `@MainActor`.
     private let pendingPlaybackBuffers = OSAllocatedUnfairLock(initialState: 0)
 
+    /// P3-B (2026-04-23): upper bound on queued playback buffers. Prior
+    /// code had no admission gate; a misbehaving upstream (Gemini Live
+    /// preview-API flood) could queue dozens of chunks into
+    /// `playerNode.scheduleBuffer` with no back-pressure, consuming
+    /// memory proportional to streamed duration. `max_output_tokens=400`
+    /// caps the happy-path queue around ~50 chunks (~16 s of audio at
+    /// ~320 ms/chunk). The 30-buffer cap gives ~50 % headroom over that
+    /// ceiling while preventing runaway growth. When the cap trips we
+    /// drop the incoming chunk and log `live_playback_queue_overflow`
+    /// so ops can see the pattern.
+    private static let playbackQueueHardCap: Int = 30
+
     /// Is the output device currently rendering model audio? True iff
     /// at least one scheduled buffer hasn't hit its `.dataPlayedBack`
     /// completion yet. Accurate proxy for "speaker is emitting sound".
     var isPlayingBack: Bool {
         pendingPlaybackBuffers.withLock { $0 > 0 }
+    }
+
+    /// Current queue depth. Public for telemetry; callers must not
+    /// base gating decisions on it (use `isPlayingBack` for that).
+    var pendingPlaybackBufferCount: Int {
+        pendingPlaybackBuffers.withLock { $0 }
     }
 
     /// Format native to the mic hardware — varies by device. Converted
@@ -389,12 +407,34 @@ final class LiveAudioPipeline {
         if !playerNode.isPlaying {
             playerNode.play()
         }
-        // Increment BEFORE scheduling so the gate correctly reflects
-        // "at least one buffer is outstanding" even if the completion
-        // handler fires almost immediately. Decrement in the
+        // P3-B (2026-04-23): admission gate. If the queue is already
+        // at the hard cap, drop this chunk rather than scheduling it.
+        // Playback queue depth reflects Gemini's send rate vs our local
+        // drain rate; persistent overflow means either Gemini is
+        // misbehaving (preview-API protocol bug) or the session is
+        // stuck and queuing speech the user will never hear. Either
+        // way, growing memory indefinitely is worse than dropping the
+        // chunk.
+        let depthAfterIncrement = pendingPlaybackBuffers.withLock { count -> Int in
+            if count >= Self.playbackQueueHardCap {
+                return count
+            }
+            count += 1
+            return count
+        }
+        if depthAfterIncrement >= Self.playbackQueueHardCap {
+            // Count didn't increment — we're capped. Drop silently at
+            // the pipeline layer; the model's audio continuity will
+            // glitch, which is the correct tradeoff vs unbounded RAM
+            // growth during a stuck session.
+            Logger.voice.warning(
+                "live_playback_queue_overflow depth=\(depthAfterIncrement, privacy: .public) cap=\(Self.playbackQueueHardCap, privacy: .public) — dropping chunk",
+            )
+            return
+        }
+        // Increment already happened above. Decrement in the
         // `.dataPlayedBack` completion (fires after the output device
         // has rendered the audio).
-        pendingPlaybackBuffers.withLock { $0 += 1 }
         playerNode.scheduleBuffer(
             pcmBuffer,
             at: nil,
@@ -427,7 +467,17 @@ final class LiveAudioPipeline {
     func tearDown() {
         stopCapture()
         cancelPlayback()
-        audioEngine.stop()
+        // P1-G (2026-04-23): guard audioEngine.stop() against the "already
+        // stopped by OS interruption" race. If AVAudioSession's
+        // interruptionNotification .began fires concurrently with Cook
+        // Mode exit, AVAudioEngine can already be stopped by the time
+        // we call stop() — on some iOS versions that raises an
+        // NSException ("Engine is not running") rather than a Swift
+        // error. Checking isRunning first avoids the exception path
+        // entirely. No behavior change on the happy path.
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
         micContinuation?.finish()
     }
 
@@ -504,8 +554,27 @@ final class LiveAudioPipeline {
         }
 
         let byteCount = Int(outBuffer.frameLength) * 2
-        let outData = Data(bytes: int16Ptr, count: byteCount)
-        let base64 = outData.base64EncodedString()
+        // P3-A (2026-04-23): `Data(bytesNoCopy:count:deallocator:.none)`
+        // wraps the AVAudioPCMBuffer's backing storage without a copy.
+        // The Int16 buffer is live for the duration of this
+        // `convertAndYield` call (the outBuffer strong-reference keeps
+        // it alive through `.base64EncodedString`), so a no-copy view
+        // is safe. Prior code did `Data(bytes:count:)` which allocated
+        // + copied the full ~1 KiB-per-frame payload on the audio
+        // render thread at 50 Hz — avoidable allocator pressure on
+        // iPhone SE-class devices where tap glitches correlate with
+        // audio-thread allocations.
+        let base64: String = int16Ptr.withMemoryRebound(
+            to: UInt8.self,
+            capacity: byteCount,
+        ) { bytePtr in
+            let view = Data(
+                bytesNoCopy: UnsafeMutableRawPointer(mutating: bytePtr),
+                count: byteCount,
+                deallocator: .none,
+            )
+            return view.base64EncodedString()
+        }
         continuation?.yield(
             MicFrame(base64: base64, mimeType: "audio/pcm;rate=16000"),
         )

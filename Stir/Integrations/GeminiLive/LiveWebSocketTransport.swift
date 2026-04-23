@@ -87,6 +87,31 @@ final class LiveWebSocketTransport {
     private var wsTask: URLSessionWebSocketTask?
     private var isClosed = false
     private var receiveLoopTask: Task<Void, Never>?
+    /// P0-E (2026-04-23): periodic WebSocket ping task. Detects cellular
+    /// TCP-head-of-line stalls that leave `receive()` blocked for
+    /// minutes with no error (CLAUDE.md §sharp-edge #2). Without this,
+    /// a frozen session only surfaces when `awaitTurnComplete` hits its
+    /// 30s budget — from the transport's perspective the connection
+    /// looks healthy the entire time.
+    private var pingTask: Task<Void, Never>?
+    /// Consecutive ping failures. Reset on every successful pong. After
+    /// `pingFailuresBeforeDrop` in a row, we synthesize a
+    /// `connectionDropped` error into the inbound stream so
+    /// `handleTransportError` recovery fires with the right shape.
+    private var consecutivePingFailures: Int = 0
+    /// Ping cadence. 15s balances "catches a stall within ~30s worst
+    /// case" against "doesn't swamp a healthy session with wake-ups."
+    private static let pingIntervalSec: Double = 15
+    /// Per-ping timeout — if the pong handler hasn't fired in this
+    /// window, the ping is counted as failed. 10s is generous enough
+    /// that normal network latency doesn't false-trigger while tight
+    /// enough to keep the two-miss drop window at ~30s total.
+    private static let pingTimeoutSec: Double = 10
+    /// How many consecutive ping failures to tolerate before declaring
+    /// the connection dropped. Two rules out single transient miss;
+    /// three would stretch detection to ~45s which is past
+    /// `awaitTurnComplete`'s budget.
+    private static let pingFailuresBeforeDrop: Int = 2
 
     /// Serializes outbound sends across `await` suspensions. The
     /// `@MainActor` isolation alone doesn't help — each `await
@@ -124,7 +149,10 @@ final class LiveWebSocketTransport {
     init() {
         self.urlSession = URLSession(configuration: .default)
         self.ownsSession = true
-        let (stream, continuation) = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: LiveInboundFrame.self,
+            bufferingPolicy: .bufferingNewest(Self.inboundBufferMax),
+        )
         self.inbound = stream
         self.inboundContinuation = continuation
     }
@@ -135,10 +163,24 @@ final class LiveWebSocketTransport {
     init(sharedSession: URLSession) {
         self.urlSession = sharedSession
         self.ownsSession = false
-        let (stream, continuation) = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: LiveInboundFrame.self,
+            bufferingPolicy: .bufferingNewest(Self.inboundBufferMax),
+        )
         self.inbound = stream
         self.inboundContinuation = continuation
     }
+
+    /// P3-I (2026-04-23): inbound frame stream buffer cap. Prior code
+    /// used the default `.unbounded` policy; under MainActor stalls
+    /// (long Core Data save, SwiftUI reconciliation spike) frames can
+    /// queue without limit while Gemini fires ~50 Hz audio. A 500 ms
+    /// MainActor stall queues ~75 frames; a longer stall is
+    /// unrecoverable regardless, so dropping oldest newest-first
+    /// (`.bufferingNewest`) is strictly safer than OOM. By the time we
+    /// hit this cap the session is already broken — the drop just
+    /// prevents memory growth while we unwind.
+    private static let inboundBufferMax: Int = 200
 
     // MARK: - Lifecycle
 
@@ -186,6 +228,7 @@ final class LiveWebSocketTransport {
         self.wsTask = task
         task.resume()
         startReceiveLoop()
+        startPingTask()
     }
 
     func close() {
@@ -195,6 +238,10 @@ final class LiveWebSocketTransport {
         wsTask = nil
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
+        // P0-E (2026-04-23): stop the ping watchdog.
+        pingTask?.cancel()
+        pingTask = nil
+        consecutivePingFailures = 0
         inboundContinuation?.finish()
         // Only invalidate sessions we own. Caller-injected sessions
         // are the caller's problem to release — invalidating here
@@ -213,27 +260,63 @@ final class LiveWebSocketTransport {
         guard let task = wsTask, !isClosed else {
             throw TransportError.sendAfterClose
         }
-        let obj = frame.asJSONObject()
-        // Pre-validate so a future heterogeneous `sessionUpdate` or
-        // `toolResponse` payload carrying a non-JSON-encodable value
-        // (e.g., Date, URL, NSNull subclass) surfaces as a typed
-        // `malformedInbound` error rather than a fatalError inside
-        // JSONSerialization on older runtimes.
-        guard JSONSerialization.isValidJSONObject(obj) else {
-            throw TransportError.malformedInbound(message: "outbound frame not JSON-encodable")
+
+        // P3-D (2026-04-23): if the frame is already a serialized JSON
+        // string (`setupRawJSON`), skip the JSONSerialization encode/
+        // decode round-trip entirely. Backend pre-serializes the setup
+        // frame; iOS was paying ~4-8 KiB × 3 passes (parse → wrap →
+        // re-serialize → stringify) every preWarm + every refresh for
+        // a constant. Now: one string send.
+        let str: String
+        if let raw = frame.asJSONString() {
+            str = raw
+        } else {
+            guard let obj = frame.asJSONObject() else {
+                // Defensive — only reachable if a new LiveOutboundFrame
+                // variant is added without updating either helper.
+                throw TransportError.malformedInbound(message: "outbound frame has no JSON representation")
+            }
+            // P3-E (2026-04-23): `isValidJSONObject` pre-flight is
+            // skipped for statically-shaped frame variants
+            // (realtimeInputAudio / realtimeInputText) — those
+            // construct `[String: String]` dictionaries whose types
+            // are Bridged-Foundation strings and cannot fail the
+            // validity check. Audio fires at 50 Hz during a turn and
+            // `isValidJSONObject` is an O(n) full-graph walk — paying
+            // it per-frame for a guaranteed-valid shape is pure cost.
+            // Untyped `toolResponse` / `sessionUpdate` payloads still
+            // get the pre-flight because they carry caller-provided
+            // `[String: Any]` where a Date/URL/NSNull could sneak in.
+            let needsValidityCheck: Bool = {
+                switch frame {
+                case .realtimeInputAudio, .realtimeInputText, .setup:
+                    return false
+                case .setupRawJSON:
+                    return false  // already handled above; defensive
+                case .toolResponse, .sessionUpdate:
+                    return true
+                }
+            }()
+            if needsValidityCheck {
+                guard JSONSerialization.isValidJSONObject(obj) else {
+                    throw TransportError.malformedInbound(message: "outbound frame not JSON-encodable")
+                }
+            }
+            let data: Data
+            do {
+                data = try JSONSerialization.data(withJSONObject: obj, options: [])
+            } catch {
+                throw TransportError.malformedInbound(message: "encode failed")
+            }
+            // Gemini Live accepts text frames (stringified JSON) for the
+            // control channel. Audio is still base64 inside that JSON — we
+            // never send binary frames.
+            guard let s = String(data: data, encoding: .utf8) else {
+                throw TransportError.malformedInbound(message: "utf8 conversion failed")
+            }
+            str = s
         }
-        let data: Data
-        do {
-            data = try JSONSerialization.data(withJSONObject: obj, options: [])
-        } catch {
-            throw TransportError.malformedInbound(message: "encode failed")
-        }
-        // Gemini Live accepts text frames (stringified JSON) for the
-        // control channel. Audio is still base64 inside that JSON — we
-        // never send binary frames.
-        guard let str = String(data: data, encoding: .utf8) else {
-            throw TransportError.malformedInbound(message: "utf8 conversion failed")
-        }
+
         // Serialize across concurrent callers. Without the semaphore,
         // an `await task.send(...)` that suspends during a cellular
         // stall lets the next send-callsite race into
@@ -257,13 +340,13 @@ final class LiveWebSocketTransport {
     /// that may contain the Gemini ephemeral token. Used before logging
     /// or surfacing error descriptions that URLSession constructed from
     /// the request URL.
+    ///
+    /// P3-J (2026-04-23): regex is pre-compiled once per process so
+    /// error paths that call this repeatedly (every receiveLoop catch,
+    /// every VoiceSessionLog.logError that carries a URL) don't pay
+    /// the compile cost per call.
     static func scrubAccessToken(_ s: String) -> String {
-        // Matches `access_token=` followed by any non-whitespace, non-&
-        // characters. Replace with a redaction marker.
-        guard let regex = try? NSRegularExpression(
-            pattern: #"access_token=[^&\s"]+"#,
-            options: [],
-        ) else { return s }
+        guard let regex = accessTokenRedactionRegex else { return s }
         let range = NSRange(s.startIndex..., in: s)
         return regex.stringByReplacingMatches(
             in: s,
@@ -271,6 +354,111 @@ final class LiveWebSocketTransport {
             range: range,
             withTemplate: "access_token=REDACTED",
         )
+    }
+
+    /// Pre-compiled regex for `scrubAccessToken`. nil only if Foundation
+    /// somehow refuses the pattern (doesn't happen — it's a literal);
+    /// scrub degrades to identity in that case, preserving the
+    /// no-crash contract even on a theoretical compile failure.
+    private static let accessTokenRedactionRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"access_token=[^&\s"]+"#,
+            options: [],
+        )
+    }()
+
+    // MARK: - Keepalive
+
+    /// Start a periodic `sendPing(pongReceiveHandler:)` loop. Each ping
+    /// is wrapped in a per-call timeout — if the pong handler doesn't
+    /// fire within `pingTimeoutSec`, we count the ping as failed. After
+    /// `pingFailuresBeforeDrop` consecutive failures we synthesize a
+    /// `connectionDropped` into the inbound stream so
+    /// `handleTransportError` fires with the right shape.
+    ///
+    /// P0-E (2026-04-23): this is the primary defense against cellular
+    /// TCP head-of-line stalls documented in CLAUDE.md §sharp-edge #2.
+    /// Without it, a frozen session only surfaces at the
+    /// `awaitTurnComplete` 30s budget — by which point the user has
+    /// already perceived "stuck on Thinking."
+    private func startPingTask() {
+        pingTask?.cancel()
+        pingTask = Task { [weak self] in
+            // Sleep first so the ping cadence doesn't race the setup
+            // handshake. Setup completes in ~200-400ms normally; giving
+            // it the first 15s free is cheap insurance.
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(Self.pingIntervalSec))
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                let stillAlive = await self.sendPingWithTimeout()
+                if !stillAlive { return }
+            }
+        }
+    }
+
+    /// Send one ping with a bounded timeout. Returns `true` if the ping
+    /// loop should continue, `false` if we've synthesized a drop and
+    /// there's no point pinging again.
+    private func sendPingWithTimeout() async -> Bool {
+        guard let task = wsTask, !isClosed else { return false }
+
+        // Single-resume latch so a late pong + timeout don't both
+        // resume the same continuation. NSLock-backed for cross-thread
+        // safety — the pong handler fires on URLSession's delegate
+        // queue, the timeout fires on a @MainActor Task.
+        final class ResumeLatch: @unchecked Sendable {
+            private let lock = NSLock()
+            private var resumed = false
+            func tryResume() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if resumed { return false }
+                resumed = true
+                return true
+            }
+        }
+        let latch = ResumeLatch()
+
+        let succeeded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            // Timeout guard
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.pingTimeoutSec))
+                guard latch.tryResume() else { return }
+                _ = self // keep self alive for the duration of the sleep
+                cont.resume(returning: false)
+            }
+            task.sendPing { error in
+                guard latch.tryResume() else { return }
+                cont.resume(returning: error == nil)
+            }
+        }
+
+        if succeeded {
+            consecutivePingFailures = 0
+            return true
+        }
+
+        consecutivePingFailures += 1
+        Logger.voice.warning(
+            "live_ws_ping_failed consecutive=\(self.consecutivePingFailures, privacy: .public) threshold=\(Self.pingFailuresBeforeDrop, privacy: .public)",
+        )
+        if consecutivePingFailures >= Self.pingFailuresBeforeDrop {
+            Logger.voice.error(
+                "live_ws_ping_dropped — synthesizing connectionDropped after \(self.consecutivePingFailures, privacy: .public) consecutive ping failures",
+            )
+            // Synthesize a drop into the inbound stream. The session
+            // actor's receive dispatcher catches it via
+            // `handleTransportError`, which (post P0-A) correctly
+            // routes to refreshSession or .error recovery.
+            inboundContinuation?.finish(
+                throwing: TransportError.connectionDropped(code: -1001, reason: "ping_timeout"),
+            )
+            return false
+        }
+        return true
     }
 
     // MARK: - Receive loop
@@ -299,14 +487,61 @@ final class LiveWebSocketTransport {
                 // token flowing into Sentry breadcrumbs / OSLog.
                 let nsErr = error as NSError
                 let scrubbedReason = Self.scrubAccessToken(nsErr.localizedDescription)
+                // P2-B (2026-04-23): prepend a symbolic category to the
+                // reason string so dashboards can bucket without parsing
+                // localized-string contents. `offline | timeout | nccl |
+                // cellular_denied | dns | ssl | other` covers the
+                // observed failure classes; any un-categorized code
+                // falls through to `other`. Category + raw code flow
+                // together so ops can still drill into the specific
+                // NSURLError number when needed.
+                let category = Self.urlErrorCategory(nsErr.code)
+                let annotated = "\(category):\(scrubbedReason)"
+                Logger.voice.warning(
+                    "live_ws_drop category=\(category, privacy: .public) code=\(nsErr.code, privacy: .public)",
+                )
                 inboundContinuation?.finish(
                     throwing: TransportError.connectionDropped(
                         code: nsErr.code,
-                        reason: scrubbedReason,
+                        reason: annotated,
                     ),
                 )
                 break
             }
+        }
+    }
+
+    /// Translate raw `NSURLError` codes to short symbolic categories
+    /// for ops dashboards. Called from the receive loop only; kept as a
+    /// static string-returning helper so it's trivially testable without
+    /// touching transport state. Specific codes are documented by Apple
+    /// under `NSURLErrorDomain`.
+    private static func urlErrorCategory(_ code: Int) -> String {
+        switch code {
+        case NSURLErrorNotConnectedToInternet,
+             NSURLErrorDataNotAllowed,
+             NSURLErrorInternationalRoamingOff:
+            return "offline"
+        case NSURLErrorTimedOut:
+            return "timeout"
+        case NSURLErrorNetworkConnectionLost:
+            return "nccl"
+        case NSURLErrorCallIsActive:
+            return "cellular_denied"
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            return "dns"
+        case NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateNotYetValid,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorClientCertificateRejected,
+             NSURLErrorClientCertificateRequired:
+            return "ssl"
+        case NSURLErrorCancelled:
+            return "cancelled"
+        default:
+            return "other"
         }
     }
 

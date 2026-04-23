@@ -36,6 +36,15 @@ enum LiveOutboundFrame {
     /// `setupComplete` until it receives this frame even with a
     /// Constrained ephemeral token.
     case setup(payload: [String: Any])
+    /// P3-D (2026-04-23): zero-parse setup path. Backend already sends
+    /// `setup_frame_json` as a serialized JSON string. Prior path
+    /// parsed it via JSONSerialization → wrapped as `[String: Any]` →
+    /// this frame → re-serialized in transport — three JSON round-
+    /// trips for a ~4-8 KiB payload, paid on preWarm AND every refresh
+    /// (~10 ms/refresh). The `setupRawJSON` variant short-circuits
+    /// `asJSONObject()` to return nil; transport routes via
+    /// `asJSONString()` instead and sends the string unchanged.
+    case setupRawJSON(String)
     case realtimeInputAudio(base64: String, mimeType: String)
     case realtimeInputText(String)
     case toolResponse(functionResponseId: String, name: String, response: [String: Any])
@@ -48,13 +57,18 @@ enum LiveOutboundFrame {
     /// JSONEncoder) because `toolResponse.response` and `sessionUpdate`
     /// carry untyped JSON objects — Codable would require `AnyEncodable`
     /// machinery for what's fundamentally a heterogeneous payload.
-    func asJSONObject() -> [String: Any] {
+    ///
+    /// Returns nil for `.setupRawJSON` — callers must check
+    /// `asJSONString()` first for that variant (P3-D).
+    func asJSONObject() -> [String: Any]? {
         switch self {
         case let .setup(payload):
             // Payload is already shaped `{"setup": {...}}` on the
             // wire; return as-is. Backend serialized it atomically so
             // iOS never reaches into the inner shape.
             return payload
+        case .setupRawJSON:
+            return nil
         case let .realtimeInputAudio(base64, mimeType):
             return [
                 "realtimeInput": [
@@ -85,6 +99,16 @@ enum LiveOutboundFrame {
                 "sessionUpdate": payload,
             ]
         }
+    }
+
+    /// Pre-serialized JSON string if this frame is already serialized
+    /// (currently only `.setupRawJSON`). Transport uses this path to
+    /// skip the JSONSerialization encode/decode round-trip. P3-D.
+    func asJSONString() -> String? {
+        if case let .setupRawJSON(json) = self {
+            return json
+        }
+        return nil
     }
 }
 
@@ -185,16 +209,24 @@ enum LiveInboundFrame {
         // drift (new envelope types alongside known ones) shows up
         // before it becomes load-bearing. Doesn't fire on the common
         // single-key frames we already handle.
-        let knownKeys: Set<String> = [
-            "setupComplete", "serverContent", "toolCall", "usageMetadata",
-            "goAway", "sessionResumptionUpdate",
-        ]
-        for k in dict.keys where !knownKeys.contains(k) {
+        //
+        // P3-J (2026-04-23): `knownKeys` hoisted to a static let so the
+        // Set isn't rebuilt per inbound frame. `parseAll` fires at
+        // ~1-5 Hz during a turn; per-frame Set construction was cheap
+        // but avoidable.
+        for k in dict.keys where !Self.knownTopLevelKeys.contains(k) {
             Logger.voice.debug("live_ws_unknown_sibling_key key=\(k, privacy: .public)")
         }
         #endif
         return frames
     }
+
+    #if DEBUG
+    private static let knownTopLevelKeys: Set<String> = [
+        "setupComplete", "serverContent", "toolCall", "usageMetadata",
+        "goAway", "sessionResumptionUpdate",
+    ]
+    #endif
     // swiftlint:enable cyclomatic_complexity
 }
 

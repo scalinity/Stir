@@ -84,9 +84,14 @@ extension VoiceSessionState {
             //   between turns while state is .ready (VAD has closed
             //   the user's turn and the very first server frame is a
             //   toolCall). Observed 2026-04-22.
+            // .refreshing: cadence + token-volume refresh triggers fire
+            //   on the NEXT turn boundary (after finalizeTurn resets
+            //   state to .ready), so entering .refreshing from .ready
+            //   is the common path (P1-J, 2026-04-23).
             return next == .userSpeaking
                 || next == .modelSpeaking
                 || next == .toolCalling
+                || next == .refreshing
         case .userSpeaking:
             // C.3 → transcribing.
             // C.2 hands-free: server VAD completes the turn server-
@@ -110,7 +115,10 @@ extension VoiceSessionState {
         case .transcribing:
             return next == .thinking
         case .thinking:
-            return next == .modelSpeaking || next == .toolCalling || next == .ready
+            return next == .modelSpeaking
+                || next == .toolCalling
+                || next == .ready
+                || next == .refreshing
         case .modelSpeaking:
             // Back to ready for the next turn, OR into a refresh (C.2),
             // OR into a tool call (mid-speech: rare but legal — the
@@ -120,9 +128,19 @@ extension VoiceSessionState {
                 || next == .refreshing
                 || next == .toolCalling
         case .toolCalling:
+            // .refreshing added P1-J (2026-04-23): a tool-response that
+            // triggers the cadence refresh threshold can fire a refresh
+            // before the toolCalling → modelSpeaking transition lands.
             return next == .modelSpeaking
+                || next == .refreshing
         case .refreshing:
-            return next == .ready || next == .fallingBack
+            // P1-J (2026-04-23): on success, return to .ready uniformly
+            // (prior state is captured by the caller if needed). On
+            // failure, fallingBack or terminal.
+            return next == .ready
+                || next == .fallingBack
+                || next == .userSpeaking
+                || next == .modelSpeaking
         case .fallingBack:
             return next == .ready || next == .error
         case .error, .closed:
