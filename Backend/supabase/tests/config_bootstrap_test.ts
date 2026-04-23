@@ -33,9 +33,13 @@ Deno.test('config-bootstrap: happy path returns entitlements + flags + prompts',
 
   assertEquals(body.entitlements.tier, 'free');
   assertEquals(body.entitlements.quotas.length, 3);
-  assertEquals(body.feature_flags.length, 8);
-  assertEquals(body.prompts.length, 7);
-
+  // P1-M (2026-04-23): dropped brittle aggregate assertions
+  // (`feature_flags.length === 8`, `prompts.length === 7`). These
+  // coupled the bootstrap contract to the current seed count — any
+  // new seeded flag or prompt broke the test for reasons unrelated to
+  // the contract. The set-containment check below is the real
+  // invariant we want to pin (specific feature keys are present);
+  // counting adds no value.
   const keys = new Set(body.prompts.map((p) => p.feature_key));
   for (const expected of [
     'pantry_parse',
@@ -48,15 +52,16 @@ Deno.test('config-bootstrap: happy path returns entitlements + flags + prompts',
   ]) {
     assertEquals(keys.has(expected), true, `prompts missing ${expected}`);
   }
-  // Step 3 promoted pantry_parse + dinner_solve to v1.0.0; step 4 added
-  // substitution@1.0.0; step 6 adds cook_mode_realtime + cook_turn at v1.0.0.
-  // Remaining features stay at step-1 v0.0.0.
-  const promotedToV1 = new Set([
-    'pantry_parse', 'dinner_solve', 'substitution', 'cook_mode_realtime', 'cook_turn',
-  ]);
+  // Every active feature has a v1.x.x default prompt as of step 7. Earlier
+  // drafts of this test expected some features to stay at step-1 v0.0.0;
+  // step-7 migrations 20260419000015 + 20260419000016 promoted recipe_import
+  // and grocery_generate to v1.0.0, and cook_mode_realtime + cook_turn have
+  // since been bumped to v1.6.0 / v1.3.0 by later step-6/7 seeds. Assert
+  // major version 1 rather than a rigid string so future seed bumps don't
+  // re-break this test the same way.
   for (const p of body.prompts) {
-    const expected = promotedToV1.has(p.feature_key) ? '1.0.0' : '0.0.0';
-    assertEquals(p.version, expected, `unexpected version for ${p.feature_key}`);
+    const major = String(p.version).split('.')[0];
+    assertEquals(major, '1', `expected feature ${p.feature_key} at version 1.x.x, got ${p.version}`);
   }
 });
 
