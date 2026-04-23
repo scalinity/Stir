@@ -481,6 +481,8 @@ POSTHOG_API_KEY
 SENTRY_DSN
 ```
 
+**APNs gateway values.** `device_installations.apns_environment` accepts exactly `'production'` OR `'sandbox'` (enforced by CHECK constraint). iOS `/v1/push/register` calls must send one of those two — `'development'` isn't a real APNs gateway and will be rejected with VAL-01.
+
 iOS (via `Config.xcconfig`, gitignored; `Config.xcconfig.example` documents shape):
 
 ```
@@ -676,6 +678,12 @@ Per-test unique IDs, no cleanup between tests. `supabase db reset` between CI ru
 | Bundled asset (JSON/SQLite) | IngredientCanonical (global ontology) | anything user-editable |
 
 If you're about to write user content to Postgres: stop. That's always a bug unless it's an operational counter keyed on `canonical_user_key`.
+
+**Schema truth note.** For column types, check the DB or the latest `ALTER` — not the init migration. Known retconnected types:
+- `device_installations.installation_id` — TEXT → UUID in `20260418000022_tighten_column_constraints.sql`
+- `app_users.current_install_id` — TEXT → UUID in the same migration
+
+Relevance: any `COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'` against UUID columns raises `22P02 invalid input syntax for type uuid` because `''` isn't a valid UUID. Cast with `::TEXT` before COALESCE or concatenation. Bit step-8 Phase 1 once; documented so it doesn't bite again.
 
 ---
 
