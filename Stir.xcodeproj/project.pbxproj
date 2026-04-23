@@ -19,6 +19,7 @@
 		0F0D935AA6828583253F4984 /* AccountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF6131D62FD6AEE89E460F0 /* AccountState.swift */; };
 		106BDB46DB5D832BEE1BCC94 /* RootCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A678963101108CE2077E4BE /* RootCoordinator.swift */; };
 		13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4714D34B06C97687599F9389 /* ErrorPresenter.swift */; };
+		158E460FC8ACA7083F21996E /* GroceryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3F1C59757DD007948589427 /* GroceryViewModel.swift */; };
 		15E5F3952E09C849758C64EB /* TimerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98501A5E5030F48A1DD11F5 /* TimerServiceTests.swift */; };
 		16A9DBA56641F2BD47913C1A /* IdentityServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903FB29F55A03687F4767D6C /* IdentityServiceTests.swift */; };
 		17EA5CAAC31FB20BD496DA83 /* CookModeVoiceIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */; };
@@ -129,6 +130,7 @@
 		A45696E727E29689E46AA055 /* RecipePlan+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */; };
 		A85EEA8C2E168EBCBFEB7899 /* KitchenEquipment+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */; };
 		A89F3E0537CD069546AB3AFB /* SupabaseSessionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */; };
+		A903B2695334DC122C276C95 /* GroceryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */; };
 		A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBA709C30DB047605482FD3 /* StirToast.swift */; };
 		AA628CBD9D02A7D0A5A95279 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4FB21256F0B5D56111DA49 /* AppGroup.swift */; };
 		ABDC21E86265244E9D9C665C /* OnboardingOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1106B6B1903590ECC6EB7227 /* OnboardingOptions.swift */; };
@@ -144,6 +146,7 @@
 		B648465A3707DA34A8FE204B /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4FB21256F0B5D56111DA49 /* AppGroup.swift */; };
 		B92301183E9FC07571959AE1 /* SentryReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18E8619A7FDF88B9465134C3 /* SentryReporting.swift */; };
 		B97E59CA1CB7CF411EDE2A47 /* CookTimer+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF56858CD141F5AB2D206A82 /* CookTimer+Extensions.swift */; };
+		B9CA434D0198DBEE0DC39B3B /* GroceryRemindersService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F756F404A0158BCBE3A3F00 /* GroceryRemindersService.swift */; };
 		BA71123C302233095A846C05 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B1A2B6DC9F30341873906 /* RevenueCat */; };
 		BA9DF37A4E6BF5D1E74C7CF9 /* AVAudioSessionConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E704BD15AB6492410C269B5 /* AVAudioSessionConfigurator.swift */; };
 		BAE68A81DE3914972A55E2C5 /* TonightSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D85C83C67E1CA51774FE07 /* TonightSnapshot.swift */; };
@@ -302,6 +305,7 @@
 		5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementTypes.swift; sourceTree = "<group>"; };
 		5D8F639B91A0A9CC0F13DE7A /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		5EB0A25C9F12C9916D340A79 /* SavedMealsSortingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsSortingTests.swift; sourceTree = "<group>"; };
+		5F756F404A0158BCBE3A3F00 /* GroceryRemindersService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRemindersService.swift; sourceTree = "<group>"; };
 		5FC4057A52C83DC0256AEDC2 /* TimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerService.swift; sourceTree = "<group>"; };
 		633850447A198796407ED908 /* MockCloudKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCloudKit.swift; sourceTree = "<group>"; };
 		63CF6906E3F3379752C78928 /* SolveRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolveRepository.swift; sourceTree = "<group>"; };
@@ -375,10 +379,12 @@
 		D0DCB3763498E55B79C6FA15 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
 		D10F98D2B68FE751D86384C7 /* SpeechFallbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackService.swift; sourceTree = "<group>"; };
 		D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallTelemetryTests.swift; sourceTree = "<group>"; };
+		D3F1C59757DD007948589427 /* GroceryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryViewModel.swift; sourceTree = "<group>"; };
 		D40A1B4A21CC6EFC11F1C3A1 /* SetupKitchenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupKitchenView.swift; sourceTree = "<group>"; };
 		D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerActivityAttributes.swift; sourceTree = "<group>"; };
 		D61ECEB2E68886B41D1AE79C /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		D6857735F3B85783592B1FBC /* PantryItemRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryItemRepository.swift; sourceTree = "<group>"; };
+		D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryListView.swift; sourceTree = "<group>"; };
 		D7A235A27546345C45BC15C3 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
 		D98501A5E5030F48A1DD11F5 /* TimerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceTests.swift; sourceTree = "<group>"; };
 		DE194C00CBA1EC009095718F /* CookingSessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingSessionRepository.swift; sourceTree = "<group>"; };
@@ -403,7 +409,7 @@
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
 		FC62FC656E734BA0343A7A00 /* GroceryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepository.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
-		"TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -534,6 +540,9 @@
 		293D5D926589A9314B0A4A72 /* Grocery */ = {
 			isa = PBXGroup;
 			children = (
+				D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */,
+				5F756F404A0158BCBE3A3F00 /* GroceryRemindersService.swift */,
+				D3F1C59757DD007948589427 /* GroceryViewModel.swift */,
 			);
 			path = Grocery;
 			sourceTree = "<group>";
@@ -961,10 +970,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_251DB033-8DC0-48E1-BD2F-B4C2EC55EAAC" /* Stir */ = {
+		"TEMP_F340914F-B057-43E2-AE6A-0A2726839FF7" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */,
+				"TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -1207,7 +1216,10 @@
 				13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */,
 				298EC85302A48928040CFF86 /* GroceryItem+Extensions.swift in Sources */,
 				335A73CED94D3A086B028F95 /* GroceryList+Extensions.swift in Sources */,
+				A903B2695334DC122C276C95 /* GroceryListView.swift in Sources */,
+				B9CA434D0198DBEE0DC39B3B /* GroceryRemindersService.swift in Sources */,
 				6DA1AD75C5E62F95833F5F12 /* GroceryRepository.swift in Sources */,
+				158E460FC8ACA7083F21996E /* GroceryViewModel.swift in Sources */,
 				F751CF25A5645B4EB4950CE3 /* HouseholdPreferencesView.swift in Sources */,
 				9FD7CCAF1B3E98E917067C6D /* HouseholdProfile+Extensions.swift in Sources */,
 				FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */,
@@ -1314,7 +1326,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1333,7 +1345,7 @@
 		};
 		4601BB06DB748D5B073B7BB6 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1372,7 +1384,7 @@
 		};
 		85EEACE6A36591361EF20DD8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1392,7 +1404,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B5C8EFFB-6277-4A10-A340-4342B50A370A" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_31F0CD44-D33A-480D-9E8D-3ECF5DD5535D" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
