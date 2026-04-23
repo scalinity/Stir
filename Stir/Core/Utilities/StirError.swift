@@ -41,6 +41,15 @@ enum StirError: Error, Sendable {
     /// RATE-01 — monthly quota exhausted.
     case rateLimited(resetDate: Date?, message: String)
 
+    /// VOICE-SESSION-01 — voice session lifecycle failure (session_id
+    /// missing / superseded / owned-by-other). Distinct from
+    /// `entitlementRequired(.entVoice01)` which is a Premium upsell
+    /// path; this case MUST rebuild the voice driver without a paywall.
+    /// `reason` is optional so a future backend response missing the
+    /// field doesn't crash the decode — iOS defaults to the generic
+    /// rebuild path.
+    case voiceSessionInvalid(reason: VoiceSessionReason?, message: String)
+
     // -- Configuration ---------------------------------------------------
     case configuration(AppConfigError)
 
@@ -64,6 +73,7 @@ extension StirError {
         case .validation:                  return .val01
         case .entitlementRequired(let c, _): return c
         case .rateLimited:                 return .rate01
+        case .voiceSessionInvalid:         return .voiceSession01
         case .configuration:               return .net01
         case .coreData, .cloudKit:         return .sync01
         case .unknown:                     return .net01
@@ -92,6 +102,8 @@ extension StirError: CustomStringConvertible {
         case .rateLimited(let resetDate, let message):
             let reset = resetDate.map { "resets \($0)" } ?? "no reset date"
             return "rate limited: \(message) (\(reset))"
+        case .voiceSessionInvalid(let reason, let message):
+            return "voice session invalid (\(reason?.rawValue ?? "unknown")): \(message)"
         case .configuration(let appConfigError):
             return "configuration error: \(appConfigError)"
         case .coreData(let underlying):

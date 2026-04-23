@@ -186,6 +186,21 @@ enum ErrorPresenter {
                 secondaryAction: "See Plans",
                 blocking: true,
             )
+        case .voiceSession01:
+            // VOICE-SESSION-01 is lifecycle, not entitlement: the voice
+            // session bound to this session_id is no longer valid (missing,
+            // closed, or supersedes by a newer mint). Voice drivers catch
+            // this internally and fall back to C.3 text mode without user
+            // copy on the happy path — this arm is the failsafe if the
+            // error reaches the app-level error surface uncaught.
+            return UserFacingError(
+                code: .voiceSession01,
+                title: "Voice session ended",
+                message: "Your voice session was interrupted. Restart Cook Mode to keep going with voice.",
+                primaryAction: "Restart",
+                secondaryAction: "Continue without voice",
+                blocking: false,
+            )
         case .val01:
             return UserFacingError(
                 code: .val01,

@@ -34,6 +34,16 @@ export enum ErrorCode {
   ENT_MULTI_IMAGE_01 = 'ENT-MULTI-IMAGE-01',
   ENT_LEFTOVERS_01 = 'ENT-LEFTOVERS-01',
 
+  // Voice session lifecycle (distinct from ENT-VOICE-01 entitlement
+  // failures and AI-VOICE-01 pipeline failures). Emitted by
+  // voice-turn-usage when the session_id the caller posted under is
+  // no longer valid for this user — either missing (expired past the
+  // 2h owner-row retention), superseded by a newer mint, or owned by
+  // a different user (IDOR). iOS handles by rebuilding the voice
+  // driver silently; NEVER by presenting a paywall. See ADR 0017
+  // and CLAUDE.md §Error code matrix for the three `reason` values.
+  VOICE_SESSION_01 = 'VOICE-SESSION-01',
+
   // Step-1 additions (also added to CLAUDE.md + spec §6)
   VAL_01 = 'VAL-01',
   AUTH_01 = 'AUTH-01',
@@ -64,6 +74,7 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.ENT_VOICE_01]: 'Cook Mode voice is a Premium feature.',
   [ErrorCode.ENT_MULTI_IMAGE_01]: 'Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once.',
   [ErrorCode.ENT_LEFTOVERS_01]: 'Leftovers mode is a Premium feature.',
+  [ErrorCode.VOICE_SESSION_01]: 'Voice session is no longer valid. Start a new session.',
   // VAL-01 message is dev-oriented: iOS shows generic copy from ErrorPresenter.
   [ErrorCode.VAL_01]: 'Request body failed validation.',
   // AUTH-01 is internal; iOS re-bootstraps silently.
@@ -93,10 +104,28 @@ export type AuthReason =
   | 'signature_invalid'
   | 'user_stale';
 
+/** Voice-session lifecycle reasons attached to ENT-VOICE-01 / AI-VOICE-01
+ *  403 responses (P1-B / SA2-W4, 2026-04-23). Typed so the compiler
+ *  guarantees the handler emits a known value and iOS can switch
+ *  exhaustively on it for dashboard attribution.
+ *
+ *    session_missing   — /v1/ai/voice-turn-usage POST under a session_id
+ *                        with no owner row (mint never happened, or row
+ *                        purged by 2h retention).
+ *    owner_mismatch    — session_id owned by a different canonical_user_key
+ *                        than the authenticated caller (IDOR attempt).
+ *    session_closed    — session_id owned by the caller but superseded by
+ *                        a newer mint (closed_at IS NOT NULL on the row).
+ */
+export type VoiceSessionReason =
+  | 'session_missing'
+  | 'owner_mismatch'
+  | 'session_closed';
+
 export interface ErrorExtras {
   message?: string;
   field_errors?: FieldError[];
-  reason?: AuthReason;
+  reason?: AuthReason | VoiceSessionReason;
   [key: string]: unknown;
 }
 

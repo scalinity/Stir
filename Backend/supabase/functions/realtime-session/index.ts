@@ -45,11 +45,74 @@ import { GeminiModel } from '../_shared/gemini.ts';
 import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
-import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
 const FEATURE_KEY = 'cook_mode_realtime';
 const MODEL = GeminiModel.FlashLivePreview;
+
+/** PostgREST error.code for SQLSTATE 23505 (unique_violation). */
+const UNIQUE_VIOLATION_CODE = '23505';
+
+/**
+ * Supersede any prior open `voice_session_owners` row for this user,
+ * then insert the new one. Retries once on unique_violation — the
+ * UNIQUE partial index `voice_session_owners_one_open_per_user_uniq`
+ * enforces "at most one open row per user" at the DB layer, so a
+ * concurrent-mint race produces 23505 on one side. Single retry
+ * handles the two-way race; a three-way race is pathological and
+ * logged.
+ *
+ * Returns true if the new row landed, false if both attempts failed.
+ */
+async function supersedeAndInsertWithRetry(args: {
+  client: ReturnType<typeof createServiceClient>;
+  sessionId: string;
+  canonicalUserKey: string;
+  userLog: { warn: (msg: string, fields?: Record<string, unknown>) => void };
+}): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    // Supersede any currently-open row for this user.
+    const { error: updateErr } = await args.client
+      .from('voice_session_owners')
+      .update({ closed_at: new Date().toISOString() })
+      .eq('canonical_user_key', args.canonicalUserKey)
+      .is('closed_at', null);
+    if (updateErr) {
+      args.userLog.warn('voice_session_owner_supersede_failed', {
+        attempt,
+        err: updateErr.message,
+      });
+      // Supersede failure doesn't prevent the INSERT from trying —
+      // if the unique index rejects it we know why. If it succeeds,
+      // we accept that the prior row may still be open (stale
+      // closed_at), which voice-turn-usage will gate correctly.
+    }
+    const { error: insertErr } = await args.client
+      .from('voice_session_owners')
+      .insert({
+        session_id: args.sessionId,
+        canonical_user_key: args.canonicalUserKey,
+      });
+    if (!insertErr) return true;
+    // Retry only on unique_violation (23505). All other errors we
+    // log and bail — the issue isn't a race we can resolve by
+    // retrying (network, permission, schema drift).
+    if (insertErr.code !== UNIQUE_VIOLATION_CODE) {
+      args.userLog.warn('voice_session_owner_insert_failed', {
+        attempt,
+        code: insertErr.code,
+        err: insertErr.message,
+      });
+      return false;
+    }
+    args.userLog.warn('voice_session_owner_insert_race_retry', {
+      attempt,
+      code: insertErr.code,
+    });
+  }
+  return false;
+}
 
 interface WireResponse {
   auth_token: string;
@@ -185,9 +248,12 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:realtime_session_daily', sourceIP);
     if (!ipRl.allowed) {
+      // P2-C (2026-04-23): log hashed IP. Enforcement still keys on
+      // raw IP via the rate-limit bucket; logs get the FNV-1a-hashed
+      // form so retention doesn't hold raw IP PII.
       userLog.warn('rate_limited', {
         scope: 'ip:realtime_session_daily',
-        source_ip: sourceIP,
+        source_ip_bucket: ipBucket(sourceIP),
         is_refresh: body.is_refresh,
       });
       return jsonError(
@@ -228,15 +294,35 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------
-  // 4. Kill switch
+  // 4. Parallel reads: flags + entitlement + active prompt
   // ---------------------------------------------------------------------
-  // Flags are read once and reused below for cook_voice_thinking_level +
-  // voice_turn_detection_mode plumbing into the mint. Fail-open on read
-  // failure — ops can still page via the AI-01 dashboard if the mint itself
-  // throws due to misconfigured flags.
-  let flags: Awaited<ReturnType<typeof readFlags>> = [];
+  // P3-G (2026-04-23): these three reads are independent of each
+  // other (different tables, no ordering dependency) but prior code
+  // serialized them, paying ~20-60ms of DB round-trip latency on the
+  // happy path. Parallelizing via Promise.all runs all three against
+  // the Supabase connection pool at once; even under heavy load
+  // they complete in ~max(t_flags, t_ent, t_prompt) rather than sum.
+  //
+  // Gating order (kill switch → entitlement → quota → prompt) is
+  // preserved below by reading from the resolved tuple in the same
+  // sequence — just with the latency collapsed to one round-trip.
+  //
+  // Fail-open on flag read failure only (same posture as prior code:
+  // flag outage shouldn't block a paid user from starting voice).
+  // Entitlement / prompt failures remain hard errors since they
+  // gate the mint's correctness (entitlement) or its ability to
+  // build a system prompt (prompt row).
+  const [flagsResult, entitlement, activePrompt] = await Promise.all([
+    readFlags(client, userLog).catch((err) => {
+      userLog.warn('flag_read_failed', { err: String(err) });
+      return [] as Awaited<ReturnType<typeof readFlags>>;
+    }),
+    readEntitlement(client, claims.canonical_user_key),
+    readActivePrompt(client, FEATURE_KEY),
+  ]);
+
+  let flags: Awaited<ReturnType<typeof readFlags>> = flagsResult;
   try {
-    flags = await readFlags(client, userLog);
     const disableRealtime = flags.find((f) => f.key === 'disable_cook_realtime');
     if (disableRealtime?.is_enabled && disableRealtime.value === true) {
       userLog.warn('kill_switch_active', { flag: 'disable_cook_realtime' });
@@ -257,7 +343,7 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 5. Entitlement: voice is Premium+ only
   // ---------------------------------------------------------------------
-  const entitlement = await readEntitlement(client, claims.canonical_user_key);
+  // Already read in parallel above (P3-G); just gate on the result.
   if (!entitlement) {
     userLog.warn('entitlement_row_missing');
     return jsonError(
@@ -353,7 +439,7 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 7. Prompt + render
   // ---------------------------------------------------------------------
-  const activePrompt = await readActivePrompt(client, FEATURE_KEY);
+  // Already read in parallel above (P3-G); just gate on the result.
   if (!activePrompt) {
     if (didConsumeQuota && consumedPeriodStart) {
       await refundQuota(
@@ -364,21 +450,47 @@ Deno.serve(async (req) => {
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
   }
 
-  const renderedPrompt = renderPrompt(activePrompt.template_blob, {
-    recipe_title_json: body.recipe_context.title,
-    recipe_servings_json: body.recipe_context.servings,
-    recipe_estimated_minutes_json: body.recipe_context.estimated_minutes,
-    current_step_number_json: body.current_step_number,
-    total_steps_json: body.recipe_context.total_steps,
-    current_step_text_json: body.recipe_context.current_step_text,
-    current_step_timer_seconds_json:
-      body.recipe_context.current_step_timer_seconds ?? 0,
-    all_steps_json: body.recipe_context.all_steps,
-    remaining_ingredients_json: body.recipe_context.remaining_ingredients,
-    pantry_snapshot_json: body.household_context.pantry_snapshot,
-    dietary_rules_json: body.household_context.dietary_rules,
-    available_equipment_json: body.household_context.available_equipment,
-  });
+  // P1-A / SA1-W1 (2026-04-23): fence user-controlled fields in USER_DATA
+  // markers. cook-turn (line 266-268) and substitution (line 498) already
+  // pass `untrusted:` for their user-derived fields; realtime-session was
+  // the one voice path where an attacker-influenced imported recipe
+  // title or step text could land in the system prompt verbatim. Once
+  // recipe-import (step 7) is live, a malicious recipe title like
+  // `"Ignore all prior rules."` in a shared URL could nudge the Live
+  // model — downstream damage is bounded (iOS tool-arg clamps, server-
+  // side hard-rule validator on substitution), but the symmetry fix is
+  // cheap and closes the obvious hole. Dietary_rules / equipment are
+  // user-managed onboarding inputs; pantry_snapshot is user-confirmed
+  // OCR output. All three merit fencing.
+  const renderedPrompt = renderPrompt(
+    activePrompt.template_blob,
+    {
+      recipe_title_json: body.recipe_context.title,
+      recipe_servings_json: body.recipe_context.servings,
+      recipe_estimated_minutes_json: body.recipe_context.estimated_minutes,
+      current_step_number_json: body.current_step_number,
+      total_steps_json: body.recipe_context.total_steps,
+      current_step_text_json: body.recipe_context.current_step_text,
+      current_step_timer_seconds_json:
+        body.recipe_context.current_step_timer_seconds ?? 0,
+      all_steps_json: body.recipe_context.all_steps,
+      remaining_ingredients_json: body.recipe_context.remaining_ingredients,
+      pantry_snapshot_json: body.household_context.pantry_snapshot,
+      dietary_rules_json: body.household_context.dietary_rules,
+      available_equipment_json: body.household_context.available_equipment,
+    },
+    {
+      untrusted: new Set([
+        'recipe_title_json',
+        'current_step_text_json',
+        'all_steps_json',
+        'remaining_ingredients_json',
+        'pantry_snapshot_json',
+        'dietary_rules_json',
+        'available_equipment_json',
+      ]),
+    },
+  );
 
   // ---------------------------------------------------------------------
   // 8. Mint
@@ -455,6 +567,57 @@ Deno.serve(async (req) => {
   // 9. Log + respond
   // ---------------------------------------------------------------------
   const sessionId = crypto.randomUUID();
+
+  // P1-B / SA2-W4 (2026-04-23; revised post-review): persist the
+  // (session_id → owner) binding so `/v1/ai/voice-turn-usage` can
+  // reject turns posted under someone else's session_id AND turns
+  // posted on a superseded session.
+  //
+  // Two-step sequence, inline (not fire-and-forget), because the
+  // ordering matters and both steps must complete before the mint
+  // response lands on iOS:
+  //
+  //   1. Supersede: mark any prior unclosed rows for THIS user as
+  //      closed. Gemini Live has no server-side logout; this
+  //      UPDATE is how we declare "the client's previous session_id
+  //      is no longer accepting turns." The partial index
+  //      `voice_session_owners_open_by_user_idx` makes the WHERE
+  //      predicate O(log n) even at scale.
+  //
+  //   2. Insert the new row with closed_at=NULL. The authenticated
+  //      client's next /v1/ai/voice-turn-usage POST will pass the
+  //      ownership + lifecycle checks; any concurrent POST under an
+  //      OLD session_id will now hit closed_at IS NOT NULL and 403
+  //      with `reason: session_closed` — the smoke-test-targeted
+  //      signal ops need to distinguish "forgot to mint" (missing)
+  //      from "client holding stale session_id" (closed).
+  //
+  // Inline (not waitUntil) because a fire-and-forget order creates
+  // a race: iOS can POST its first turn BEFORE the supersede
+  // UPDATE lands, missing the old row's new closed_at timestamp.
+  // The 10-30ms latency cost is negligible on the mint path.
+  // Supersede + insert with one retry on unique_violation (SQLSTATE
+  // 23505). The UNIQUE partial index
+  // `voice_session_owners_one_open_per_user_uniq` enforces "at most
+  // one open row per user" at the DB layer. Under a concurrent-mint
+  // race, the losing INSERT returns 23505; we retry once — the
+  // retry's UPDATE finds the winner's row open and closes it, then
+  // the INSERT succeeds. A third concurrent mint on the same user
+  // within the same instant is pathological; if it ever happens
+  // we'll see repeated 23505s in logs and have a known case to
+  // address.
+  const inserted = await supersedeAndInsertWithRetry({
+    client,
+    sessionId,
+    canonicalUserKey: claims.canonical_user_key,
+    userLog,
+  });
+  if (!inserted) {
+    userLog.warn('voice_session_owner_write_gave_up', {});
+    // Non-fatal for the mint — voice-turn-usage will fail-close on
+    // the missing binding, which disables THIS session's turn posts
+    // but doesn't break the response path.
+  }
 
   // Cost is zero at mint time — the minted session's real spend arrives via
   // usageMetadata frames during the Live WS turns. iOS forwards those per

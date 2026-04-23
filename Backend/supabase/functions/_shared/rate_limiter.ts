@@ -273,3 +273,35 @@ export function extractSourceIP(req: Request): string {
   }
   return 'unknown';
 }
+
+/**
+ * Non-cryptographic bucket identifier for a source IP, for use in
+ * dashboard deduplication (e.g., "same peer hit rate limit N times in
+ * the last hour"). Deterministic FNV-1a 32-bit hash — same IP always
+ * produces the same bucket string within a deploy.
+ *
+ * **Does NOT provide privacy against log-access threat models.** FNV-1a
+ * is unsalted, non-cryptographic, and trivially reversible by
+ * precomputing the bucket for every possible IPv4 address (~seconds
+ * on a laptop). Anyone with log access can recover the raw IP.
+ *
+ * For privacy-grade hashing (HMAC-SHA256 with a rotated env-sourced
+ * salt) see the §Deferred entry in /CLAUDE.md titled "Source-IP HMAC
+ * with rotated salt" — filed 2026-04-23 as a dedicated security task.
+ * Do NOT claim this function provides privacy in new code; it's a
+ * bucketing helper only.
+ *
+ * Name reflects the intent: this is a dashboard bucket, not a hash.
+ *
+ * P2-C (2026-04-23; renamed post-review from `hashSourceIP`).
+ */
+export function ipBucket(ip: string): string {
+  if (ip === 'unknown' || ip === '') return 'unknown';
+  // FNV-1a 32-bit
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < ip.length; i++) {
+    hash ^= ip.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return 'ip_' + (hash >>> 0).toString(16).padStart(8, '0');
+}

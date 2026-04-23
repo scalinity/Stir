@@ -94,6 +94,29 @@ export function testIPHeaders(): Record<string, string> {
   };
 }
 
+/** P1-B (2026-04-23): seed a row in `voice_session_owners` so a
+ *  subsequent `/v1/ai/voice-turn-usage` POST passes the new IDOR
+ *  ownership check. In production the mint endpoint writes this row;
+ *  tests that bypass mint need to seed it explicitly. Idempotent:
+ *  safe to call with a session_id that already exists (upsert).
+ */
+export async function seedVoiceSessionOwner(args: {
+  sessionId: string;
+  canonicalUserKey: string;
+}): Promise<void> {
+  const { serviceClient } = await import('./pg.ts');
+  const client = serviceClient();
+  const { error } = await client
+    .from('voice_session_owners')
+    .upsert(
+      { session_id: args.sessionId, canonical_user_key: args.canonicalUserKey },
+      { onConflict: 'session_id' },
+    );
+  if (error) {
+    throw new Error(`seedVoiceSessionOwner failed: ${error.message}`);
+  }
+}
+
 /** POST /v1/session/bootstrap — returns parsed body + status. */
 export async function callBootstrap(
   body: BootstrapBody | unknown,

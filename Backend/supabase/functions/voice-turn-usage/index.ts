@@ -226,6 +226,90 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------
+  // 5.5 Session ownership: this user must own the session_id they're
+  //     posting turns under. P1-B / SA2-W4 (2026-04-23) closes a
+  //     bounded IDOR class: a forged Premium client could previously
+  //     POST turns under any UUID, polluting other users' $ai_trace
+  //     rollups and billing their ai_request_log cost attribution to
+  //     the wrong canonical_user_key.
+  //
+  //     `voice_session_owners` is populated by realtime-session at
+  //     mint time. Retention is 2 h — more than the 35-min Gemini
+  //     hard mint deadline — so a binding is always fresh enough for
+  //     any in-flight session. Missing row → 403 (fail-closed).
+  // ---------------------------------------------------------------------
+  const { data: ownerRow, error: ownerErr } = await client
+    .from('voice_session_owners')
+    .select('canonical_user_key, closed_at')
+    .eq('session_id', body.session_id)
+    .maybeSingle();
+  if (ownerErr) {
+    userLog.error('voice_session_owner_lookup_failed', ownerErr);
+    // Fail CLOSED on lookup error — the alternative (admit the post)
+    // re-opens the IDOR class we're closing. Tiny blast radius:
+    // observability rows for this turn are lost, not user-visible.
+    return jsonError(
+      ErrorCode.AI_01,
+      500,
+      { message: 'Could not verify session ownership.' },
+      requestId,
+    );
+  }
+  if (!ownerRow) {
+    userLog.warn('voice_session_owner_missing', {
+      session_id: body.session_id,
+    });
+    return jsonError(
+      ErrorCode.VOICE_SESSION_01,
+      403,
+      {
+        message: 'Session not found or expired. Start a new voice session.',
+        reason: 'session_missing',
+      },
+      requestId,
+    );
+  }
+  if (ownerRow.canonical_user_key !== claims.canonical_user_key) {
+    // Authenticated user is posting turns under someone else's session
+    // id. Attempted IDOR (or a VM bug writing a stale session_id —
+    // either way, reject). This is the signal ops dashboards should
+    // alert on if it ever fires at non-zero rate.
+    userLog.error(
+      'voice_session_owner_mismatch',
+      new Error('authenticated user does not own posted session_id'),
+    );
+    return jsonError(
+      ErrorCode.VOICE_SESSION_01,
+      403,
+      {
+        message: 'Session does not belong to this user.',
+        reason: 'owner_mismatch',
+      },
+      requestId,
+    );
+  }
+  if (ownerRow.closed_at !== null) {
+    // P1-B lifecycle check: session was superseded by a newer mint.
+    // ENT-VOICE-01 (not AI-VOICE-01 — that's AI-pipeline failure, not
+    // a match for lifecycle) with a typed `reason` discriminator so
+    // ops dashboards can split lifecycle failures from ownership
+    // failures. See ADR 0017 for the full reason taxonomy.
+    userLog.warn('voice_session_owner_closed', {
+      session_id: body.session_id,
+      closed_at: ownerRow.closed_at,
+    });
+    return jsonError(
+      ErrorCode.VOICE_SESSION_01,
+      403,
+      {
+        message: 'Voice session was superseded by a newer session.',
+        reason: 'session_closed',
+      },
+      requestId,
+    );
+  }
+
+  // ---------------------------------------------------------------------
   // 6. Per-turn: compute cost → recordAIRequest (upsert + PostHog)
   // ---------------------------------------------------------------------
   // v1 writes one row + one event per turn. Batched writes are a future

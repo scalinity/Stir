@@ -206,6 +206,14 @@ actor SupabaseSessionClient {
             let errData = try await readAllBytes(bytes)
             let body = try parseErrorBody(errData)
             let code = ErrorCode(rawValue: body.error) ?? .bill01
+            // VOICE-SESSION-01 is a lifecycle failure (session expired/
+            // superseded/foreign), NOT an entitlement failure — MUST
+            // NOT paywall the user. Route via a dedicated case so the
+            // handler rebuilds the voice driver silently. See ADR 0017.
+            if code == .voiceSession01 {
+                let reason = body.reason.flatMap(VoiceSessionReason.init(rawValue:))
+                throw StirError.voiceSessionInvalid(reason: reason, message: body.message)
+            }
             throw StirError.entitlementRequired(code: code, message: body.message)
 
         case 429:

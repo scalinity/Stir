@@ -16,7 +16,7 @@
 // capture signal is visible at prod via PostHog's own dashboard.
 
 import { assertEquals, assertExists } from '@std/assert';
-import { quickBootstrap, testIPHeaders } from './_helpers/factory.ts';
+import { quickBootstrap, seedVoiceSessionOwner, testIPHeaders } from './_helpers/factory.ts';
 import { serviceClient } from './_helpers/pg.ts';
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
@@ -144,6 +144,9 @@ Deno.test('voice-turn-usage 400 VAL-01 on empty turns array', async () => {
 Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async () => {
   const boot = await quickBootstrap();
   const sessionId = crypto.randomUUID();
+  // P1-B (2026-04-23): seed ownership binding so the handler's new
+  // IDOR check passes. Production writes this at mint time.
+  await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
   const body = validBody({ session_id: sessionId });
   const result = await callVoiceTurnUsage(body, boot.session_jwt);
   assertEquals(result.status, 204);
@@ -183,6 +186,7 @@ Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async
 Deno.test('voice-turn-usage idempotency: repeat POST with same (session_id, turn_index) is no-op', async () => {
   const boot = await quickBootstrap();
   const sessionId = crypto.randomUUID();
+  await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
   const body = validBody({ session_id: sessionId });
   // First write.
   const r1 = await callVoiceTurnUsage(body, boot.session_jwt);
@@ -204,6 +208,7 @@ Deno.test('voice-turn-usage idempotency: repeat POST with same (session_id, turn
 Deno.test('voice-turn-usage batch writes N rows', async () => {
   const boot = await quickBootstrap();
   const sessionId = crypto.randomUUID();
+  await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
   const now = new Date().toISOString();
   const turns = [1, 2, 3].map((idx) => ({
     turn_index: idx,
@@ -240,6 +245,7 @@ Deno.test(
   async () => {
     const boot = await quickBootstrap();
     const sessionId = crypto.randomUUID();
+    await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     const body = validBody({
       session_id: sessionId,
       turns: [{
@@ -278,6 +284,7 @@ Deno.test(
   async () => {
     const boot = await quickBootstrap();
     const sessionId = crypto.randomUUID();
+    await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     // validBody() deliberately omits prompt_tokens_cached — the common
     // path where caching either didn't fire or iOS didn't send the field.
     const result = await callVoiceTurnUsage(
@@ -331,6 +338,74 @@ Deno.test(
   },
 );
 
+// ---------------------------------------------------------------------------
+// P1-B / SA2-W4: session_id ownership binding
+// ---------------------------------------------------------------------------
+
+Deno.test('voice-turn-usage 403 when session_id has no owner row (unbooted session)', async () => {
+  // Valid Premium JWT but a session_id that was never minted. Prior
+  // behavior: would 204 and happily write a turn under someone else's
+  // trace_id. Post-P1-B: hard 403 with ENT-VOICE-01.
+  const boot = await quickBootstrap();
+  const sessionId = crypto.randomUUID(); // not seeded
+  const result = await callVoiceTurnUsage(
+    validBody({ session_id: sessionId }),
+    boot.session_jwt,
+  );
+  assertEquals(result.status, 403);
+  assertEquals((result.body as { error: string }).error, 'ENT-VOICE-01');
+});
+
+Deno.test(
+  'voice-turn-usage 403 ENT-VOICE-01 session_closed when session was superseded by a newer mint',
+  async () => {
+    // Simulates: iOS mints a session, iOS refreshes → new session, iOS
+    // posts a turn under the OLD session_id (e.g., in-flight POST that
+    // crossed the supersede UPDATE on the backend). Ownership check
+    // passes (same user) but lifecycle check rejects with a distinct
+    // reason so ops can split this from IDOR failures.
+    const boot = await quickBootstrap();
+    const oldSessionId = crypto.randomUUID();
+    await seedVoiceSessionOwner({
+      sessionId: oldSessionId,
+      canonicalUserKey: boot.canonical_user_key,
+    });
+    // Simulate supersede: a new mint landed for the same user, which
+    // would mark the old row closed. Here we mutate directly via
+    // service role to avoid needing a full realtime-session mint.
+    const admin = serviceClient();
+    await admin
+      .from('voice_session_owners')
+      .update({ closed_at: new Date().toISOString() })
+      .eq('session_id', oldSessionId);
+
+    const result = await callVoiceTurnUsage(
+      validBody({ session_id: oldSessionId }),
+      boot.session_jwt,
+    );
+    assertEquals(result.status, 403);
+    const body = result.body as { error: string; reason?: string };
+    assertEquals(body.error, 'ENT-VOICE-01');
+    assertEquals(body.reason, 'session_closed');
+  },
+);
+
+Deno.test('voice-turn-usage 403 when session_id was minted by a different user (IDOR)', async () => {
+  // Bootstrap TWO users. User A mints a session. User B tries to post
+  // turns under A's session_id — must be rejected.
+  const userA = await quickBootstrap();
+  const userB = await quickBootstrap();
+  const sessionId = crypto.randomUUID();
+  await seedVoiceSessionOwner({ sessionId, canonicalUserKey: userA.canonical_user_key });
+
+  const result = await callVoiceTurnUsage(
+    validBody({ session_id: sessionId }),
+    userB.session_jwt, // B's JWT, A's session
+  );
+  assertEquals(result.status, 403);
+  assertEquals((result.body as { error: string }).error, 'ENT-VOICE-01');
+});
+
 Deno.test(
   'voice-turn-usage accepts prompt_tokens_cached exactly equal to prompt_tokens_total',
   async () => {
@@ -339,6 +414,7 @@ Deno.test(
     // no new user content yet — rare but legal).
     const boot = await quickBootstrap();
     const sessionId = crypto.randomUUID();
+    await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     const body = validBody({
       session_id: sessionId,
       turns: [{

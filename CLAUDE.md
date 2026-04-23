@@ -219,6 +219,8 @@ enum ErrorCode: String {
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
     case entLeftovers01  = "ENT-LEFTOVERS-01" // leftovers mode requires Premium+
+    case voiceSession01  = "VOICE-SESSION-01" // voice session lifecycle: missing / closed / owner_mismatch
+                                         // (ADR 0017 — distinct from ENT-VOICE-01 entitlement or AI-VOICE-01 pipeline)
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
     case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale
                                          // iOS auto-re-bootstraps silently; invisible unless retry also fails
@@ -888,7 +890,7 @@ These aren't restrictions on creativity — they're specific wrong paths that lo
 - Don't derive `voice_enabled` on iOS. It's server-computed in the bootstrap response.
 - Don't use object-keyed `quotas` in API responses. Always an iterable array.
 - Don't add new telemetry event names **or new property values on existing events** without updating spec §15 and this file. A new `result=busy` on `voice_affordance_tapped` is a wire-contract change just like adding a new event.
-- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, ENT-LEFTOVERS-01, VAL-01, AUTH-01, METHOD-NOT-ALLOWED-01). New codes require updating both this file and spec §6.
+- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, ENT-LEFTOVERS-01, VOICE-SESSION-01, VAL-01, AUTH-01, METHOD-NOT-ALLOWED-01). New codes require updating both this file and spec §6.
 - Don't return 4xx/5xx with empty body or string-only error. Always `{ error: CODE, message, ...structured_details }`.
 - Don't skip the hard-rule validator on substitution output because "the model is trustworthy on this one." Not optional.
 - Don't use UIKit unless wrapping `AVCaptureVideoPreviewLayer` via `UIViewRepresentable`. SwiftUI-first, always.
