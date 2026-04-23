@@ -1,0 +1,196 @@
+// DishOptionCard
+//
+// The hero component on Dinner Options — this is the "aha moment"
+// surface (Specs/Design-System.md §8.3). Three of these arrive as SSE
+// events stream in from /v1/ai/dinner-solve. Users tap one to move to
+// Dish Preview.
+//
+// Visual grammar:
+//   - radius.lg (16pt) — hero card radius, distinct from the default
+//     14pt so the dish cards visibly out-rank the Saved/Import rows
+//   - paper.100 fill, 1pt ink.100 border
+//   - Rank numeral (1/2/3) in displayMd, ink.300 — sits top-left as a
+//     quiet ordinal
+//   - displayMd title in ink.900
+//   - bodyMd "why it fits" reason below title, ink.700
+//   - Metadata row: clock icon + total time, missing-ingredient count
+//   - One FitLabel badge (the primary fit reason — §8.4 "only ONE fit
+//     label per dish")
+//   - Press feedback: 98% scale + ember border ring (via DishCardStyle
+//     ButtonStyle below). Reduce Motion honored via .stirAnimation.
+
+import SwiftUI
+
+struct DishOptionCard: View {
+    let rank: Int
+    let title: String
+    let totalTimeMinutes: Int
+    let whyItFits: String
+    let missingIngredientCount: Int
+    let fitKind: FitLabelKind
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                HStack(alignment: .top) {
+                    Text("\(rank)")
+                        .stirFont(.displayMd)
+                        .foregroundStyle(Color.Stir.ink300)
+                        .accessibilityHidden(true) // a11y label includes rank
+
+                    Spacer(minLength: CGFloat.Stir.space3)
+
+                    FitLabel(kind: fitKind)
+                }
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                    Text(title)
+                        .stirFont(.displayMd)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+
+                    Text(whyItFits)
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink700)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                }
+
+                metadataRow
+            }
+            .padding(CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(DishOptionCardStyle())
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: CGFloat.Stir.space4) {
+            HStack(spacing: CGFloat.Stir.space1) {
+                Image.Stir.clock
+                    .font(.system(size: CGFloat.Stir.iconSm))
+                    .foregroundStyle(Color.Stir.ink500)
+                Text("\(totalTimeMinutes) min")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
+            }
+
+            if missingIngredientCount > 0 {
+                HStack(spacing: CGFloat.Stir.space1) {
+                    Image.Stir.cart
+                        .font(.system(size: CGFloat.Stir.iconSm))
+                        .foregroundStyle(Color.Stir.ink500)
+                    Text(missingIngredientCount == 1
+                         ? "1 to grab"
+                         : "\(missingIngredientCount) to grab")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ink500)
+                }
+            } else {
+                HStack(spacing: CGFloat.Stir.space1) {
+                    Image.Stir.check
+                        .font(.system(size: CGFloat.Stir.iconSm))
+                        .foregroundStyle(Color.Stir.sage600)
+                    Text("You have it all")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.sage600)
+                }
+            }
+        }
+    }
+
+    private var accessibilityLabel: String {
+        var parts = ["Option \(rank): \(title)"]
+        parts.append("\(totalTimeMinutes) minutes")
+        parts.append(missingIngredientCount == 0
+                     ? "has every ingredient"
+                     : "\(missingIngredientCount) ingredients to grab")
+        parts.append("why it fits: \(whyItFits)")
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - ButtonStyle — press feedback
+
+/// 98% scale + ember border ring on press, per Spec §8.3. Reduce Motion
+/// collapses the scale animation to instant (border still flips for the
+/// press signal).
+private struct DishOptionCardStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
+            .animation(reduceMotion ? nil : .Stir.standard, value: configuration.isPressed)
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                    .strokeBorder(
+                        configuration.isPressed ? Color.Stir.ember600 : Color.clear,
+                        lineWidth: 2,
+                    ),
+            )
+    }
+}
+
+// MARK: - Previews
+
+#Preview("DishOptionCard — light") {
+    dishOptionGallery
+        .preferredColorScheme(.light)
+}
+
+#Preview("DishOptionCard — dark") {
+    dishOptionGallery
+        .preferredColorScheme(.dark)
+}
+
+@MainActor
+private var dishOptionGallery: some View {
+    ScrollView {
+        VStack(spacing: CGFloat.Stir.space3) {
+            DishOptionCard(
+                rank: 1,
+                title: "Lemon-garlic shrimp pasta",
+                totalTimeMinutes: 22,
+                whyItFits: "Uses the shrimp and spinach before they turn. Leans on pantry staples you already have.",
+                missingIngredientCount: 0,
+                fitKind: .leastWaste,
+                onTap: {},
+            )
+            DishOptionCard(
+                rank: 2,
+                title: "One-pan harissa chicken",
+                totalTimeMinutes: 32,
+                whyItFits: "Higher protein to hit your goal tonight. Skip if you're not up for a hotter dish.",
+                missingIngredientCount: 1,
+                fitKind: .bestFit,
+                onTap: {},
+            )
+            DishOptionCard(
+                rank: 3,
+                title: "Sheet-pan gnocchi",
+                totalTimeMinutes: 18,
+                whyItFits: "Fastest tonight — 18 minutes including oven preheat.",
+                missingIngredientCount: 2,
+                fitKind: .fastest,
+                onTap: {},
+            )
+        }
+        .padding(CGFloat.Stir.space4)
+    }
+    .frame(width: 390, height: 844)
+    .background(Color.Stir.paper50)
+}
