@@ -93,7 +93,7 @@ final class GroceryViewModel {
     /// gates on stage == .generating.
     func generate() async {
         guard stage == .generating else { return }
-        guard let householdID = household.id else {
+        guard household.id != nil else {
             stage = .error(code: "VAL-01", message: "Household missing id. Restart the app.")
             return
         }
@@ -123,7 +123,6 @@ final class GroceryViewModel {
                 canonicalSlug: item.canonicalIngredientSlug,
             )
         }
-        _ = householdID
 
         let request = GroceryGenerateRequest(
             sourceID: recipePlanID,

@@ -8,29 +8,28 @@
 //   - usesLanguageCorrection = true (fixes common OCR slips like
 //     "I tsp" → "1 tsp")
 //
-// Returns ordered plain text joined with newlines. The Edge Function
-// then does the JSON-LD / HTML stripping / prose extraction — iOS
-// only produces raw OCR text.
-//
-// Async: runs on Vision's internal queue, hops back to MainActor
-// only for the result delivery.
+// Runs OFF the main thread: `VNImageRequestHandler.perform` is
+// synchronous + blocking (500–2000 ms typical for a recipe screenshot).
+// Callers are on @MainActor; we bounce to a detached Task so the
+// progress spinner in `ImportEntryView`'s footer animates through
+// the OCR window. Result hops back to the caller's actor implicitly
+// via `.value`.
 
 import UIKit
 import Vision
 
-@MainActor
-struct OCRService {
+struct OCRService: Sendable {
     enum Failure: Error, LocalizedError {
         case imageDecodeFailed
-        case visionError(Error)
+        case visionError(String)
         case emptyResult
 
         var errorDescription: String? {
             switch self {
             case .imageDecodeFailed:
                 return "We couldn't read that image. Try another one."
-            case .visionError(let err):
-                return "OCR failed: \(err.localizedDescription)"
+            case .visionError(let message):
+                return "OCR failed: \(message)"
             case .emptyResult:
                 return "Nothing readable in that image. Try a clearer shot."
             }
@@ -45,12 +44,22 @@ struct OCRService {
         let pageCount: Int
     }
 
-    /// Recognize text in a single image. v1 single-image scope; if
-    /// called with UIImage it blocks until Vision completes or throws.
     func recognizeText(in image: UIImage) async throws -> Result {
+        // Extract the CGImage on the caller's actor so we pass a
+        // Sendable handle into the detached task. UIImage itself is
+        // not Sendable; CGImage is (immutable Core Foundation type).
         guard let cgImage = image.cgImage else {
             throw Failure.imageDecodeFailed
         }
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.performOCR(on: cgImage)
+        }.value
+    }
+
+    /// Synchronous Vision work — runs on the detached task's background
+    /// thread. Stays a `static` so it doesn't capture self (keeps the
+    /// detached closure free of actor references).
+    private static func performOCR(on cgImage: CGImage) throws -> Result {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -60,13 +69,14 @@ struct OCRService {
         do {
             try handler.perform([request])
         } catch {
-            throw Failure.visionError(error)
+            throw Failure.visionError(error.localizedDescription)
         }
-        let observations = (request.results ?? [])
+        let observations = request.results ?? []
         let lines: [String] = observations.compactMap { obs in
             obs.topCandidates(1).first?.string
         }
-        let text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw Failure.emptyResult }
         return Result(text: text, pageCount: 1)
     }

@@ -177,6 +177,10 @@ private struct ItemRow: View {
 
     @State private var localAmount: String = ""
     @State private var seeded: Bool = false
+    /// Debounce token so per-keystroke edits don't each hit the VM's
+    /// items array. 300ms after the last change we commit the value
+    /// through `onSetAmount`; mid-burst edits cancel the pending task.
+    @State private var debounceTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -226,7 +230,16 @@ private struct ItemRow: View {
                     Capsule(style: .continuous).strokeBorder(Color.Stir.ink100, lineWidth: 1),
                 )
                 .onChange(of: localAmount) { _, new in
-                    onSetAmount(new)
+                    debounceTask?.cancel()
+                    debounceTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(300))
+                        guard !Task.isCancelled else { return }
+                        onSetAmount(new)
+                    }
+                }
+                .onSubmit {
+                    debounceTask?.cancel()
+                    onSetAmount(localAmount)
                 }
         }
         .padding(14)

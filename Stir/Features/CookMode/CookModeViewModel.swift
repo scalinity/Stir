@@ -115,6 +115,7 @@ final class CookModeViewModel {
     private let cookingSessionRepository: CookingSessionRepository
     private let cookTimerRepository: CookTimerRepository
     private let timerService: TimerService
+    private let liveActivityManager: LiveActivityManager
     private let analytics: PostHogClient
     private let sentry: any SentryReporting
     private let entitlements: EntitlementService?
@@ -133,7 +134,7 @@ final class CookModeViewModel {
     let disableCookRealtimeAtEntry: Bool
     /// Closure the root passes in to present the paywall. Avoids
     /// leaking RootCoordinator into the view model's imports.
-    private let presentPaywall: ((PaywallTrigger) -> Void)?
+    private let presentPaywall: ((PaywallTrigger) -> Void)? = nil
     /// Closure the root passes in AFTER VM construction so the VM can
     /// ask for a fresh voice driver when the user reopens voice mode
     /// after a `closeVoiceSession()` teardown. Without this, the user
@@ -143,7 +144,7 @@ final class CookModeViewModel {
     /// Cook Mode entry and then calls `attachVoiceDriver(_:)` to wire
     /// the new instance back into the VM. Nil in tests that stub
     /// `voiceDriver` directly — driver rebuild isn't exercised there.
-    var onRequestNewVoiceSession: (@MainActor () async -> Void)?
+    var onRequestNewVoiceSession: (@MainActor () async -> Void)? = nil
 
     // MARK: - Init
 
@@ -155,6 +156,7 @@ final class CookModeViewModel {
         cookingSessionRepository: CookingSessionRepository? = nil,
         cookTimerRepository: CookTimerRepository? = nil,
         timerService: TimerService? = nil,
+        liveActivityManager: LiveActivityManager? = nil,
         analytics: PostHogClient = .shared,
         sentry: (any SentryReporting)? = nil,
         entitlements: EntitlementService? = nil,
@@ -170,6 +172,7 @@ final class CookModeViewModel {
         self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository()
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository()
         self.timerService = timerService ?? TimerService()
+        self.liveActivityManager = liveActivityManager ?? LiveActivityManager()
         self.analytics = analytics
         self.sentry = sentry ?? SentryReporter.shared
         self.entitlements = entitlements
@@ -305,7 +308,9 @@ final class CookModeViewModel {
             )
             await timerService.requestAuthorizationIfNeeded()
             try await timerService.start(timer, on: session)
+            startLiveActivity(for: timer, step: step)
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
 
             analytics.capture(.timerStarted, properties: [
                 "duration_bucket": bucketForDuration(secs),
@@ -346,7 +351,9 @@ final class CookModeViewModel {
             )
             await timerService.requestAuthorizationIfNeeded()
             try await timerService.start(timer, on: session)
+            startLiveActivity(for: timer, step: step)
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
 
             analytics.capture(.timerStarted, properties: [
                 "duration_bucket": bucketForDuration(seconds),
@@ -360,8 +367,21 @@ final class CookModeViewModel {
 
     func pauseTimer(_ timer: CookTimer) async {
         do {
+            // Capture paused-remaining BEFORE the state flip — once
+            // typedState == .paused, remainingSeconds returns 0 (the
+            // computed prop gates on .running). The Live Activity needs
+            // the time-left at the pause moment for the static display.
+            let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer)
             try await timerService.pause(timer, on: session)
+            if let tid = timer.id, let fire = timer.fireDate {
+                await liveActivityManager.update(
+                    timerId: tid,
+                    fireDate: fire,
+                    pausedRemainingSec: pausedRemaining,
+                )
+            }
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
         } catch {
             Logger.ui.error("pause failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -370,7 +390,18 @@ final class CookModeViewModel {
     func resumeTimer(_ timer: CookTimer) async {
         do {
             try await timerService.resume(timer, on: session)
+            // `fireDate` has shifted forward by the paused duration after
+            // resume (TimerService only shifts `startedAt` on resume). Refresh the
+            // activity with the new fireDate and clear the paused flag.
+            if let tid = timer.id, let fire = timer.fireDate {
+                await liveActivityManager.update(
+                    timerId: tid,
+                    fireDate: fire,
+                    pausedRemainingSec: nil,
+                )
+            }
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
         } catch {
             Logger.ui.error("resume failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -379,7 +410,11 @@ final class CookModeViewModel {
     func cancelTimer(_ timer: CookTimer) async {
         do {
             try await timerService.cancel(timer, on: session)
+            if let tid = timer.id {
+                await liveActivityManager.end(timerId: tid, reason: .cancelled)
+            }
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
         } catch {
             Logger.ui.error("cancel timer failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -390,8 +425,14 @@ final class CookModeViewModel {
     /// completed.
     func reconcileTimersOnForeground() async {
         do {
-            _ = try await timerService.reconcileOnForeground(session: session)
+            let transitioned = try await timerService.reconcileOnForeground(session: session)
+            for timer in transitioned {
+                if let tid = timer.id {
+                    await liveActivityManager.end(timerId: tid, reason: .completed)
+                }
+            }
             activeTimers = cookTimerRepository.timers(for: session)
+            timerStateVersion &+= 1
         } catch {
             Logger.ui.error("timer reconcile failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -443,6 +484,9 @@ final class CookModeViewModel {
         for timer in activeTimers where timer.typedState == .running {
             do {
                 try await timerService.cancel(timer, on: session)
+                if let tid = timer.id {
+                    await liveActivityManager.end(timerId: tid, reason: .cancelled)
+                }
             } catch {
                 Logger.ui.error("exit cancelTimer failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -940,6 +984,45 @@ final class CookModeViewModel {
         case ..<1800: return "15_30m"
         default: return "over_30m"
         }
+    }
+
+    /// Start a Live Activity for a freshly-started CookTimer. Pulls the
+    /// static attributes from the recipe plan + step metadata; the manager
+    /// is responsible for handling "activities disabled" and "already
+    /// active for this timerId" gracefully (both no-op). No-ops on
+    /// timers without an id (shouldn't happen in practice — repos always
+    /// assign `UUID()` at creation — but defensive).
+    private func startLiveActivity(for timer: CookTimer, step: RecipeStep) {
+        guard let tid = timer.id, let fire = timer.fireDate else { return }
+        let title = recipePlan.title?.isEmpty == false ? recipePlan.title! : "Your recipe"
+        let description: String = {
+            if let t = step.title, !t.isEmpty { return t }
+            if let body = step.instructionText, !body.isEmpty {
+                // First-sentence trim so the Lock Screen doesn't wrap a
+                // 4-line step.
+                let firstStop = body.firstIndex(where: { $0 == "." }) ?? body.endIndex
+                return String(body[..<firstStop])
+            }
+            return "Step \(step.stepNumber)"
+        }()
+        liveActivityManager.start(
+            timerId: tid,
+            recipeTitle: title,
+            stepDescription: description,
+            stepNumber: Int(step.stepNumber),
+            totalSteps: totalSteps,
+            fireDate: fire,
+        )
+    }
+
+    /// Compute remaining seconds at the moment of pause. `fireDate` is
+    /// stable across the pause transition (TimerService only shifts
+    /// `startedAt` on resume), so `fireDate.timeIntervalSinceNow`
+    /// captures the instant-of-pause delta regardless of whether the
+    /// caller invokes this before or after `timerService.pause(_:)`.
+    private func pausedRemainingSecondsSnapshot(for timer: CookTimer) -> Int {
+        guard let fire = timer.fireDate else { return 0 }
+        return max(0, Int(fire.timeIntervalSinceNow.rounded()))
     }
 
     #if DEBUG

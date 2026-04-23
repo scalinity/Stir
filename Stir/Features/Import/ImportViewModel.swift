@@ -28,7 +28,7 @@ final class ImportViewModel {
     /// Intentionally NOT Equatable — `RecipeImportResponse.ImportedRecipe`
     /// is a Decodable payload without Equatable conformance. Views pattern-
     /// match on the case; callers that need "is this stage X" use the
-    /// boolean helpers below.
+    /// boolean helpers below or the `kind` accessor for tests.
     enum Stage {
         case idle
         case submitting
@@ -39,7 +39,25 @@ final class ImportViewModel {
         case error(code: String, message: String)
     }
 
+    /// Coarse identifier for tests — associated-value-free variant of
+    /// `Stage`. Production code pattern-matches on `stage` directly.
+    enum StageKind: String, Equatable, CaseIterable {
+        case idle, submitting, review, queued, saving, saved, error
+    }
+
     private(set) var stage: Stage = .idle
+
+    var stageKind: StageKind {
+        switch stage {
+        case .idle: return .idle
+        case .submitting: return .submitting
+        case .review: return .review
+        case .queued: return .queued
+        case .saving: return .saving
+        case .saved: return .saved
+        case .error: return .error
+        }
+    }
 
     var isBusy: Bool {
         switch stage {
@@ -98,7 +116,11 @@ final class ImportViewModel {
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else {
-            stage = .error(code: "VAL-01", message: "That doesn't look like a web address.")
+            await recordClientRejection(
+                source: .url,
+                rawContent: trimmed.isEmpty ? "(empty)" : trimmed,
+                message: "That doesn't look like a web address.",
+            )
             return
         }
         await submit(
@@ -113,7 +135,11 @@ final class ImportViewModel {
     func submitPastedText(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            stage = .error(code: "VAL-01", message: "Paste some recipe text first.")
+            await recordClientRejection(
+                source: .pastedText,
+                rawContent: "(empty)",
+                message: "Paste some recipe text first.",
+            )
             return
         }
         await submit(
@@ -131,10 +157,20 @@ final class ImportViewModel {
         do {
             ocrResult = try await ocrService.recognizeText(in: image)
         } catch let error as OCRService.Failure {
-            stage = .error(code: "IMPORT-01", message: error.errorDescription ?? "OCR failed.")
+            await recordClientRejection(
+                source: .screenshotOCR,
+                rawContent: "(ocr-failed)",
+                message: error.errorDescription ?? "OCR failed.",
+                errorCode: "IMPORT-01",
+            )
             return
         } catch {
-            stage = .error(code: "IMPORT-01", message: error.localizedDescription)
+            await recordClientRejection(
+                source: .screenshotOCR,
+                rawContent: "(ocr-failed)",
+                message: error.localizedDescription,
+                errorCode: "IMPORT-01",
+            )
             return
         }
         await submit(
@@ -144,6 +180,37 @@ final class ImportViewModel {
             sourceURL: nil,
             ocrPageCount: Int16(ocrResult.pageCount),
         )
+    }
+
+    // MARK: - Client-rejected attempt
+
+    /// Persist a failed RecipeImport row for an attempt that never reached
+    /// the backend (empty URL, bad scheme, OCR decode failure). Spec §4.10
+    /// invariant: "every import attempt persists a RecipeImport row".
+    /// errorCode defaults to VAL-01 for input validation rejections;
+    /// OCR-path failures pass IMPORT-01.
+    private func recordClientRejection(
+        source: RecipeImportSource,
+        rawContent: String,
+        message: String,
+        errorCode: String = "VAL-01",
+    ) async {
+        activeSource = source
+        let input = RecipeImportRepository.StartInput(
+            importID: UUID(),
+            source: source,
+            sourceURL: source == .url ? rawContent : nil,
+            ocrPageCount: 0,
+            rawContent: rawContent,
+        )
+        do {
+            let row = try importRepo.start(for: household, input: input)
+            try importRepo.markFailed(row, errorCode: errorCode)
+            activeImportRow = row
+        } catch {
+            Logger.ui.warning("import client-reject audit write failed: \(error.localizedDescription, privacy: .public)")
+        }
+        stage = .error(code: errorCode, message: message)
     }
 
     // MARK: - Shared submit path
@@ -265,8 +332,10 @@ final class ImportViewModel {
     }
 
     /// Persist the parsed recipe as a RecipePlan + RecipeIngredient +
-    /// RecipeStep rows. Caution tags + isOptional flags are deferred
-    /// (v1 import doesn't extract those; Saved detail view can add later).
+    /// RecipeStep rows. Sets `household` so the new plan shows up in
+    /// `CookingSessionRepository.savedMealEntries` (which filters on
+    /// household). Caution tags + isOptional flags are deferred (v1
+    /// import doesn't extract those; Saved detail view can add later).
     private func persistRecipePlan(
         _ recipe: RecipeImportResponse.ImportedRecipe,
         source: RecipeImportSource,
@@ -275,6 +344,7 @@ final class ImportViewModel {
         let plan = RecipePlan(context: ctx)
         let planID = UUID()
         plan.id = planID
+        plan.household = household
         plan.title = recipe.title
         plan.servings = Int16(recipe.servings ?? 2)
         plan.estimatedMinutes = Int16(recipe.estimatedMinutes ?? 30)

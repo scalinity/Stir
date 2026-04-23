@@ -71,6 +71,9 @@ struct RootView: View {
                 Task { await coordinator.refreshEntitlementsOnForeground() }
             }
         }
+        .onOpenURL { url in
+            StirDeepLinkHandler.handle(url)
+        }
     }
 }
 

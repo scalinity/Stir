@@ -196,8 +196,6 @@ targets:
         PRODUCT_NAME: StirWidgets
         DEVELOPMENT_TEAM: 25H5DDPKAC
         CODE_SIGN_STYLE: Automatic
-        INFOPLIST_FILE: Extensions/StirWidgets/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Extensions/StirWidgets/StirWidgets.entitlements
         SKIP_INSTALL: YES
         GENERATE_INFOPLIST_FILE: NO
         # Must match parent Stir app. Xcode warns otherwise.

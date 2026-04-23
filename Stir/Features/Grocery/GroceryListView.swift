@@ -16,7 +16,6 @@
 //   - Primary CTA bottom bar "Export to Reminders" (ember)
 //   - Secondary bar state on Reminders-denied: "Copy list" / retry
 
-import CoreData
 import SwiftUI
 
 struct GroceryListView: View {
@@ -175,18 +174,15 @@ private struct AisleSection: View {
 }
 
 private struct AisleRow: View {
-    @ObservedObject private var itemObserver: GroceryItemObserver
+    /// Core Data's NSManagedObject conforms to ObservableObject; SwiftUI
+    /// picks up objectWillChange via KVO automatically, so a direct
+    /// @ObservedObject binding redraws on every persisted mutation —
+    /// no custom notification-center shim needed.
+    @ObservedObject var item: GroceryItem
     let recipeTitle: String
     let onToggle: () -> Void
 
-    init(item: GroceryItem, recipeTitle: String, onToggle: @escaping () -> Void) {
-        self._itemObserver = ObservedObject(wrappedValue: GroceryItemObserver(item: item))
-        self.recipeTitle = recipeTitle
-        self.onToggle = onToggle
-    }
-
     var body: some View {
-        let item = itemObserver.item
         HStack(spacing: 10) {
             Button(action: onToggle) {
                 ZStack {
@@ -232,34 +228,6 @@ private struct AisleRow: View {
             return name
         }
         return "\(name), \(qty)"
-    }
-}
-
-/// NSManagedObject's `objectWillChange` doesn't fire on attribute
-/// mutation through code paths that don't go through a processPendingChanges
-/// tick in the exact moment SwiftUI wants to redraw. Wrapping with
-/// @ObservedObject on a tiny shim gets us a reliable redraw on
-/// isChecked toggles.
-@MainActor
-private final class GroceryItemObserver: ObservableObject {
-    let item: GroceryItem
-    private var token: NSObjectProtocol?
-
-    init(item: GroceryItem) {
-        self.item = item
-        token = NotificationCenter.default.addObserver(
-            forName: .NSManagedObjectContextObjectsDidChange,
-            object: item.managedObjectContext,
-            queue: .main,
-        ) { [weak self] note in
-            guard let self, let updated = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject>,
-                  updated.contains(self.item) else { return }
-            Task { @MainActor in self.objectWillChange.send() }
-        }
-    }
-
-    deinit {
-        if let token { NotificationCenter.default.removeObserver(token) }
     }
 }
 
