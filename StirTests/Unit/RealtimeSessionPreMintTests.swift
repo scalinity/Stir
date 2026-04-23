@@ -51,6 +51,13 @@ final class RealtimeSessionPreMintTests: XCTestCase {
             .createSession(on: household, for: recipePlan, entryPoint: .solve)
     }
 
+    override func tearDown() async throws {
+        // Clear any handler set by the seam integration test (P1-P.5).
+        // Lifecycle tests don't set it, so this is a no-op for them.
+        MockURLProtocol.reset()
+        try await super.tearDown()
+    }
+
     // MARK: - P1-P.1 — close-before-consume
 
     /// The close-before-consume invariant: when `session.close()` cancels
@@ -377,6 +384,92 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         )
     }
 
+    // MARK: - P1-P.5 — seam integration (prewarm → AIDispatch → urlSession)
+
+    /// Verifies `kickOffPreMintIfBudgetAllows` reaches the production
+    /// `AIDispatch.realtimeSession()` call path through the injected
+    /// urlSession. Tests 1-4 pin the consumer's state machine on
+    /// synthetic tasks — they don't catch a refactor that silently
+    /// routes production around the seam. This test catches that.
+    ///
+    /// Pins three things, nothing more:
+    ///   1. HTTP request is issued through the injected urlSession —
+    ///      MockURLProtocol handler fires and its URL/method assertions
+    ///      confirm the prewarm hit the realtime-session endpoint.
+    ///   2. Response from the urlSession flows into pendingPreMintTask
+    ///      synchronously after prewarm returns (slot populated).
+    ///   3. The task in the slot resolves to the response the mock
+    ///      returned (field-level sessionID match — same pattern as
+    ///      tests 3 and 5).
+    ///
+    /// Does NOT pin: request body correctness, retry behavior, timeout
+    /// handling, auth header shape — those are AIDispatch /
+    /// SupabaseSessionClient contracts with their own tests. Seam
+    /// integration only verifies the seam connects.
+    func test_prewarmPreMintTask_setsPendingTask_viaRealAiDispatchSeam() async throws {
+        let session = makeDriverWithMockURLProtocol()
+        let stubSessionID = UUID().uuidString
+
+        MockURLProtocol.handler = { request in
+            // Pin (1) sub-assertion: prewarm must POST to the
+            // realtime-session endpoint. Request body correctness is
+            // AIDispatch's contract, not pinned here.
+            XCTAssertEqual(
+                request.url?.path,
+                "/functions/v1/realtime-session",
+                "prewarm must POST to the realtime-session endpoint",
+            )
+            XCTAssertEqual(request.httpMethod, "POST", "prewarm must use POST")
+
+            let body = """
+            {
+                "auth_token": "auth_tokens/seam-test",
+                "expires_at": "2027-01-01T00:00:00Z",
+                "session_id": "\(stubSessionID)",
+                "ws_url": "wss://test.invalid",
+                "prompt_version": "1.0.0",
+                "setup_frame_json": "{\\"setup\\":{}}"
+            }
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["content-type": "application/json"],
+            )!
+            return (response, body)
+        }
+
+        // Act: invoke prewarm. Synchronously stores a Task in the slot;
+        // the Task begins the HTTP call in the background.
+        session._testKickOffPreMintIfBudgetAllows(currentTurn: 3)
+
+        // Pin (2): slot is populated immediately — prewarm stored a task.
+        XCTAssertTrue(
+            session._testPendingPreMintIsSet,
+            "prewarm must populate pendingPreMintTask",
+        )
+
+        // Consume and await the task through the real AIDispatch path.
+        let task = try XCTUnwrap(
+            session._testConsumePreMintedTaskIfFresh(),
+            "slot must hold a task after prewarm",
+        )
+        let response = try await task.value
+
+        // Pin (3): response the mock returned flows through to the
+        // caller unchanged. If the handler was never invoked, the
+        // response would fail to decode and `task.value` would throw
+        // before reaching this line — so a successful sessionID match
+        // here also implicitly proves pin (1)'s URL/method assertions
+        // fired and the handler ran.
+        XCTAssertEqual(
+            response.sessionID,
+            stubSessionID,
+            "seam must deliver the mocked response unchanged",
+        )
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
@@ -396,6 +489,42 @@ final class RealtimeSessionPreMintTests: XCTestCase {
             config: config,
             keychain: MockKeychain(),
             urlSession: Self.failFastSession(),
+            sentry: NoOpSentryReporter(),
+        )
+        let aiDispatch = AIDispatch(session: sessionClient, config: config)
+        let mint = RealtimeSessionResponse(
+            authToken: "auth_tokens/test",
+            expiresAt: "2027-01-01T00:00:00Z",
+            sessionID: UUID().uuidString,
+            wsURL: "wss://test.invalid",
+            promptVersion: "1.0.0",
+            setupFrameJSON: "{\"setup\":{}}",
+        )
+        return RealtimeSession(
+            testingOnlyMintResponse: mint,
+            aiDispatch: aiDispatch,
+            voiceTurnRepository: VoiceTurnRepository(controller: controller),
+            cookingSession: cookingSession,
+        )
+    }
+
+    /// Builds a `RealtimeSession` routed through a `MockURLProtocol`-
+    /// backed URLSession. Used by the seam integration test (P1-P.5)
+    /// to script the mint endpoint's HTTP response. Sibling to
+    /// `makeDriver` — same constructor chain, only the URLSession
+    /// differs. Set `MockURLProtocol.handler` before invoking a method
+    /// that triggers the mint path; remember to reset in tearDown (the
+    /// class's tearDown handles this).
+    private func makeDriverWithMockURLProtocol() -> RealtimeSession {
+        let config = AppConfig(
+            supabase: AppConfig.Supabase(url: URL(string: "https://test.invalid")!, anonKey: "x"),
+            posthog: nil, sentry: nil, revenueCat: nil,
+            build: "1.0.0 (1)", osVersion: "17.5",
+        )
+        let sessionClient = SupabaseSessionClient(
+            config: config,
+            keychain: MockKeychain(),
+            urlSession: MockURLProtocol.stubSession(),
             sentry: NoOpSentryReporter(),
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
