@@ -41,6 +41,7 @@ struct SettingsRootView: View {
             if isTrialActive {
                 trialReminderSection
             }
+            notificationsSection
             householdSection
             syncSection
             aboutSection
@@ -276,6 +277,16 @@ struct SettingsRootView: View {
 
     private var isTrialActive: Bool {
         entitlements.billingState == .trial && entitlements.expiresAt != nil
+    }
+
+    // MARK: - Notifications
+
+    private var notificationsSection: some View {
+        Section {
+            NavigationLink(destination: NotificationPrefsView()) {
+                Label("Notifications", systemImage: "bell")
+            }
+        }
     }
 
     // MARK: - Household
