@@ -261,6 +261,7 @@
 		F6326373ED0BD2EF6E3A3D82 /* CurrentHouseholdStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */; };
 		F751CF25A5645B4EB4950CE3 /* HouseholdPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD287009FA0BEF2EC99BC52 /* HouseholdPreferencesView.swift */; };
 		F83A18A41686CFEB6FBECC7D /* RealtimeSessionRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E386921C0E68945B99EF37F8 /* RealtimeSessionRecoveryTests.swift */; };
+		7B5F3A9D2E4C61F8A0913B72 /* RealtimeSessionPreMintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B82C4E6A9D1F3075E4AC2B50 /* RealtimeSessionPreMintTests.swift */; };
 		F8AE79D8A6D222663EEB7FED /* FitLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB058DE954E7448BAAAC88E /* FitLabel.swift */; };
 		F908AA9F63C6323E9F8EE678 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80734F0D80B957C73E9B3AEB /* Colors.swift */; };
 		FA5510AC37C53EFB051DD0E9 /* SharedTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A126ED8CE06FC62D54163207 /* SharedTier.swift */; };
@@ -508,6 +509,7 @@
 		E1C2668CED3E5BC216628D9D /* DishPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DishPreviewView.swift; sourceTree = "<group>"; };
 		E3338AB1A72A44CB0F1EA9C1 /* SubstitutionSheetViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetViewModelTests.swift; sourceTree = "<group>"; };
 		E386921C0E68945B99EF37F8 /* RealtimeSessionRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionRecoveryTests.swift; sourceTree = "<group>"; };
+		B82C4E6A9D1F3075E4AC2B50 /* RealtimeSessionPreMintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionPreMintTests.swift; sourceTree = "<group>"; };
 		E559382264F786E632B90E55 /* StirShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StirShareExtension.entitlements; sourceTree = "<group>"; };
 		E68A2A99E08B3E6DF9A142D3 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryButton.swift; sourceTree = "<group>"; };
@@ -631,6 +633,7 @@
 				EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */,
 				44F858F8920DDE3FF02BC6EA /* RealtimeSessionIdentityTests.swift */,
 				E386921C0E68945B99EF37F8 /* RealtimeSessionRecoveryTests.swift */,
+				B82C4E6A9D1F3075E4AC2B50 /* RealtimeSessionPreMintTests.swift */,
 				06E0CF21FEE1210F2C2C9B15 /* RealtimeSessionReportingTests.swift */,
 				AA6FB3DA4A4B4110A31C28F2 /* RealtimeSessionRequestDTOTests.swift */,
 				94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */,
@@ -1419,6 +1422,7 @@
 				56E60FF0F19911293746A834 /* Radius.swift in Sources */,
 				C520B60C0D42AF692D9EF764 /* RealtimeSessionIdentityTests.swift in Sources */,
 				F83A18A41686CFEB6FBECC7D /* RealtimeSessionRecoveryTests.swift in Sources */,
+				7B5F3A9D2E4C61F8A0913B72 /* RealtimeSessionPreMintTests.swift in Sources */,
 				CF71E2183F5667FFBD4A84D6 /* RealtimeSessionReportingTests.swift in Sources */,
 				F3B238EEEA94C87BB96575E4 /* RealtimeSessionRequestDTOTests.swift in Sources */,
 				8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */,
