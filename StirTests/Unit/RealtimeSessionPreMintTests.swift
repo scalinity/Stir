@@ -302,6 +302,81 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         }
     }
 
+    // MARK: - P1-P.4 — in-flight-await (Behavior A contract)
+
+    /// The in-flight case: consume is called while the pre-mint task is
+    /// still running. Consumer returns the Task regardless of completion
+    /// state (Behavior A — the consumer does NOT inspect task state,
+    /// only slot occupancy and age); the defer clears the slot
+    /// atomically with the return even though the task hasn't resolved
+    /// yet; the caller's subsequent `await task.value` suspends until
+    /// the task resolves naturally.
+    ///
+    /// Pins Behavior A. A future refactor that adds a completion check
+    /// and returns nil for in-flight tasks (Behavior B — skip in-flight,
+    /// re-mint) would break this test — correctly, because that's a
+    /// contract change, not a refactor.
+    ///
+    /// Uses `AsyncThrowingStream.makeStream()` to expose the task's
+    /// resume-control synchronously. Chosen over the continuation-box +
+    /// `Task.yield` loop because the stream's continuation is returned
+    /// directly from `makeStream()` — no race between "task body starts"
+    /// and "continuation captured." The stream buffers yields that
+    /// happen before iteration reaches them, so ordering of
+    /// `yield` / `finish` / task start is irrelevant.
+    func test_preMintTask_inFlightAwait_completesOnRefreshResult() async throws {
+        let session = makeDriver()
+        let stubSessionID = UUID().uuidString
+
+        let (stream, continuation) = AsyncThrowingStream<RealtimeSessionResponse, Error>.makeStream()
+        let inFlight = Task<RealtimeSessionResponse, Error> {
+            for try await value in stream {
+                return value
+            }
+            throw CancellationError()
+        }
+
+        session._testSetPreMintTask(inFlight, startedAt: Date())
+
+        // Act: consume while the task is still iterating the stream (no
+        // value yielded yet). Consumer must return the task, NOT nil.
+        let consumed = session._testConsumePreMintedTaskIfFresh()
+        let task = try XCTUnwrap(consumed, "in-flight consume must return the task")
+
+        // Assert defer cleared the slot atomically with return, even
+        // though the task hasn't resolved.
+        XCTAssertFalse(
+            session._testPendingPreMintIsSet,
+            "defer must clear slot even for still-running task",
+        )
+        XCTAssertNil(
+            session._testPendingPreMintStartedAt,
+            "defer must clear timestamp even for still-running task",
+        )
+
+        // Resume the task: yield the stub response + finish the stream.
+        // Task body's `for try await` loop returns the first yielded
+        // value; `continuation.finish()` closes the stream so the
+        // implicit `throw CancellationError()` path isn't taken.
+        continuation.yield(RealtimeSessionResponse(
+            authToken: "auth_tokens/test-in-flight",
+            expiresAt: "2027-01-01T00:00:00Z",
+            sessionID: stubSessionID,
+            wsURL: "wss://test.invalid",
+            promptVersion: "1.0.0",
+            setupFrameJSON: "{\"setup\":{}}",
+        ))
+        continuation.finish()
+
+        // Caller awaits task.value — resolves to the yielded response.
+        let result = try await task.value
+        XCTAssertEqual(
+            result.sessionID,
+            stubSessionID,
+            "in-flight task resolves to the response the test yielded",
+        )
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
