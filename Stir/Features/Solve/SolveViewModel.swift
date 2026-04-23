@@ -65,19 +65,32 @@ final class SolveViewModel {
     private(set) var ingredientsForSolve: [DinnerSolveRequest.IngredientLite] = []
     private(set) var parseIDForSolve: UUID?
 
-    private let aiDispatch: AIDispatch
+    /// Intentionally internal — DishPreviewView needs an AIDispatch
+    /// handle to instantiate GroceryViewModel for the "Add to grocery"
+    /// action. The SolveVM is the single AIDispatch owner in the Solve
+    /// feature; exposing it here avoids threading a separate AIDispatch
+    /// through every DishPreviewView caller.
+    let aiDispatch: AIDispatch
     private let solveRepo: SolveRepository
     private let householdStore: CurrentHouseholdStore
+    /// Paywall presentation hook injected at construction by ScanFlowRoot.
+    /// Invoked on RATE-01 so the Dinner-Solve-quota-exhausted user sees
+    /// the paywall instead of a silent error screen — and so
+    /// `paywall_viewed.trigger = dinner_solve_quota_exhausted` actually
+    /// fires (was missing from 48h probe; spec §15 declared but unwired).
+    private let presentPaywall: ((PaywallTrigger) -> Void)?
     private var streamTask: Task<Void, Never>?
 
     init(
         aiDispatch: AIDispatch,
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
+        presentPaywall: ((PaywallTrigger) -> Void)? = nil,
     ) {
         self.aiDispatch = aiDispatch
         self.solveRepo = solveRepo
         self.householdStore = householdStore
+        self.presentPaywall = presentPaywall
     }
 
     // MARK: - Flow entry
@@ -133,6 +146,12 @@ final class SolveViewModel {
             } catch StirError.rateLimited(_, let message) {
                 self.phase = .error(message: message, code: "RATE-01")
                 Self.emitSolveFailed(code: "RATE-01")
+                // Free users out of Dinner Solves see the paywall instead
+                // of a dead-end error. Premium+ on RATE-01 = tier bump or
+                // Pro upsell (see PaywallTrigger.dinnerSolveQuotaExhausted
+                // subhead routing). Paywall emits paywall_viewed with
+                // trigger=dinner_solve_quota_exhausted (spec §15).
+                self.presentPaywall?(.dinnerSolveQuotaExhausted)
             } catch StirError.entitlementRequired(let code, let message) {
                 self.phase = .error(message: message, code: code.rawValue)
                 Self.emitSolveFailed(code: code.rawValue)

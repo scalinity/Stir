@@ -17,6 +17,7 @@ struct TonightHomeView: View {
     @State private var toastMessage: String?
     @State private var showScanFlow = false
     @State private var showSavedMeals = false
+    @State private var showImport = false
     @State private var resumableSession: CookingSession?
     @State private var recentCompleted: [CookingSession] = []
 
@@ -44,12 +45,21 @@ struct TonightHomeView: View {
             }
             .overlay(alignment: .top) { toastOverlay }
             .fullScreenCover(isPresented: $showScanFlow) {
+                // Match CookModeRoot.swift pattern: strong-capture the
+                // coordinator. RootCoordinator is owned by RootView for
+                // the app lifetime, so the `[weak]` was theatre — and
+                // inconsistency across paywall wire-ups makes the
+                // pattern harder to grep.
+                let capturedCoordinator = coordinator
                 ScanFlowRoot(
                     aiDispatch: coordinator.aiDispatch,
                     pantryRepo: coordinator.pantryItemRepository,
                     solveRepo: coordinator.solveRepository,
                     householdStore: coordinator.household,
                     entitlements: entitlements,
+                    presentPaywall: { trigger in
+                        capturedCoordinator.presentPaywall(trigger)
+                    },
                 )
             }
             .navigationDestination(isPresented: $showSavedMeals) {
@@ -57,6 +67,22 @@ struct TonightHomeView: View {
                     SavedMealsView(
                         household: household,
                         aiDispatch: coordinator.aiDispatch,
+                    )
+                }
+            }
+            .fullScreenCover(isPresented: $showImport) {
+                if let household = coordinator.household.profile {
+                    let vm = ImportViewModel(
+                        household: household,
+                        aiDispatch: coordinator.aiDispatch,
+                    )
+                    ImportRoot(
+                        viewModel: vm,
+                        onDismiss: { showImport = false },
+                        onCompleted: { _ in
+                            showImport = false
+                            Task { await refreshCookingState() }
+                        },
                     )
                 }
             }
@@ -139,14 +165,18 @@ struct TonightHomeView: View {
     private var primaryActions: some View {
         VStack(spacing: 12) {
             scanKitchenButton
-            primaryButton(
-                systemImage: "square.and.arrow.down.on.square",
-                title: "Import Recipe",
-                subtitle: "Paste a URL or share from Safari to cook someone else's recipe.",
-                tint: .purple,
-                enabled: false,
-                comingSoon: "Recipe import lands with Premium features (step 7).",
-            )
+            Button {
+                showImport = true
+            } label: {
+                buttonRow(
+                    systemImage: "square.and.arrow.down.on.square",
+                    title: "Import Recipe",
+                    subtitle: "Paste a URL, pick a screenshot, or paste the text of any recipe.",
+                    tint: .purple,
+                    enabled: true,
+                )
+            }
+            .buttonStyle(.plain)
             Button {
                 showSavedMeals = true
             } label: {

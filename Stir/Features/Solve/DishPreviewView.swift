@@ -24,6 +24,7 @@ struct DishPreviewView: View {
 
     @State private var hasCapturedSelection = false
     @State private var localFavorite: Bool = false
+    @State private var showGrocery: Bool = false
     /// Surfaces a toast when "Start Cooking" can't resolve the
     /// persisted RecipePlan or current household — a rare CloudKit
     /// race or upsert failure. Without this the button was a silent
@@ -49,17 +50,41 @@ struct DishPreviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    handleFavoriteTap()
-                } label: {
-                    // Favorite star uses `ember600` on active, `ink300` on
-                    // inactive — the warm-palette counterpart to SwiftUI's
-                    // default yellow. Stays on-brand across the paywall-
-                    // trigger surfaces (DishPreview, Saved, Cook).
-                    Image(systemName: localFavorite ? "star.fill" : "star")
-                        .foregroundStyle(localFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
+                HStack(spacing: 14) {
+                    Button {
+                        presentGrocery()
+                    } label: {
+                        Image(systemName: "cart")
+                            .foregroundStyle(Color.Stir.ink700)
+                    }
+                    .accessibilityLabel("Add to grocery")
+
+                    Button {
+                        handleFavoriteTap()
+                    } label: {
+                        // Favorite star uses `ember600` on active, `ink300` on
+                        // inactive — the warm-palette counterpart to SwiftUI's
+                        // default yellow. Stays on-brand across the paywall-
+                        // trigger surfaces (DishPreview, Saved, Cook).
+                        Image(systemName: localFavorite ? "star.fill" : "star")
+                            .foregroundStyle(localFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
+                    }
+                    .accessibilityLabel(localFavorite ? "Remove from favorites" : "Save to favorites")
                 }
-                .accessibilityLabel(localFavorite ? "Remove from favorites" : "Save to favorites")
+            }
+        }
+        .fullScreenCover(isPresented: $showGrocery) {
+            if let plan = viewModel.persistedRecipePlan(for: dish),
+               let household = viewModel.currentHousehold {
+                let vm = GroceryViewModel(
+                    recipePlan: plan,
+                    household: household,
+                    aiDispatch: viewModel.aiDispatch,
+                )
+                GroceryListView(
+                    viewModel: vm,
+                    onDismiss: { showGrocery = false },
+                )
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -211,6 +236,25 @@ struct DishPreviewView: View {
                 ),
             )
         }
+    }
+
+    /// Open the Grocery flow for this dish. Nil-guards on persisted
+    /// plan + household (CloudKit nullify race) mirror `startCookingBar`.
+    private func presentGrocery() {
+        guard viewModel.persistedRecipePlan(for: dish) != nil,
+              viewModel.currentHousehold != nil
+        else {
+            Logger.ui.error(
+                "dish_preview_grocery_missing_plan_or_household rank=\(dish.rank, privacy: .public)",
+            )
+            errorToast = StirToastPayload(
+                id: UUID(),
+                message: "Couldn't build a grocery list for this one. Try another dish.",
+                kind: .failed,
+            )
+            return
+        }
+        showGrocery = true
     }
 
     private var startCookingBar: some View {

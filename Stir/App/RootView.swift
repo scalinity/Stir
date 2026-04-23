@@ -67,8 +67,15 @@ struct RootView: View {
                 }
         }
         .onChange(of: scenePhase) { _, new in
-            if new == .active, coordinator.phase == .ready || coordinator.phase == .offlineFallback {
-                Task { await coordinator.refreshEntitlementsOnForeground() }
+            if new == .active {
+                // Active-session foregrounds clear the pending 7-day
+                // reactivation nudge — the user literally just opened
+                // Stir, so the "haven't cooked in a week" message would
+                // land as spam.
+                ReactivationScheduler.shared.cancel()
+                if coordinator.phase == .ready || coordinator.phase == .offlineFallback {
+                    Task { await coordinator.refreshEntitlementsOnForeground() }
+                }
             }
         }
         .onOpenURL { url in

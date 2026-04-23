@@ -47,6 +47,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
     ) {
         emitTelemetryIfTrialReminder(notification)
+        emitTelemetryIfReactivation(notification)
         completionHandler([.banner, .sound])
     }
 
@@ -61,6 +62,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping () -> Void,
     ) {
         emitTelemetryIfTrialReminder(response.notification)
+        emitTelemetryIfReactivation(response.notification)
         completionHandler()
     }
 
@@ -82,6 +84,27 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         telemetry.capture(
             .trialReminderSent,
             properties: BillingTelemetryProperties.trialReminderSent(daysRemaining: days),
+        )
+    }
+
+    /// Emit `reactivation_notification_opened` with `trigger_kind` when the
+    /// 7-day cook-reminder fires (delivery OR tap-through). Dedupe on the
+    /// shared `emittedReminderIDs` set since reactivation uses its own
+    /// singleton identifier (`stir.reactivation.cook.7d`) so same-ID
+    /// double-invocation can't fire the event twice.
+    private func emitTelemetryIfReactivation(_ notification: UNNotification) {
+        let userInfo = notification.request.content.userInfo
+        guard let triggerKind = ReactivationNotification.triggerKind(from: userInfo) else { return }
+
+        let id = notification.request.identifier
+        emitLock.lock()
+        let shouldEmit = emittedReminderIDs.insert(id).inserted
+        emitLock.unlock()
+        guard shouldEmit else { return }
+
+        telemetry.capture(
+            .reactivationNotificationOpened,
+            properties: ["trigger_kind": triggerKind],
         )
     }
 }

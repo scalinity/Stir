@@ -191,6 +191,10 @@ final class GroceryViewModel {
                     destination: .reminders,
                 ),
             )
+            // Donate the intent so Siri starts suggesting "Add to
+            // grocery" contextually for repeat users. 24h cooldown is
+            // honored inside the donation service.
+            Task { await IntentDonationService().donateAddToGroceryIfEligible() }
             return true
         } catch let error as GroceryRemindersService.Failure {
             Logger.ui.warning("grocery reminders export: \(error.localizedDescription, privacy: .public)")
