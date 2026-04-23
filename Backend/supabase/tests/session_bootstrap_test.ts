@@ -36,8 +36,9 @@ Deno.test('session-bootstrap: happy path install-only', async () => {
   assertEquals(byKey.get('voice_cook_session')?.cap, 0);
   assertEquals(byKey.get('recipe_import')?.cap, 2);
 
-  // Every server flag seeded should appear.
-  assertEquals(res.feature_flags.length, 8);
+  // Every server flag seeded should appear. Count tracks every
+  // ON CONFLICT-idempotent seed migration; bump when a new seed lands.
+  assertEquals(res.feature_flags.length, 9);
   assertExists(res.session_jwt);
 });
 
