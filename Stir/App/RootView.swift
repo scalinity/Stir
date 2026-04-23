@@ -36,7 +36,7 @@ struct RootView: View {
 
             case .offlineFallback:
                 VStack(spacing: 0) {
-                    OfflineBanner()
+                    OfflineBanner(onRetry: coordinator.retry)
                     TonightHomeView(coordinator: coordinator)
                 }
             }
@@ -131,18 +131,89 @@ struct RootView: View {
     }
 }
 
+/// Persistent top banner for coordinator.phase == .offlineFallback.
+///
+/// Mockup 01 §"Offline fallback" — info-flavor banner (paper.200 bg,
+/// ink.700 body, 44pt min height, 1pt ink.100 bottom border). Split
+/// text surfaces "You're offline." as bold hook + "Saved meals and the
+/// last scan still work." as reassurance. Inline Retry button re-runs
+/// `coordinator.retry()` which re-probes reachability via a fresh
+/// bootstrap attempt.
+///
+/// Note on copy vs spec: Spec §6 SYNC-01 message reads "iCloud Sync
+/// isn't available. Stir will work on this device only for now." —
+/// that wording targets the iCloud-specific failure mode. The mockup's
+/// "You're offline. Saved meals and the last scan still work." targets
+/// the general network-offline fallback, which is what the
+/// `.offlineFallback` coordinator phase represents today. Kept the
+/// mockup copy here; flagged in the turn-1 output contract that the
+/// `.offlineFallback` phase currently covers both network and iCloud
+/// offline in a single branch — a future task may split them per spec
+/// §6 semantics.
 private struct OfflineBanner: View {
+    let onRetry: () -> Void
+
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(.white)
-            Text("Offline mode — using last known plan state. Pull to refresh.")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white)
-            Spacer()
+        HStack(alignment: .center, spacing: CGFloat.Stir.space3 - 2) { // 10pt
+            Image.Stir.syncOff
+                .font(.system(size: CGFloat.Stir.iconSm))
+                .foregroundStyle(Color.Stir.ink700)
+                .accessibilityHidden(true)
+
+            splitText
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onRetry) {
+                Text("Retry")
+                    .stirFont(.labelMd)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ember600)
+                    .padding(.horizontal, CGFloat.Stir.space1)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Retry connection")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.orange)
+        .padding(.leading, CGFloat.Stir.space4)
+        .padding(.trailing, CGFloat.Stir.space2)
+        .frame(minHeight: 44)
+        .background(
+            Color.Stir.paper200,
+            ignoresSafeAreaEdges: [],
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.Stir.divider)
+                .frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
     }
+
+    private var splitText: some View {
+        (Text("You're offline.")
+            .foregroundStyle(Color.Stir.ink900)
+            .fontWeight(.semibold)
+            + Text(" Saved meals and the last scan still work.")
+            .foregroundStyle(Color.Stir.ink700))
+            .stirFont(.bodySm)
+    }
+}
+
+#Preview("OfflineBanner — light") {
+    VStack(spacing: 0) {
+        OfflineBanner(onRetry: {})
+        Rectangle().fill(Color.Stir.paper50).frame(height: 200)
+    }
+    .frame(width: 390, height: 260)
+    .preferredColorScheme(.light)
+}
+
+#Preview("OfflineBanner — dark") {
+    VStack(spacing: 0) {
+        OfflineBanner(onRetry: {})
+        Rectangle().fill(Color.Stir.paper50).frame(height: 200)
+    }
+    .frame(width: 390, height: 260)
+    .preferredColorScheme(.dark)
 }
