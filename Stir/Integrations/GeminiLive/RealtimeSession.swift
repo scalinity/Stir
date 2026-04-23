@@ -797,6 +797,70 @@ final class RealtimeSession: VoiceSessionDriver {
     var _testLastToolCallName: String? {
         lastToolCallName
     }
+
+    /// P1-P test hook: inject a task + timestamp into the pre-mint slot.
+    /// Drives `consumePreMintedTaskIfFresh` into each of its four lifecycle
+    /// cases deterministically (close-before-consume, ready-before-refresh,
+    /// 45 s staleness, in-flight-await) without waiting on a real mint
+    /// HTTP round trip. Passing `nil` for `task` clears the slot; passing
+    /// `nil` for `startedAt` is treated as infinitely stale by the consumer
+    /// via the `.map { ... } ?? .infinity` branch in
+    /// `consumePreMintedTaskIfFresh`.
+    func _testSetPreMintTask(
+        _ task: Task<RealtimeSessionResponse, Error>?,
+        startedAt: Date?,
+    ) {
+        pendingPreMintTask = task
+        pendingPreMintStartedAt = startedAt
+    }
+
+    /// P1-P test hook: non-destructive peek — true iff `pendingPreMintTask`
+    /// is currently set. Does NOT trigger the consumer's defer-clear.
+    /// Used by the seam-integration test to assert that
+    /// `kickOffPreMintIfBudgetAllows` put something in the slot.
+    var _testPendingPreMintIsSet: Bool {
+        pendingPreMintTask != nil
+    }
+
+    /// P1-P test hook: non-destructive peek at `pendingPreMintStartedAt`.
+    /// Returns nil after a stale-branch consumption cleared the slot;
+    /// lifecycle tests use this to assert the consumer's defer ran.
+    var _testPendingPreMintStartedAt: Date? {
+        pendingPreMintStartedAt
+    }
+
+    /// P1-P test hook: test-accessible wrapper for the private consumer.
+    /// Returns the Task if fresh, nil otherwise; clears state via the
+    /// consumer's defer regardless of outcome. Same contract as the
+    /// production call site in `refreshSession` (line ~1339).
+    func _testConsumePreMintedTaskIfFresh() -> Task<RealtimeSessionResponse, Error>? {
+        consumePreMintedTaskIfFresh()
+    }
+
+    /// P1-P test hook: synchronous wrapper for the private prewarm.
+    /// Production trigger is deep in the finalize-turn path (fires only
+    /// at `turnsSinceRefresh == refreshAtTurnCount - 1`, ~3 turns in);
+    /// driving that naturally in a test would require a full multi-turn
+    /// setup. The seam-integration test uses this hook to invoke the
+    /// prewarm directly after injecting a MockURLProtocol-backed
+    /// `AIDispatch` via the normal constructor, then asserts
+    /// `_testPendingPreMintIsSet == true` to pin the seam.
+    func _testKickOffPreMintIfBudgetAllows(currentTurn: Int) {
+        kickOffPreMintIfBudgetAllows(currentTurn: currentTurn)
+    }
+
+    /// P1-P test hook: run the pre-mint teardown path exactly as
+    /// `session.close()` does, without running the rest of close's
+    /// 200-line teardown (continuations, transport, audio pipeline,
+    /// etc.). Exercises `cancelAndClearPreMintSlot()` — the extracted
+    /// symbol both the production `close()` and this hook call. A
+    /// future refactor that moves the cancel or clear out of the
+    /// extracted method is caught by P1-P test 1; a future refactor
+    /// that removes the call from `close()` is caught by the paired
+    /// wiring test (close-invokes-extraction).
+    func _testTearDownPreMintSlot() {
+        cancelAndClearPreMintSlot()
+    }
     #endif
 
     // MARK: - Errors
@@ -1158,13 +1222,10 @@ final class RealtimeSession: VoiceSessionDriver {
         // minted ephemeral token we're never going to use now that the
         // session is closing — leaving it running wastes backend work
         // and (harmlessly) holds a Gemini auth_tokens resource until the
-        // token expires. Cleared here so the defer-less path doesn't
-        // leak the reference.
-        if let preMint = pendingPreMintTask {
-            preMint.cancel()
-            pendingPreMintTask = nil
-            pendingPreMintStartedAt = nil
-        }
+        // token expires. Extracted to `cancelAndClearPreMintSlot()` so
+        // the P1-P `_testTearDownPreMintSlot` hook exercises the same
+        // production symbol, not a test-only copy.
+        cancelAndClearPreMintSlot()
         // Cancel the stuck-modelSpeaking watchdog. If the session is
         // closing, we don't want a late fire to synthesize turnComplete
         // on a dead session (would no-op due to the state guard inside
@@ -1676,6 +1737,21 @@ final class RealtimeSession: VoiceSessionDriver {
         #if DEBUG
         VoiceSessionLog.log("refresh.premint_started", ["turn": currentTurn])
         #endif
+    }
+
+    /// Cancel any in-flight pre-mint Task and clear the slot. Extracted
+    /// from `close()` so the P1-P `_testTearDownPreMintSlot` hook can
+    /// exercise the exact production teardown — not a test-private copy.
+    /// Call sites: `close()` + `_testTearDownPreMintSlot`. A future
+    /// refactor that needs to add or change the teardown of the pre-mint
+    /// slot must edit this one method; both call sites inherit the
+    /// change.
+    private func cancelAndClearPreMintSlot() {
+        if let preMint = pendingPreMintTask {
+            preMint.cancel()
+            pendingPreMintTask = nil
+            pendingPreMintStartedAt = nil
+        }
     }
 
     /// Consume the pending pre-mint if it exists and is still fresh.
