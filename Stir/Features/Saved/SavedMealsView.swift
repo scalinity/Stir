@@ -31,6 +31,17 @@ struct SavedMealsView: View {
     @State private var cookAgainPlan: RecipePlan?
     @State private var errorMessage: String?
     @State private var showFavoritesOnly = false
+    @State private var searchQuery: String = ""
+    @State private var sortOption: SortOption = .lastCooked
+
+    /// Sort orderings for the Saved list. Mirrors the mockup 10 picker
+    /// (last cooked desc is default; rating desc surfaces best hits;
+    /// alphabetical is the "I know what I'm looking for" fallback).
+    enum SortOption: String, Hashable, CaseIterable, Sendable {
+        case lastCooked = "Recently cooked"
+        case rating = "Top rated"
+        case alphabetical = "A–Z"
+    }
 
     private let repository: CookingSessionRepository
     private let solveRepository: SolveRepository
@@ -88,30 +99,98 @@ struct SavedMealsView: View {
     // MARK: - Filter bar
 
     private var filterBar: some View {
-        HStack {
-            Picker("Filter", selection: Binding(
-                get: { showFavoritesOnly },
-                set: { newValue in
-                    // Free tier can't view favorites-only; tap → paywall.
-                    if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
-                        coordinator.presentPaywall(.savedFavoritesGate)
-                        return
+        VStack(spacing: CGFloat.Stir.space2) {
+            HStack {
+                Picker("Filter", selection: Binding(
+                    get: { showFavoritesOnly },
+                    set: { newValue in
+                        // Free tier can't view favorites-only; tap → paywall.
+                        if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
+                            coordinator.presentPaywall(.savedFavoritesGate)
+                            return
+                        }
+                        showFavoritesOnly = newValue
+                    },
+                )) {
+                    Text("All").tag(false)
+                    Text("Favorites").tag(true)
+                }
+                .pickerStyle(.segmented)
+
+                Menu {
+                    Picker("Sort", selection: $sortOption) {
+                        ForEach(SortOption.allCases, id: \.self) { opt in
+                            Text(opt.rawValue).tag(opt)
+                        }
                     }
-                    showFavoritesOnly = newValue
-                },
-            )) {
-                Text("All").tag(false)
-                Text("Favorites").tag(true)
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .frame(minWidth: 32, minHeight: 32)
+                        .foregroundStyle(Color.Stir.ink700)
+                }
+                .accessibilityLabel("Sort — \(sortOption.rawValue)")
             }
-            .pickerStyle(.segmented)
+
+            HStack(spacing: CGFloat.Stir.space2) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Color.Stir.ink500)
+                TextField("Search by title or ingredient", text: $searchQuery)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled()
+                    .foregroundStyle(Color.Stir.ink900)
+                if !searchQuery.isEmpty {
+                    Button { searchQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Color.Stir.ink300)
+                    }
+                }
+            }
+            .padding(.horizontal, CGFloat.Stir.space3)
+            .padding(.vertical, CGFloat.Stir.space2)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .strokeBorder(Color.Stir.ink100, lineWidth: 1),
+            )
         }
     }
 
     // MARK: - List
 
     private var filteredRows: [CookingSessionRepository.SavedMealEntry] {
-        guard showFavoritesOnly else { return rows }
-        return rows.filter { $0.plan?.isFavorite == true }
+        var filtered = rows
+        // 1. Favorites filter
+        if showFavoritesOnly {
+            filtered = filtered.filter { $0.plan?.isFavorite == true }
+        }
+        // 2. Search — matches title OR any ingredient displayName,
+        //    case-insensitive. Whitespace-only query is a no-op.
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            let needle = trimmedQuery.lowercased()
+            filtered = filtered.filter { row in
+                if row.title.lowercased().contains(needle) { return true }
+                guard let plan = row.plan,
+                      let ings = plan.ingredients as? Set<RecipeIngredient>
+                else { return false }
+                return ings.contains { ($0.displayName?.lowercased() ?? "").contains(needle) }
+            }
+        }
+        // 3. Sort
+        switch sortOption {
+        case .lastCooked:
+            // Uses the repo's existing sortByLastCooked (last-cooked-desc;
+            // un-cooked entries fall to bottom alphabetically).
+            filtered.sort(by: CookingSessionRepository.sortByLastCooked)
+        case .rating:
+            filtered.sort { ($0.rating ?? 0) > ($1.rating ?? 0) }
+        case .alphabetical:
+            filtered.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        return filtered
     }
 
     private var list: some View {
