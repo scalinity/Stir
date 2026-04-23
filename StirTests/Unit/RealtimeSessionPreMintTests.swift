@@ -206,6 +206,102 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         )
     }
 
+    // MARK: - P1-P.3 — staleness boundary (both sides)
+
+    /// Fresh side of the 45 s staleness boundary. A task with a
+    /// `startedAt` timestamp 1 s INSIDE the budget must be returned by
+    /// consume (fresh branch). Paired with the stale-side test below:
+    /// together they catch a refactor that flips the comparison
+    /// direction (e.g., `<` → `>`) — both tests fail, identifying the
+    /// flip. Neither test pins `<` vs `<=` at age == exactly
+    /// `preMintStalenessSec`; that requires time-injection support
+    /// not yet present on the consumer, out of scope for P1-P.
+    ///
+    /// Uses `LiveSessionBudget.preMintStalenessSec` directly so the
+    /// tests survive a future bump of the constant — the 1 s margin
+    /// is relative to whatever the budget is, not to the hard-coded
+    /// 45 s.
+    func test_preMintTask_justUnderStalenessBoundary_returnsTask() async throws {
+        let session = makeDriver()
+        let stubSessionID = UUID().uuidString
+        let ready = Task<RealtimeSessionResponse, Error> {
+            RealtimeSessionResponse(
+                authToken: "auth_tokens/test-boundary-fresh",
+                expiresAt: "2027-01-01T00:00:00Z",
+                sessionID: stubSessionID,
+                wsURL: "wss://test.invalid",
+                promptVersion: "1.0.0",
+                setupFrameJSON: "{\"setup\":{}}",
+            )
+        }
+        let staleBoundary = LiveSessionBudget.preMintStalenessSec
+        // startedAt 1 s INSIDE the budget — age at consume is ~(budget-1)
+        // with room for ~1 s of test-execution drift before flipping stale.
+        let startedAt = Date().addingTimeInterval(-(staleBoundary - 1))
+        session._testSetPreMintTask(ready, startedAt: startedAt)
+
+        // Act:
+        let consumed = session._testConsumePreMintedTaskIfFresh()
+
+        // Assert fresh branch returned the task + defer cleared state.
+        let result = try await XCTUnwrap(consumed).value
+        XCTAssertEqual(
+            result.sessionID,
+            stubSessionID,
+            "fresh-boundary consume must return the pre-minted response",
+        )
+        XCTAssertFalse(
+            session._testPendingPreMintIsSet,
+            "defer must clear slot even on fresh return",
+        )
+    }
+
+    /// Stale side of the 45 s staleness boundary. A task with a
+    /// `startedAt` timestamp 1 s OUTSIDE the budget must be cancelled
+    /// AND the consumer must return nil. The cancel is load-bearing:
+    /// if stale tasks leak, the backend mint completes in the
+    /// background, wastes a mint request, and holds a Gemini
+    /// auth_tokens resource until it naturally expires.
+    func test_preMintTask_stalenessBeyond45s_returnsNilAndCancels() async throws {
+        let session = makeDriver()
+        let sentinel = Task<RealtimeSessionResponse, Error> {
+            try await Task.sleep(for: .seconds(60))
+            XCTFail("sentinel should have been cancelled by staleness branch")
+            throw CancellationError()
+        }
+        let staleBoundary = LiveSessionBudget.preMintStalenessSec
+        // startedAt 1 s PAST the budget — clearly stale by the time
+        // consume runs, robust to test-execution drift.
+        let startedAt = Date().addingTimeInterval(-(staleBoundary + 1))
+        session._testSetPreMintTask(sentinel, startedAt: startedAt)
+
+        // Act: consume must hit the staleness branch.
+        let consumed = session._testConsumePreMintedTaskIfFresh()
+
+        // Assert nil return + slot cleared.
+        XCTAssertNil(consumed, "stale consume must return nil")
+        XCTAssertFalse(
+            session._testPendingPreMintIsSet,
+            "slot must be cleared after stale-branch consumption",
+        )
+        XCTAssertNil(
+            session._testPendingPreMintStartedAt,
+            "timestamp must be cleared after stale-branch consumption",
+        )
+
+        // Assert the task was cancelled — NOT leaked-running. If this
+        // fails, the backend mint will still complete and waste a
+        // Gemini auth_tokens resource.
+        do {
+            _ = try await sentinel.value
+            XCTFail("staleness branch must cancel the task, not leak it")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("sentinel threw unexpected error: \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
