@@ -72,13 +72,11 @@ struct NotificationPrefsView: View {
                 }
             } header: {
                 Text("Types")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.32)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.ink500)
             } footer: {
                 Text("Server push for trial reminder + import completion require notification permission. Local reminders still fire when permission is off.")
-                    .font(.system(size: 12))
+                    .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
             }
         }
@@ -100,10 +98,10 @@ struct NotificationPrefsView: View {
     private func toggleRow(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.system(size: 15, weight: .medium))
+                .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ink900)
             Text(subtitle)
-                .font(.system(size: 12))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink500)
                 .lineLimit(2)
         }
@@ -120,13 +118,11 @@ struct NotificationPrefsView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.Stir.ember600)
                 Text("Enable notifications")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.32)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.ember600)
             }
             Text("Stir uses notifications for trial reminders, cook nudges, and import completion. You haven't been asked yet — turn it on and Stir will prompt iOS next.")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink700)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
@@ -137,7 +133,8 @@ struct NotificationPrefsView: View {
                 }
             } label: {
                 Text("Request permission")
-                    .font(.system(size: 14, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ember600)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -157,13 +154,11 @@ struct NotificationPrefsView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.Stir.rust600)
                 Text("Notifications are off")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.32)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.rust600)
             }
             Text("Stir needs notification permission to fire the reminders below. Turn it on in iOS Settings.")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink700)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
@@ -172,7 +167,8 @@ struct NotificationPrefsView: View {
                 }
             } label: {
                 Text("Open Settings")
-                    .font(.system(size: 14, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ember600)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())

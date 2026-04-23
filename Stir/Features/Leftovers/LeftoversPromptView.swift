@@ -76,17 +76,14 @@ struct LeftoversPromptView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Color.Stir.sage600)
                 Text("Log what's left")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.sage600)
             }
             Text("Anything left over?")
-                .font(.system(size: 30, weight: .semibold, design: .serif))
-                .tracking(-0.6)
+                .stirFont(.displayXl)
                 .foregroundStyle(Color.Stir.ink900)
             Text("Pick what's left and I'll look for a fast use-up tomorrow.")
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
                 .lineLimit(2)
         }
@@ -96,7 +93,7 @@ struct LeftoversPromptView: View {
         Group {
             if viewModel.selectedItems.isEmpty {
                 Text("Select at least one item to see a tomorrow idea.")
-                    .font(.system(size: 12))
+                    .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,10 +104,11 @@ struct LeftoversPromptView: View {
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Tomorrow:")
-                        .font(.system(size: 12, weight: .semibold))
+                        .stirFont(.bodySm)
+                        .fontWeight(.semibold)
                         .foregroundStyle(Color.Stir.ink700)
                     Text("I'll look for a quick use-up that leans on these \(viewModel.selectedItems.count) items.")
-                        .font(.system(size: 12))
+                        .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.ink500)
                 }
                 .padding(12)
@@ -127,7 +125,8 @@ struct LeftoversPromptView: View {
         HStack(spacing: 10) {
             Button(action: onDismiss) {
                 Text("None")
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink700)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -144,7 +143,8 @@ struct LeftoversPromptView: View {
             .accessibilityHint("Skips the leftovers flow")
             Button(action: { Task { await onFindIdea() } }) {
                 Text(selectedCountLabel)
-                    .font(.system(size: 17, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -217,12 +217,13 @@ private struct ItemRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.displayName)
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink900)
                     .lineLimit(1)
                 if let amount = entry.approximateAmountText, !amount.isEmpty {
                     Text(amount)
-                        .font(.system(size: 12))
+                        .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.ink500)
                         .lineLimit(1)
                 }
@@ -231,7 +232,7 @@ private struct ItemRow: View {
             Spacer(minLength: 8)
 
             TextField("Amount", text: $localAmount)
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink700)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 84)
@@ -285,7 +286,7 @@ private struct AddCustomRow: View {
     var body: some View {
         HStack(spacing: 10) {
             TextField("Add other…", text: $name)
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(
@@ -293,7 +294,7 @@ private struct AddCustomRow: View {
                         .fill(Color.Stir.paper50),
                 )
             TextField("Amount", text: $amount)
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .frame(width: 84)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 10)

@@ -51,14 +51,11 @@ struct LeftoversSolveView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.Stir.sage600)
                 Text("\(viewModel.selectedItems.count) leftovers · tomorrow")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.sage600)
             }
             Text("Tomorrow, built from tonight.")
-                .font(.system(size: 28, weight: .semibold, design: .serif))
-                .tracking(-0.28)
+                .stirFont(.displayLg)
                 .foregroundStyle(Color.Stir.ink900)
                 .lineLimit(2)
         }
@@ -91,7 +88,7 @@ struct LeftoversSolveView: View {
 
     private var helperText: some View {
         Text("Saving one of these adds it to tomorrow's Tonight. Change anytime.")
-            .font(.system(size: 12))
+            .stirFont(.bodySm)
             .foregroundStyle(Color.Stir.ink500)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,7 +104,8 @@ struct LeftoversSolveView: View {
         HStack(spacing: 10) {
             Button(action: onDismiss) {
                 Text("Not tomorrow")
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink700)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -145,13 +143,12 @@ private struct LeftoversOptionCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     if isBestFit {
                         Text("Best fit")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(1.4)
-                            .textCase(.uppercase)
+                            .stirFont(.labelMicroEyebrow)
                             .foregroundStyle(Color.Stir.ember600)
                     }
                     Text(dish.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
                         .foregroundStyle(Color.Stir.ink900)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -160,11 +157,11 @@ private struct LeftoversOptionCard: View {
                             .font(.system(size: 11))
                             .foregroundStyle(Color.Stir.ink500)
                         Text("\(dish.totalTimeMinutes) min")
-                            .font(.system(size: 12))
+                            .stirFont(.bodySm)
                             .foregroundStyle(Color.Stir.ink500)
                         Text("·").foregroundStyle(Color.Stir.ink500)
                         Text(dish.whyItFits)
-                            .font(.system(size: 12))
+                            .stirFont(.bodySm)
                             .foregroundStyle(Color.Stir.ink500)
                             .lineLimit(1)
                     }
@@ -234,7 +231,8 @@ private struct LeftoversChipStrip: View {
         let text: String
         var body: some View {
             Text(text)
-                .font(.system(size: 12, weight: .semibold))
+                .stirFont(.bodySm)
+                .fontWeight(.semibold)
                 .foregroundStyle(Color.Stir.sage600)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -278,7 +276,7 @@ private struct SolvingSkeleton: View {
                 ProgressView()
                     .tint(Color.Stir.ember600)
                 Text("Looking at your leftovers…")
-                    .font(.system(size: 13))
+                    .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
                 Spacer()
             }
@@ -297,13 +295,11 @@ private struct ErrorView: View {
                     .font(.system(size: 14))
                     .foregroundStyle(Color.Stir.rust600)
                 Text(code)
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.rust600)
             }
             Text(message)
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink700)
                 .lineLimit(3)
         }

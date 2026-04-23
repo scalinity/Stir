@@ -60,14 +60,11 @@ struct ImportReviewView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Color.Stir.sage600)
                 Text("Parsed · \(parseQuality)")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.sage600)
             }
             Text(recipe.title)
-                .font(.system(size: 26, weight: .semibold, design: .serif))
-                .tracking(-0.26)
+                .stirFont(.displayLg)
                 .foregroundStyle(Color.Stir.ink900)
                 .lineLimit(3)
         }
@@ -93,7 +90,7 @@ struct ImportReviewView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(Color.Stir.rust600)
             Text("Parse confidence is low. Double-check the ingredients before saving.")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink700)
             Spacer(minLength: 0)
         }
@@ -111,20 +108,18 @@ struct ImportReviewView: View {
     private var ingredientsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Ingredients")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.32)
-                .textCase(.uppercase)
+                .stirFont(.labelEyebrow)
                 .foregroundStyle(Color.Stir.ink500)
             VStack(spacing: 0) {
                 ForEach(Array(recipe.ingredients.enumerated()), id: \.offset) { idx, ing in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(ing.displayName)
-                            .font(.system(size: 14))
+                            .stirFont(.bodyMd)
                             .foregroundStyle(Color.Stir.ink900)
                         Spacer(minLength: 8)
                         if let amount = ing.amountText, !amount.isEmpty {
                             Text(amount)
-                                .font(.system(size: 13))
+                                .stirFont(.bodySm)
                                 .foregroundStyle(Color.Stir.ink500)
                         }
                     }
@@ -150,21 +145,19 @@ struct ImportReviewView: View {
     private var stepsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Steps")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.32)
-                .textCase(.uppercase)
+                .stirFont(.labelEyebrow)
                 .foregroundStyle(Color.Stir.ink500)
             VStack(spacing: 8) {
                 ForEach(recipe.steps, id: \.stepNumber) { step in
                     HStack(alignment: .top, spacing: 10) {
                         Text("\(step.stepNumber)")
-                            .font(.system(size: 12, weight: .bold))
-                            .tracking(0.24)
+                            .stirFont(.bodySm)
+                            .fontWeight(.bold)
                             .foregroundStyle(Color.Stir.ember600)
                             .frame(width: 22, height: 22)
                             .background(Circle().fill(Color.Stir.ember100))
                         Text(step.instructionText)
-                            .font(.system(size: 14))
+                            .stirFont(.bodyMd)
                             .foregroundStyle(Color.Stir.ink900)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -190,7 +183,8 @@ struct ImportReviewView: View {
                     ProgressView().tint(.white)
                 }
                 Text(viewModel.isBusy ? "Saving…" : "Save to Saved")
-                    .font(.system(size: 17, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
@@ -220,7 +214,8 @@ private struct MetaChip: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Color.Stir.ink500)
             Text(label)
-                .font(.system(size: 12, weight: .medium))
+                .stirFont(.bodySm)
+                .fontWeight(.medium)
                 .foregroundStyle(Color.Stir.ink700)
         }
     }

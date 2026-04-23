@@ -55,14 +55,11 @@ struct ShareExtensionRootView: View {
             HStack(spacing: 6) {
                 StirGlyph(size: 22)
                 Text("Send to Stir")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.32)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.ink500)
             }
             Text("Import this recipe?")
-                .font(.system(size: 22, weight: .semibold, design: .serif))
-                .tracking(-0.22)
+                .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.ink900)
         }
     }
@@ -70,10 +67,11 @@ struct ShareExtensionRootView: View {
     private var emptyCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Nothing shareable")
-                .font(.system(size: 14, weight: .semibold))
+                .stirFont(.labelLg)
+                .fontWeight(.semibold)
                 .foregroundStyle(Color.Stir.ink900)
             Text("This page didn't include a URL or recipe text I could read.")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink500)
         }
         .padding(16)
@@ -86,7 +84,7 @@ struct ShareExtensionRootView: View {
 
     private var infoNote: some View {
         Text("Opening Stir will finish parsing + save this to your recipes.")
-            .font(.system(size: 12))
+            .stirFont(.bodySm)
             .foregroundStyle(Color.Stir.ink500)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,7 +98,8 @@ struct ShareExtensionRootView: View {
         HStack(spacing: 10) {
             Button(action: onCancel) {
                 Text("Cancel")
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink700)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
@@ -119,7 +118,8 @@ struct ShareExtensionRootView: View {
                 if let pending = state.pending { onSend(pending) }
             } label: {
                 Text("Send to Stir")
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
@@ -144,12 +144,10 @@ private struct PayloadCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(pending.impliedSource == "share_sheet" ? "URL" : "Text")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.2)
-                .textCase(.uppercase)
+                .stirFont(.labelMicroEyebrow)
                 .foregroundStyle(Color.Stir.ember600)
             Text(pending.displayLabel)
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink900)
                 .lineLimit(3)
                 .truncationMode(.middle)
@@ -172,7 +170,7 @@ private struct PlaceholderCard: View {
         HStack(spacing: 10) {
             ProgressView().tint(Color.Stir.ember600)
             Text("Reading what you shared…")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink500)
             Spacer()
         }

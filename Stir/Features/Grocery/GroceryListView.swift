@@ -94,11 +94,10 @@ struct GroceryListView: View {
     private var heroStat: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text("\(viewModel.missingCount)")
-                .font(.system(size: 28, weight: .semibold, design: .serif))
-                .tracking(-0.28)
+                .stirFont(.displayLg)
                 .foregroundStyle(Color.Stir.ink900)
             Text("items to buy · grouped by aisle")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink500)
             Spacer(minLength: 0)
         }
@@ -122,7 +121,8 @@ struct GroceryListView: View {
                 Image(systemName: "checklist")
                     .font(.system(size: 14, weight: .semibold))
                 Text(exportInFlight ? "Exporting…" : "Export to Reminders")
-                    .font(.system(size: 17, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -157,12 +157,10 @@ private struct AisleSection: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(category.displayName)
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.ember600)
                 Text("\(items.count)")
-                    .font(.system(size: 11))
+                    .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
                 Rectangle()
                     .fill(Color.Stir.ink100)
@@ -218,14 +216,15 @@ private struct AisleRow: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title(for: item))
-                    .font(.system(size: 14, weight: .medium))
+                    .stirFont(.bodyMd)
+                    .fontWeight(.medium)
                     .foregroundStyle(item.isChecked ? Color.Stir.ink500 : Color.Stir.ink900)
                     .strikethrough(item.isChecked, color: Color.Stir.ink500)
                     .lineLimit(2)
                 Spacer(minLength: 4)
                 if !recipeTitle.isEmpty {
                     Text(recipeTitle)
-                        .font(.system(size: 11))
+                        .stirFont(.bodySm)
                         .italic()
                         .foregroundStyle(Color.Stir.ink500)
                         .lineLimit(1)
@@ -252,7 +251,7 @@ private struct GeneratingView: View {
             ProgressView()
                 .tint(Color.Stir.ember600)
             Text("Building your list…")
-                .font(.system(size: 15))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -272,17 +271,17 @@ private struct ExportedView: View {
                     .foregroundStyle(Color.Stir.sage600)
             }
             Text("Sent to Reminders")
-                .font(.system(size: 22, weight: .semibold, design: .serif))
-                .tracking(-0.22)
+                .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.ink900)
             Text("Open the Reminders app to check off items at the store.")
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Button(action: onDismiss) {
                 Text("Done")
-                    .font(.system(size: 17, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .frame(width: 160, height: 48)
                     .background(
@@ -307,17 +306,16 @@ private struct ErrorStateView: View {
                     .font(.system(size: 14))
                     .foregroundStyle(Color.Stir.rust600)
                 Text(code)
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.54)
-                    .textCase(.uppercase)
+                    .stirFont(.labelEyebrow)
                     .foregroundStyle(Color.Stir.rust600)
             }
             Text(message)
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink700)
             Button(action: onRetry) {
                 Text("Try again")
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ember600)
             }
             .padding(.top, 4)
@@ -337,7 +335,7 @@ private struct RemindersDeniedToast: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.Stir.rust600)
             Text("Reminders access is off. Open Settings → Privacy to enable.")
-                .font(.system(size: 13))
+                .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink700)
                 .lineLimit(2)
             Button(action: onDismiss) {

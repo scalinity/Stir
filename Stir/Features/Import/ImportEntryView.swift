@@ -68,11 +68,10 @@ struct ImportEntryView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Bring anything in.")
-                .font(.system(size: 28, weight: .semibold, design: .serif))
-                .tracking(-0.56)
+                .stirFont(.displayLg)
                 .foregroundStyle(Color.Stir.ink900)
             Text("Stir parses the recipe and adapts it to your kitchen.")
-                .font(.system(size: 14))
+                .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
                 .lineLimit(2)
         }
@@ -81,9 +80,7 @@ struct ImportEntryView: View {
     private var urlField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Link")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.4)
-                .textCase(.uppercase)
+                .stirFont(.labelMicroEyebrow)
                 .foregroundStyle(urlText.isEmpty ? Color.Stir.ink500 : Color.Stir.ember600)
             HStack(spacing: 10) {
                 Image(systemName: "link")
@@ -93,7 +90,7 @@ struct ImportEntryView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .font(.system(size: 15, design: .monospaced))
+                    .stirFont(.monoMd)
                     .foregroundStyle(Color.Stir.ink900)
                     .accessibilityLabel("Recipe URL")
                     .accessibilityHint("Paste a URL to a recipe you want to import")
@@ -123,9 +120,7 @@ struct ImportEntryView: View {
 
     private var orDivider: some View {
         Text("Or")
-            .font(.system(size: 11, weight: .bold))
-            .tracking(1.32)
-            .textCase(.uppercase)
+            .stirFont(.labelEyebrow)
             .foregroundStyle(Color.Stir.ink500)
             .padding(.top, 4)
     }
@@ -160,7 +155,7 @@ struct ImportEntryView: View {
 
     private var privacyNote: some View {
         Text("Anything you import stays private to your account. We don't train on your cookbook.")
-            .font(.system(size: 12))
+            .stirFont(.bodySm)
             .foregroundStyle(Color.Stir.ink500)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -181,7 +176,8 @@ struct ImportEntryView: View {
                     ProgressView().tint(.white)
                 }
                 Text(viewModel.isBusy ? "Importing…" : "Import link")
-                    .font(.system(size: 17, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
@@ -232,10 +228,11 @@ private struct MethodRow: View {
             .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink900)
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
             }
             Spacer(minLength: 4)
@@ -267,14 +264,13 @@ private struct PasteSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Paste recipe text")
-                        .font(.system(size: 22, weight: .semibold, design: .serif))
-                        .tracking(-0.22)
+                        .stirFont(.displayMd)
                         .foregroundStyle(Color.Stir.ink900)
                     Text("From anywhere — email, an OCR app, a friend's text.")
-                        .font(.system(size: 13))
+                        .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.ink500)
                     TextEditor(text: $text)
-                        .font(.system(size: 14))
+                        .stirFont(.bodyMd)
                         .frame(minHeight: 280)
                         .padding(12)
                         .background(
