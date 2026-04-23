@@ -146,6 +146,66 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         }
     }
 
+    // MARK: - P1-P.2 — ready-before-refresh
+
+    /// Happy path: a pre-mint task has completed successfully BEFORE
+    /// consume is called, within the 45 s staleness budget. Consume
+    /// must return the ready task; the caller awaits `.value` and
+    /// receives the pre-minted `RealtimeSessionResponse`. Post-consume
+    /// the slot must be cleared via the consumer's defer (state
+    /// hygiene — a subsequent call would return nil via guard-1).
+    ///
+    /// Baseline for the P1-P suite. The remaining three tests
+    /// (staleness, in-flight-await, seam) all assume this path works;
+    /// if the happy path is broken, the other tests can't reliably
+    /// pin their invariants.
+    func test_preMintTask_readyBeforeRefresh_returnsTask() async throws {
+        let session = makeDriver()
+        let stubSessionID = UUID().uuidString
+
+        // Task<T, Error>'s body runs on creation; by the time
+        // `_testSetPreMintTask` returns, `.value` is already resolved.
+        let ready = Task<RealtimeSessionResponse, Error> {
+            RealtimeSessionResponse(
+                authToken: "auth_tokens/test-ready",
+                expiresAt: "2027-01-01T00:00:00Z",
+                sessionID: stubSessionID,
+                wsURL: "wss://test.invalid",
+                promptVersion: "1.0.0",
+                setupFrameJSON: "{\"setup\":{}}",
+            )
+        }
+        session._testSetPreMintTask(ready, startedAt: Date())
+        XCTAssertTrue(session._testPendingPreMintIsSet, "precondition: slot set")
+
+        // Act: consume well within the 45 s budget — consumer should
+        // return the ready task via the fresh branch.
+        let consumed = session._testConsumePreMintedTaskIfFresh()
+        let result = try await XCTUnwrap(consumed).value
+
+        // Assert: caller receives the pre-minted response.
+        XCTAssertEqual(
+            result.sessionID,
+            stubSessionID,
+            "consume must return the pre-minted response unchanged",
+        )
+
+        // Assert: consumer's defer cleared state — subsequent consume
+        // on the same session would return nil via guard-1.
+        XCTAssertFalse(
+            session._testPendingPreMintIsSet,
+            "slot must be cleared post-consume",
+        )
+        XCTAssertNil(
+            session._testPendingPreMintStartedAt,
+            "timestamp must be cleared post-consume",
+        )
+        XCTAssertNil(
+            session._testConsumePreMintedTaskIfFresh(),
+            "re-consume on cleared slot must return nil",
+        )
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
