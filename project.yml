@@ -157,6 +157,10 @@ targets:
         embed: true
         copy:
           destination: plugins
+      - target: StirShareExtension
+        embed: true
+        copy:
+          destination: plugins
 
   StirWidgets:
     # App extension hosting Home Screen widgets (TonightWidget) and
@@ -213,6 +217,67 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: ActivityKit.framework
 
+  StirShareExtension:
+    # Share-services app extension that accepts URL + plain-text
+    # shares from Safari / Notes / any app publishing a share sheet.
+    # Writes the payload to App Group SharedStorage; main Stir app
+    # picks it up on next foreground and routes through ImportRoot.
+    # The extension itself does NOT call /v1/ai/recipe-import — keeps
+    # the bundle small and avoids plumbing auth/Supabase into the
+    # extension's constrained memory budget.
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    configFiles:
+      Debug: Config.xcconfig
+      Release: Config.xcconfig
+
+    sources:
+      - path: Extensions/StirShareExtension
+      - path: Shared
+
+    info:
+      path: Extensions/StirShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Stir
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+
+    entitlements:
+      path: Extensions/StirShareExtension/StirShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.scalinity.stir
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scalinity.stir.shareextension
+        PRODUCT_NAME: StirShareExtension
+        DEVELOPMENT_TEAM: 25H5DDPKAC
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: NO
+        # Must match parent Stir app. Xcode warns otherwise.
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -O
+
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: UIKit.framework
+      - sdk: UniformTypeIdentifiers.framework
+
   StirTests:
     type: bundle.unit-test
     platform: iOS
@@ -240,6 +305,7 @@ schemes:
       targets:
         Stir: all
         StirWidgets: all
+        StirShareExtension: all
         StirTests: [test]
     run:
       config: Debug

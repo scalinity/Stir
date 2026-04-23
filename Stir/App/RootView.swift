@@ -9,6 +9,7 @@ import SwiftUI
 struct RootView: View {
     @Bindable var coordinator: RootCoordinator
     @Environment(\.scenePhase) private var scenePhase
+    @State private var pendingShareImport: PendingImport?
 
     var body: some View {
         Group {
@@ -68,18 +69,42 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, new in
             if new == .active {
-                // Active-session foregrounds clear the pending 7-day
-                // reactivation nudge — the user literally just opened
-                // Stir, so the "haven't cooked in a week" message would
-                // land as spam.
                 ReactivationScheduler.shared.cancel()
                 if coordinator.phase == .ready || coordinator.phase == .offlineFallback {
                     Task { await coordinator.refreshEntitlementsOnForeground() }
+                }
+                // Drain any share-extension-queued import. The extension
+                // runs in its own process and cannot present UI beyond the
+                // share sheet; it writes to SharedStorage and we pick up
+                // here. consume* is atomic — clears the slot on read so
+                // a subsequent foreground doesn't re-import.
+                if let pending = SharedStorage().consumePendingImport() {
+                    pendingShareImport = pending
                 }
             }
         }
         .onOpenURL { url in
             StirDeepLinkHandler.handle(url)
+        }
+        .fullScreenCover(item: $pendingShareImport) { pending in
+            if let household = coordinator.household.profile {
+                let vm = ImportViewModel(
+                    household: household,
+                    aiDispatch: coordinator.aiDispatch,
+                )
+                ImportRoot(
+                    viewModel: vm,
+                    onDismiss: { pendingShareImport = nil },
+                    onCompleted: { _ in pendingShareImport = nil },
+                )
+                .task {
+                    if let url = pending.url, !url.isEmpty {
+                        await vm.submitURL(url)
+                    } else if let text = pending.text, !text.isEmpty {
+                        await vm.submitPastedText(text)
+                    }
+                }
+            }
         }
     }
 }

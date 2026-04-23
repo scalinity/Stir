@@ -67,6 +67,36 @@ public struct SharedStorage: @unchecked Sendable {
         defaults.string(forKey: Self.tierKey)
     }
 
+    // MARK: - PendingImport (share extension queue)
+
+    private static let pendingImportKey = "stir.pendingImport.v1"
+
+    public func writePendingImport(_ pending: PendingImport?) {
+        guard let pending else {
+            defaults.removeObject(forKey: Self.pendingImportKey)
+            return
+        }
+        if let data = try? Self.encoder().encode(pending) {
+            defaults.set(data, forKey: Self.pendingImportKey)
+        }
+    }
+
+    public func readPendingImport() -> PendingImport? {
+        guard let data = defaults.data(forKey: Self.pendingImportKey) else { return nil }
+        return try? Self.decoder().decode(PendingImport.self, from: data)
+    }
+
+    /// Atomically read + clear. Used by the main app on foreground to
+    /// process the extension's queued entry without risking a replay
+    /// on a subsequent foreground.
+    public func consumePendingImport() -> PendingImport? {
+        let pending = readPendingImport()
+        if pending != nil {
+            writePendingImport(nil)
+        }
+        return pending
+    }
+
     // MARK: - Debug
 
     /// Clear all shared keys. Used on sign-out / delete account and in
@@ -74,6 +104,7 @@ public struct SharedStorage: @unchecked Sendable {
     public func clearAll() {
         defaults.removeObject(forKey: Self.tonightKey)
         defaults.removeObject(forKey: Self.tierKey)
+        defaults.removeObject(forKey: Self.pendingImportKey)
     }
 
     // MARK: - Coders
