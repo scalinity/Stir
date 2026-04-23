@@ -84,9 +84,20 @@ final class SubstitutionSheetViewModel {
         let pickedIngredient = selectedIngredientID.flatMap(findIngredient)
         let problemText = userProblem.trimmingCharacters(in: .whitespaces)
 
+        // `sub_event_id` so the requested → accepted pair can be joined
+        // in PostHog via a single join key rather than needing to match
+        // on distinct_id + timestamp heuristics. ADR 0009's
+        // dashboard-join contract pairs AI calls by `$ai_span_id`; this
+        // event is a product event, not an AI call, but the same pairing
+        // discipline applies.
+        let subEventIDString = subEventID.uuidString
+        Logger.telemetry.info(
+            "substitution_requested invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) problem_type=\(pickedIngredient == nil ? "free_text" : "picker", privacy: .public)",
+        )
         analytics.capture(.substitutionRequested, properties: [
             "problem_type": pickedIngredient == nil ? "free_text" : "picker",
             "invocation": "sheet",
+            "sub_event_id": subEventIDString,
         ])
 
         let body = SubstitutionRequest(
@@ -121,9 +132,22 @@ final class SubstitutionSheetViewModel {
         } catch {
             Logger.coreData.error("accept substitution failed: \(error.localizedDescription, privacy: .public)")
         }
+        // `invocation` + `sub_event_id` on accepted lets the rescue-usage
+        // funnel join requested → accepted pairs by sub_event_id AND
+        // slice by invocation (sheet vs realtime_function_call). Without
+        // `invocation`, dashboards can't tell voice-driven vs manual
+        // substitutions apart on the accepted side. Spec §15 amended in
+        // this change to include both fields.
+        let subEventIDString = subEventID.uuidString
+        Logger.telemetry.info(
+            "substitution_accepted invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) accepted=true constraint_safe=true",
+        )
         analytics.capture(.substitutionAccepted, properties: [
             "accepted": true,
             "constraint_safe": true,
+            "invocation": "sheet",
+            "sub_event_id": subEventIDString,
+            "reason": "user_accepted",
         ])
         onFinished()
     }
@@ -135,9 +159,17 @@ final class SubstitutionSheetViewModel {
         } catch {
             Logger.coreData.error("reject substitution failed: \(error.localizedDescription, privacy: .public)")
         }
+        let subEventIDString = subEventID.uuidString
+        let constraintSafe = state.isSafe
+        Logger.telemetry.info(
+            "substitution_accepted invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) accepted=false constraint_safe=\(constraintSafe, privacy: .public)",
+        )
         analytics.capture(.substitutionAccepted, properties: [
             "accepted": false,
-            "constraint_safe": state.isSafe,
+            "constraint_safe": constraintSafe,
+            "invocation": "sheet",
+            "sub_event_id": subEventIDString,
+            "reason": "user_rejected",
         ])
         onFinished()
     }
@@ -145,9 +177,16 @@ final class SubstitutionSheetViewModel {
     func acknowledgeUnsafe() async {
         // Unsafe results persist as accepted=nil (pending) since the user
         // didn't pick a swap. Just dismiss.
+        let subEventIDString = subEventID.uuidString
+        Logger.telemetry.info(
+            "substitution_accepted invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) accepted=false constraint_safe=false reason=unsafe_acknowledged",
+        )
         analytics.capture(.substitutionAccepted, properties: [
             "accepted": false,
             "constraint_safe": false,
+            "invocation": "sheet",
+            "sub_event_id": subEventIDString,
+            "reason": "unsafe_acknowledged",
         ])
         onFinished()
     }

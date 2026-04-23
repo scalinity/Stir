@@ -21,6 +21,7 @@
 //     (CLAUDE.md §sharp-edge #9)
 
 import Foundation
+import OSLog
 
 // MARK: - Outbound frames (iOS → server)
 
@@ -113,35 +114,86 @@ enum LiveInboundFrame {
     case unknown(key: String)
 
     // swiftlint:disable cyclomatic_complexity
-    static func parse(_ json: Any) -> LiveInboundFrame? {
-        guard let dict = json as? [String: Any] else { return nil }
-        // Server envelopes use exactly one top-level key. Scan in
-        // priority order — setupComplete and serverContent dominate the
-        // happy path; others are rare.
+    /// Parse all applicable frames from one WebSocket envelope. Gemini Live
+    /// envelopes commonly carry MULTIPLE top-level keys in a single message
+    /// — e.g., `{ serverContent: {...}, usageMetadata: {...} }` on the
+    /// turn-complete frame. An earlier version returned on first match and
+    /// silently dropped sibling keys; that lost every usageMetadata that
+    /// arrived alongside serverContent, so downstream token/cost reporting
+    /// always saw 0 (observed 2026-04-22 against a 36-generation prod run:
+    /// every $ai_generation had $ai_input_tokens=0).
+    ///
+    /// Returns frames in order of dispatch dependency:
+    ///   1. `setupComplete` — handshake gate.
+    ///   2. `usageMetadata` — pure state update that must land before
+    ///      anything that triggers `finalizeTurn()`. `{serverContent:
+    ///      {turnComplete}, usageMetadata}` would otherwise POST 0
+    ///      tokens because `finalizeTurn()` would fire before the
+    ///      usage envelope was accumulated.
+    ///   3. `toolCall` — must land BEFORE a same-envelope `serverContent`
+    ///      with `turnComplete=true`, otherwise `finalizeTurn()` latches
+    ///      `containedToolCall=false` and the belated `handleToolCall`
+    ///      mis-tags the NEXT turn as `tool_call` (ADR 0012 gate split).
+    ///      Gemini Live's documented envelope shape `{serverContent:
+    ///      {turnComplete}, toolCall}` means "here's my tool call AND
+    ///      I'm done" — the call belongs to the turn that's ending.
+    ///      Trade-off: in the rare combined envelope `{audioChunks,
+    ///      turnComplete, toolCall}`, the last audio chunks wait on the
+    ///      tool dispatch round-trip (~500 ms) before enqueue. Still
+    ///      audible; playback queue already has preceding chunks
+    ///      buffered, and correctness of result-type tagging wins over
+    ///      tail-audio promptness for a rare shape.
+    ///   4. `serverContent` — content + the `turnComplete` trigger.
+    static func parseAll(_ json: Any) -> [LiveInboundFrame] {
+        guard let dict = json as? [String: Any] else { return [] }
+        var frames: [LiveInboundFrame] = []
+
         if dict["setupComplete"] != nil {
-            return .setupComplete
+            frames.append(.setupComplete)
+        }
+        // Side-data first so state-dependent handlers downstream see it.
+        if let obj = dict["usageMetadata"] as? [String: Any] {
+            frames.append(.usageMetadata(LiveUsageMetadata.parse(obj)))
+        }
+        // toolCall BEFORE serverContent so handleToolCall stamps
+        // `turnContainedToolCall = true` before finalizeTurn latches it.
+        // See ordering docstring above for the combined-envelope case.
+        if let obj = dict["toolCall"] as? [String: Any] {
+            frames.append(.toolCall(LiveToolCall.parse(obj)))
         }
         if let obj = dict["serverContent"] as? [String: Any] {
-            return .serverContent(LiveServerContent.parse(obj))
-        }
-        if let obj = dict["toolCall"] as? [String: Any] {
-            return .toolCall(LiveToolCall.parse(obj))
-        }
-        if let obj = dict["usageMetadata"] as? [String: Any] {
-            return .usageMetadata(LiveUsageMetadata.parse(obj))
+            frames.append(.serverContent(LiveServerContent.parse(obj)))
         }
         if let obj = dict["goAway"] as? [String: Any] {
             let ms = obj["timeBeforeDisconnectMs"] as? Int
                 ?? (obj["timeBeforeDisconnect"] as? String).flatMap(Int.init)
-            return .goAway(timeBeforeDisconnectMs: ms)
+            frames.append(.goAway(timeBeforeDisconnectMs: ms))
         }
         if dict["sessionResumptionUpdate"] != nil {
-            return .sessionResumption
+            frames.append(.sessionResumption)
         }
-        if let firstKey = dict.keys.first {
-            return .unknown(key: firstKey)
+
+        // If we didn't recognize any known key, yield one `.unknown` so
+        // the receive dispatcher's debug log fires. Otherwise stay
+        // silent — unrecognized extra keys alongside known ones are
+        // likely future-compat extensions and not worth alerting on.
+        if frames.isEmpty, let firstKey = dict.keys.first {
+            frames.append(.unknown(key: firstKey))
         }
-        return nil
+        #if DEBUG
+        // Log unknown-sibling keys at debug level so Gemini Live API
+        // drift (new envelope types alongside known ones) shows up
+        // before it becomes load-bearing. Doesn't fire on the common
+        // single-key frames we already handle.
+        let knownKeys: Set<String> = [
+            "setupComplete", "serverContent", "toolCall", "usageMetadata",
+            "goAway", "sessionResumptionUpdate",
+        ]
+        for k in dict.keys where !knownKeys.contains(k) {
+            Logger.voice.debug("live_ws_unknown_sibling_key key=\(k, privacy: .public)")
+        }
+        #endif
+        return frames
     }
     // swiftlint:enable cyclomatic_complexity
 }
@@ -294,14 +346,21 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
     /// response can't feed `Int.max` / negative values into the timer
     /// scheduler and trigger overflow or infinite timers.
     var timerSeconds: Int? {
+        // Discriminate Bool from Int by inspecting the underlying
+        // CFNumberType. `NSNumber(value: 1) as? Int` succeeds (returns 1)
+        // AND `NSNumber(value: 1) is Bool` ALSO succeeds (returns true,
+        // because NSNumber(1) bridges to Bool(true) in Swift), so an
+        // `is Bool` guard rejects real integers too. Only CFBooleanGetTypeID
+        // reliably distinguishes __NSCFBoolean from __NSCFNumber
+        // (review 2026-04-22: timerSeconds and targetStepNumber both
+        // silently rejected integer 1 because of this).
+        if let n = args["seconds"] as? NSNumber,
+           CFGetTypeID(n) == CFBooleanGetTypeID() {
+            return nil
+        }
         let raw: Int?
         if let i = args["seconds"] as? Int { raw = i }
-        else if let n = args["seconds"] as? NSNumber {
-            // Reject Bool bridged as NSNumber — Bool values disguised as
-            // ints would otherwise parse as 0 or 1 seconds.
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
-            raw = n.intValue
-        }
+        else if let n = args["seconds"] as? NSNumber { raw = n.intValue }
         else if let s = args["seconds"] as? String { raw = Int(s) }
         else { raw = nil }
         guard let value = raw, (1...14400).contains(value) else { return nil }
@@ -311,6 +370,45 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
     /// `start_timer.label` — optional string arg.
     var timerLabel: String? {
         args["label"] as? String
+    }
+
+    /// `set_step.step_number` — nominally 1-indexed int arg. Gemini
+    /// sometimes emits `step_number: 0` when the user says "step one"
+    /// (model briefly mistakes the tool contract for 0-indexed — observed
+    /// 2026-04-22 on a multi-turn session where every step 2..5
+    /// succeeded but "step one" consistently came back ok=false). Rather
+    /// than reject and force the model to spit out "that step doesn't
+    /// exist", we clamp gracefully:
+    ///
+    ///   step_number <= 0   → treated as 1 (user wants the start)
+    ///   step_number >= 101 → treated as 100 (VM clamps to totalSteps)
+    ///
+    /// The VM's own `jumpToStep` clamps again to `[0, totalSteps-1]`,
+    /// so out-of-bounds requests still settle on a valid step. Only
+    /// truly unparseable payloads (Bool, non-numeric string, missing)
+    /// still return nil — those are genuine malformed calls.
+    var targetStepNumber: Int? {
+        // Same CFBooleanGetTypeID discriminator as `timerSeconds` — an
+        // `is Bool` check would over-reject integer 1 because
+        // NSNumber(value: 1) bridges to Bool(true). Observed 2026-04-22:
+        // this path returned nil for step_number=1 on every "go to step
+        // one" request, producing a misleading "that step doesn't exist"
+        // narration.
+        if let n = args["step_number"] as? NSNumber,
+           CFGetTypeID(n) == CFBooleanGetTypeID() {
+            return nil
+        }
+        let raw: Int?
+        if let i = args["step_number"] as? Int { raw = i }
+        else if let n = args["step_number"] as? NSNumber { raw = n.intValue }
+        else if let s = args["step_number"] as? String { raw = Int(s) }
+        else { raw = nil }
+        guard let value = raw else { return nil }
+        // Clamp rather than reject. The VM re-clamps to totalSteps, and
+        // the tool response's `ok: true` lets the model narrate the
+        // actually-selected step instead of gaslighting the user with
+        // "that step doesn't exist."
+        return min(100, max(1, value))
     }
 }
 
@@ -333,11 +431,19 @@ struct LiveUsageMetadata: Sendable, Equatable {
     let promptTextTokens: Int?
     let responseAudioTokens: Int?
     let responseTextTokens: Int?
+    /// Portion of `promptTokenCount` that was served from Gemini's
+    /// content cache (system prompt re-use). Billed at a discounted
+    /// rate. `promptTokensDetails` typically lists only the fresh AUDIO
+    /// chunk and omits the cached portion; without parsing this field
+    /// we silently drop cached tokens from cost attribution — observed
+    /// gap 2026-04-22: 185–261 tokens per turn unaccounted.
+    let cachedContentTokenCount: Int?
 
     static func parse(_ obj: [String: Any]) -> LiveUsageMetadata {
         let prompt = obj["promptTokenCount"] as? Int ?? 0
         let response = obj["responseTokenCount"] as? Int ?? 0
         let total = obj["totalTokenCount"] as? Int ?? (prompt + response)
+        let cached = obj["cachedContentTokenCount"] as? Int
 
         var pAudio: Int?
         var pText: Int?
@@ -369,6 +475,7 @@ struct LiveUsageMetadata: Sendable, Equatable {
             promptTextTokens: pText,
             responseAudioTokens: rAudio,
             responseTextTokens: rText,
+            cachedContentTokenCount: cached,
         )
     }
 }

@@ -28,7 +28,8 @@ import {
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { PantryParseRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
@@ -368,23 +369,33 @@ Deno.serve(async (req) => {
     userLog.error('pantry_parse_failed_after_retry', lastErr, { retry_count: retryCount });
 
     // Log failed attempt for cost observability.
-    logAIRequest(client, userLog, {
-      request_id: body.client_request_id,
-      canonical_user_key: claims.canonical_user_key,
-      feature_key: FEATURE_KEY,
-      model: MODEL,
-      input_tokens: totalInputTokens,
-      output_tokens: totalOutputTokens,
-      cost_usd: computeCostUSD(MODEL, {
-        textInputTokens: totalInputTokens - totalImageTokens,
-        imageInputTokens: totalImageTokens,
-        textOutputTokens: totalOutputTokens,
-      }),
-      latency_ms: totalLatency,
-      thinking_level: 'minimal',
-      prompt_version: activePrompt.version,
-      retry_count: retryCount,
+    const failedCostUsd = computeCostUSD(MODEL, {
+      textInputTokens: totalInputTokens - totalImageTokens,
+      imageInputTokens: totalImageTokens,
+      textOutputTokens: totalOutputTokens,
     });
+    recordAIRequest(
+      client, userLog,
+      {
+        request_id: body.client_request_id,
+        canonical_user_key: claims.canonical_user_key,
+        feature_key: FEATURE_KEY,
+        model: MODEL,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        cost_usd: failedCostUsd,
+        latency_ms: totalLatency,
+        thinking_level: 'minimal',
+        prompt_version: activePrompt.version,
+        retry_count: retryCount,
+      },
+      {
+        trace_id: body.client_request_id,
+        span_name: 'pantry_parse',
+        is_error: true,
+        error_code: ErrorCode.AI_02,
+      },
+    );
 
     return jsonError(
       ErrorCode.AI_02,
@@ -402,19 +413,26 @@ Deno.serve(async (req) => {
     imageInputTokens: totalImageTokens,
     textOutputTokens: totalOutputTokens,
   });
-  logAIRequest(client, userLog, {
-    request_id: body.client_request_id,
-    canonical_user_key: claims.canonical_user_key,
-    feature_key: FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatency,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: retryCount,
-  });
+  recordAIRequest(
+    client, userLog,
+    {
+      request_id: body.client_request_id,
+      canonical_user_key: claims.canonical_user_key,
+      feature_key: FEATURE_KEY,
+      model: MODEL,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      cost_usd: costUsd,
+      latency_ms: totalLatency,
+      thinking_level: 'minimal',
+      prompt_version: activePrompt.version,
+      retry_count: retryCount,
+    },
+    {
+      trace_id: body.client_request_id,
+      span_name: 'pantry_parse',
+    },
+  );
 
   const wire: WireResponse = {
     parse_id: parseId,

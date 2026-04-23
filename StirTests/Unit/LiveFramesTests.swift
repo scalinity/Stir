@@ -71,7 +71,7 @@ final class LiveFramesTests: XCTestCase {
 
     func test_inbound_setupComplete_parses_to_enum_case() throws {
         let json: Any = ["setupComplete": [:]]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         if case .setupComplete = frame {} else {
             XCTFail("expected .setupComplete, got \(frame)")
         }
@@ -100,7 +100,7 @@ final class LiveFramesTests: XCTestCase {
                 ],
             ],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .serverContent(content) = frame else {
             XCTFail("expected .serverContent"); return
         }
@@ -113,7 +113,7 @@ final class LiveFramesTests: XCTestCase {
 
     func test_inbound_serverContent_flagsTurnComplete() throws {
         let json: Any = ["serverContent": ["turnComplete": true]]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .serverContent(content) = frame else {
             XCTFail("expected .serverContent"); return
         }
@@ -123,7 +123,7 @@ final class LiveFramesTests: XCTestCase {
 
     func test_inbound_serverContent_flagsInterrupted() throws {
         let json: Any = ["serverContent": ["interrupted": true]]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .serverContent(content) = frame else {
             XCTFail("expected .serverContent"); return
         }
@@ -145,7 +145,7 @@ final class LiveFramesTests: XCTestCase {
                 ]],
             ],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .toolCall(tc) = frame else {
             XCTFail("expected .toolCall"); return
         }
@@ -173,7 +173,7 @@ final class LiveFramesTests: XCTestCase {
                 ]],
             ],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .toolCall(tc) = frame, let call = tc.functionCalls.first else {
             XCTFail("expected .toolCall"); return
         }
@@ -191,7 +191,7 @@ final class LiveFramesTests: XCTestCase {
                 ]],
             ],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .toolCall(tc) = frame, let call = tc.functionCalls.first else {
             XCTFail("expected .toolCall"); return
         }
@@ -215,7 +215,7 @@ final class LiveFramesTests: XCTestCase {
                 ],
             ],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .usageMetadata(usage) = frame else {
             XCTFail("expected .usageMetadata"); return
         }
@@ -234,7 +234,7 @@ final class LiveFramesTests: XCTestCase {
         let json: Any = [
             "goAway": ["timeBeforeDisconnectMs": 5000],
         ]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .goAway(ms) = frame else {
             XCTFail("expected .goAway"); return
         }
@@ -243,7 +243,7 @@ final class LiveFramesTests: XCTestCase {
 
     func test_inbound_goAway_parses_when_ms_is_missing() throws {
         let json: Any = ["goAway": [:]]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         guard case let .goAway(ms) = frame else {
             XCTFail("expected .goAway"); return
         }
@@ -254,7 +254,7 @@ final class LiveFramesTests: XCTestCase {
 
     func test_inbound_unknown_key_returns_unknown_case() throws {
         let json: Any = ["somethingWeDontKnowAboutYet": ["foo": "bar"]]
-        let frame = try XCTUnwrap(LiveInboundFrame.parse(json))
+        let frame = try XCTUnwrap(LiveInboundFrame.parseAll(json).first)
         if case let .unknown(key) = frame {
             XCTAssertEqual(key, "somethingWeDontKnowAboutYet")
         } else {
@@ -262,11 +262,130 @@ final class LiveFramesTests: XCTestCase {
         }
     }
 
-    // MARK: - Inbound: malformed shape returns nil (not crash)
+    // MARK: - Inbound: malformed shape returns empty array (not crash)
 
-    func test_inbound_malformed_shape_returns_nil() {
-        XCTAssertNil(LiveInboundFrame.parse("just a string"))
-        XCTAssertNil(LiveInboundFrame.parse(42))
-        XCTAssertNil(LiveInboundFrame.parse([] as [Any]))
+    func test_inbound_malformed_shape_returns_empty_array() {
+        XCTAssertTrue(LiveInboundFrame.parseAll("just a string").isEmpty)
+        XCTAssertTrue(LiveInboundFrame.parseAll(42).isEmpty)
+        XCTAssertTrue(LiveInboundFrame.parseAll([] as [Any]).isEmpty)
+    }
+
+    // MARK: - Inbound: multi-key envelope (the actual prod regression)
+
+    /// Gemini Live's turnComplete envelope commonly carries BOTH
+    /// `serverContent` and `usageMetadata` as siblings. An earlier
+    /// `parse` version returned only the first match and dropped
+    /// the usage sibling, which caused every $ai_generation to report
+    /// 0 tokens in prod (observed 2026-04-22). This test pins the
+    /// contract: BOTH frames must land.
+    func test_inbound_envelope_with_serverContent_and_usageMetadata_yields_both() throws {
+        let json: Any = [
+            "serverContent": [
+                "modelTurn": ["parts": [["text": "ok"]]],
+                "turnComplete": true,
+            ],
+            "usageMetadata": [
+                "promptTokenCount": 2150,
+                "responseTokenCount": 150,
+                "totalTokenCount": 2300,
+            ],
+        ]
+        let frames = LiveInboundFrame.parseAll(json)
+        XCTAssertEqual(frames.count, 2, "both sibling frames must be yielded")
+    }
+
+    /// Ordering invariant: `usageMetadata` MUST precede `serverContent`
+    /// in the yielded array. The receive dispatcher processes frames
+    /// sequentially; a `serverContent{turnComplete: true}` triggers
+    /// `finalizeTurn()`, which snapshots `lastUsageMetadata`. If that
+    /// snapshot runs BEFORE the usageMetadata frame lands, the voice-
+    /// turn-usage POST fires with zeros. Regression class that caused
+    /// 36+ zero-token events in prod 2026-04-22.
+    func test_inbound_multiKey_usageMetadata_yielded_before_serverContent() throws {
+        let json: Any = [
+            "serverContent": [
+                "modelTurn": ["parts": []],
+                "turnComplete": true,
+            ],
+            "usageMetadata": ["promptTokenCount": 1000],
+        ]
+        let frames = LiveInboundFrame.parseAll(json)
+        guard frames.count >= 2 else {
+            XCTFail("expected at least 2 frames, got \(frames.count)"); return
+        }
+        if case .usageMetadata = frames[0] {} else {
+            XCTFail("usageMetadata must be FIRST; got \(frames[0])")
+        }
+        if case .serverContent = frames[1] {} else {
+            XCTFail("serverContent must be SECOND; got \(frames[1])")
+        }
+    }
+
+    /// Three-key envelope: usageMetadata first (state update that must
+    /// land before anything triggers finalizeTurn), toolCall second
+    /// (must precede serverContent so `turnContainedToolCall` is set
+    /// before `finalizeTurn()` latches it on a same-envelope turnComplete
+    /// — ADR 0012 gate split), serverContent last (content + turnComplete
+    /// trigger). Rare in practice but covered so the ordering doesn't
+    /// silently flip if a future reorder changes parseAll.
+    func test_inbound_tripleKey_envelope_usage_tool_serverContent_order() throws {
+        let json: Any = [
+            "usageMetadata": ["promptTokenCount": 500],
+            "serverContent": ["modelTurn": ["parts": []]],
+            "toolCall": [
+                "functionCalls": [[
+                    "id": "fn_1",
+                    "name": "start_timer",
+                    "args": ["seconds": 60],
+                ]],
+            ],
+        ]
+        let frames = LiveInboundFrame.parseAll(json)
+        guard frames.count == 3 else {
+            XCTFail("expected 3 frames, got \(frames.count)"); return
+        }
+        if case .usageMetadata = frames[0] {} else {
+            XCTFail("frame[0] must be .usageMetadata; got \(frames[0])")
+        }
+        if case .toolCall = frames[1] {} else {
+            XCTFail("frame[1] must be .toolCall; got \(frames[1])")
+        }
+        if case .serverContent = frames[2] {} else {
+            XCTFail("frame[2] must be .serverContent; got \(frames[2])")
+        }
+    }
+
+    /// Combined envelope {serverContent: {turnComplete: true}, toolCall}:
+    /// Gemini Live's "here's my tool call AND I'm done" shape. The tool
+    /// call belongs to the ENDING turn. If parseAll emitted serverContent
+    /// first, `finalizeTurn()` would latch `containedToolCall = false`
+    /// and then `handleToolCall` would mis-tag the NEXT turn. Reorder
+    /// locked in here so the regression can't silently return.
+    func test_inbound_turnComplete_with_toolCall_emits_toolCall_first() throws {
+        let json: Any = [
+            "serverContent": [
+                "modelTurn": ["parts": []],
+                "turnComplete": true,
+            ],
+            "toolCall": [
+                "functionCalls": [[
+                    "id": "fn_tc",
+                    "name": "start_timer",
+                    "args": ["seconds": 60],
+                ]],
+            ],
+        ]
+        let frames = LiveInboundFrame.parseAll(json)
+        guard frames.count == 2 else {
+            XCTFail("expected 2 frames, got \(frames.count)"); return
+        }
+        if case .toolCall = frames[0] {} else {
+            XCTFail("toolCall must precede serverContent on combined " +
+                    "turnComplete+toolCall envelope — ADR 0012 tagging; " +
+                    "got \(frames[0]) first")
+        }
+        if case .serverContent = frames[1] {} else {
+            XCTFail("frame[1] must be .serverContent; got \(frames[1])")
+        }
     }
 }

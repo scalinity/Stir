@@ -75,15 +75,17 @@ final class GroceryRemindersService {
 
     /// Request full-access if needed. iOS 17+ only API; returns true on
     /// grant, throws `.authorizationDenied` on deny.
+    ///
+    /// v1 ships write-only: we insert reminders into a new "Stir — " list
+    /// and never re-read for sync. If step-N adds Reminders-to-Stir
+    /// round-tripping, upgrade the docstring + request full access.
     @discardableResult
     func requestAccess() async throws -> Bool {
         switch authorizationStatus {
         case .fullAccess:
             return true
         case .writeOnly:
-            // Write-only is sufficient for inserting new reminders, but
-            // we need full access later to re-read for sync. Best effort
-            // upgrade — if user granted write-only explicitly, honor it.
+            // Write-only is sufficient for inserting new reminders in v1.
             return true
         case .restricted, .denied:
             throw Failure.authorizationDenied
@@ -98,7 +100,11 @@ final class GroceryRemindersService {
     // MARK: - Export
 
     /// Create a new Reminders list + inserts one reminder per item.
-    /// Atomic commit — failure in the middle rolls everything back.
+    /// Atomic at the pending-changes layer — failure BEFORE commit calls
+    /// store.reset() to discard; failure AT commit deletes the (just-
+    /// committed, now-orphan) calendar with a follow-up
+    /// store.removeCalendar(..., commit: true) so retries don't
+    /// accumulate empty "Stir — Pasta" lists (CA2-16).
     func export(
         items: [InputItem],
         recipeTitle: String,
@@ -144,7 +150,17 @@ final class GroceryRemindersService {
         do {
             try store.commit()
         } catch {
-            store.reset()
+            // Commit failed AFTER some rows may have landed. store.reset()
+            // only clears PENDING changes — the partially-committed
+            // calendar stays on disk and every retry would create a new
+            // orphan. Explicitly remove it.
+            do {
+                try store.removeCalendar(calendar, commit: true)
+            } catch {
+                Logger.ui.warning(
+                    "grocery export: orphan calendar cleanup failed: \(error.localizedDescription, privacy: .public)",
+                )
+            }
             throw Failure.saveFailed(underlying: error)
         }
 
@@ -160,13 +176,24 @@ final class GroceryRemindersService {
     // MARK: - Private
 
     /// Pick the source the user's default Reminders list lives in. Falls
-    /// back to the first source with a reminders-capable calendar.
+    /// back to the first LOCAL source (never calDAV by default — work
+    /// Exchange or corp CalDAV accounts shouldn't silently receive
+    /// "Stir — Pasta" reminders, CA2-15). If only calDAV is available,
+    /// filter to iCloud-titled sources so we still land somewhere
+    /// reasonable but skip Exchange/work accounts.
     private func reminderSource() -> EKSource? {
         if let defaultCal = store.defaultCalendarForNewReminders() {
             return defaultCal.source
         }
+        if let local = store.sources.first(where: { $0.sourceType == .local }) {
+            return local
+        }
         return store.sources.first { source in
-            source.sourceType == .local || source.sourceType == .calDAV
+            guard source.sourceType == .calDAV else { return false }
+            // Only iCloud-titled calDAV sources — skip Exchange /
+            // corporate / work accounts that happen to expose
+            // reminders.
+            return source.title.lowercased().contains("icloud")
         }
     }
 

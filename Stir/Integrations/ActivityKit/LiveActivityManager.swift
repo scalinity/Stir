@@ -55,12 +55,17 @@ final class LiveActivityManager {
         if let existing = activities[timerId] {
             return existing
         }
+        // Derive initial duration from fireDate at start time. Pinning
+        // here (rather than re-deriving from ContentState per view) so
+        // the progress bar's denominator doesn't shift on pause/resume.
+        let initialDurationSec = max(1, Int(fireDate.timeIntervalSinceNow.rounded()))
         let attributes = TimerActivityAttributes(
             timerId: timerId,
             recipeTitle: recipeTitle,
             stepDescription: stepDescription,
             stepNumber: stepNumber,
             totalSteps: totalSteps,
+            initialDurationSec: initialDurationSec,
         )
         let state = TimerActivityAttributes.ContentState(fireDate: fireDate)
         let content = ActivityContent(state: state, staleDate: fireDate.addingTimeInterval(300))

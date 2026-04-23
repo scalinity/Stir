@@ -350,7 +350,14 @@ final class CookModeViewModel {
         // OutcomeFeedback for a session that never had a step.
         guard totalSteps > 0 else { return }
         guard !isLastStep else {
-            finishPresentationRequested = true
+            // Voice path reached last step via suggested_action=advance_step.
+            // Route through finish() so telemetry + scheduling + donations +
+            // timer/LiveActivity/voice teardown run — NOT just the
+            // presentation flag. Previously this branch silently dropped
+            // cook_session_completed, markCompleted, ReactivationScheduler,
+            // IntentDonationService, fireVoiceSessionCloseTrace, and all
+            // timer cleanup for every voice-driven recipe completion.
+            finish()
             return
         }
         let newIndex = currentStepIndex + 1
@@ -503,19 +510,10 @@ final class CookModeViewModel {
 
     func pauseTimer(_ timer: CookTimer) async {
         do {
-            // Capture paused-remaining BEFORE the state flip — once
-            // typedState == .paused, remainingSeconds returns 0 (the
-            // computed prop gates on .running). The Live Activity needs
-            // the time-left at the pause moment for the static display.
-            let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer)
+            // TimerService.pause captures paused-remaining BEFORE the
+            // repo flip and calls liveActivityManager.update with the
+            // static value internally (CR1-18). No VM-side fan-out.
             try await timerService.pause(timer, on: session)
-            if let tid = timer.id, let fire = timer.fireDate {
-                await liveActivityManager.update(
-                    timerId: tid,
-                    fireDate: fire,
-                    pausedRemainingSec: pausedRemaining,
-                )
-            }
             activeTimers = cookTimerRepository.timers(for: session)
             timerStateVersion &+= 1
         } catch {
@@ -525,17 +523,10 @@ final class CookModeViewModel {
 
     func resumeTimer(_ timer: CookTimer) async {
         do {
+            // TimerService.resume advances startedAt then calls
+            // liveActivityManager.update with the new fireDate + nil
+            // paused flag internally (CR1-18).
             try await timerService.resume(timer, on: session)
-            // `fireDate` has shifted forward by the paused duration after
-            // resume (TimerService advances startedAt). Refresh the
-            // activity with the new fireDate and clear the paused flag.
-            if let tid = timer.id, let fire = timer.fireDate {
-                await liveActivityManager.update(
-                    timerId: tid,
-                    fireDate: fire,
-                    pausedRemainingSec: nil,
-                )
-            }
             activeTimers = cookTimerRepository.timers(for: session)
             timerStateVersion &+= 1
         } catch {
@@ -553,10 +544,9 @@ final class CookModeViewModel {
 
     func cancelTimer(_ timer: CookTimer) async {
         do {
+            // TimerService.cancel ends the Live Activity with reason
+            // .cancelled internally (CR1-18).
             try await timerService.cancel(timer, on: session)
-            if let tid = timer.id {
-                await liveActivityManager.end(timerId: tid, reason: .cancelled)
-            }
             activeTimers = cookTimerRepository.timers(for: session)
             timerStateVersion &+= 1
         } catch {
@@ -769,12 +759,10 @@ final class CookModeViewModel {
     /// completed.
     func reconcileTimersOnForeground() async {
         do {
-            let transitioned = try await timerService.reconcileOnForeground(session: session)
-            for timer in transitioned {
-                if let tid = timer.id {
-                    await liveActivityManager.end(timerId: tid, reason: .completed)
-                }
-            }
+            // TimerService.reconcileOnForeground now ends each
+            // transitioned timer's Live Activity with reason .completed
+            // internally (CR1-18).
+            _ = try await timerService.reconcileOnForeground(session: session)
             activeTimers = cookTimerRepository.timers(for: session)
             timerStateVersion &+= 1
         } catch {
@@ -827,10 +815,9 @@ final class CookModeViewModel {
         }
         for timer in activeTimers where timer.typedState == .running {
             do {
+                // TimerService.cancel ends the Live Activity with
+                // reason .cancelled internally (CR1-18).
                 try await timerService.cancel(timer, on: session)
-                if let tid = timer.id {
-                    await liveActivityManager.end(timerId: tid, reason: .cancelled)
-                }
             } catch {
                 Logger.ui.error("exit cancelTimer failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -859,10 +846,51 @@ final class CookModeViewModel {
 
     // MARK: - Completion
 
-    /// User tapped Finish on the last step. Marks completed, computes
-    /// duration, fires cook_session_completed, and raises the outcome
-    /// feedback flag so the root can present the sheet.
+    /// User tapped Finish on the last step (or voice advanced off the last
+    /// step). Tears down active timers + LiveActivities + voice driver +
+    /// audio session (mirroring `exit(markAbandoned:)`), then marks the
+    /// session completed, emits `cook_session_completed`, and raises the
+    /// outcome feedback flag.
+    ///
+    /// Teardown ordering matters: timers stop ringing before the outcome
+    /// sheet presents; voice close-trace fires BEFORE the
+    /// `cook_session_completed` event so PostHog records the trace close
+    /// with the session-end semantics attached.
+    ///
+    /// Callers are sync (StepCardView Finish button, nextStep voice
+    /// last-step branch) so the async teardown runs inside a Task; the
+    /// presentation flag flips only after teardown completes on the main
+    /// actor.
     func finish() {
+        Task { await performFinish() }
+    }
+
+    private func performFinish() async {
+        // Cancel every running timer + end its Live Activity. Use
+        // timerService.markCompleted (not .cancel) so the Live Activity
+        // ends with reason .completed — matches the "user finished"
+        // semantic. exit(markAbandoned:) uses .cancel for "user bailed".
+        for timer in activeTimers where timer.typedState == .running {
+            do {
+                try await timerService.markCompleted(timer, on: session)
+            } catch {
+                Logger.ui.error("finish markCompleted timer failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        activeTimers = cookTimerRepository.timers(for: session)
+
+        // Voice teardown — idempotent no-op when no driver. Mirrors
+        // exit()'s ordering: cancelSpeaking waits for the state machine
+        // to settle, close() tears down recognizer + synthesizer,
+        // fireVoiceSessionCloseTrace seals the PostHog $ai_trace with
+        // endedReason="session_finish", AVAudioSession deactivates last
+        // so the system mic indicator drops before the outcome sheet
+        // appears.
+        await voiceDriver?.cancelSpeaking()
+        voiceDriver?.close()
+        fireVoiceSessionCloseTrace(endedReason: "session_finish")
+        AVAudioSessionConfigurator.deactivate()
+
         do {
             try cookingSessionRepository.markCompleted(session)
         } catch {

@@ -73,18 +73,40 @@ struct RootView: View {
                 if coordinator.phase == .ready || coordinator.phase == .offlineFallback {
                     Task { await coordinator.refreshEntitlementsOnForeground() }
                 }
-                // Drain any share-extension-queued import. The extension
-                // runs in its own process and cannot present UI beyond the
-                // share sheet; it writes to SharedStorage and we pick up
-                // here. consume* is atomic — clears the slot on read so
-                // a subsequent foreground doesn't re-import.
-                if let pending = SharedStorage().consumePendingImport() {
+                // widget_added Retention funnel (spec §15). Widget process
+                // writes a first-seen timestamp on its first getTimeline
+                // fetch; we drain + emit exactly once per installation.
+                if SharedStorage().drainWidgetFirstSeen() != nil {
+                    PostHogClient.shared.capture(
+                        .widgetAdded,
+                        properties: StepSevenTelemetry.widgetAdded(source: "home_screen"),
+                    )
+                }
+                // Drain any share-extension-queued import. Two guards:
+                //   (a) Only consume when phase == .ready. If the user
+                //       shared during onboarding, coordinator.household.
+                //       profile is nil and the cover body below would
+                //       render empty @ViewBuilder — but consume* would
+                //       have cleared the slot forever, producing an
+                //       undismissable blank modal and losing the share
+                //       (DB1-19). Re-checks on every foreground until
+                //       onboarding completes.
+                //   (b) User-scoped consume — drops the payload if its
+                //       consumingUserKey mismatches the current
+                //       identity (user signed into a different iCloud
+                //       between share-time and re-open). Share-ext
+                //       captures canonical_user_key at share time
+                //       (SA2-10, CWE-345 defense).
+                if coordinator.phase == .ready,
+                   let pending = SharedStorage().consumePendingImport(
+                       currentUserKey: SharedStorage().readCanonicalUserKey(),
+                   ) {
                     pendingShareImport = pending
                 }
             }
         }
         .onOpenURL { url in
-            StirDeepLinkHandler.handle(url)
+            StirDeepLinkHandler.handle(url, coordinator: coordinator)
         }
         .fullScreenCover(item: $pendingShareImport) { pending in
             if let household = coordinator.household.profile {

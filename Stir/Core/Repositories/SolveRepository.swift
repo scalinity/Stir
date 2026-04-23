@@ -102,9 +102,9 @@ final class SolveRepository {
             recipe.household = household
             recipe.title = dish.recipePlan.title
             recipe.summary = dish.recipePlan.summary
-            recipe.servings = Int16(dish.recipePlan.servings)
-            recipe.difficulty = Int16(dish.recipePlan.difficulty)
-            recipe.estimatedMinutes = Int16(dish.recipePlan.estimatedMinutes)
+            recipe.servings = Int16(clamping: dish.recipePlan.servings)
+            recipe.difficulty = Int16(clamping: dish.recipePlan.difficulty)
+            recipe.estimatedMinutes = Int16(clamping: dish.recipePlan.estimatedMinutes)
             recipe.cuisine = dish.recipePlan.cuisine
             recipe.aiVersion = dish.recipePlan.aiVersion
             recipe.typedOrigin = .ai
@@ -124,7 +124,7 @@ final class SolveRepository {
                 // to `false` = required. Matches prior behavior before
                 // isOptional was made nullable on the wire.
                 row.isOptional = ing.isOptional ?? false
-                row.sortOrder = Int16(idx)
+                row.sortOrder = Int16(clamping: idx)
                 row.typedSource = .ai
             }
 
@@ -132,10 +132,10 @@ final class SolveRepository {
                 let row = RecipeStep(context: context)
                 row.id = UUID()
                 row.recipePlan = recipe
-                row.stepNumber = Int16(step.stepNumber)
-                row.sortOrder = Int16(step.stepNumber)
+                row.stepNumber = Int16(clamping: step.stepNumber)
+                row.sortOrder = Int16(clamping: step.stepNumber)
                 row.instructionText = step.instructionText
-                row.timerSeconds = Int32(step.timerSeconds ?? 0)
+                row.timerSeconds = Int32(clamping: step.timerSeconds ?? 0)
                 row.cautionTagsArray = step.cautionTags
             }
 
@@ -145,13 +145,13 @@ final class SolveRepository {
             suggested.id = dishId
             suggested.solveRequest = solve
             suggested.recipePlan = recipe
-            suggested.rank = Int16(dish.rank)
+            suggested.rank = Int16(clamping: dish.rank)
             suggested.title = dish.title
             suggested.summary = dish.summary
-            suggested.estimatedMinutes = Int16(dish.totalTimeMinutes)
+            suggested.estimatedMinutes = Int16(clamping: dish.totalTimeMinutes)
             suggested.typedFitLabelPrimary = dish.fitLabelPrimary
             suggested.typedFitLabelSecondary = dish.fitLabelSecondary
-            suggested.missingIngredientCount = Int16(dish.missingIngredientCount)
+            suggested.missingIngredientCount = Int16(clamping: dish.missingIngredientCount)
             suggested.hardConstraintPass = dish.hardConstraintPass
             suggested.reasoningSummary = dish.reasoningSummary
             suggested.confidence = dish.confidence

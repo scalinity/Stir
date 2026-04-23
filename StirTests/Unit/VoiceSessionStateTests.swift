@@ -153,13 +153,58 @@ final class VoiceSessionStateTests: XCTestCase {
     }
 
     func test_illegal_readyToUnrelatedLateStates() {
-        // .ready can only step forward into .userSpeaking (tap-start)
-        // or .modelSpeaking (hands-free next turn). Other forward
-        // states (.thinking, .transcribing, .toolCalling) still
-        // require traversal through intermediate steps.
+        // .ready can step forward into .userSpeaking (tap-start),
+        // .modelSpeaking (hands-free next turn), or .toolCalling
+        // (model fires a tool immediately after VAD closes user's
+        // turn). Other forward states (.thinking, .transcribing)
+        // still require traversal through intermediate steps.
         XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .thinking))
         XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .transcribing))
-        XCTAssertFalse(VoiceSessionState.ready.canTransition(to: .toolCalling))
+    }
+
+    // MARK: - Tool-call hands-free transitions (2026-04-22)
+
+    func test_livePath_readyToToolCallingIsLegal() {
+        // Model can call `advance_step` / `start_timer` /
+        // `substitution_check` between turns, when iOS has already
+        // settled back to `.ready`. Before this was allowed, tool
+        // calls were dropped with `tool_call.dropped_bad_state` and
+        // the server sent `toolCallCancellation`.
+        XCTAssertTrue(VoiceSessionState.ready.canTransition(to: .toolCalling))
+    }
+
+    func test_livePath_userSpeakingToToolCallingIsLegal() {
+        // Model can interrupt mid-utterance to dispatch a tool when
+        // VAD has already parsed enough of the user's speech. iOS
+        // state is still `.userSpeaking` at that moment.
+        XCTAssertTrue(VoiceSessionState.userSpeaking.canTransition(to: .toolCalling))
+    }
+
+    func test_livePath_modelSpeakingToToolCallingIsLegal() {
+        // Rare but legal: model interrupts its own spoken output to
+        // fire a tool. State machine must allow it so handleToolCall
+        // doesn't drop the frame.
+        XCTAssertTrue(VoiceSessionState.modelSpeaking.canTransition(to: .toolCalling))
+    }
+
+    // MARK: - Self-transition idempotence (2026-04-22)
+
+    func test_selfTransition_isIdempotentNoop_doesNotFireCallback() {
+        // VoiceSessionStateMachine.advance treats self-transitions as
+        // no-ops and returns `true` silently. Re-entrant tool frames
+        // from the server (back-to-back `.toolCalling`) would
+        // otherwise hit the canTransition guard and assertionFailure
+        // in debug builds.
+        let machine = VoiceSessionStateMachine()
+        _ = machine.advance(to: .ready)
+        var observed: [(VoiceSessionState, VoiceSessionState)] = []
+        machine.onTransition = { old, new in observed.append((old, new)) }
+
+        XCTAssertTrue(machine.advance(to: .ready),
+                      "self-transition should return true (idempotent)")
+        XCTAssertEqual(machine.state, .ready)
+        XCTAssertTrue(observed.isEmpty,
+                      "onTransition must not fire for self-transition")
     }
 
     // MARK: - Callback

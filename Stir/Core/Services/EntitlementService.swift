@@ -171,8 +171,17 @@ final class EntitlementService {
         switch gate {
         // Premium-tier gates
         case .voiceCookMode:
-            if effectiveTier == .free { return .blockedByTier(required: .premium) }
-            if let quota = quotas[.voiceCookSession], quota.used >= quota.cap {
+            // Honor the server-computed `voiceEnabled` flag per CLAUDE.md
+            // rule "Don't derive `voice_enabled` on iOS." Prior code tier-
+            // checked directly here, which diverged from the server and
+            // broke ADR-0008 (voice temporarily free for testing).
+            if !voiceEnabled { return .blockedByTier(required: .premium) }
+            // Defensive guard: require cap > 0 before quota-blocking. A
+            // stale cached snapshot with cap=0 (e.g. from a pre-ADR-0008
+            // bootstrap) would otherwise make `0 >= 0` trip the quota
+            // paywall even though no sessions have been used. Server-side
+            // comment in readQuotasForWire flags this exact footgun.
+            if let quota = quotas[.voiceCookSession], quota.cap > 0, quota.used >= quota.cap {
                 return .blockedByQuota(
                     feature: .voiceCookSession,
                     used: quota.used, cap: quota.cap,
@@ -190,9 +199,11 @@ final class EntitlementService {
             if effectiveTier != .pro { return .blockedByTier(required: .pro) }
             return .allowed
 
-        // Metered (no tier gate — Free users get a small monthly allotment)
+        // Metered (no tier gate — Free users get a small monthly allotment).
+        // Same `cap > 0` guard as voiceCookMode: stale cached snapshots
+        // with cap=0 would otherwise block with `0 >= 0`.
         case .dinnerSolve:
-            if let quota = quotas[.dinnerSolve], quota.used >= quota.cap {
+            if let quota = quotas[.dinnerSolve], quota.cap > 0, quota.used >= quota.cap {
                 return .blockedByQuota(
                     feature: .dinnerSolve,
                     used: quota.used, cap: quota.cap,
@@ -202,7 +213,7 @@ final class EntitlementService {
             return .allowed
 
         case .recipeImport:
-            if let quota = quotas[.recipeImport], quota.used >= quota.cap {
+            if let quota = quotas[.recipeImport], quota.cap > 0, quota.used >= quota.cap {
                 return .blockedByQuota(
                     feature: .recipeImport,
                     used: quota.used, cap: quota.cap,

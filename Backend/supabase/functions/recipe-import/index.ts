@@ -32,7 +32,8 @@ import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, type Logger } from '../_shared/logger.ts';
 import { RecipeImportRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
@@ -367,19 +368,28 @@ Deno.serve(async (req) => {
 
   if (!recipe) {
     await refundQuota(client, userLog, claims.canonical_user_key, 'recipe_import', consumedPeriodStart);
-    logAIRequest(client, userLog, {
-      request_id: body.import_id,
-      canonical_user_key: claims.canonical_user_key,
-      feature_key: FEATURE_KEY,
-      model: MODEL,
-      input_tokens: totalInputTokens,
-      output_tokens: totalOutputTokens,
-      cost_usd: costUsd,
-      latency_ms: totalLatencyMs,
-      thinking_level: 'minimal',
-      prompt_version: activePrompt.version,
-      retry_count: retryCount,
-    });
+    recordAIRequest(
+      client, userLog,
+      {
+        request_id: body.import_id,
+        canonical_user_key: claims.canonical_user_key,
+        feature_key: FEATURE_KEY,
+        model: MODEL,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        cost_usd: costUsd,
+        latency_ms: totalLatencyMs,
+        thinking_level: 'minimal',
+        prompt_version: activePrompt.version,
+        retry_count: retryCount,
+      },
+      {
+        trace_id: body.import_id,
+        span_name: 'recipe_import',
+        is_error: true,
+        error_code: ErrorCode.IMPORT_01,
+      },
+    );
     userLog.error('import_failed_upstream', lastErr, { retry_count: retryCount });
     return jsonError(
       ErrorCode.IMPORT_01,
@@ -396,19 +406,26 @@ Deno.serve(async (req) => {
   // into this handler later (same pattern as substitution), re-enable a
   // server-side pass here as belt-and-suspenders.
 
-  logAIRequest(client, userLog, {
-    request_id: body.import_id,
-    canonical_user_key: claims.canonical_user_key,
-    feature_key: FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatencyMs,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: retryCount,
-  });
+  recordAIRequest(
+    client, userLog,
+    {
+      request_id: body.import_id,
+      canonical_user_key: claims.canonical_user_key,
+      feature_key: FEATURE_KEY,
+      model: MODEL,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      cost_usd: costUsd,
+      latency_ms: totalLatencyMs,
+      thinking_level: 'minimal',
+      prompt_version: activePrompt.version,
+      retry_count: retryCount,
+    },
+    {
+      trace_id: body.import_id,
+      span_name: 'recipe_import',
+    },
+  );
 
   const responseBody: RecipeImportResponse = {
     import_id: body.import_id,
@@ -467,7 +484,11 @@ async function resolveRawContent(
       const html = await fetchUrlText(payload.url);
       const extracted = extractRecipeText(html);
       log.info('source_fetched', {
-        url: payload.url.slice(0, 200),
+        // Host-only — paths/queries can carry session tokens, referral
+        // tokens, or identify private-blog posts tied to the user
+        // (SA3-11). The full URL is captured on the RecipeImport audit
+        // row iOS-side; it doesn't need to land in operational logs.
+        url_host: safeUrlHost(payload.url),
         html_bytes: html.length,
         extracted_bytes: extracted.length,
       });
@@ -485,20 +506,49 @@ async function resolveRawContent(
   throw new FetchFailure(`unknown source_type: ${String(body.source_type)}`);
 }
 
+function safeUrlHost(raw: string): string {
+  try { return new URL(raw).host; } catch { return '<unparseable>'; }
+}
+
 async function fetchUrlText(url: string): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), URL_FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: {
-        'user-agent': URL_FETCH_USER_AGENT,
-        'accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9',
-      },
-    });
+    // Walk redirects manually — `redirect: 'follow'` would skip
+    // per-hop SSRF re-validation and let a Location: http://10.0.0.1/
+    // (or a DNS rebind on the second hop) bypass the initial guard.
+    let currentUrl = url;
+    let response: Response | null = null;
+    for (let hop = 0; hop <= URL_FETCH_MAX_REDIRECTS; hop++) {
+      await assertUrlIsPublic(currentUrl);
+      const r = await fetch(currentUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          'user-agent': URL_FETCH_USER_AGENT,
+          'accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+          'accept-language': 'en-US,en;q=0.9',
+        },
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const location = r.headers.get('location');
+        if (!location) {
+          throw new FetchFailure(`redirect ${r.status} with no location`);
+        }
+        // Resolve relative Locations against the current URL.
+        currentUrl = new URL(location, currentUrl).toString();
+        // Drain + close the redirect response so the connection can
+        // be reused.
+        await r.body?.cancel();
+        continue;
+      }
+      response = r;
+      break;
+    }
+    if (!response) {
+      throw new FetchFailure(`too many redirects (>${URL_FETCH_MAX_REDIRECTS})`);
+    }
     if (!response.ok) {
       throw new FetchFailure(`upstream ${response.status}`);
     }
@@ -534,6 +584,114 @@ async function fetchUrlText(url: string): Promise<string> {
   }
 }
 
+const URL_FETCH_MAX_REDIRECTS = 5;
+
+/**
+ * SSRF guard — blocks anything that isn't a public http(s) URL.
+ *
+ * Checks:
+ *   1. Scheme allow-list: http/https only.
+ *   2. No userinfo (prevents `http://attacker@target/` smuggling).
+ *   3. Hostname resolves to a public IP — blocks RFC-1918, loopback,
+ *      link-local (169.254 = AWS IMDS, GCP metadata), CGNAT, multicast,
+ *      IPv4-mapped IPv6, ULA. Runs on EVERY hop via `redirect: 'manual'`,
+ *      so a DNS rebind or Location redirect can't bypass the initial
+ *      check. (CWE-918, CWE-601.)
+ */
+async function assertUrlIsPublic(raw: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new FetchFailure('invalid url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new FetchFailure(`scheme not allowed: ${parsed.protocol}`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new FetchFailure('userinfo in url not allowed');
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname) {
+    throw new FetchFailure('empty hostname');
+  }
+  // Reject bracketed IPv6 literals + localhost aliases eagerly.
+  if (hostname === 'localhost' || hostname === 'ip6-localhost' || hostname === 'ip6-loopback') {
+    throw new FetchFailure(`blocked hostname: ${hostname}`);
+  }
+  // Resolve A + AAAA records. An unresolvable host is harmless-to-us
+  // (fetch would error anyway), but we treat it as a block so the
+  // error is typed + logged here rather than surfacing as a generic
+  // fetch failure.
+  const ips = await resolveAllIps(hostname);
+  if (ips.length === 0) {
+    throw new FetchFailure(`hostname did not resolve: ${hostname}`);
+  }
+  for (const ip of ips) {
+    if (isPrivateIp(ip)) {
+      throw new FetchFailure(`blocked private ip: ${ip}`);
+    }
+  }
+}
+
+async function resolveAllIps(hostname: string): Promise<string[]> {
+  // If the hostname is already an IP literal, Deno.resolveDns throws;
+  // short-circuit by returning it directly so the range check runs.
+  if (isIpLiteral(hostname)) return [hostname];
+  const out: string[] = [];
+  for (const type of ['A', 'AAAA'] as const) {
+    try {
+      const records = await Deno.resolveDns(hostname, type);
+      out.push(...records);
+    } catch {
+      // Record type absent is normal; keep the other type's records.
+    }
+  }
+  return out;
+}
+
+function isIpLiteral(s: string): boolean {
+  // IPv4 dotted-quad or IPv6 (including brackets).
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return true;
+  const stripped = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s;
+  return stripped.includes(':');
+}
+
+function isPrivateIp(ip: string): boolean {
+  // IPv4 dotted-quad — cover loopback, RFC1918, link-local, CGNAT,
+  // multicast, class-E, and the any-host 0.0.0.0.
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = v4.slice(1, 3).map((n) => parseInt(n, 10));
+    if (a === 10) return true;                              // 10/8
+    if (a === 127) return true;                             // loopback
+    if (a === 0) return true;                               // 0/8
+    if (a === 169 && b === 254) return true;                // link-local (IMDS)
+    if (a === 172 && b >= 16 && b <= 31) return true;       // 172.16/12
+    if (a === 192 && b === 168) return true;                // 192.168/16
+    if (a === 100 && b >= 64 && b <= 127) return true;      // CGNAT 100.64/10
+    if (a === 192 && b === 0 && v4[3] === '0') return true; // 192.0.0/24 IETF
+    if (a === 192 && b === 0 && v4[3] === '2') return true; // 192.0.2/24 TEST-NET-1
+    if (a === 198 && (b === 18 || b === 19)) return true;   // 198.18/15 benchmark
+    if (a === 198 && b === 51) return true;                 // 198.51.100/24
+    if (a === 203 && b === 0) return true;                  // 203.0.113/24
+    if (a >= 224) return true;                              // 224+ multicast + reserved
+    return false;
+  }
+  // IPv6 — normalize lower + strip zone id. Block loopback (::1), unspec
+  // (::), ULA fc00::/7, link-local fe80::/10, multicast ff00::/8, and
+  // IPv4-mapped ::ffff:a.b.c.d / IPv4-compat ::a.b.c.d.
+  const v6 = ip.toLowerCase().split('%')[0];
+  if (v6 === '::1' || v6 === '::') return true;
+  if (v6.startsWith('fc') || v6.startsWith('fd')) return true;  // ULA fc00::/7
+  if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) return true;  // fe80::/10
+  if (v6.startsWith('ff')) return true;  // multicast
+  // IPv4-mapped / IPv4-compat: ::ffff:x.y.z.w or ::x.y.z.w — extract the v4 tail.
+  const mapped = v6.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mapped) return isPrivateIp(mapped[1]);
+  return false;
+}
+
 /**
  * Minimal HTML → text extraction:
  *   1. Prefer <script type="application/ld+json"> recipe schema if present
@@ -565,13 +723,26 @@ function extractRecipeText(html: string): string {
     }
   }
 
-  // Strip noise blocks.
-  let stripped = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<template[\s\S]*?<\/template>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ');
+  // Strip noise blocks. Iterate until the output stabilizes so nested
+  // occlusions like `<scr<script>ipt>alert()</script>ipt>` can't leave
+  // a half-stripped payload. Cap at 8 passes so a pathological input
+  // can't DoS the Edge Function.
+  const NOISE_PATTERNS: RegExp[] = [
+    /<script[\s\S]*?<\/script>/gi,
+    /<style[\s\S]*?<\/style>/gi,
+    /<noscript[\s\S]*?<\/noscript>/gi,
+    /<template[\s\S]*?<\/template>/gi,
+    /<!--[\s\S]*?-->/g,
+  ];
+  let stripped = html;
+  for (let i = 0; i < 8; i++) {
+    let next = stripped;
+    for (const pattern of NOISE_PATTERNS) {
+      next = next.replace(pattern, ' ');
+    }
+    if (next === stripped) break;
+    stripped = next;
+  }
 
   // Replace block-level tags with newlines for readability.
   stripped = stripped.replace(/<\/(p|div|section|article|li|h[1-6]|tr)>/gi, '\n');
@@ -579,17 +750,24 @@ function extractRecipeText(html: string): string {
   // Drop remaining tags.
   stripped = stripped.replace(/<[^>]+>/g, ' ');
 
-  // Decode a minimal set of HTML entities.
-  stripped = stripped
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#039;/gi, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&rsquo;/gi, "\u2019")
-    .replace(/&lsquo;/gi, "\u2018");
+  // Decode a minimal set of HTML entities. Iterate until stable so
+  // `&amp;lt;` → `&lt;` → `<` chains don't leave encoded markers in
+  // the output that a second user could re-decode later. Same 8-pass
+  // DoS cap.
+  for (let i = 0; i < 8; i++) {
+    const before = stripped;
+    stripped = stripped
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#039;/gi, "'")
+      .replace(/&#x27;/gi, "'")
+      .replace(/&rsquo;/gi, "’")
+      .replace(/&lsquo;/gi, "‘");
+    if (stripped === before) break;
+  }
 
   // Collapse whitespace.
   return stripped.replace(/\s+/g, ' ').trim();

@@ -32,7 +32,47 @@ struct SavedMealsView: View {
     @State private var errorMessage: String?
     @State private var showFavoritesOnly = false
     @State private var searchQuery: String = ""
+    @State private var debouncedSearchQuery: String = ""
     @State private var sortOption: SortOption = .lastCooked
+    /// Lowercased "title + every ingredient displayName" blob per row id.
+    /// Populated at load(); consulted instead of re-lowercasing title +
+    /// walking the ingredients relationship on every keystroke (CA3-7).
+    @State private var searchBlobs: [UUID: String] = [:]
+    /// Memoized output of the filter+sort pipeline. SwiftUI doesn't
+    /// memoize computed properties, so every body re-eval pre-fix
+    /// re-walked rows × ingredients. Rebuilt via .onChange on its
+    /// inputs (rows / debouncedSearchQuery / sortOption / favorites).
+    @State private var filteredRows: [CookingSessionRepository.SavedMealEntry] = []
+
+    /// Filter + sort pipeline. Consults pre-computed searchBlobs so each
+    /// keystroke is a dictionary lookup + substring match — no per-row
+    /// title-lowercase, no ingredients relationship walk.
+    private func rebuildFilteredRows() {
+        var filtered = rows
+        // 1. Favorites filter
+        if showFavoritesOnly {
+            filtered = filtered.filter { $0.plan?.isFavorite == true }
+        }
+        // 2. Search — matches title OR any ingredient displayName,
+        //    case-insensitive. Whitespace-only query is a no-op.
+        let trimmedQuery = debouncedSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            let needle = trimmedQuery.lowercased()
+            filtered = filtered.filter { row in
+                searchBlobs[row.id]?.contains(needle) ?? false
+            }
+        }
+        // 3. Sort
+        switch sortOption {
+        case .lastCooked:
+            filtered.sort(by: CookingSessionRepository.sortByLastCooked)
+        case .rating:
+            filtered.sort { ($0.rating ?? 0) > ($1.rating ?? 0) }
+        case .alphabetical:
+            filtered.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        self.filteredRows = filtered
+    }
 
     /// Sort orderings for the Saved list. Mirrors the mockup 10 picker
     /// (last cooked desc is default; rating desc surfaces best hits;
@@ -82,6 +122,23 @@ struct SavedMealsView: View {
         .task {
             await load()
         }
+        // Debounce searchQuery → debouncedSearchQuery. 150ms matches
+        // keystroke cadence without feeling laggy. Each keystroke
+        // restarts the Task; cancellation drops stale work.
+        .task(id: searchQuery) {
+            do {
+                try await Task.sleep(nanoseconds: 150_000_000)
+                debouncedSearchQuery = searchQuery
+            } catch {
+                // Task cancelled by next keystroke — intended.
+            }
+        }
+        // rows changes come from load() which already calls
+        // rebuildFilteredRows() inline — no .onChange observer needed
+        // (SavedMealEntry isn't Equatable because RecipePlan isn't).
+        .onChange(of: debouncedSearchQuery) { rebuildFilteredRows() }
+        .onChange(of: sortOption) { rebuildFilteredRows() }
+        .onChange(of: showFavoritesOnly) { rebuildFilteredRows() }
         .fullScreenCover(item: $cookAgainPlan) { plan in
             CookModeRoot(
                 recipePlan: plan,
@@ -159,39 +216,6 @@ struct SavedMealsView: View {
     }
 
     // MARK: - List
-
-    private var filteredRows: [CookingSessionRepository.SavedMealEntry] {
-        var filtered = rows
-        // 1. Favorites filter
-        if showFavoritesOnly {
-            filtered = filtered.filter { $0.plan?.isFavorite == true }
-        }
-        // 2. Search — matches title OR any ingredient displayName,
-        //    case-insensitive. Whitespace-only query is a no-op.
-        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedQuery.isEmpty {
-            let needle = trimmedQuery.lowercased()
-            filtered = filtered.filter { row in
-                if row.title.lowercased().contains(needle) { return true }
-                guard let plan = row.plan,
-                      let ings = plan.ingredients as? Set<RecipeIngredient>
-                else { return false }
-                return ings.contains { ($0.displayName?.lowercased() ?? "").contains(needle) }
-            }
-        }
-        // 3. Sort
-        switch sortOption {
-        case .lastCooked:
-            // Uses the repo's existing sortByLastCooked (last-cooked-desc;
-            // un-cooked entries fall to bottom alphabetically).
-            filtered.sort(by: CookingSessionRepository.sortByLastCooked)
-        case .rating:
-            filtered.sort { ($0.rating ?? 0) > ($1.rating ?? 0) }
-        case .alphabetical:
-            filtered.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        }
-        return filtered
-    }
 
     private var list: some View {
         List(filteredRows) { row in
@@ -309,8 +333,36 @@ struct SavedMealsView: View {
     @MainActor
     private func load() async {
         do {
-            self.rows = try repository.savedMealEntries(for: household)
+            let fetched = try repository.savedMealEntries(for: household)
+            self.rows = fetched
+            // Rebuild search blobs at load time. Title lowered once,
+            // every ingredient displayName concatenated. Excludes
+            // canonicalSlug (users search the visible names). Re-built
+            // only on load — toggling favorites / sorting / typing
+            // doesn't invalidate the blobs.
+            var blobs: [UUID: String] = [:]
+            blobs.reserveCapacity(fetched.count)
+            for entry in fetched {
+                let titleLower = entry.title.lowercased()
+                var ingredientLower = ""
+                if let plan = entry.plan,
+                   let ings = plan.ingredients as? Set<RecipeIngredient> {
+                    // Single allocation — append each displayName, space
+                    // between so partial-word cross-matches don't span
+                    // boundaries ("salt" shouldn't match "salted peanuts"
+                    // next to "water").
+                    for ing in ings {
+                        if let name = ing.displayName, !name.isEmpty {
+                            ingredientLower.append(" ")
+                            ingredientLower.append(name.lowercased())
+                        }
+                    }
+                }
+                blobs[entry.id] = titleLower + ingredientLower
+            }
+            self.searchBlobs = blobs
             self.errorMessage = nil
+            rebuildFilteredRows()
         } catch {
             Logger.coreData.error("SavedMeals load failed: \(error.localizedDescription, privacy: .public)")
             self.errorMessage = "Couldn't load saved meals."

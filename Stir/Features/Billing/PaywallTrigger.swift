@@ -71,7 +71,10 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     var headline: String {
         switch self {
         case .voiceAffordanceTapped:
-            return "Cook hands-free. Try Premium free for 7 days."
+            // ADR 0015 copy spec: hero carries the benefit verb ("Cook
+            // hands-free with voice") + trial CTA. Cap numbers live in
+            // the subheadline / feature list below, never the hero.
+            return "Cook hands-free with voice. Start Premium free for 7 days."
         case .voiceCookQuotaExhausted:
             return "You've used this month's voice Cook Sessions. Upgrade to Pro for more."
         case .dinnerSolveQuotaExhausted:
@@ -87,7 +90,12 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         case .multiImageScanGate:
             return "Scan your whole kitchen at once. Upgrade to Pro."
         case .settingsUpgrade:
-            return "Try Premium free for 7 days."
+            // Hero aligns with the Pro-flavored subheadline below
+            // (ADR 0015 paywall copy spec classified settingsUpgrade
+            // as a generic Pro-upsell row). Previous "Try Premium
+            // free for 7 days." produced Premium-hero + Pro-feature-
+            // list dissonance on the same surface.
+            return "Upgrade for every-dinner voice and multi-image scan."
         }
     }
 
@@ -95,28 +103,57 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     /// carries the full value prop.
     ///
     /// Exhaustive (no `default`) so the compiler forces an update when a
-    /// new trigger is added or when step 6 replaces "voice Cook Mode
-    /// (coming soon)" with the real voice copy. A `default` arm would
-    /// silently misrepresent voice availability after step 6 ships.
+    /// new trigger is added. A `default` arm would silently misrepresent
+    /// the value prop on a new trigger and produce "copy says X, cap
+    /// enforces Y" refund-request bugs.
+    ///
+    /// **Copy philosophy (ADR 0015):** frequency framing, never raw
+    /// session counts. "~3 dinners a week" on Premium and "every dinner"
+    /// on Pro read as benefit statements; "13 voice Cook Sessions / mo"
+    /// and "27 voice Cook Sessions / mo" read as rationing. Both the
+    /// paywall surfaces (this file + PaywallView.featuresList) and the
+    /// ProComparisonSheet use frequency framing for the voice row;
+    /// enforcement numbers (13 / 27) live only in
+    /// `_shared/entitlements.ts`. If those numbers change, update the
+    /// frequency phrases here and in ProComparisonSheet in the same
+    /// commit — the phrases must stay truthful to the enforced caps.
     var subheadline: String {
-        // Canonical subhead pre-voice-launch. Step 6 will replace the
-        // "(coming soon)" clause with "hands-free voice Cook Mode" — at
-        // that point, `voiceAffordanceTapped` and the generic paywall
-        // text converge.
-        let voiceComingSoon = "40 Dinner Solves/mo, voice Cook Mode (coming soon), saved favorites, widgets, leftovers."
+        // Premium value prop — voice leads, then cadence, then surface
+        // features. Frequency-framed so it ages well if the cap changes
+        // later (ADR 0015 trigger-to-revisit).
+        let premiumValueProp = "Hands-free voice for ~3 dinners a week, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
+        // Pro value prop — voice "every dinner" is the anchoring benefit;
+        // exact cap (27) stays out of prose. 120 Dinner Solves acts as
+        // a second anchor so the subhead works for non-voice Pro triggers.
+        let proValueProp = "Voice cooking for every dinner, 120 Dinner Solves/mo, multi-image scan, priority inference, 1,000 pantry items."
         switch self {
         case .voiceAffordanceTapped:
-            return "Hands-free voice Cook Mode, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
-        case .voiceCookQuotaExhausted, .multiImageScanGate:
-            // Pro-tier upsell — caller has already paid for Premium.
-            return "120 Dinner Solves/mo, 40 voice Cook Sessions, multi-image scan, priority inference, 1,000 pantry items."
+            // Free→Premium hero trigger — lead with the benefit verb,
+            // not the cap. ADR 0015 paywall copy table, row 1.
+            return "Cook hands-free with your voice, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
+        case .voiceCookQuotaExhausted:
+            // Premium user hit monthly voice cap → Pro upsell. Voice is
+            // THE reason they'd upgrade; "every dinner" removes the
+            // rationing frame without citing 27.
+            return proValueProp
+        case .multiImageScanGate:
+            // Premium user tried Pro-only multi-image scan. Voice still
+            // leads because it's the durable differentiator, with
+            // multi-image called out as the surface feature that
+            // triggered the paywall. ADR 0015 paywall copy table, row 3.
+            return "Voice for every dinner + multi-image scan, 120 Dinner Solves/mo, priority inference, 1,000 pantry items."
+        case .settingsUpgrade:
+            // Generic upgrade from Settings. Classified as Pro-upsell
+            // per ADR 0015 paywall copy table, row 2 — the surface
+            // needs a strong voice anchor because it's context-free
+            // (unlike feature-gated triggers which have their own lead).
+            return proValueProp
         case .dinnerSolveQuotaExhausted,
              .recipeImportQuotaExhausted,
              .savedFavoritesGate,
              .widgetsGate,
-             .leftoversGate,
-             .settingsUpgrade:
-            return voiceComingSoon
+             .leftoversGate:
+            return premiumValueProp
         }
     }
 }

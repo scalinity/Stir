@@ -27,12 +27,14 @@ import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { jsonOk, jsonError, ErrorCode } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
 
-const CLAIM_LIMIT = 3;       // one tick handles at most 3 jobs
+const CLAIM_LIMIT = 10;      // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
 const RETRY_BACKOFF_SECONDS = [60, 300, 900];  // 1m, 5m, 15m
+const STUCK_JOB_TIMEOUT_MINUTES = 5;  // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
 const MODEL = GeminiModel.FlashLite;
 
@@ -139,6 +141,33 @@ Deno.serve(async (req) => {
 
   const started = performance.now();
   const client = createServiceClient();
+
+  // ---- Reclaim sweep: flip stuck 'processing' rows back to 'pending'.
+  // If a prior tick crashed (OOM, 150s timeout, pod restart) mid-batch,
+  // rows stay wedged in 'processing' forever. Reclaim any row that's
+  // been 'processing' for more than STUCK_JOB_TIMEOUT_MINUTES without
+  // hitting MAX_ATTEMPTS. Rare in practice but essential for queue
+  // liveness (CA2-4).
+  try {
+    const { data: reclaimed, error: reclaimErr } = await client
+      .from('notification_jobs')
+      .update({
+        state: 'pending',
+        error_message: 'reclaimed after stuck processing window',
+      })
+      .eq('state', 'processing')
+      .lt('attempt_count', MAX_ATTEMPTS)
+      .lt('updated_at', new Date(Date.now() - STUCK_JOB_TIMEOUT_MINUTES * 60_000).toISOString())
+      .select('id');
+    if (reclaimErr) {
+      log.warn('reclaim_failed', { err: reclaimErr.message });
+    } else if (reclaimed && reclaimed.length > 0) {
+      log.info('stuck_jobs_reclaimed', { count: reclaimed.length });
+    }
+  } catch (err) {
+    // Never fatal — the claim below still runs.
+    log.warn('reclaim_unexpected', { err: err instanceof Error ? err.message : String(err) });
+  }
 
   // ---- Claim up to CLAIM_LIMIT pending jobs atomically.
   const { data: claimedRows, error: claimErr } = await client.rpc(
@@ -270,19 +299,27 @@ async function processRecipeImportAsync(
 
   const userLog = await createLogger(job.id, '/v1/ops/pgmq-dispatch:recipe_import', job.canonical_user_key);
 
-  logAIRequest(client, userLog, {
-    request_id: payload.import_id,
-    canonical_user_key: job.canonical_user_key,
-    feature_key: RECIPE_IMPORT_FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatencyMs,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: retryCount,
-  });
+  recordAIRequest(
+    client, userLog,
+    {
+      request_id: payload.import_id,
+      canonical_user_key: job.canonical_user_key,
+      feature_key: RECIPE_IMPORT_FEATURE_KEY,
+      model: MODEL,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      cost_usd: costUsd,
+      latency_ms: totalLatencyMs,
+      thinking_level: 'minimal',
+      prompt_version: activePrompt.version,
+      retry_count: retryCount,
+    },
+    {
+      trace_id: payload.import_id,
+      span_name: 'recipe_import_async',
+      is_error: !recipe,
+    },
+  );
 
   if (!recipe) {
     throw new Error(`recipe normalization failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);

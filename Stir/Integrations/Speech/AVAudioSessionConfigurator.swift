@@ -7,12 +7,23 @@
 //
 // Category + mode choice (ADR 0007 pre-commits):
 //   - `.playAndRecord` — both mic in and speaker out in one session
-//   - `.voiceChat` mode — enables echo cancellation, tightens output
-//     gain for voice (gets louder with less distortion)
+//   - `.videoChat` mode — enables echo cancellation (same Voice
+//     Processing IO unit as `.voiceChat`) but routes to the speaker
+//     by default and uses a flatter frequency response suited to
+//     dual-direction voice rather than telephony. `.voiceChat`
+//     produced earpiece-like output on iPhone even with
+//     `.defaultToSpeaker` + `overrideOutputAudioPort(.speaker)` set
+//     (observed 2026-04-23: "coming out as if you were on a
+//     phonecall"). `.videoChat` is what FaceTime/Meet-class apps
+//     use for the same reason.
 //   - `.duckOthers` — kitchen apps like music ducking during a turn
-//   - `.defaultToSpeaker` — without this, iPhone routes to earpiece
-//     on phones that lack a proximity sensor signal
-//   - `.allowBluetooth` — AirPods + kitchen BT speakers both work
+//   - `.defaultToSpeaker` — redundant under `.videoChat` (mode sets
+//     it implicitly per Apple docs), but kept as explicit belt +
+//     suspenders. If Apple ever changes `.videoChat` to not imply
+//     speaker routing, this keeps the current behavior stable.
+//   - `.allowBluetoothHFP` — AirPods + kitchen BT speakers both work
+//     (renamed from deprecated `.allowBluetooth` in iOS 8; same
+//     hands-free-profile semantic, no behavior change)
 //
 // Activate/deactivate is idempotent at Cook Mode entry; safe to call
 // multiple times. Deactivate with `.notifyOthersOnDeactivation` so
@@ -40,13 +51,29 @@ enum AVAudioSessionConfigurator {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
             .playAndRecord,
-            mode: .voiceChat,
-            options: [.duckOthers, .defaultToSpeaker, .allowBluetooth],
+            mode: .videoChat,
+            options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP],
         )
         try session.setActive(true, options: [])
+        // Force speaker routing explicitly. `.defaultToSpeaker` is a
+        // category option hint, but `.voiceChat` mode can still route
+        // to the earpiece on some iPhone models with proximity sensing
+        // (observed 2026-04-23: user reports quiet output while phone
+        // is on a countertop, which is the earpiece-routing signature).
+        // `overrideOutputAudioPort(.speaker)` is the authoritative override.
+        do {
+            try session.overrideOutputAudioPort(.speaker)
+        } catch {
+            // Non-fatal — the category-level `.defaultToSpeaker` still
+            // applies, and some Bluetooth-connected routes refuse this
+            // override. Log and continue.
+            Logger.voice.warning(
+                "av_session_speaker_override_failed: \(error.localizedDescription, privacy: .public)",
+            )
+        }
         isActiveForCookMode = true
         Logger.voice.info(
-            "av_session_activated category=playAndRecord mode=voiceChat sampleRate=\(session.sampleRate, privacy: .public)",
+            "av_session_activated category=playAndRecord mode=videoChat sampleRate=\(session.sampleRate, privacy: .public) speaker_override=ok",
         )
     }
 

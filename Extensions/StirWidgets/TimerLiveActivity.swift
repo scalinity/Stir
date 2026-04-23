@@ -85,16 +85,15 @@ struct TimerLiveActivity: Widget {
         "\(context.attributes.recipeTitle) · Step \(context.attributes.stepNumber)/\(context.attributes.totalSteps)"
     }
 
-    /// Estimate the total duration from the fire date. We don't persist
-    /// it on the activity (fireDate shifts on resume) so derive from the
-    /// difference between capture and fire at activity-start time is
-    /// not retained. Fallback: clamp to 1 minute so the progress bar
-    /// isn't divided by zero on freshly-opened activities.
+    /// Total seconds for the progress-bar denominator. Pinned at
+    /// activity-start time (on the static attributes), so pause/resume
+    /// updates to fireDate don't shift the denominator. Fallback to
+    /// current-remaining for any legacy activities that predate the
+    /// attributes-level field.
     private func totalDurationSec(for context: ActivityViewContext<TimerActivityAttributes>) -> Int {
-        // For v1 we don't carry total duration on the activity. Using
-        // a coarse 60-min upper bound for the progress bar visual. The
-        // main signal is "timer is running" + remaining mmss; exact
-        // fill % is secondary. Revisit if UX feedback demands precision.
+        if context.attributes.initialDurationSec > 0 {
+            return context.attributes.initialDurationSec
+        }
         let remaining = max(0, Int(context.state.fireDate.timeIntervalSinceNow.rounded()))
         return max(remaining, 60)
     }

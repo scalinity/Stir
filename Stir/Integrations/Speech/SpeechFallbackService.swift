@@ -81,6 +81,41 @@ final class SpeechFallbackService: VoiceSessionDriver {
     /// on telemetry events by CookModeViewModel per spec §15.
     nonisolated let pathLabel: VoiceSessionPath = .geminiFallback
 
+    // SCOPE NOTE — stuck-modelSpeaking watchdog is Live-only.
+    //
+    // The `turnStuckWatchdog` in `RealtimeSession.swift` catches the
+    // Gemini Live protocol bug where `turnComplete` can go missing
+    // after multi-pass tool-call turns (observed 2026-04-23, ADR
+    // 0015). It does NOT apply here because:
+    //
+    //   1. The fallback path has no long-lived WebSocket — each turn
+    //      is a discrete HTTP round-trip via `/v1/ai/cook-turn`, so
+    //      there is no equivalent "dropped turnComplete frame" class
+    //      of bug to guard against.
+    //   2. The local AVSpeechSynthesizer reliably signals
+    //      `didFinish` (see `SynthesisDelegate` below); if that
+    //      delegate call is ever missed it's a local iOS issue, not
+    //      a preview-API protocol bug.
+    //   3. An 8-second threshold against AVSpeechSynthesizer playback
+    //      (which routinely runs 10-25s for multi-sentence model
+    //      responses at Stir's speaking rate) would false-positive
+    //      mid-sentence, cutting the TTS off and advancing state
+    //      before the user had a chance to hear the response.
+    //
+    // If the fallback path ever grows its own "model is producing
+    // multi-stage output" behavior (e.g. streaming text responses
+    // with server-sent events), revisit this note and design a
+    // watchdog with an appropriate threshold. Until then, keep the
+    // scope pinned to the Live driver.
+
+    /// Stateless per-turn — cook-turn carries its own client_request_id
+    /// per call; there is no session trace on the fallback path.
+    var voiceSessionID: String? { nil }
+
+    /// No session-level prompt on the fallback path — each cook-turn
+    /// call carries its own prompt_version via the response DTO.
+    var voiceSessionPromptVersion: String? { nil }
+
     // MARK: Dependencies
 
     private let aiDispatch: AIDispatch
@@ -176,10 +211,22 @@ final class SpeechFallbackService: VoiceSessionDriver {
             throw SpeechFallbackError.recognizerUnavailable
         }
 
-        // Request speech-recognition authorization. One-shot primer —
-        // async wrapper around SFSpeechRecognizer.requestAuthorization.
-        let status = await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
-            SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+        // Request speech-recognition authorization. Only call the
+        // one-shot primer if status is still `.notDetermined`. When
+        // the user has already granted/denied, `authorizationStatus()`
+        // returns the cached value synchronously — re-requesting just
+        // re-fires the callback without re-showing the primer, but it
+        // burns a turnaround on every Cook Mode entry / driver rebuild.
+        // Review 2026-04-22 §Warning #2.
+        let cached = SFSpeechRecognizer.authorizationStatus()
+        let status: SFSpeechRecognizerAuthorizationStatus
+        if cached == .notDetermined {
+            status = await withCheckedContinuation {
+                (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+                SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+            }
+        } else {
+            status = cached
         }
         switch status {
         case .authorized:
@@ -354,17 +401,29 @@ final class SpeechFallbackService: VoiceSessionDriver {
 
         // Persist user VoiceTurn now — before the backend call — so a
         // backend failure doesn't orphan the transcript. Spec §4.12:
-        // every user turn writes a row on BOTH paths.
+        // every user turn writes a row on BOTH paths. If the persist
+        // throws we log it explicitly AND skip the matching model row
+        // so Core Data / ops-replay never sees a "model turn with no
+        // user turn" orphan (review 2026-04-22 §Critical #5). Earlier
+        // `try?`-swallowed failures could create that orphan.
         let userTurnIndex = voiceTurnRepository.nextTurnIndex(for: cookingSession)
-        try? voiceTurnRepository.persist(.init(
-            session: cookingSession,
-            speaker: .user,
-            turnIndex: userTurnIndex,
-            transcriptText: transcript,
-            inputMode: .voice,
-            latencyMs: sttLatencyMs,
-            resultType: .normal,
-        ))
+        var userRowPersisted = true
+        do {
+            try voiceTurnRepository.persist(.init(
+                session: cookingSession,
+                speaker: .user,
+                turnIndex: userTurnIndex,
+                transcriptText: transcript,
+                inputMode: .voice,
+                latencyMs: sttLatencyMs,
+                resultType: .normal,
+            ))
+        } catch {
+            userRowPersisted = false
+            Logger.voice.error(
+                "speech_fallback_user_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+            )
+        }
 
         stateMachine.advance(to: .thinking)
 
@@ -385,17 +444,26 @@ final class SpeechFallbackService: VoiceSessionDriver {
             response = try await aiDispatch.cookTurn(request: body)
         } catch {
             // Persist an error VoiceTurn for the model side so ops can
-            // replay exactly where the session died. resultType='error'
-            // is spec-legal (§4.12 enum).
-            try? voiceTurnRepository.persist(.init(
-                session: cookingSession,
-                speaker: .model,
-                turnIndex: userTurnIndex + 1,
-                transcriptText: "",
-                inputMode: .voice,
-                latencyMs: Int(Date().timeIntervalSince(backendStart) * 1000),
-                resultType: .error,
-            ))
+            // replay exactly where the session died — BUT only if the
+            // user row is in. Skipping when user persist failed avoids
+            // an orphan model row with no matching user turn.
+            if userRowPersisted {
+                do {
+                    try voiceTurnRepository.persist(.init(
+                        session: cookingSession,
+                        speaker: .model,
+                        turnIndex: userTurnIndex + 1,
+                        transcriptText: "",
+                        inputMode: .voice,
+                        latencyMs: Int(Date().timeIntervalSince(backendStart) * 1000),
+                        resultType: .error,
+                    ))
+                } catch {
+                    Logger.voice.error(
+                        "speech_fallback_error_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+                    )
+                }
+            }
             stateMachine.advance(to: .error)
             throw error
         }
@@ -409,16 +477,24 @@ final class SpeechFallbackService: VoiceSessionDriver {
         let modelResultType: VoiceTurn.ResultType =
             response.suggestedAction == .none ? .normal : .toolCall
 
-        // Persist model VoiceTurn.
-        try? voiceTurnRepository.persist(.init(
-            session: cookingSession,
-            speaker: .model,
-            turnIndex: userTurnIndex + 1,
-            transcriptText: response.spokenResponse,
-            inputMode: .voice,
-            latencyMs: backendLatencyMs,
-            resultType: modelResultType,
-        ))
+        // Persist model VoiceTurn — same orphan-avoidance guard.
+        if userRowPersisted {
+            do {
+                try voiceTurnRepository.persist(.init(
+                    session: cookingSession,
+                    speaker: .model,
+                    turnIndex: userTurnIndex + 1,
+                    transcriptText: response.spokenResponse,
+                    inputMode: .voice,
+                    latencyMs: backendLatencyMs,
+                    resultType: modelResultType,
+                ))
+            } catch {
+                Logger.voice.error(
+                    "speech_fallback_model_voice_turn_persist_failed error=\(error.localizedDescription, privacy: .public)",
+                )
+            }
+        }
 
         stateMachine.advance(to: .modelSpeaking)
 
@@ -508,17 +584,47 @@ final class SpeechFallbackService: VoiceSessionDriver {
     /// Stop all audio, cancel tasks, advance to `.closed`. Idempotent.
     /// Call from Cook Mode exit regardless of current state.
     func close() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        // Drop the external VM subscriber first so any final
+        // `forceClose()` transition below doesn't fire a callback
+        // into a VM that's mid-dismissal.
+        onVoiceStateChange = nil
+
+        // Teardown audio side BEFORE the state-machine transition so a
+        // bad engine state can't leave the session in limbo. Each of
+        // these is a no-op if the corresponding resource was never
+        // acquired (the close() contract is "idempotent; call from any
+        // state"). Wrap the audio-engine teardown in `isRunning`
+        // guards because `audioEngine.inputNode.removeTap(onBus:)`
+        // raises an ObjC exception in the simulator when no tap was
+        // ever installed — which is the exact state a
+        // constructed-but-never-used service lands in (observed via
+        // SpeechFallbackServiceTests `test_close_fromIdle` where the
+        // raise short-circuited forceClose and left currentState .idle).
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        if currentState != .closed {
+
+        // Transition the state machine. The mirror closure set in init
+        // writes `self.currentState = .closed` synchronously. Belt-and-
+        // suspenders: set currentState directly too, so any future
+        // refactor of the mirror (or a test that pre-sets onTransition
+        // to nil) doesn't silently leave currentState stale.
+        if stateMachine.state != .closed {
             stateMachine.forceClose()
         }
+        currentState = .closed
+
+        // Drop the internal mirror closure AFTER forceClose so the
+        // state update propagated to `currentState`. Any further
+        // state writes (none expected post-close) are inert.
+        stateMachine.onTransition = nil
     }
 
     // MARK: - Private

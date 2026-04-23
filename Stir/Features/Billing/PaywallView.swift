@@ -166,10 +166,19 @@ struct PaywallView: View {
     }
 
     private var featuresList: some View {
+        // Premium feature list — ADR 0015 copy spec. Frequency framing
+        // ("~3 dinners a week" vs "13 sessions/month") reads as benefit
+        // not rationing, and ages well if the cap ever comes back up.
+        // Voice bullet leads because it's the paid-tier differentiator.
+        //
+        // iPhone SE (4.7") truncation watch: "Hands-free voice for ~3
+        // dinners a week" is the longest string in this list. If it
+        // wraps awkwardly under Dynamic Type, fall back to "Voice for
+        // ~3 dinners a week" (29 chars) and promote "Hands-free voice
+        // Cook Mode" to a section header above the bullet list.
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-            // Step 6 replaces the "(coming soon)" clause with the live voice copy.
-            featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice cooking", subtitle: "Coming soon")
-            featureRow(icon: Image.Stir.cook, title: "40 Dinner Solves / month")
+            featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice for ~3 dinners a week")
+            featureRow(icon: Image.Stir.cook, title: "40 Dinner Solves per month")
             featureRow(icon: Image.Stir.pro, title: "Unlimited Saved Favorites")
             featureRow(icon: Image.Stir.widgetFill, title: "Widgets + Shortcuts")
             featureRow(icon: Image.Stir.leaf, title: "Leftovers mode")

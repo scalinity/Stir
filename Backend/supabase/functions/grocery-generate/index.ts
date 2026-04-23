@@ -21,7 +21,8 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { GroceryGenerateRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
@@ -202,6 +203,15 @@ Deno.serve(async (req) => {
   const rendered = renderPrompt(activePrompt.template_blob, {
     ingredients_needed_json: body.ingredients_needed,
     pantry_snapshot_json: body.pantry_snapshot,
+  }, {
+    // Both keys carry user/model-supplied display names + amount text.
+    // Wrap in USER_DATA markers to defeat prompt-injection from a
+    // pantry scan ("IGNORE PRIOR INSTRUCTIONS…") or a rogue recipe
+    // ingredient. Matches cook-turn + substitution + dinner-solve.
+    untrusted: new Set([
+      'ingredients_needed_json',
+      'pantry_snapshot_json',
+    ]),
   });
 
   // ---- Gemini (one retry on 5xx/schema)
@@ -258,19 +268,28 @@ Deno.serve(async (req) => {
   });
 
   if (!output) {
-    logAIRequest(client, userLog, {
-      request_id: body.source_id,
-      canonical_user_key: claims.canonical_user_key,
-      feature_key: FEATURE_KEY,
-      model: MODEL,
-      input_tokens: totalInputTokens,
-      output_tokens: totalOutputTokens,
-      cost_usd: costUsd,
-      latency_ms: totalLatencyMs,
-      thinking_level: 'minimal',
-      prompt_version: activePrompt.version,
-      retry_count: retryCount,
-    });
+    recordAIRequest(
+      client, userLog,
+      {
+        request_id: body.source_id,
+        canonical_user_key: claims.canonical_user_key,
+        feature_key: FEATURE_KEY,
+        model: MODEL,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        cost_usd: costUsd,
+        latency_ms: totalLatencyMs,
+        thinking_level: 'minimal',
+        prompt_version: activePrompt.version,
+        retry_count: retryCount,
+      },
+      {
+        trace_id: body.source_id,
+        span_name: 'grocery_generate',
+        is_error: true,
+        error_code: ErrorCode.AI_01,
+      },
+    );
     userLog.error('grocery_failed_upstream', lastErr, { retry_count: retryCount });
     return jsonError(
       ErrorCode.AI_01,
@@ -296,19 +315,26 @@ Deno.serve(async (req) => {
     retry_count: retryCount,
   };
 
-  logAIRequest(client, userLog, {
-    request_id: body.source_id,
-    canonical_user_key: claims.canonical_user_key,
-    feature_key: FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatencyMs,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: retryCount,
-  });
+  recordAIRequest(
+    client, userLog,
+    {
+      request_id: body.source_id,
+      canonical_user_key: claims.canonical_user_key,
+      feature_key: FEATURE_KEY,
+      model: MODEL,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      cost_usd: costUsd,
+      latency_ms: totalLatencyMs,
+      thinking_level: 'minimal',
+      prompt_version: activePrompt.version,
+      retry_count: retryCount,
+    },
+    {
+      trace_id: body.source_id,
+      span_name: 'grocery_generate',
+    },
+  );
 
   try {
     await writeCache(client, claims.canonical_user_key, body.source_id, FEATURE_KEY, 200, responseBody);

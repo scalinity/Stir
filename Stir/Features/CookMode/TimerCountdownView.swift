@@ -11,10 +11,30 @@ import SwiftUI
 
 struct TimerCountdownView: View {
     let timer: CookTimer
+    /// Wall-clock time the pause button was tapped, looked up by the
+    /// parent from `CookModeViewModel.pauseStartedAt(for:)`. Nil when
+    /// the timer isn't paused OR the pause context was lost (app cold-
+    /// relaunch while paused — rare, documented limitation). Drives
+    /// the static paused-remaining display; without it the paused
+    /// label kept ticking down because it was computed from
+    /// `fireDate - now` which keeps moving.
+    var pauseStartedAt: Date? = nil
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0)) { context in
-            content(at: context.date)
+        // Only install the 1 Hz TimelineView when we're actually
+        // counting — `.completed` / `.cancelled` / `.pending` displays
+        // are static text, and `.paused` is static by design (the
+        // pause-frozen value doesn't change while paused). Skipping
+        // the TimelineView in those branches saves 1 Hz redraws when
+        // multiple terminal timers stack up.
+        Group {
+            if timer.typedState == .running {
+                TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                    content(at: context.date)
+                }
+            } else {
+                content(at: Date())
+            }
         }
         // Accessibility: expose the hh:mm:ss as a single element so
         // VoiceOver reads "3 minutes 12 seconds remaining", not each
@@ -30,6 +50,8 @@ struct TimerCountdownView: View {
         case .running:
             runningBody(at: now)
         case .paused:
+            // Color change (orange) is the pause signal — no "(paused)"
+            // suffix, per Daniel's 2026-04-22 request.
             label(frozenDisplayString, color: .orange)
         case .completed:
             label("Done", color: .green)
@@ -51,16 +73,24 @@ struct TimerCountdownView: View {
         return Int(fire.timeIntervalSince(now).rounded())
     }
 
-    /// Last-known display for the paused state. `startedAt` is not
-    /// advanced on pause, so without the in-memory pause timestamp we
-    /// can only show the remaining relative to the ORIGINAL fire date.
-    /// Cross-session pauses will therefore show an inflated "still
-    /// remaining" — acceptable for step 4 per the pause-math notes in
-    /// TimerService.swift.
+    /// Static paused-remaining display. Computed as `fireDate -
+    /// pauseStartedAt` when the in-memory pause timestamp is
+    /// available (same-session pause/resume — the 99% case). Falls
+    /// back to `fireDate - now` when pause context was lost (app
+    /// cold-relaunched while paused); that fallback keeps ticking but
+    /// is the safest approximation TimerService can offer without a
+    /// persisted pause timestamp (see CLAUDE.md §"Persisted pause
+    /// timestamp for CookTimer" deferral).
     private var frozenDisplayString: String {
         let fire = timer.fireDate ?? Date()
-        let r = Int(fire.timeIntervalSinceNow.rounded())
-        return formatHHMMSS(max(0, r)) + " (paused)"
+        let reference: Date
+        if let pausedAt = pauseStartedAt {
+            reference = pausedAt
+        } else {
+            reference = Date()
+        }
+        let r = Int(fire.timeIntervalSince(reference).rounded())
+        return formatHHMMSS(max(0, r))
     }
 
     private func label(_ text: String, color: Color) -> some View {

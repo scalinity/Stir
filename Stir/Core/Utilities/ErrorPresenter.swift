@@ -177,6 +177,15 @@ enum ErrorPresenter {
                 secondaryAction: "Continue with one",
                 blocking: true,
             )
+        case .entLeftovers01:
+            return UserFacingError(
+                code: .entLeftovers01,
+                title: "Leftovers is Premium",
+                message: "Turn leftovers into a next meal with Stir Premium. Try it free for 7 days.",
+                primaryAction: "Start Trial",
+                secondaryAction: "See Plans",
+                blocking: true,
+            )
         case .val01:
             return UserFacingError(
                 code: .val01,

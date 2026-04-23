@@ -152,6 +152,47 @@ final class VoiceTurnRepositoryTests: XCTestCase {
         XCTAssertEqual(turn.typedResultType, .toolCall)
     }
 
+    // MARK: - errorCode (stuck-watchdog VoiceTurn persistence — review-driven)
+
+    func test_persist_writesErrorCodeWhenProvided() throws {
+        // Watchdog fire path per CookModeViewModel's recordVoiceTurnStuck
+        // flow: resultType=.error + errorCode="turnComplete_timeout" on
+        // the model-turn row when Gemini Live drops `turnComplete` after
+        // a multi-pass tool-call turn (CLAUDE.md sharp-edge #20).
+        let session = try sessionRepo.createSession(on: household, for: recipePlan, entryPoint: .solve)
+        let turn = try voiceTurnRepo.persist(.init(
+            session: session,
+            speaker: .model,
+            turnIndex: 1,
+            transcriptText: "Step 4: simmer for 10 minutes…",
+            inputMode: .voice,
+            latencyMs: 18_423,
+            resultType: .error,
+            errorCode: "turnComplete_timeout",
+        ))
+        XCTAssertEqual(turn.typedResultType, .error)
+        XCTAssertEqual(turn.errorCode, "turnComplete_timeout")
+    }
+
+    func test_persist_errorCodeDefaultsToNil() throws {
+        // Every pre-existing persist call site omits `errorCode` — the
+        // default must stay nil so non-error turns (.normal, .toolCall)
+        // don't accidentally carry a stale slug from a prior builder
+        // pattern. Guards against a future PersistInput refactor
+        // defaulting the field to something non-nil.
+        let session = try sessionRepo.createSession(on: household, for: recipePlan, entryPoint: .solve)
+        let turn = try voiceTurnRepo.persist(.init(
+            session: session,
+            speaker: .model,
+            turnIndex: 1,
+            transcriptText: "sure, let me check",
+            inputMode: .voice,
+            latencyMs: 420,
+            resultType: .normal,
+        ))
+        XCTAssertNil(turn.errorCode)
+    }
+
     func test_typedSpeaker_defaultsToModelOnEmptyString() throws {
         let session = try sessionRepo.createSession(on: household, for: recipePlan, entryPoint: .solve)
         let turn = try voiceTurnRepo.persist(.init(

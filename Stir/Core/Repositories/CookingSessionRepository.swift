@@ -156,7 +156,14 @@ final class CookingSessionRepository {
             format: "household == %@ AND deletedAt == nil",
             household,
         )
-        request.relationshipKeyPathsForPrefetching = ["cookingSessions", "cookingSessions.outcomeFeedback"]
+        request.relationshipKeyPathsForPrefetching = [
+            "cookingSessions",
+            "cookingSessions.outcomeFeedback",
+            // Pre-faulted for SavedMealsView's search-by-ingredient path.
+            // Without this, filtering by needle triggers a fault per row
+            // (disk round-trip per keystroke at N rows × 1 fault).
+            "ingredients",
+        ]
 
         let plans: [RecipePlan]
         do {
@@ -166,6 +173,18 @@ final class CookingSessionRepository {
         }
 
         let entries: [SavedMealEntry] = plans.compactMap { plan in
+            // Skip nil-id plans (corrupted state) rather than generate a
+            // fresh UUID per fetch — the generated id would differ on
+            // every reload and break SwiftUI List identity, causing
+            // favorite-toggle reloads to animate full insert/delete and
+            // lose scroll position. RecipePlans are always created with
+            // a non-nil id at persistence time; if one slips through
+            // nil, surfacing it as a missing row is better than masking
+            // it with an unstable identity.
+            guard let planID = plan.id else {
+                Logger.coreData.warning("savedMealEntries skipped plan with nil id (corrupted row)")
+                return nil
+            }
             let completedSessions = (plan.cookingSessions as? Set<CookingSession> ?? [])
                 .filter { $0.typedStatus == .completed }
             let lastCompletedAt = completedSessions.compactMap { $0.endedAt }.max()
@@ -180,7 +199,7 @@ final class CookingSessionRepository {
                 .1
 
             return SavedMealEntry(
-                id: plan.id ?? UUID(),
+                id: planID,
                 title: plan.title ?? "Untitled recipe",
                 plan: plan,
                 lastCookedAt: lastCompletedAt,

@@ -29,7 +29,12 @@ export type RateLimitPolicyKey =
   | 'ip:recipe_import_daily'
   | 'ip:grocery_generate_daily'
   | 'ip:push_register_hourly'
-  | 'user:dinner_solve_hourly';
+  | 'ip:voice_turn_usage_daily'
+  | 'ip:realtime_session_daily'
+  | 'user:dinner_solve_hourly'
+  | 'user:voice_turn_usage_hourly'
+  | 'user:cook_turn_hourly'
+  | 'user:realtime_session_hourly';
 
 export interface RateLimitPolicy {
   windowSeconds: number;
@@ -65,6 +70,36 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   //   apns_token space) without interfering with legitimate use.
   'ip:push_register_hourly':   { windowSeconds: 3600,  maxCount: 20 },
   'user:dinner_solve_hourly': { windowSeconds: 3600,  maxCount: 10 },
+  // voice_turn_usage (ADR 0009): one POST per Gemini Live turnComplete.
+  // A realistic Premium voice session emits ~15 POSTs; the 500/hr user
+  // cap allows ~33 sessions/hr (far above the 20 voice_cook_session
+  // monthly quota). The IP cap (2000/day) is defense against forged
+  // clients trying to inflate ai_request_log + PostHog ingest volume;
+  // real households aren't voice-cooking all day.
+  'ip:voice_turn_usage_daily':   { windowSeconds: 86400, maxCount: 2000 },
+  'user:voice_turn_usage_hourly':{ windowSeconds: 3600,  maxCount: 500 },
+  // Cook turn (text fallback when Gemini Live is unavailable) is
+  // Premium+ tier-gated but NOT metered via usage_counters — spec §9
+  // calls the fallback path "unmetered" because a healthy user on
+  // the Live path never hits it. But a user stuck on the C.3 fallback
+  // (kill switch engaged, or chronic mint failures on their account)
+  // could call /v1/ai/cook-turn indefinitely up to the 300/day IP cap.
+  // 300 × $0.0023/call = ~$0.69/day/user — breaks the Premium $1.89/mo
+  // AI budget. 30/hour/user is generous (covers a 15-turn cook session
+  // with 2x headroom for repeats) while clamping the worst-case cost
+  // exposure at ~$0.05/hour = ~$1.20/day/user in the persistent-C.3
+  // scenario. Revisit if real C.3 users regularly hit the cap.
+  'user:cook_turn_hourly':       { windowSeconds: 3600,  maxCount: 30 },
+  // realtime_session (ADR 0014): each mint opens a Gemini Live session.
+  // Normal path: 1 mint per Cook Mode entry + 1 refresh per ~10 turns.
+  // A Premium user's 20 voice_cook_session monthly cap, even with 3
+  // refreshes per session, is 80 mints/month = ~2.7/day. IP 200/day
+  // is a generous burst cap that catches a runaway-refresh bug on the
+  // client (or a malicious client looping is_refresh=true to bypass
+  // quota) without interfering with shared-NAT households. User cap
+  // 40/hour protects a single account from a 1000-mints/hour script.
+  'ip:realtime_session_daily':    { windowSeconds: 86400, maxCount: 200 },
+  'user:realtime_session_hourly': { windowSeconds: 3600,  maxCount: 40 },
 };
 
 export interface RateLimitResult {

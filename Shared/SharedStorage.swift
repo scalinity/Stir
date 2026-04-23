@@ -67,6 +67,52 @@ public struct SharedStorage: @unchecked Sendable {
         defaults.string(forKey: Self.tierKey)
     }
 
+    // MARK: - Canonical user key (share-extension user binding)
+
+    /// Main app writes the active canonical_user_key at bootstrap so the
+    /// share extension — which has no Supabase access — can bind a
+    /// PendingImport to a specific user (CWE-345 defense against
+    /// cross-iCloud-account payload bleed).
+    private static let canonicalUserKeyKey = "stir.user.canonicalKey.v1"
+
+    public func writeCanonicalUserKey(_ key: String?) {
+        if let key {
+            defaults.set(key, forKey: Self.canonicalUserKeyKey)
+        } else {
+            defaults.removeObject(forKey: Self.canonicalUserKeyKey)
+        }
+    }
+
+    public func readCanonicalUserKey() -> String? {
+        defaults.string(forKey: Self.canonicalUserKeyKey)
+    }
+
+    // MARK: - Widget first-seen (Retention funnel — widget_added emission)
+
+    /// Widget process writes the timestamp of the first timeline fetch.
+    /// Main app drains on foreground to emit the `widget_added` product
+    /// event exactly once per installation (spec §15 Retention funnel).
+    /// Returning nil means "already drained or never seen."
+    private static let widgetFirstSeenKey = "stir.widget.firstSeenAt.v1"
+
+    /// Widget-side writer. Idempotent: writes only if the key isn't
+    /// already set, so subsequent timeline refreshes don't bump the
+    /// timestamp (which would break "first seen" semantics).
+    public func markWidgetFirstSeenIfNeeded(now: Date = Date()) {
+        if defaults.object(forKey: Self.widgetFirstSeenKey) != nil { return }
+        defaults.set(now.timeIntervalSince1970, forKey: Self.widgetFirstSeenKey)
+    }
+
+    /// Main-app-side drain. Reads the timestamp and clears the key in
+    /// one hop — subsequent calls return nil so the widget_added event
+    /// never double-fires for the same installation.
+    public func drainWidgetFirstSeen() -> Date? {
+        guard defaults.object(forKey: Self.widgetFirstSeenKey) != nil else { return nil }
+        let ts = defaults.double(forKey: Self.widgetFirstSeenKey)
+        defaults.removeObject(forKey: Self.widgetFirstSeenKey)
+        return Date(timeIntervalSince1970: ts)
+    }
+
     // MARK: - PendingImport (share extension queue)
 
     private static let pendingImportKey = "stir.pendingImport.v1"
@@ -97,6 +143,28 @@ public struct SharedStorage: @unchecked Sendable {
         return pending
     }
 
+    /// User-scoped consume: drops the payload if its `consumingUserKey`
+    /// doesn't match `currentUserKey` (user signed out + into a
+    /// different iCloud account between share + re-open). Returns nil
+    /// for mismatched or absent payloads; caller can treat that as "no
+    /// pending import" — the drop is silent from the user's POV apart
+    /// from an optional toast surfaced by the caller. Legacy payloads
+    /// written before the consumingUserKey field existed are accepted
+    /// (nil == unbound == same-user) for one-release back-compat.
+    public func consumePendingImport(currentUserKey: String?) -> PendingImport? {
+        guard let pending = readPendingImport() else { return nil }
+        // Always clear so a second-foreground doesn't replay. Even if
+        // we reject this payload the slot is now free for the next
+        // share.
+        writePendingImport(nil)
+        if let bound = pending.consumingUserKey,
+           let currentUserKey,
+           bound != currentUserKey {
+            return nil
+        }
+        return pending
+    }
+
     // MARK: - Debug
 
     /// Clear all shared keys. Used on sign-out / delete account and in
@@ -104,6 +172,8 @@ public struct SharedStorage: @unchecked Sendable {
     public func clearAll() {
         defaults.removeObject(forKey: Self.tonightKey)
         defaults.removeObject(forKey: Self.tierKey)
+        defaults.removeObject(forKey: Self.canonicalUserKeyKey)
+        defaults.removeObject(forKey: Self.widgetFirstSeenKey)
         defaults.removeObject(forKey: Self.pendingImportKey)
     }
 

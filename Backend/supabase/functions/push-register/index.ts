@@ -137,7 +137,16 @@ Deno.serve(async (req) => {
     .update({
       push_token: body.apns_token,
       apns_environment: body.environment,
-      notifications_enabled: true,
+      // Derived from submitted prefs — true iff at least one category
+      // is enabled. Hardcoding `true` here (pre-fix) silently clobbered
+      // user opt-outs for every future push path reading this column
+      // (step-8 reactivation campaigns, ops dashboards). notification_
+      // prefs_json remains the per-category source of truth; the
+      // boolean is a cheap "any push at all?" index.
+      notifications_enabled:
+        body.notification_prefs.import_completion ||
+        body.notification_prefs.reactivation ||
+        body.notification_prefs.trial_reminder,
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),
     })

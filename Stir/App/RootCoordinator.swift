@@ -85,6 +85,14 @@ final class RootCoordinator {
     /// predictable.
     var activeCookLaunch: CookModeLaunch?
 
+    /// Deep-link scan request signal. `StirDeepLinkHandler` flips this
+    /// to a fresh UUID when a widget/intent/Live-Activity tap lands
+    /// with `stir://scan/start`. TonightHomeView observes via
+    /// `.onChange` and presents its Scan cover. UUID (rather than Bool)
+    /// so two rapid taps produce two distinct signals and each
+    /// presentation is honored.
+    var pendingDeepLinkScan: UUID?
+
     enum CookModeLaunch: Identifiable, Equatable {
         /// Fresh Cook Mode launched from DishPreview → Start Cooking.
         /// Recipe plan + household are resolved at DishPreview time;
@@ -234,6 +242,12 @@ final class RootCoordinator {
         // 4. Pre-create HouseholdProfile (Round-1 Q4 decision: eager creation
         //    anchored to the resolved canonical_user_key).
         let canonicalKeyString = canonicalKey.stringValue
+        // Mirror the resolved canonical_user_key into the App Group so
+        // StirShareExtension can bind PendingImport payloads to the
+        // active user (CWE-345 defense against cross-iCloud-account
+        // payload bleed). Written on every bootstrap so an account
+        // switch after install re-syncs the shared surface.
+        SharedStorage().writeCanonicalUserKey(canonicalKeyString)
         do {
             let repo = HouseholdProfileRepository()
             let profile = try repo.ensureHouseholdProfile(for: canonicalKeyString)
@@ -539,6 +553,21 @@ final class RootCoordinator {
     /// so the fullScreenCover drops.
     func dismissCookMode() {
         activeCookLaunch = nil
+    }
+
+    // MARK: - Deep-link routing
+
+    /// Called by StirDeepLinkHandler when a widget/intent/Live-Activity
+    /// tap lands with `stir://scan/start`. Flips `pendingDeepLinkScan`
+    /// to a fresh UUID so TonightHomeView's `.onChange` observer fires
+    /// even if we just cleared it.
+    func requestDeepLinkScan() {
+        pendingDeepLinkScan = UUID()
+    }
+
+    /// Clear the scan signal once TonightHomeView has acted on it.
+    func clearDeepLinkScan() {
+        pendingDeepLinkScan = nil
     }
 
     /// Build a PaywallViewModel bound to this coordinator's RC + entitlement

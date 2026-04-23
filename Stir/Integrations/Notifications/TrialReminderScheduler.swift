@@ -31,11 +31,11 @@ private let trialReminderID = "stir.trial.reminder.2d"
 final class TrialReminderScheduler {
     static let shared = TrialReminderScheduler()
 
-    private let center: UNUserNotificationCenter
+    private let center: any UserNotificationCenterClient
     private let calendar: Calendar
 
     init(
-        center: UNUserNotificationCenter = .current(),
+        center: any UserNotificationCenterClient = UNUserNotificationCenter.current(),
         calendar: Calendar = .current,
     ) {
         self.center = center

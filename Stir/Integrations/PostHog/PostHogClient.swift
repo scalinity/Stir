@@ -60,6 +60,38 @@ class PostHogClient: @unchecked Sendable {
         PostHogSDK.shared.capture(event.rawValue, properties: properties)
     }
 
+    /// Emit a `$ai_trace` event for PostHog LLM Observability.
+    ///
+    /// Trace lifecycle (ADR 0009 + spec §15 dashboard-join contract):
+    ///   1. Backend fires $ai_trace at mint time with `inputState`
+    ///      populated (`voice_session_start` span_name).
+    ///   2. iOS fires $ai_trace at session close with the SAME
+    ///      `traceID` + `spanName` + `outputState` populated. PostHog
+    ///      treats same-id repeat emission as overwrite, so the final
+    ///      trace row carries both input and output state.
+    ///
+    /// Privacy: no user content. `inputState` / `outputState` must
+    /// contain only metadata (turn counts, token totals, ended_reason,
+    /// duration_ms). Recipe titles, transcripts, or AI responses MUST
+    /// NOT be placed in either state map.
+    func captureAITrace(
+        traceID: String,
+        spanName: String,
+        inputState: [String: Any]? = nil,
+        outputState: [String: Any]? = nil,
+        feature: String? = nil,
+    ) {
+        guard isInitialized else { return }
+        var properties: [String: Any] = [
+            "$ai_trace_id": traceID,
+            "$ai_span_name": spanName,
+        ]
+        if let inputState { properties["$ai_input_state"] = inputState }
+        if let outputState { properties["$ai_output_state"] = outputState }
+        if let feature { properties["feature"] = feature }
+        PostHogSDK.shared.capture("$ai_trace", properties: properties)
+    }
+
     #if DEBUG
     /// Protected init so tests can subclass with an override of
     /// `capture(...)`. DEBUG-only so production builds can't
@@ -99,6 +131,15 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case substitutionAccepted = "substitution_accepted"
     case cookSessionCompleted = "cook_session_completed"
     case mealRated = "meal_rated"
+    /// Fires when the user dismisses the outcome feedback sheet via Skip
+    /// without submitting a rating. Complement to `meal_rated` — the pair
+    /// measures whether users actually rate vs opt out, which the
+    /// north-star `core_success_event` funnel is blind to when only
+    /// ratings are measured. Sheet opens on every `cook_session_completed`;
+    /// TYPICALLY one of {meal_rated, meal_rating_skipped} follows — force-
+    /// quit / crash / background-kill between sheet open and dismissal
+    /// yield zero emissions, a valid third state.
+    case mealRatingSkipped = "meal_rating_skipped"
     // Step 5 — billing + paywall.
     case paywallViewed = "paywall_viewed"
     case trialStarted = "trial_started"
@@ -113,6 +154,19 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // Step 6 C.4 — voice cook-turn events. Spec §15 verbatim.
     case cookTurnSubmitted = "cook_turn_submitted"
     case cookTurnResolved = "cook_turn_resolved"
+    // Step 6 C.5 — session-observability events. Both emitted by the
+    // VM on turn-boundary callbacks from RealtimeSession. Spec §15
+    // verbatim; property contracts enforced at emission sites.
+    case voiceSessionTokenSnapshot = "voice_session_token_snapshot"
+    case voiceSessionRefreshed = "voice_session_refreshed"
+    // Step 6 (late) — stuck-modelSpeaking watchdog fire. Gemini Live
+    // occasionally drops `turnComplete` on multi-pass tool-call turns
+    // (observed 2026-04-23); the watchdog synthesizes the transition.
+    // Emission carries {session_id, turn_index, tool_call_type,
+    // elapsed_stuck_ms, turn_length_at_stuck}. Not part of spec §15 —
+    // added as an ops-only signal; monitor threshold per ADR 0015
+    // (>5% of tool-call turns = revisit vendor contingency).
+    case voiceTurnStuckWatchdogFired = "voice_turn_stuck_watchdog_fired"
     // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
     case reactivationNotificationOpened = "reactivation_notification_opened"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
@@ -168,11 +222,57 @@ public enum StepSevenTelemetry {
     /// `grocery_list_exported` — post-EventKit export success. Also fired
     /// with `destination: "in_app"` when Reminders was denied and the
     /// list stayed in Stir. Properties: item_count, destination.
-    public static func groceryListExported(itemCount: Int, destination: Destination) -> [String: Any] {
+    public enum GroceryExportDestination: String, Sendable {
+        case reminders
+        case inApp = "in_app"
+    }
+
+    public static func groceryListExported(
+        itemCount: Int,
+        destination: GroceryExportDestination,
+    ) -> [String: Any] {
         [
             "item_count": itemCount,
             "destination": destination.rawValue,
         ]
+    }
+
+    /// `dinner_solve_requested` — one event per user-initiated solve.
+    /// `contextHint` discriminates the leftovers path ("leftovers") from
+    /// the primary pantry-scan path (nil → omitted from properties).
+    /// `leftoversItemsCount` is 0 for primary solves, >0 for leftovers.
+    /// Keeping the helper typed prevents the "typo in context_hint"
+    /// funnel-corruption hazard CR2-26 flagged.
+    public static func dinnerSolveRequested(
+        contextHint: String? = nil,
+        leftoversItemsCount: Int = 0,
+    ) -> [String: Any] {
+        var props: [String: Any] = [:]
+        if let contextHint { props["context_hint"] = contextHint }
+        if leftoversItemsCount > 0 { props["leftovers_items_count"] = leftoversItemsCount }
+        return props
+    }
+
+    /// `dinner_solve_completed` — terminal event on the SSE stream's
+    /// `done` frame. Carries cost + retry + prompt version for the
+    /// ops dashboard.
+    public static func dinnerSolveCompleted(
+        contextHint: String? = nil,
+        dishesReturned: Int,
+        totalCostUSD: Double,
+        retryCount: Int,
+        promptVersion: String,
+        totalLatencyMs: Int,
+    ) -> [String: Any] {
+        var props: [String: Any] = [
+            "dishes_returned": dishesReturned,
+            "total_cost_usd": totalCostUSD,
+            "retry_count": retryCount,
+            "prompt_version": promptVersion,
+            "total_latency_ms": totalLatencyMs,
+        ]
+        if let contextHint { props["context_hint"] = contextHint }
+        return props
     }
 
     /// Destination values match spec §15 verbatim. DO NOT add new values

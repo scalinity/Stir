@@ -43,6 +43,10 @@ export const flagRegistry: Readonly<Record<string, { schema: z.ZodType; defaultV
     schema: z.enum(['minimal', 'low']),
     defaultValue: 'minimal',
   },
+  voice_turn_detection_mode:      {
+    schema: z.enum(['semantic_vad', 'server_vad']),
+    defaultValue: 'semantic_vad',
+  },
   prompt_version_override:        {
     schema: z.union([z.null(), z.string()]),
     defaultValue: null,

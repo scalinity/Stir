@@ -32,6 +32,7 @@ export enum ErrorCode {
   PAY_01 = 'PAY-01',
   ENT_VOICE_01 = 'ENT-VOICE-01',
   ENT_MULTI_IMAGE_01 = 'ENT-MULTI-IMAGE-01',
+  ENT_LEFTOVERS_01 = 'ENT-LEFTOVERS-01',
 
   // Step-1 additions (also added to CLAUDE.md + spec §6)
   VAL_01 = 'VAL-01',
@@ -62,6 +63,7 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.PAY_01]: "Purchase didn't go through.",
   [ErrorCode.ENT_VOICE_01]: 'Cook Mode voice is a Premium feature.',
   [ErrorCode.ENT_MULTI_IMAGE_01]: 'Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once.',
+  [ErrorCode.ENT_LEFTOVERS_01]: 'Leftovers mode is a Premium feature.',
   // VAL-01 message is dev-oriented: iOS shows generic copy from ErrorPresenter.
   [ErrorCode.VAL_01]: 'Request body failed validation.',
   // AUTH-01 is internal; iOS re-bootstraps silently.

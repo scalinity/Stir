@@ -115,6 +115,36 @@ final class GroceryRepositoryTests: XCTestCase {
         XCTAssertEqual(GroceryRepository.normalizedDisplayName("Salt"), "salt")
     }
 
+    /// Regression for the "roses → ros" bug. Singulars ending in -e
+    /// that take a plural-s (rose, name, range) must round-trip through
+    /// the same normalized key as their plural. Pre-fix the -es branch
+    /// aggressively dropped 'es', producing "ros"/"nam"/"rang" for the
+    /// plurals and breaking dedupe.
+    func test_normalizedDisplayName_singularsEndingInEArePreserved() {
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("roses"), "rose")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("rose"), "rose")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("names"), "name")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("name"), "name")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("ranges"), "range")
+        // Sibilant -es plurals still drop 'es' properly.
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("classes"), "class")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("boxes"), "box")
+        XCTAssertEqual(GroceryRepository.normalizedDisplayName("dishes"), "dish")
+    }
+
+    /// Regression: slug-keyed item and no-slug item with same display
+    /// name must merge. Pre-fix they went into separate buckets because
+    /// dedupe keyed on slug OR name (not slug AND name index).
+    func test_dedupedForPersistence_mergesSlugWithNoSlugSameDisplayName() {
+        let merged = repo.dedupedForPersistence([
+            .init(displayName: "Chicken breast", quantityText: "1 lb", canonicalSlug: "chicken_breast", category: .meat, priority: .high),
+            .init(displayName: "Chicken breast", quantityText: "2 pieces", canonicalSlug: nil, category: .meat, priority: .normal),
+        ])
+        XCTAssertEqual(merged.count, 1, "items with same display name merge whether slug is present or not")
+        XCTAssertEqual(merged.first?.canonicalSlug, "chicken_breast", "known slug wins over nil")
+        XCTAssertEqual(merged.first?.priority, .high)
+    }
+
     // MARK: - markExported
 
     func test_markExported_flipsStatusAndRecordsEventKitIDs() throws {

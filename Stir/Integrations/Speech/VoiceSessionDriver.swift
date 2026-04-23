@@ -43,6 +43,20 @@ protocol VoiceSessionDriver: AnyObject {
     /// layer; drivers themselves don't branch on it.
     var pathLabel: VoiceSessionPath { get }
 
+    /// Backend-minted voice session id, if this driver has one. Set
+    /// only on the Live path (RealtimeSession.mintResponse.sessionID)
+    /// after preWarm succeeds; nil on the fallback path (cook-turn is
+    /// per-turn stateless). CookModeViewModel uses this as the PostHog
+    /// `$ai_trace_id` for the close-summary $ai_trace event.
+    var voiceSessionID: String? { get }
+
+    /// Prompt version baked into the current voice session. Set on the
+    /// Live path after preWarm (RealtimeSession.mintResponse.promptVersion);
+    /// nil on fallback. VM includes this in the close-summary $ai_trace's
+    /// $ai_input_state so dashboards can attribute session metadata to
+    /// a specific prompt rollout.
+    var voiceSessionPromptVersion: String? { get }
+
     /// Current voice-session state. Observed by the view layer to
     /// render mic / waveform / thinking affordances. Changes on every
     /// legal transition per VoiceSessionStateMachine.
@@ -84,4 +98,12 @@ protocol VoiceSessionDriver: AnyObject {
     /// failing to do so leaves the indicator stuck on after Cook
     /// Mode exit.
     func close()
+}
+
+/// Default-nil conformances so test doubles and drivers that don't
+/// participate in the PostHog $ai_trace lifecycle (e.g. fallback
+/// stubs) don't have to opt in. Live drivers override with real values.
+extension VoiceSessionDriver {
+    var voiceSessionID: String? { nil }
+    var voiceSessionPromptVersion: String? { nil }
 }

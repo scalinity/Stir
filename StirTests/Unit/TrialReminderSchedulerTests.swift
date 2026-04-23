@@ -22,7 +22,7 @@ final class TrialReminderSchedulerTests: XCTestCase {
     /// cancelled first unconditionally, eating the user's reminder on
     /// a stale re-schedule.
     func testPastFireDatePreservesExistingReminder() async {
-        let scheduler = TrialReminderScheduler(center: .current(), calendar: .current)
+        let scheduler = TrialReminderScheduler(center: UNUserNotificationCenter.current(), calendar: .current)
         // Any expiresAt within the next 48h → fireDate (expiresAt - 2d) is
         // in the past. The `guard fireDate > now` short-circuits before
         // `cancel()` fires. We verify by confirming the method returns

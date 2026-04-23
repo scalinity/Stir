@@ -129,6 +129,20 @@ actor SupabaseSessionClient {
         return try await perform(mutable, attempt: 0, retriedAuth: false)
     }
 
+    /// Variant for endpoints that return 204 No Content (voice-turn-usage).
+    /// Same AUTH-01 silent-retry + 5xx backoff as `performAuthenticated`;
+    /// skips JSON-decode entirely on 2xx so an empty response body doesn't
+    /// trigger `malformedResponse`.
+    func performAuthenticatedNoContent(_ request: URLRequest) async throws {
+        var mutable = request
+        mutable.addValue("application/json", forHTTPHeaderField: "accept")
+        if let jwt = cachedJWT {
+            mutable.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        }
+        mutable.setValue(config.supabase.anonKey, forHTTPHeaderField: "apikey")
+        try await performNoContent(mutable, attempt: 0, retriedAuth: false)
+    }
+
     /// Streaming variant for SSE endpoints (dinner-solve). Returns the
     /// response headers + an AsyncBytes stream the caller consumes directly.
     /// Status is checked ONCE at header time; AUTH-01 triggers a silent
@@ -399,6 +413,92 @@ actor SupabaseSessionClient {
                 "unexpected status \(http.statusCode) from \(request.url?.path ?? "?", privacy: .public)",
             )
             throw StirError.malformedResponse(description: "unexpected status \(http.statusCode)")
+        }
+    }
+
+    /// 2xx-or-typed-error variant that never tries to decode a response
+    /// body. Shares the auth-retry + 5xx-backoff semantics of `perform`
+    /// so callers behave identically on failure, but succeeds silently
+    /// on empty 2xx responses.
+    private func performNoContent(
+        _ request: URLRequest,
+        attempt: Int,
+        retriedAuth: Bool,
+    ) async throws {
+        let (data, urlResponse): (Data, URLResponse)
+        do {
+            (data, urlResponse) = try await urlSession.data(for: request)
+        } catch {
+            Logger.supabase.error(
+                "urlsession failure (no-content): \(error.localizedDescription, privacy: .public)",
+            )
+            if attempt < 3 {
+                try await backoff(attempt: attempt)
+                try await performNoContent(request, attempt: attempt + 1, retriedAuth: retriedAuth)
+                return
+            }
+            throw StirError.networkUnreachable(underlying: error)
+        }
+
+        guard let http = urlResponse as? HTTPURLResponse else {
+            throw StirError.malformedResponse(description: "not an HTTPURLResponse")
+        }
+
+        switch http.statusCode {
+        case 200 ..< 300:
+            return
+
+        case 400:
+            let body = try parseErrorBody(data)
+            let code = ErrorCode(rawValue: body.error) ?? .val01
+            if code == .val01 {
+                throw StirError.validation(fieldErrors: body.fieldErrors ?? [], message: body.message)
+            }
+            throw StirError.server(code: code, message: body.message, fieldErrors: body.fieldErrors ?? [])
+
+        case 401:
+            let body = try parseErrorBody(data)
+            let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
+            logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
+            if !retriedAuth {
+                guard let identity = lastBootstrapIdentity else {
+                    throw StirError.auth(reason: reason, message: body.message)
+                }
+                _ = try await bootstrap(
+                    installationID: identity.installationID,
+                    cloudKitRecordName: identity.cloudKitRecordName,
+                )
+                var retried = request
+                if let jwt = cachedJWT {
+                    retried.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+                }
+                try await performNoContent(retried, attempt: 0, retriedAuth: true)
+                return
+            }
+            throw StirError.auth(reason: reason, message: body.message)
+
+        case 403:
+            let body = try parseErrorBody(data)
+            let code = ErrorCode(rawValue: body.error) ?? .bill01
+            throw StirError.entitlementRequired(code: code, message: body.message)
+
+        case 429:
+            let body = try? parseErrorBody(data)
+            throw StirError.rateLimited(resetDate: nil, message: body?.message ?? "rate limited")
+
+        case 500 ..< 600:
+            Logger.supabase.warning(
+                "5xx (no-content) from \(request.url?.path ?? "?", privacy: .public): status=\(http.statusCode)",
+            )
+            if attempt < 3 {
+                try await backoff(attempt: attempt)
+                try await performNoContent(request, attempt: attempt + 1, retriedAuth: retriedAuth)
+                return
+            }
+            throw StirError.networkUnreachable(underlying: nil)
+
+        default:
+            throw StirError.malformedResponse(description: "unexpected no-content status \(http.statusCode)")
         }
     }
 

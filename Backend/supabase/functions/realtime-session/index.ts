@@ -45,6 +45,7 @@ import { GeminiModel } from '../_shared/gemini.ts';
 import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
 const FEATURE_KEY = 'cook_mode_realtime';
@@ -173,10 +174,69 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------
+  // 3.5 Rate limit (IP + user) — applies to BOTH fresh mints and
+  //     refresh mints. Refreshes bypass the monthly voice_cook_session
+  //     quota (ADR 0014 — is_refresh skips increment); without a
+  //     rate-limit layer a runaway is_refresh=true loop could drive
+  //     Gemini API spend indefinitely. Fail-open on rate limiter
+  //     outage (same posture as other AI endpoints).
+  // ---------------------------------------------------------------------
+  const sourceIP = extractSourceIP(req);
+  try {
+    const ipRl = await checkAndIncrement(client, 'ip:realtime_session_daily', sourceIP);
+    if (!ipRl.allowed) {
+      userLog.warn('rate_limited', {
+        scope: 'ip:realtime_session_daily',
+        source_ip: sourceIP,
+        is_refresh: body.is_refresh,
+      });
+      return jsonError(
+        ErrorCode.RATE_01,
+        429,
+        {
+          message: "Too many voice session starts. Try again shortly.",
+          scope: 'ip:realtime_session_daily',
+          retry_after_seconds: ipRl.retry_after_seconds,
+          reset_at: ipRl.reset_at,
+        },
+        requestId,
+      );
+    }
+    const userRl = await checkAndIncrement(
+      client, 'user:realtime_session_hourly', claims.canonical_user_key,
+    );
+    if (!userRl.allowed) {
+      userLog.warn('rate_limited', {
+        scope: 'user:realtime_session_hourly',
+        is_refresh: body.is_refresh,
+      });
+      return jsonError(
+        ErrorCode.RATE_01,
+        429,
+        {
+          message: "Too many voice session starts in the past hour. Try again shortly.",
+          scope: 'user:realtime_session_hourly',
+          retry_after_seconds: userRl.retry_after_seconds,
+          reset_at: userRl.reset_at,
+        },
+        requestId,
+      );
+    }
+  } catch (err) {
+    userLog.error('rate_limiter_failed', err);
+    // Fail open — rate limiter outage shouldn't block paid users.
+  }
+
+  // ---------------------------------------------------------------------
   // 4. Kill switch
   // ---------------------------------------------------------------------
+  // Flags are read once and reused below for cook_voice_thinking_level +
+  // voice_turn_detection_mode plumbing into the mint. Fail-open on read
+  // failure — ops can still page via the AI-01 dashboard if the mint itself
+  // throws due to misconfigured flags.
+  let flags: Awaited<ReturnType<typeof readFlags>> = [];
   try {
-    const flags = await readFlags(client, userLog);
+    flags = await readFlags(client, userLog);
     const disableRealtime = flags.find((f) => f.key === 'disable_cook_realtime');
     if (disableRealtime?.is_enabled && disableRealtime.value === true) {
       userLog.warn('kill_switch_active', { flag: 'disable_cook_realtime' });
@@ -228,51 +288,78 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------
-  // 6. Quota: atomic voice_cook_session increment
+  // 6. Quota: atomic voice_cook_session increment (skipped on refresh)
   // ---------------------------------------------------------------------
-  const quotaResult = await incrementQuotaAtomic(
-    client,
-    claims.canonical_user_key,
-    'voice_cook_session',
-    new Date(userRow.created_at),
-  );
-  if (quotaResult.status === 'not_bootstrapped') {
-    userLog.warn('quota_row_missing');
-    return jsonError(
-      ErrorCode.VAL_01,
-      400,
-      {
-        message: 'No current-period quota row. Call /v1/session/bootstrap to refresh.',
-        field_errors: [{ field: 'session', issue: 'usage_counters missing current period row' }],
-      },
-      requestId,
-    );
-  }
-  if (quotaResult.status === 'capped') {
-    userLog.warn('quota_capped', { used: quotaResult.used, cap: quotaResult.cap });
-    return jsonError(
-      ErrorCode.RATE_01,
-      429,
-      {
-        message: "You've used all of this month's voice Cook Sessions for your plan.",
-        scope: 'user:voice_cook_session_monthly',
-        used: quotaResult.used,
-        cap: quotaResult.cap,
-      },
-      requestId,
-    );
-  }
+  // Refresh mints are silent handoffs within an already-active cook
+  // session (ADR 0014). The user's original session start consumed a
+  // quota slot; the refresh is a cost-control mechanism on the SAME
+  // session, so we skip the atomic increment here entirely.
+  //
+  // `didConsumeQuota` is the source of truth for downstream refund
+  // decisions — any refund path (missing prompt, mint failure) must
+  // gate on it so we never decrement a counter we never incremented
+  // (review 2026-04-22 Critical #3). `consumedPeriodStart` is only
+  // set on the non-refresh branch; passing it to refundQuota without
+  // a real increment would corrupt `usage_counters.used_count` for
+  // this user's current period.
+  const didConsumeQuota = !body.is_refresh;
+  let consumedPeriodStart: string | undefined;
+  // Keep typed data from the quota read for logging (used/cap); -1
+  // sentinels on refresh indicate "not applicable here" — log consumers
+  // should filter those when aggregating.
+  let quotaUsed = -1;
+  let quotaCap = -1;
 
-  const consumedPeriodStart = quotaResult.period_start;
+  if (body.is_refresh) {
+    userLog.info('quota_skipped_refresh', { reason: 'session_refresh' });
+  } else {
+    const quotaResult = await incrementQuotaAtomic(
+      client,
+      claims.canonical_user_key,
+      'voice_cook_session',
+      new Date(userRow.created_at),
+    );
+    if (quotaResult.status === 'not_bootstrapped') {
+      userLog.warn('quota_row_missing');
+      return jsonError(
+        ErrorCode.VAL_01,
+        400,
+        {
+          message: 'No current-period quota row. Call /v1/session/bootstrap to refresh.',
+          field_errors: [{ field: 'session', issue: 'usage_counters missing current period row' }],
+        },
+        requestId,
+      );
+    }
+    if (quotaResult.status === 'capped') {
+      userLog.warn('quota_capped', { used: quotaResult.used, cap: quotaResult.cap });
+      return jsonError(
+        ErrorCode.RATE_01,
+        429,
+        {
+          message: "You've used all of this month's voice Cook Sessions for your plan.",
+          scope: 'user:voice_cook_session_monthly',
+          used: quotaResult.used,
+          cap: quotaResult.cap,
+        },
+        requestId,
+      );
+    }
+    consumedPeriodStart = quotaResult.period_start;
+    quotaUsed = quotaResult.used;
+    quotaCap = quotaResult.cap;
+  }
 
   // ---------------------------------------------------------------------
   // 7. Prompt + render
   // ---------------------------------------------------------------------
   const activePrompt = await readActivePrompt(client, FEATURE_KEY);
   if (!activePrompt) {
-    await refundQuota(
-      client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
-    );
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
+      );
+    }
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
   }
@@ -286,6 +373,7 @@ Deno.serve(async (req) => {
     current_step_text_json: body.recipe_context.current_step_text,
     current_step_timer_seconds_json:
       body.recipe_context.current_step_timer_seconds ?? 0,
+    all_steps_json: body.recipe_context.all_steps,
     remaining_ingredients_json: body.recipe_context.remaining_ingredients,
     pantry_snapshot_json: body.household_context.pantry_snapshot,
     dietary_rules_json: body.household_context.dietary_rules,
@@ -295,19 +383,57 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 8. Mint
   // ---------------------------------------------------------------------
+  // Reflect feature flags in the mint config. `cook_voice_thinking_level`
+  // escalates from MINIMAL → LOW if Gate 2 (preamble rate) drops and we
+  // need more consistent spontaneous preambles. `voice_turn_detection_mode`
+  // flips to `server_vad` if the tuned kitchen VAD profile misbehaves in
+  // prod. Both safe defaults when the flag is absent.
+  const thinkingFlag = flags.find((f) => f.key === 'cook_voice_thinking_level');
+  const resolvedThinkingLevel: 'minimal' | 'low' =
+    thinkingFlag?.is_enabled && (thinkingFlag.value === 'minimal' || thinkingFlag.value === 'low')
+      ? thinkingFlag.value
+      : 'minimal';
+  const vadFlag = flags.find((f) => f.key === 'voice_turn_detection_mode');
+  const resolvedTurnDetectionMode: 'semantic_vad' | 'server_vad' =
+    vadFlag?.is_enabled && (vadFlag.value === 'semantic_vad' || vadFlag.value === 'server_vad')
+      ? vadFlag.value
+      : 'semantic_vad';
+
   let mint;
   try {
+    // If the request carried a recap (session-refresh path per ADR 0014),
+    // append it as a clearly-delimited suffix to systemInstruction so the
+    // new session's very first turn has continuity context. Delimiter
+    // markers ensure the model treats the recap as context, not part of
+    // the core style/rules contract.
+    const systemInstructionWithRecap = body.recap && body.recap.trim().length > 0
+      ? `${renderedPrompt}\n\n# Recent conversation context (from prior session)\n${body.recap.trim()}`
+      : renderedPrompt;
+
     mint = await mintLiveToken({
-      systemInstruction: renderedPrompt,
+      systemInstruction: systemInstructionWithRecap,
       model: `models/${MODEL}`,
-      thinkingLevel: 'minimal',
+      thinkingLevel: resolvedThinkingLevel,
+      turnDetectionMode: resolvedTurnDetectionMode,
     });
   } catch (err) {
-    await refundQuota(
-      client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
-    );
+    // Refund only if we actually consumed quota. Refresh mints
+    // skip the increment entirely; refunding there would decrement
+    // a counter we never touched and grant the user extra free
+    // sessions (review 2026-04-22 Critical #3).
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
+      );
+    }
+    // `refund_applied` metadata mirrors the actual refund decision so
+    // ops triage isn't misled on refresh-mint failures.
     if (err instanceof LiveMintError) {
-      userLog.error('mint_failed', err, { upstream_status: err.statusCode });
+      userLog.error('mint_failed', err, {
+        upstream_status: err.statusCode,
+        refund_applied: didConsumeQuota,
+        is_refresh: body.is_refresh,
+      });
       return jsonError(
         ErrorCode.AI_01,
         502,
@@ -318,7 +444,10 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    userLog.error('mint_unexpected_error', err);
+    userLog.error('mint_unexpected_error', err, {
+      refund_applied: didConsumeQuota,
+      is_refresh: body.is_refresh,
+    });
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
   }
 
@@ -328,10 +457,12 @@ Deno.serve(async (req) => {
   const sessionId = crypto.randomUUID();
 
   // Cost is zero at mint time — the minted session's real spend arrives via
-  // usageMetadata frames during the Live WS turns (not plumbed to backend
-  // in v1). Log the mint as a zero-cost event row so the voice_cook_session
-  // counter increment has a matching ai_request_log anchor for cost attribution
-  // dashboards. Future work: pipe iOS-forwarded usageMetadata deltas in.
+  // usageMetadata frames during the Live WS turns. iOS forwards those per
+  // turn to /v1/ai/voice-turn-usage, which emits one ai_request_log row +
+  // one $ai_generation per turn (request_id="voice:<session_id>:<turn_index>").
+  // The mint row here stays as a zero-cost anchor so the voice_cook_session
+  // quota increment has a matching ai_request_log entry for cost attribution
+  // dashboards — the session-level $ai_trace below is the PostHog equivalent.
   logAIRequest(client, userLog, {
     request_id: body.client_request_id,
     canonical_user_key: claims.canonical_user_key,
@@ -346,6 +477,15 @@ Deno.serve(async (req) => {
     retry_count: 0,
   });
 
+  // PostHog $ai_trace is fired by iOS (CookModeViewModel) at session
+  // close with BOTH $ai_input_state (mint context) and $ai_output_state
+  // (session totals) in one event. Emitting a mint-time $ai_trace was
+  // considered but dropped per ADR 0009 — PostHog is an append-only
+  // event store, so same-trace_id emissions create sibling events
+  // rather than overwriting. One emission at close keeps the trace
+  // record consistent. Child $ai_generation events aggregate into the
+  // trace view automatically via PostHog's pseudo-trace rollup.
+
   const wire: WireResponse = {
     auth_token: mint.tokenName,
     expires_at: mint.expiresAt,
@@ -359,8 +499,8 @@ Deno.serve(async (req) => {
     status: 200,
     latency_ms: Math.round(performance.now() - started),
     session_id: sessionId,
-    voice_sessions_used: quotaResult.used,
-    voice_sessions_cap: quotaResult.cap,
+    voice_sessions_used: quotaUsed,
+    voice_sessions_cap: quotaCap,
   });
 
   return jsonOk(wire, requestId);

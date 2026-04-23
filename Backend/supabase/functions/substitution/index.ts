@@ -37,7 +37,8 @@ import {
 } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { SubstitutionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
@@ -352,19 +353,28 @@ Deno.serve(async (req) => {
     userLog.error('substitution_failed_after_retry', lastErr, {
       retry_count: totalRetries,
     });
-    logAIRequest(client, userLog, {
-      request_id: body.sub_event_id,
-      canonical_user_key: claims.canonical_user_key,
-      feature_key: FEATURE_KEY,
-      model: MODEL,
-      input_tokens: totalInputTokens,
-      output_tokens: totalOutputTokens,
-      cost_usd: costUsd,
-      latency_ms: totalLatency,
-      thinking_level: 'minimal',
-      prompt_version: activePrompt.version,
-      retry_count: totalRetries,
-    });
+    recordAIRequest(
+      client, userLog,
+      {
+        request_id: body.sub_event_id,
+        canonical_user_key: claims.canonical_user_key,
+        feature_key: FEATURE_KEY,
+        model: MODEL,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        cost_usd: costUsd,
+        latency_ms: totalLatency,
+        thinking_level: 'minimal',
+        prompt_version: activePrompt.version,
+        retry_count: totalRetries,
+      },
+      {
+        trace_id: body.sub_event_id,
+        span_name: 'substitution',
+        is_error: true,
+        error_code: ErrorCode.AI_02,
+      },
+    );
     return jsonError(
       ErrorCode.AI_02,
       502,
@@ -406,19 +416,26 @@ Deno.serve(async (req) => {
       };
 
   // Log cost + best-effort cache write.
-  logAIRequest(client, userLog, {
-    request_id: body.sub_event_id,
-    canonical_user_key: claims.canonical_user_key,
-    feature_key: FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatency,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: totalRetries,
-  });
+  recordAIRequest(
+    client, userLog,
+    {
+      request_id: body.sub_event_id,
+      canonical_user_key: claims.canonical_user_key,
+      feature_key: FEATURE_KEY,
+      model: MODEL,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      cost_usd: costUsd,
+      latency_ms: totalLatency,
+      thinking_level: 'minimal',
+      prompt_version: activePrompt.version,
+      retry_count: totalRetries,
+    },
+    {
+      trace_id: body.sub_event_id,
+      span_name: 'substitution',
+    },
+  );
 
   try {
     await writeCache(client, claims.canonical_user_key, body.sub_event_id, FEATURE_KEY, 200, wire);

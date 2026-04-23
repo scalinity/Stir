@@ -50,6 +50,101 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertEqual(cap, 20)
     }
 
+    // MARK: - Server voice_enabled flag honor (ADR-0008 + review fix)
+
+    func test_voiceCookMode_honorsServerVoiceEnabledFlag_whenTrueOnFree() async throws {
+        // ADR-0008: backend may flip voice_enabled=true regardless of
+        // tier for dev/testing. iOS must honor the server's decision,
+        // not re-derive from `tier` — the prior hardcoded tier check
+        // would have blocked a server-authorized Free user from voice.
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .free,
+            billingState: .none,
+            voiceEnabled: true,
+            quotas: [
+                Self.quota(.voiceCookSession, used: 0, cap: 20),
+                Self.quota(.dinnerSolve, used: 0, cap: 6),
+                Self.quota(.recipeImport, used: 0, cap: 2),
+            ],
+        ))
+
+        XCTAssertEqual(service.canAccess(.voiceCookMode), .allowed)
+    }
+
+    func test_voiceCookMode_blockedWhenServerDisablesEvenIfPaidTier() async throws {
+        // Inverse: if the server computes voice_enabled=false (e.g.,
+        // feature-flag kill switch, tier downgrade mid-session), the
+        // client must respect that even when `tier` looks paid.
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium,
+            billingState: .active,
+            voiceEnabled: false,
+            quotas: [
+                Self.quota(.voiceCookSession, used: 0, cap: 20),
+                Self.quota(.dinnerSolve, used: 0, cap: 40),
+                Self.quota(.recipeImport, used: 0, cap: 100_000),
+            ],
+        ))
+
+        XCTAssertEqual(service.canAccess(.voiceCookMode),
+                       .blockedByTier(required: .premium))
+    }
+
+    // MARK: - Stale snapshot defensive: cap=0 must not falsely block
+
+    func test_voiceCookMode_capZero_doesNotBlock_whenVoiceEnabled() async throws {
+        // Regression: a stale cached snapshot from before the ADR-0008
+        // DB backfill carried `voiceCookSession` cap=0. Old check was
+        // `used >= cap` → `0 >= 0` → `.blockedByQuota` → "upgrade to
+        // Pro" paywall even though nothing had been consumed. Defensive
+        // guard now requires cap > 0 before quota-blocking.
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium,
+            billingState: .active,
+            voiceEnabled: true,
+            quotas: [
+                Self.quota(.voiceCookSession, used: 0, cap: 0),
+                Self.quota(.dinnerSolve, used: 0, cap: 40),
+                Self.quota(.recipeImport, used: 0, cap: 100_000),
+            ],
+        ))
+
+        XCTAssertEqual(service.canAccess(.voiceCookMode), .allowed)
+    }
+
+    func test_dinnerSolve_capZero_doesNotBlock() async throws {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .free,
+            billingState: .none,
+            quotas: [
+                Self.quota(.voiceCookSession, used: 0, cap: 0),
+                Self.quota(.dinnerSolve, used: 0, cap: 0),
+                Self.quota(.recipeImport, used: 0, cap: 0),
+            ],
+        ))
+
+        XCTAssertEqual(service.canAccess(.dinnerSolve), .allowed)
+    }
+
+    func test_recipeImport_capZero_doesNotBlock() async throws {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .free,
+            billingState: .none,
+            quotas: [
+                Self.quota(.voiceCookSession, used: 0, cap: 0),
+                Self.quota(.dinnerSolve, used: 0, cap: 0),
+                Self.quota(.recipeImport, used: 0, cap: 0),
+            ],
+        ))
+
+        XCTAssertEqual(service.canAccess(.recipeImport), .allowed)
+    }
+
     func test_expiredBillingState_treatsUserAsFree() async throws {
         let service = EntitlementService(keychain: MockKeychain())
         service.hydrate(from: Self.entitlements(tier: .premium, billingState: .expired))

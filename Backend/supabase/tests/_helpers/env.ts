@@ -36,3 +36,21 @@ try {
     })`,
   );
 }
+
+// Prod-safety guard: tests call clearRateLimitBuckets() and other
+// DELETE operations that would wipe shared state. Even with the
+// .env file override above, a misconfigured .env could point at
+// cloud. Assert that SUPABASE_URL resolves to localhost at module
+// load so any test run against prod fails loudly before any side
+// effect lands (Suggestion #13).
+const loadedSupabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+if (
+  !loadedSupabaseUrl.includes('127.0.0.1') &&
+  !loadedSupabaseUrl.includes('localhost')
+) {
+  throw new Error(
+    `tests/_helpers/env.ts: refusing to run tests against non-local SUPABASE_URL=${loadedSupabaseUrl}. ` +
+      'Tests issue DELETE statements (rate-limit buckets, test rows) and MUST target the local stack. ' +
+      "Run 'supabase start' + re-generate the .env before re-running tests.",
+  );
+}

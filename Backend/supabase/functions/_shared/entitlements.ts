@@ -27,9 +27,19 @@ export type BillingState =
 
 /** Per-tier monthly caps. Mirrors CLAUDE.md "Tier entitlements (authoritative)". */
 export const TIER_CAPS: Record<UserTier, Record<UsageFeatureKey, number>> = {
+  // ADR 0015 caps (post-step-6 device test, 2026-04-23):
+  //   - free.voice_cook_session reverted 20 → 0 (supersedes ADR-0008
+  //     testing bump; voice is Premium+ only per CLAUDE.md north-star #6)
+  //   - premium.voice_cook_session cut 20 → 13 (~3 dinners/week) — paywall
+  //     copy in PaywallView.featuresList + PaywallTrigger.subheadline +
+  //     ProComparisonSheet must stay in lockstep with this number
+  //   - pro.voice_cook_session cut 40 → 27 ("every dinner" — 6-7/week
+  //     at 7 dinners/week ≈ every dinner)
+  // Cost model + margin justification: ADR 0015. Cap-reversal trigger +
+  // guard rail for raising back toward 20/40: same ADR.
   free:    { dinner_solve: 6,   voice_cook_session: 0,  recipe_import: 2 },
-  premium: { dinner_solve: 40,  voice_cook_session: 20, recipe_import: 100_000 },
-  pro:     { dinner_solve: 120, voice_cook_session: 40, recipe_import: 100_000 },
+  premium: { dinner_solve: 40,  voice_cook_session: 13, recipe_import: 100_000 },
+  pro:     { dinner_solve: 120, voice_cook_session: 27, recipe_import: 100_000 },
 };
 // ASSUMPTION: "unlimited" Recipe Imports for Premium/Pro is modeled as a
 // very large integer (100_000) to keep the atomic cap-check shape uniform.
@@ -64,6 +74,27 @@ export function effectiveTier(row: Pick<EntitlementRow, 'tier' | 'billing_state'
 export function effectiveVoiceEnabled(
   row: Pick<EntitlementRow, 'tier' | 'billing_state'>,
 ): boolean {
+  // ADR-0008 (Superseded by ADR 0015): the
+  // ENTITLEMENT_OVERRIDE_VOICE_FREE env escape hatch stays in the code
+  // path so future testing / dev / staging runs can temporarily open
+  // voice to all tiers without a cap change. Production must never
+  // have this env var set — ADR 0015 reverted the step-6 open state
+  // on 2026-04-23. Default remains FAIL-CLOSED (voice gated unless
+  // the env is explicitly set), matching the security invariant
+  // established during ADR-0008's second review round.
+  //
+  // To re-enable for dev only:
+  //   `supabase secrets set ENTITLEMENT_OVERRIDE_VOICE_FREE=true --project-ref <dev-ref>`
+  //   `supabase functions deploy session-bootstrap config-bootstrap ...`
+  //
+  // Production secret must stay unset (or explicitly false). Runbook:
+  // before any cap-related deploy, verify via
+  //   `supabase secrets list --project-ref ktqajarcomzplnpbczfo`
+  // that ENTITLEMENT_OVERRIDE_VOICE_FREE is absent.
+  const overrideRaw = Deno.env.get('ENTITLEMENT_OVERRIDE_VOICE_FREE') ?? 'false';
+  const overrideEnabled = /^(1|true|yes|on)$/i.test(overrideRaw.trim());
+  if (overrideEnabled) return true;
+
   const tier = effectiveTier(row);
   return (
     (tier === 'premium' || tier === 'pro') &&

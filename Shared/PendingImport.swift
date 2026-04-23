@@ -22,11 +22,11 @@
 import Foundation
 
 public struct PendingImport: Codable, Sendable, Equatable, Identifiable {
-    /// Stable id for SwiftUI's `fullScreenCover(item:)`. `capturedAt`
-    /// is unique per-extension-write (millisecond-resolution Date);
-    /// a second share from the same session gets a distinct id so
-    /// SwiftUI re-presents rather than treating it as the same payload.
-    public var id: Date { capturedAt }
+    /// Stable UUID assigned at share-time. Replaces the prior Date-based
+    /// id — Date had millisecond precision but could collide in the
+    /// rare "two shares, same millisecond" case and leaked timing info
+    /// into SwiftUI diagnostics.
+    public let id: UUID
 
     /// URL shared from Safari / Reader / browser extension. Mutually
     /// exclusive with `text` at the source level but we tolerate both
@@ -39,11 +39,27 @@ public struct PendingImport: Codable, Sendable, Equatable, Identifiable {
     /// few hours (avoid zombie re-import if the user somehow never
     /// returned to Stir after sharing).
     public let capturedAt: Date
+    /// canonical_user_key of the account active in the main app at
+    /// share time. The main app's consume path compares this against
+    /// the current bootstrap identity; mismatch → drop with a toast
+    /// so a share doesn't cross-user-bleed into a different iCloud
+    /// account (SA2-10, CWE-345). Nil is legal for legacy payloads
+    /// written before this field existed; those fall through to the
+    /// current-user path to stay back-compat during upgrade.
+    public let consumingUserKey: String?
 
-    public init(url: String?, text: String?, capturedAt: Date) {
+    public init(
+        id: UUID = UUID(),
+        url: String?,
+        text: String?,
+        capturedAt: Date,
+        consumingUserKey: String? = nil,
+    ) {
+        self.id = id
         self.url = url
         self.text = text
         self.capturedAt = capturedAt
+        self.consumingUserKey = consumingUserKey
     }
 
     /// Returns the more specific source type implied by the payload.

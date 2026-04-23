@@ -53,6 +53,13 @@ public struct TimerActivityAttributes: ActivityAttributes {
     public let stepDescription: String
     public let stepNumber: Int
     public let totalSteps: Int
+    /// Total seconds the timer was initially configured for. Static
+    /// for the activity's lifetime — pause/resume updates fireDate on
+    /// ContentState, but the denominator for the progress bar stays
+    /// pinned here. Previously the widget derived a coarse 60-min
+    /// upper bound from current-remaining, making 2-min timers start
+    /// at 100% full and 60-min timers barely move (W19).
+    public let initialDurationSec: Int
 
     public init(
         timerId: UUID,
@@ -60,11 +67,13 @@ public struct TimerActivityAttributes: ActivityAttributes {
         stepDescription: String,
         stepNumber: Int,
         totalSteps: Int,
+        initialDurationSec: Int,
     ) {
         self.timerId = timerId
         self.recipeTitle = recipeTitle
         self.stepDescription = stepDescription
         self.stepNumber = stepNumber
         self.totalSteps = totalSteps
+        self.initialDurationSec = initialDurationSec
     }
 }

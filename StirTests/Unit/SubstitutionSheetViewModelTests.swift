@@ -91,9 +91,43 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
         await fulfillment(of: [expect], timeout: 1.0)
     }
 
+    // MARK: - Analytics emission (pre-dispatch)
+
+    func test_submit_emitsSubstitutionRequestedBeforeDispatch() async {
+        // 2026-04-22 prod regression: 4 substitution_accepted(unsafe_acknowledged)
+        // events landed on PostHog from the sheet VM in the last hour, but
+        // zero substitution_requested despite BOTH being emitted from the
+        // same class, same analytics instance, same submit → unsafe → ack
+        // flow. Pin the pre-dispatch emission here so a regression shows
+        // up loud at CI time instead of as a funnel drop-off in prod.
+        let spy = SpyPostHog()
+        let vm = makeVM(analytics: spy)
+        vm.freeTextName = "out of heavy cream"
+
+        // Kick off the submit. The AI dispatch will fail against
+        // test.invalid, but that's fine — substitution_requested fires
+        // BEFORE the dispatch (line 97 of the VM, immediately after
+        // state = .requesting and before the SubstitutionRequest is
+        // even constructed). The capture should land regardless of
+        // dispatch outcome.
+        await vm.submit()
+
+        let requested = spy.captures.filter { $0.event == "substitution_requested" }
+        XCTAssertEqual(requested.count, 1,
+                       "substitutionRequested must fire exactly once per submit — got \(requested.count)")
+        let props = requested.first?.properties ?? [:]
+        XCTAssertEqual(props["invocation"] as? String, "sheet")
+        XCTAssertEqual(props["problem_type"] as? String, "free_text")
+        XCTAssertNotNil(props["sub_event_id"] as? String,
+                        "sub_event_id must be populated so the funnel joins to the paired accepted event")
+    }
+
     // MARK: - Helpers
 
-    private func makeVM(onFinished: @escaping () -> Void = {}) -> SubstitutionSheetViewModel {
+    private func makeVM(
+        onFinished: @escaping () -> Void = {},
+        analytics: PostHogClient? = nil,
+    ) -> SubstitutionSheetViewModel {
         SubstitutionSheetViewModel(
             recipePlan: recipePlan,
             household: household,
@@ -101,6 +135,7 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
             currentStep: nil,
             aiDispatch: aiDispatch,
             repository: SubstitutionRepository(controller: controller),
+            analytics: analytics ?? .shared,
             onFinished: onFinished,
         )
     }
@@ -154,4 +189,27 @@ private final class DismissBox: @unchecked Sendable {
     private var _value = false
     var value: Bool { lock.lock(); defer { lock.unlock() }; return _value }
     func flip() { lock.lock(); _value = true; lock.unlock() }
+}
+
+/// Spy analytics subclass for asserting captures in tests. Uses the
+/// `#if DEBUG` `init(testingOnly:)` protected init on PostHogClient so
+/// production builds can't accidentally construct one.
+private final class SpyPostHog: PostHogClient, @unchecked Sendable {
+    struct Capture: Sendable {
+        let event: String
+        let properties: [String: Any]
+    }
+    private let lock = NSLock()
+    private var _captures: [Capture] = []
+    var captures: [Capture] {
+        lock.lock(); defer { lock.unlock() }
+        return _captures
+    }
+    init() {
+        super.init(testingOnly: true)
+    }
+    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
+        lock.lock(); defer { lock.unlock() }
+        _captures.append(Capture(event: event.rawValue, properties: properties))
+    }
 }

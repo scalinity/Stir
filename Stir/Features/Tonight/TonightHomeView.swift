@@ -15,11 +15,21 @@ struct TonightHomeView: View {
 
     @Environment(EntitlementService.self) private var entitlements
     @State private var toastMessage: String?
-    @State private var showScanFlow = false
     @State private var showSavedMeals = false
-    @State private var showImport = false
     @State private var resumableSession: CookingSession?
     @State private var recentCompleted: [CookingSession] = []
+    /// Consolidates scan + import entry covers into one fullScreenCover
+    /// driven by this enum (CR1-23). Peer `.fullScreenCover` modifiers
+    /// on the same view — even when at-most-one is active — trip
+    /// iOS 18/26's "Currently, only presenting a single sheet is
+    /// supported" warning.
+    @State private var activeModal: ActiveModal?
+
+    enum ActiveModal: String, Identifiable {
+        case scan
+        case `import`
+        var id: String { rawValue }
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,45 +54,55 @@ struct TonightHomeView: View {
                 }
             }
             .overlay(alignment: .top) { toastOverlay }
-            .fullScreenCover(isPresented: $showScanFlow) {
-                // Match CookModeRoot.swift pattern: strong-capture the
-                // coordinator. RootCoordinator is owned by RootView for
-                // the app lifetime, so the `[weak]` was theatre — and
-                // inconsistency across paywall wire-ups makes the
-                // pattern harder to grep.
-                let capturedCoordinator = coordinator
-                ScanFlowRoot(
-                    aiDispatch: coordinator.aiDispatch,
-                    pantryRepo: coordinator.pantryItemRepository,
-                    solveRepo: coordinator.solveRepository,
-                    householdStore: coordinator.household,
-                    entitlements: entitlements,
-                    presentPaywall: { trigger in
-                        capturedCoordinator.presentPaywall(trigger)
-                    },
-                )
+            .onChange(of: coordinator.pendingDeepLinkScan) { _, new in
+                // Widget-origin `stir://scan/start` tap arrived while
+                // TonightHome is on screen. Route to the scan cover
+                // iff we're not already presenting one.
+                guard new != nil, activeModal == nil else { return }
+                activeModal = .scan
+                coordinator.clearDeepLinkScan()
+            }
+            .fullScreenCover(item: $activeModal) { modal in
+                switch modal {
+                case .scan:
+                    // Match CookModeRoot.swift pattern: strong-capture the
+                    // coordinator. RootCoordinator is owned by RootView for
+                    // the app lifetime, so the `[weak]` was theatre — and
+                    // inconsistency across paywall wire-ups makes the
+                    // pattern harder to grep.
+                    let capturedCoordinator = coordinator
+                    ScanFlowRoot(
+                        aiDispatch: coordinator.aiDispatch,
+                        pantryRepo: coordinator.pantryItemRepository,
+                        solveRepo: coordinator.solveRepository,
+                        householdStore: coordinator.household,
+                        entitlements: entitlements,
+                        presentPaywall: { trigger in
+                            capturedCoordinator.presentPaywall(trigger)
+                        },
+                    )
+                case .import:
+                    if let household = coordinator.household.profile {
+                        let vm = ImportViewModel(
+                            household: household,
+                            aiDispatch: coordinator.aiDispatch,
+                        )
+                        ImportRoot(
+                            viewModel: vm,
+                            onDismiss: { activeModal = nil },
+                            onCompleted: { _ in
+                                activeModal = nil
+                                Task { await refreshCookingState() }
+                            },
+                        )
+                    }
+                }
             }
             .navigationDestination(isPresented: $showSavedMeals) {
                 if let household = coordinator.household.profile {
                     SavedMealsView(
                         household: household,
                         aiDispatch: coordinator.aiDispatch,
-                    )
-                }
-            }
-            .fullScreenCover(isPresented: $showImport) {
-                if let household = coordinator.household.profile {
-                    let vm = ImportViewModel(
-                        household: household,
-                        aiDispatch: coordinator.aiDispatch,
-                    )
-                    ImportRoot(
-                        viewModel: vm,
-                        onDismiss: { showImport = false },
-                        onCompleted: { _ in
-                            showImport = false
-                            Task { await refreshCookingState() }
-                        },
                     )
                 }
             }
@@ -166,7 +186,7 @@ struct TonightHomeView: View {
         VStack(spacing: 12) {
             scanKitchenButton
             Button {
-                showImport = true
+                activeModal = .import
             } label: {
                 buttonRow(
                     systemImage: "square.and.arrow.down.on.square",
@@ -198,7 +218,7 @@ struct TonightHomeView: View {
             if killed {
                 toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
             } else {
-                showScanFlow = true
+                activeModal = .scan
             }
         } label: {
             buttonRow(

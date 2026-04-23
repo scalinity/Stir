@@ -214,6 +214,11 @@
     <entity name="VoiceTurn" representedClassName="VoiceTurn" syncable="YES" codeGenerationType="class">
         <attribute name="cookingSessionId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <!-- nil on resultType != 'error'. On error, set to a stable slug
+             identifying the failure class (e.g. 'turnComplete_timeout',
+             'ws_disconnected', 'mint_failed'). Used by ops review to
+             distinguish recovery paths without having to parse transcriptText. -->
+        <attribute name="errorCode" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <!-- voice | text — v1 always 'voice'. `text` reserved for future keyboard input. -->
         <attribute name="inputMode" optional="YES" attributeType="String" defaultValueString="voice"/>

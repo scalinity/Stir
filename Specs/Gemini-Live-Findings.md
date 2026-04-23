@@ -15,7 +15,7 @@ The full-spike validation ran in April 2026 against `gemini-3.1-flash-live-previ
 - Audio token metering at 25 tokens/sec in both directions (matches published pricing).
 - `usageMetadata` frames contain per-turn accumulation — the signal the client uses to detect pruning regressions.
 - Preamble pattern works when explicitly prompted; spontaneous preambles are weaker than OpenAI's but the prompt-level instruction lands most of the time at MINIMAL.
-- Explicit `max_output_tokens: 150` and `session.update` pruning bound per-turn input audio to ~950 tokens after the third turn.
+- Explicit `max_output_tokens: 150` is honored (bumped to 400 on 2026-04-22, ADR 0010). **CORRECTION (2026-04-22):** the `session.update` pruning claim here is wrong — Gemini Live has no client-side truncation frame. The original spike writeup misidentified a fictional OpenAI-Realtime-style semantic. The actual per-turn growth is ~680 tokens/turn linear with turn count; bounded via `refreshSession()` at 10-turn / 15k-token triggers per ADR 0014.
 
 **Discovered (200-token audio overhead):**
 - Audio frames carry a fixed ~200-token overhead per turn that doesn't show up in the raw PCM bit-rate math. Cost model in `CLAUDE.md` and `Specs/Stir-Cook-Mode-Architecture.md` §2 already accounts for this via the carried-context line (825 tokens for 3 prior turns @ ~275 tokens each, which bakes in the overhead).

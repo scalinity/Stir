@@ -117,53 +117,73 @@ final class GroceryRepository {
 
     // MARK: - Dedupe
 
-    /// Merge incoming items by canonical_slug (fallback to normalized
-    /// display name). Preserves the first occurrence's index but bumps
-    /// priority to the highest seen and appends amount_text if different.
+    /// Merge incoming items by canonical_slug AND normalized display
+    /// name — an entry is registered under BOTH keys so a later item
+    /// with only one of them still merges into the existing bucket.
+    /// Pre-fix the dedupe keyed on slug OR name only, which split:
+    ///   { slug: "chicken-breast", name: "Chicken breast" }
+    ///   { slug: nil,              name: "Chicken breast" }
+    /// into two entries.
+    ///
+    /// Preserves the first occurrence's display copy + sort position,
+    /// bumps priority to the highest seen, appends amount_text when
+    /// different.
     func dedupedForPersistence(_ items: [IncomingItem]) -> [IncomingItem] {
-        var bucket: [String: IncomingItem] = [:]
-        var order: [String] = []
+        var entries: [IncomingItem] = []
+        var slugIndex: [String: Int] = [:]
+        var nameIndex: [String: Int] = [:]
         for item in items {
-            let key = item.canonicalSlug?.lowercased()
-                ?? Self.normalizedDisplayName(item.displayName)
-            if var existing = bucket[key] {
-                if item.priority.sortRank < existing.priority.sortRank {
-                    // Lower sortRank = higher priority — keep new
-                    existing = .init(
-                        displayName: existing.displayName,
-                        quantityText: combinedQuantity(existing.quantityText, item.quantityText),
-                        canonicalSlug: existing.canonicalSlug ?? item.canonicalSlug,
-                        category: existing.category,
-                        priority: item.priority,
-                    )
-                } else {
-                    existing = .init(
-                        displayName: existing.displayName,
-                        quantityText: combinedQuantity(existing.quantityText, item.quantityText),
-                        canonicalSlug: existing.canonicalSlug ?? item.canonicalSlug,
-                        category: existing.category,
-                        priority: existing.priority,
-                    )
-                }
-                bucket[key] = existing
+            let slugKey = item.canonicalSlug?.lowercased()
+            let nameKey = Self.normalizedDisplayName(item.displayName)
+            let existingIdx = slugKey.flatMap { slugIndex[$0] } ?? nameIndex[nameKey]
+            if let idx = existingIdx {
+                let existing = entries[idx]
+                let takeNewPriority = item.priority.sortRank < existing.priority.sortRank
+                let merged = IncomingItem(
+                    displayName: existing.displayName,
+                    quantityText: combinedQuantity(existing.quantityText, item.quantityText),
+                    canonicalSlug: existing.canonicalSlug ?? item.canonicalSlug,
+                    category: existing.category,
+                    priority: takeNewPriority ? item.priority : existing.priority,
+                )
+                entries[idx] = merged
+                // Register newly-learned slug/name keys for this entry
+                // so subsequent items matching on the other key merge too.
+                if let slugKey, slugIndex[slugKey] == nil { slugIndex[slugKey] = idx }
+                if nameIndex[nameKey] == nil { nameIndex[nameKey] = idx }
             } else {
-                bucket[key] = item
-                order.append(key)
+                let idx = entries.count
+                entries.append(item)
+                if let slugKey { slugIndex[slugKey] = idx }
+                nameIndex[nameKey] = idx
             }
         }
-        return order.compactMap { bucket[$0] }
+        return entries
     }
 
     /// Cheap singular/plural + case normalization for display-name
     /// matching — mirrors the backend `normalizeForMatch` helper so
     /// client-side and server-side dedupe converge.
+    ///
+    /// The -es drop only fires for sibilant-ending plurals (classes,
+    /// boxes, dishes, buzzes, peaches, potatoes). Singulars ending in
+    /// -se/-ge/-me/-ne (rose, range, name) fall through to the drop-s
+    /// branch so "roses"/"rose" round-trip to the same key instead of
+    /// diverging to "ros"/"rose".
     static func normalizedDisplayName(_ name: String) -> String {
         let lowered = name.lowercased().trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "  ", with: " ")
         if lowered.hasSuffix("ies"), lowered.count > 4 {
             return String(lowered.dropLast(3)) + "y"
         }
-        if lowered.hasSuffix("es"), lowered.count > 3, !lowered.hasSuffix("ees") {
+        let endsInSibilantEsPlural =
+            lowered.hasSuffix("sses") ||    // class → classes
+            lowered.hasSuffix("xes") ||     // box → boxes
+            lowered.hasSuffix("zes") ||     // waltz → waltzes
+            lowered.hasSuffix("ches") ||    // peach → peaches
+            lowered.hasSuffix("shes") ||    // dish → dishes
+            lowered.hasSuffix("oes")        // potato → potatoes
+        if endsInSibilantEsPlural, lowered.count > 3 {
             return String(lowered.dropLast(2))
         }
         if lowered.hasSuffix("s"), lowered.count > 2, !lowered.hasSuffix("ss") {

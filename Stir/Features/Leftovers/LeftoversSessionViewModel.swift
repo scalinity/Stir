@@ -57,6 +57,16 @@ final class LeftoversSessionViewModel {
 
     private let aiDispatch: AIDispatch
     private let analytics: PostHogClient
+    /// Optional entitlement service — present in production (injected by
+    /// the coordinator), nil in unit tests that don't exercise the gate.
+    /// findFollowUpIdea consults this for a snappy local Premium check
+    /// before firing the dinner-solve request; server-side ENT-LEFTOVERS-01
+    /// remains the authoritative check (SA2-3 defense-in-depth).
+    private let entitlements: EntitlementService?
+    /// Closure the coordinator uses to present the paywall when the
+    /// client gate trips. Optional so tests can assert the call without
+    /// threading through a UI layer.
+    private let presentPaywall: ((PaywallTrigger) -> Void)?
 
     init(
         recipePlan: RecipePlan,
@@ -64,11 +74,15 @@ final class LeftoversSessionViewModel {
         seededFrom outcome: OutcomeFeedback?,
         aiDispatch: AIDispatch,
         analytics: PostHogClient = .shared,
+        entitlements: EntitlementService? = nil,
+        presentPaywall: ((PaywallTrigger) -> Void)? = nil,
     ) {
         self.recipePlan = recipePlan
         self.household = household
         self.aiDispatch = aiDispatch
         self.analytics = analytics
+        self.entitlements = entitlements
+        self.presentPaywall = presentPaywall
 
         // Seed item suggestions from the just-cooked recipe: each
         // ingredient becomes a pre-selected default with amount-text
@@ -129,12 +143,41 @@ final class LeftoversSessionViewModel {
     /// options | error.
     func findFollowUpIdea() async {
         guard !selectedItems.isEmpty else { return }
+
+        // Client-side Premium+ gate. Server-side ENT-LEFTOVERS-01 is the
+        // authoritative check (handles modified clients + direct curl);
+        // this snappy local check avoids the round-trip + paywall flash
+        // for the common case. Nil entitlements falls through to the
+        // server gate rather than fail-open.
+        if let entitlements {
+            switch entitlements.canAccess(.leftoversMode) {
+            case .allowed:
+                break
+            case .blockedByTier, .blockedByBilling:
+                presentPaywall?(.leftoversGate)
+                stage = .prompt
+                return
+            case .blockedByQuota:
+                // Leftovers reuses the dinner-solve quota — if that's
+                // capped, surface RATE-01 paywall instead of the
+                // tier paywall. canAccess for .leftoversMode currently
+                // never returns blockedByQuota (see EntitlementService
+                // :193), so this branch is forward-compat only.
+                presentPaywall?(.dinnerSolveQuotaExhausted)
+                stage = .prompt
+                return
+            }
+        }
+
         stage = .solving
 
-        analytics.capture(.dinnerSolveRequested, properties: [
-            "context_hint": "leftovers",
-            "leftovers_items_count": selectedItems.count,
-        ])
+        analytics.capture(
+            .dinnerSolveRequested,
+            properties: StepSevenTelemetry.dinnerSolveRequested(
+                contextHint: "leftovers",
+                leftoversItemsCount: selectedItems.count,
+            ),
+        )
 
         let startedAt = Date()
         let request = DinnerSolveRequest(
@@ -155,7 +198,7 @@ final class LeftoversSessionViewModel {
 
         var returned: [DishCard] = []
         do {
-            let stream = await aiDispatch.dinnerSolve(request: request)
+            let stream = try await aiDispatch.dinnerSolve(request: request)
             for try await event in stream {
                 switch event {
                 case .dish(let dish):
@@ -169,14 +212,17 @@ final class LeftoversSessionViewModel {
                     continue
                 case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion):
                     self.lastPromptVersion = promptVersion
-                    analytics.capture(.dinnerSolveCompleted, properties: [
-                        "context_hint": "leftovers",
-                        "dishes_returned": dishesReturned,
-                        "total_cost_usd": cost,
-                        "retry_count": retryCount,
-                        "prompt_version": promptVersion,
-                        "total_latency_ms": Int(Date().timeIntervalSince(startedAt) * 1000),
-                    ])
+                    analytics.capture(
+                        .dinnerSolveCompleted,
+                        properties: StepSevenTelemetry.dinnerSolveCompleted(
+                            contextHint: "leftovers",
+                            dishesReturned: dishesReturned,
+                            totalCostUSD: cost,
+                            retryCount: retryCount,
+                            promptVersion: promptVersion,
+                            totalLatencyMs: Int(Date().timeIntervalSince(startedAt) * 1000),
+                        ),
+                    )
                     if returned.isEmpty {
                         stage = .error(code: "AI-02", message: "Couldn't find a follow-up idea from those leftovers. Try selecting more items.")
                     } else {

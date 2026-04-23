@@ -13,6 +13,15 @@ struct DinnerOptionsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
+                // Surface the top-level .error phase BEFORE the slot
+                // cards. RATE-01 now also presents the paywall via
+                // SolveViewModel.presentPaywall, but the row stays
+                // rendered so the user returns to a recoverable screen
+                // (retry CTA) instead of a stuck skeleton after paywall
+                // dismissal.
+                if case .error(let message, let code) = viewModel.phase {
+                    errorBanner(message: message, code: code)
+                }
                 ForEach(viewModel.slots) { slot in
                     slotCard(slot)
                 }
@@ -81,6 +90,36 @@ struct DinnerOptionsView: View {
                     .progressViewStyle(.circular)
                     .tint(.secondary),
             )
+    }
+
+    private func errorBanner(message: String, code: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message)
+                    .font(.subheadline.weight(.semibold))
+                Text(code)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                Button("Try again") {
+                    viewModel.startSolve()
+                }
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1),
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(message). Error code \(code).")
     }
 
     private func errorSlot(rank: Int, code: ErrorCode) -> some View {

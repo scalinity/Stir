@@ -264,6 +264,20 @@ const RealtimeRecipeContext = z.object({
   // 0 → no timer. Use nullable for "no timer" but keep it integer so Zod
   // doesn't choke on null when a step has no timer.
   current_step_timer_seconds: z.number().int().min(0).max(36000).nullable(),
+  // Full numbered list of every step in the recipe. Added 2026-04-22
+  // after observed hallucination: user on step 2 asked about step 3
+  // and the model invented content (said step 3 was "sautéing with
+  // garlic" when it was really "add kale to boiling water"). Prior
+  // context gave only the current step; the model had no grounding
+  // for adjacent steps. Bounded `max(100)` matches `total_steps`
+  // bound; each instruction capped at 2000 chars to match
+  // `current_step_text`. Timer bound mirrors
+  // `current_step_timer_seconds`.
+  all_steps: z.array(z.object({
+    step_number: z.number().int().min(1).max(100),
+    text: z.string().min(1).max(2000),
+    timer_seconds: z.number().int().min(0).max(36000).nullable(),
+  }).strict()).max(100),
   remaining_ingredients: z.array(z.object({
     display_name: z.string().min(1).max(128),
     canonical_slug: z.string().min(1).max(128).optional(),
@@ -290,6 +304,17 @@ export const RealtimeSessionRequest = z.object({
   current_step_number: z.number().int().min(1).max(100),
   recipe_context: RealtimeRecipeContext,
   household_context: RealtimeHouseholdContext,
+  // Optional ~200-300 token recap appended to systemInstruction for
+  // session refresh continuity (ADR 0014). Absent = fresh session.
+  // Cap at 2048 chars to keep the mint body well under limits; iOS
+  // builds a targeted recap from last 3 voice turns + timer state.
+  recap: z.string().max(2048).optional(),
+  // True when this mint is a silent handoff within an already-active
+  // cook session (iOS refresh trigger at turn 10 / >15k tokens). When
+  // set, the backend skips the voice_cook_session quota increment — the
+  // original session start already consumed one slot and refreshes are
+  // cost-control handoffs, not new sessions. Default false (fresh start).
+  is_refresh: z.boolean().optional().default(false),
 }).strict();
 
 export type RealtimeSessionRequest = z.infer<typeof RealtimeSessionRequest>;
@@ -320,6 +345,86 @@ export const CookTurnRequest = z.object({
 }).strict();
 
 export type CookTurnRequest = z.infer<typeof CookTurnRequest>;
+
+// ---------------------------------------------------------------------------
+// /v1/ai/voice-turn-usage (step 6 — PostHog LLM Observability)
+// ---------------------------------------------------------------------------
+//
+// iOS fires this fire-and-forget after every Gemini Live `turnComplete`
+// to report usageMetadata + latency from the WebSocket turn. Backend
+// computes cost, inserts one ai_request_log row per turn, captures one
+// $ai_generation to PostHog. Request is batched from v1 — iOS sends
+// single-item arrays today; buffering can be added later without a
+// schema change.
+//
+// Reconciliation contract (ADR 0009):
+//   ai_request_log.request_id = "voice:<session_id>:<turn_index>"
+//   $ai_span_id               = same
+//   $ai_trace_id              = <session_id>  (matches mint trace)
+//
+// path:
+//   'live_api'        — Gemini Live WebSocket (C.2). All v1 writes.
+//   'gemini_fallback' — Reserved for future C.3 unification. Accepted
+//                        but currently unused (SpeechFallbackService
+//                        calls /v1/ai/cook-turn which captures directly).
+
+const TurnUsage = z.object({
+  turn_index: z.number().int().min(1).max(500),
+  prompt_tokens_text: z.number().int().min(0).max(1_000_000),
+  prompt_tokens_audio: z.number().int().min(0).max(1_000_000),
+  // Raw `promptTokenCount` / `responseTokenCount` summed across
+  // generation passes. May exceed `text + audio` by the AUDIO-mode
+  // per-pass overhead (CLAUDE.md sharp-edge #15). Handler uses totals
+  // for `ai_request_log.input_tokens` / `output_tokens` and prices the
+  // uncategorized remainder at audio in/out rate.
+  prompt_tokens_total: z.number().int().min(0).max(1_000_000),
+  // Gemini Live `cachedContentTokenCount` — portion of prompt tokens
+  // served from implicit context cache. When > 0, that portion is
+  // discounted in pricing (Gemini publishes ~25% of text-in rate for
+  // cached). Feeds `ai_request_log.prompt_cached_tokens` + PostHog
+  // `$ai_cache_read_input_tokens` so the cap-reversal trigger in spec §9
+  // ("cachedContentTokenCount ≥ 50% of promptTokenCount across 100
+  // sessions") is measurable. Optional — iOS omits when the accumulated
+  // count is zero (saves a field on the common path where caching isn't
+  // firing).
+  prompt_tokens_cached: z.number().int().min(0).max(1_000_000).optional(),
+  response_tokens_text: z.number().int().min(0).max(1_000_000),
+  response_tokens_audio: z.number().int().min(0).max(1_000_000),
+  response_tokens_total: z.number().int().min(0).max(1_000_000),
+  latency_ms: z.number().int().min(0).max(600_000),
+  ended_reason: z.enum(['turn_complete', 'tool_response', 'error', 'interrupted']),
+  prompt_version: z.string().min(1).max(32),
+  // v1 is live_api only — /v1/ai/cook-turn handles the gemini_fallback
+  // path with its own recordAIRequest emission. Reopening the enum
+  // requires a deliberate ADR update (no silent addition) so dashboards
+  // don't cross-contaminate semantically distinct rows.
+  path: z.enum(['live_api']),
+  ended_at: z.string().datetime(),
+}).strict();
+
+export const VoiceTurnUsageRequest = z.object({
+  session_id: z.string().uuid(),
+  turns: z.array(TurnUsage).min(1).max(50),
+}).strict()
+  // Cross-field invariant: cachedContentTokenCount CANNOT exceed
+  // promptTokenCount, because cached tokens are a SUBSET of the prompt
+  // tokens served on this turn. A buggy client sending cached > total
+  // would produce dashboard ratios > 1.0 (e.g., cap-reversal trigger
+  // "cachedContentTokenCount / promptTokenCount ≥ 0.5" fires wrongly).
+  // Enforced at the request level rather than at TurnUsage because Zod
+  // .refine() on an inner object is still validated per-item when
+  // z.array() runs — same effective coverage, cleaner error message.
+  .refine(
+    (body) => body.turns.every(
+      (t) => (t.prompt_tokens_cached ?? 0) <= t.prompt_tokens_total,
+    ),
+    {
+      message: 'prompt_tokens_cached must not exceed prompt_tokens_total',
+      path: ['turns'],
+    },
+  );
+
+export type VoiceTurnUsageRequest = z.infer<typeof VoiceTurnUsageRequest>;
 
 // ---------------------------------------------------------------------------
 // /v1/ai/recipe-import (step 7)

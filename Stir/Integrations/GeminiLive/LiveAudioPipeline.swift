@@ -27,6 +27,7 @@
 
 import AVFoundation
 import Foundation
+import os
 import OSLog
 
 @MainActor
@@ -47,6 +48,44 @@ final class LiveAudioPipeline {
 
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
+
+    /// Linear gain factor applied to Gemini Live audio output before it
+    /// hits the player node. 2.0 == +6 dB, perceptually "twice as loud".
+    /// Rationale: `AVAudioSession.mode = .voiceChat` applies voice-
+    /// processing AGC tuned for phone-to-ear distance. With the phone
+    /// sitting on a counter 0.5-1 m from the user, unity-gain output is
+    /// hard to hear over ambient kitchen noise (observed 2026-04-23).
+    /// We pre-amplify in the sample domain and hard-clamp to [-1, 1] so
+    /// any rare over-range samples get clipped rather than wrapped.
+    /// Tuning bound: 2.0 is a safe ceiling — speech rarely sustains at
+    /// peak, so clipping should be negligible. Above ~3.0 we'd hear
+    /// audible distortion on loud consonants.
+    private static let playbackGain: Float = 2.0
+
+    /// Count of scheduled-but-not-yet-rendered audio buffers. Incremented
+    /// synchronously in `enqueuePlayback` before `scheduleBuffer`, and
+    /// decremented in the `.dataPlayedBack` completion callback when the
+    /// output device has rendered the audio.
+    ///
+    /// DO NOT use `playerNode.isPlaying` as a "still speaking" signal —
+    /// `isPlaying` reflects whether `play()` has been called without a
+    /// matching `stop()`, NOT whether audio is currently rendering. Once
+    /// `play()` is called on the first buffer, `isPlaying` stays true
+    /// forever (observed 2026-04-22: mic stayed muted for 40+ s after
+    /// the model finished speaking because `isPlaying=true` never cleared).
+    ///
+    /// `OSAllocatedUnfairLock` because the decrement runs on an
+    /// AVFoundation-internal thread (the audio render thread calls the
+    /// completion handler asynchronously), while the increment runs on
+    /// `@MainActor`.
+    private let pendingPlaybackBuffers = OSAllocatedUnfairLock(initialState: 0)
+
+    /// Is the output device currently rendering model audio? True iff
+    /// at least one scheduled buffer hasn't hit its `.dataPlayedBack`
+    /// completion yet. Accurate proxy for "speaker is emitting sound".
+    var isPlayingBack: Bool {
+        pendingPlaybackBuffers.withLock { $0 > 0 }
+    }
 
     /// Format native to the mic hardware — varies by device. Converted
     /// to 16 kHz mono PCM16 via AVAudioConverter before we base64.
@@ -110,51 +149,27 @@ final class LiveAudioPipeline {
     /// and received mic permission. Pre-warm path: call once per
     /// session; start/stop cycles via `startCapture`/`stopCapture`.
     func prepare() throws {
-        let inputNode = audioEngine.inputNode
-
-        // Enable the voice-processing IO unit BEFORE touching the
-        // input format. This routes BOTH the engine's input and the
-        // playerNode's output through Apple's system AEC stage, which
-        // is the only defense against our own TTS audio being picked
-        // up by the mic and sent back to Gemini as "user" input.
+        // AEC is provided by `AVAudioSession.mode = .videoChat` (see
+        // AVAudioSessionConfigurator). Do NOT also call
+        // `inputNode.setVoiceProcessingEnabled(true)` — the two paths
+        // are the same underlying Voice Processing IO unit, and
+        // double-enabling produced a silent-tap failure on iPhone
+        // 2026-04-22: `mic_tap_installed engine_running=true` appeared
+        // in the log, but the tap callback never fired over 7s of
+        // live speech. Session mode alone gives us AEC; the Voice
+        // Processing IO unit activates once, driven by the session
+        // configuration, and the tap fires normally.
         //
-        // Observed 2026-04-22 on a full 5-turn session: without AEC,
-        // every turn after the first was Gemini transcribing its own
-        // previous response played through the speaker ("Yes, I can
-        // hear you great. Ready to get started?" came back verbatim
-        // as transcription.user on turn 2). Session looped forever
-        // with the model talking to itself.
+        // Mode is `.videoChat` (not `.voiceChat`) because `.voiceChat`
+        // produced telephony-style output routing even with
+        // `.defaultToSpeaker` set (observed 2026-04-23). Both modes
+        // engage the same Voice Processing IO unit, so AEC is
+        // unchanged; `.videoChat` just routes to the speaker by
+        // default and uses a flatter frequency response.
         //
-        // setVoiceProcessingEnabled(_:) can fail on older/unsupported
-        // hardware — log + continue. We also install a client-side
-        // half-duplex gate in RealtimeSession.startMicForwarding
-        // (drops frames while .modelSpeaking) as a belt-and-suspenders
-        // safety net regardless of whether AEC is active.
-        do {
-            try inputNode.setVoiceProcessingEnabled(true)
-            Logger.voice.info("mic_voice_processing_enabled")
-        } catch {
-            Logger.voice.warning(
-                "mic_voice_processing_enable_failed error=\(error.localizedDescription, privacy: .public)",
-            )
-        }
-
-        // Snapshot the hardware input format AFTER enabling voice
-        // processing — the VP IO unit may change the input format
-        // (typically to mono 24 kHz or similar).
-        let hwFormat = inputNode.inputFormat(forBus: 0)
-        guard hwFormat.sampleRate > 0 else {
-            throw PipelineError.noInputDevice
-        }
-        self.hardwareInputFormat = hwFormat
-
-        // Converter must accept the hardware format in and produce our
-        // 16 kHz target format. AVAudioConverter handles rate-change +
-        // channel-mix + format-coerce all at once.
-        guard let conv = AVAudioConverter(from: hwFormat, to: targetInputFormat) else {
-            throw PipelineError.converterCreateFailed
-        }
-        self.converter = conv
+        // If AEC quality proves insufficient in D.1 validation,
+        // consider switching to `setVoiceProcessingEnabled(true)` AND
+        // `mode = .default` (engine-driven VP), not both.
 
         // Pin playerNode → mainMixer with our own `playerFormat` so
         // every scheduled buffer matches. See `playerFormat` doc
@@ -164,14 +179,41 @@ final class LiveAudioPipeline {
             to: audioEngine.mainMixerNode,
             format: playerFormat,
         )
+
+        // Input format + converter are captured at tap-install time
+        // in `startCapture`, NOT here — the inputNode's format can
+        // change between prepare and start once the AVAudioSession is
+        // fully negotiated, so snapshotting it early risks a tap/
+        // converter that doesn't match what the engine is actually
+        // producing. Keep `prepare()` structural only.
     }
 
     /// Start the mic tap + engine. Idempotent — safe to call after stop.
     func startCapture() throws {
         guard !isMicRunning else { return }
-        guard let hwFormat = hardwareInputFormat else {
-            throw PipelineError.notPrepared
+
+        // Capture the inputNode's CURRENT output format here, not at
+        // prepare() time. Reason: AVAudioSession negotiation (voiceChat
+        // mode + Voice Processing IO unit activation) can shift the
+        // inputNode's output format between `prepare` and `start`. A
+        // stale format passed to installTap produces a tap that installs
+        // successfully but never fires its callback — the exact silent
+        // failure observed 2026-04-22 on iPhone (mic_tap_installed with
+        // engine_running=true, then zero tap callbacks over 7 s of
+        // live speech). Re-query here so the tap + converter match
+        // whatever the engine is actually producing.
+        let inputNode = audioEngine.inputNode
+        let hwFormat = inputNode.outputFormat(forBus: 0)
+        guard hwFormat.sampleRate > 0 else {
+            throw PipelineError.noInputDevice
         }
+        self.hardwareInputFormat = hwFormat
+
+        guard let converter = AVAudioConverter(from: hwFormat, to: targetInputFormat) else {
+            throw PipelineError.converterCreateFailed
+        }
+        self.converter = converter
+
         // 20 ms buffer = reasonable tradeoff. Shorter = more frames +
         // overhead; longer = more perceptible talk-to-send lag.
         let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hwFormat.sampleRate * 0.02)
@@ -190,13 +232,10 @@ final class LiveAudioPipeline {
         // doesn't need to touch @MainActor-isolated self at all.
         // Converter is documented safe for serialized access; we only
         // ever run it from a single audio thread.
-        guard let converter = self.converter else {
-            throw PipelineError.notPrepared
-        }
         let target = self.targetInputFormat
         let continuation = self.micContinuation
 
-        audioEngine.inputNode.installTap(
+        inputNode.installTap(
             onBus: 0,
             bufferSize: bufferSize,
             format: hwFormat,
@@ -269,6 +308,12 @@ final class LiveAudioPipeline {
         guard isMicRunning else { return }
         audioEngine.inputNode.removeTap(onBus: 0)
         isMicRunning = false
+        // Format + converter are captured per-startCapture (AVAudioSession
+        // renegotiation between start/stop cycles can shift the input
+        // format). Clear them on stop so a subsequent read of `converter`
+        // outside startCapture can never use a stale reference.
+        hardwareInputFormat = nil
+        converter = nil
     }
 
     // MARK: - Playback
@@ -309,14 +354,19 @@ final class LiveAudioPipeline {
 
         // Convert Int16 [-32768, 32767] → Float32 [-1, 1] directly
         // into the buffer's Float32ChannelData. Division by 32768.0
-        // matches Apple's documented normalization factor.
+        // matches Apple's documented normalization factor. Multiply by
+        // `playbackGain` (see docstring) to overcome .voiceChat mode's
+        // tightened output level; hard-clamp to [-1, 1] so any rare
+        // over-range samples clip cleanly instead of wrapping.
         data.withUnsafeBytes { rawPtr in
             guard let int16Src = rawPtr.bindMemory(to: Int16.self).baseAddress,
                   let floatDst = pcmBuffer.floatChannelData?[0]
             else { return }
             let n = Int(frameCount)
+            let gain = Self.playbackGain
             for i in 0..<n {
-                floatDst[i] = Float(int16Src[i]) / 32768.0
+                let gained = (Float(int16Src[i]) / 32768.0) * gain
+                floatDst[i] = max(-1.0, min(1.0, gained))
             }
         }
 
@@ -339,18 +389,37 @@ final class LiveAudioPipeline {
         if !playerNode.isPlaying {
             playerNode.play()
         }
-        playerNode.scheduleBuffer(pcmBuffer, completionHandler: nil)
+        // Increment BEFORE scheduling so the gate correctly reflects
+        // "at least one buffer is outstanding" even if the completion
+        // handler fires almost immediately. Decrement in the
+        // `.dataPlayedBack` completion (fires after the output device
+        // has rendered the audio).
+        pendingPlaybackBuffers.withLock { $0 += 1 }
+        playerNode.scheduleBuffer(
+            pcmBuffer,
+            at: nil,
+            options: [],
+            completionCallbackType: .dataPlayedBack,
+        ) { [pendingPlaybackBuffers] _ in
+            pendingPlaybackBuffers.withLock { $0 = max(0, $0 - 1) }
+        }
     }
 
     /// Immediately stop playback and flush any queued buffers. Returns
     /// once the player transitions to stopped (the `.stop` call is
     /// synchronous on AVAudioPlayerNode; playback-complete delegates
     /// don't apply).
+    ///
+    /// Resets the pending-buffer counter because `playerNode.reset()`
+    /// drops scheduled buffers without firing their completion handlers
+    /// — without this reset, the counter would stay stuck at N and
+    /// `isPlayingBack` would permanently report true.
     func cancelPlayback() {
         if playerNode.isPlaying {
             playerNode.stop()
         }
         playerNode.reset()
+        pendingPlaybackBuffers.withLock { $0 = 0 }
     }
 
     // MARK: - Teardown

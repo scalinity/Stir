@@ -27,6 +27,7 @@ enum ErrorCode: String, Sendable, Codable, CaseIterable {
     case pay01 = "PAY-01"          // purchase failed
     case entVoice01 = "ENT-VOICE-01" // voice requires Premium+
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan is Pro-only
+    case entLeftovers01 = "ENT-LEFTOVERS-01" // leftovers mode requires Premium+
     case val01 = "VAL-01"          // request body validation failure
     case auth01 = "AUTH-01"        // session missing/expired/malformed/sig-invalid
     case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"  // 405 — client bug, never user-visible

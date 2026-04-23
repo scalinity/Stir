@@ -220,6 +220,230 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertTrue(session.isResumable)
     }
 
+    // MARK: - Mic button role (pre-first-turn vs between-turns `.ready`)
+
+    func test_micButtonRole_readyBeforeFirstTurn_isAskWithVoice() throws {
+        // Observed 2026-04-22: mapping all `.ready` to `.listening`
+        // made Cook Mode entry confusing — button said "Listening"
+        // seconds after open but the mic wasn't hot, and the first
+        // tap closed the session instead of starting a turn. Fix
+        // keys the role off `hasBegunFirstTurn`.
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm._testForceVoiceState(.ready)
+        vm._testForceHasBegunFirstTurn(false)
+
+        XCTAssertEqual(vm.micButtonRole, .askWithVoice)
+    }
+
+    func test_micButtonRole_readyAfterFirstTurn_isListening() throws {
+        // After beginTurn has succeeded at least once, the Audio
+        // Engine mic tap is installed, VAD is hot, and `.ready` means
+        // "between turns, speak freely". Button reflects that.
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm._testForceVoiceState(.ready)
+        vm._testForceHasBegunFirstTurn(true)
+
+        XCTAssertEqual(vm.micButtonRole, .listening)
+    }
+
+    func test_micButtonRole_terminalStates_areAskWithVoice() throws {
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+        vm._testForceHasBegunFirstTurn(true)
+
+        for s: VoiceSessionState? in [nil, .idle, .error, .closed] {
+            vm._testForceVoiceState(s)
+            XCTAssertEqual(vm.micButtonRole, .askWithVoice,
+                           "state \(String(describing: s)) should route to askWithVoice")
+        }
+    }
+
+    func test_micButtonRole_userSpeaking_isSubmit() throws {
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+        vm._testForceHasBegunFirstTurn(true)
+        vm._testForceVoiceState(.userSpeaking)
+        XCTAssertEqual(vm.micButtonRole, .submit)
+    }
+
+    func test_micButtonRole_thinkingModelSpeakingTranscribing_areBusy() throws {
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+        vm._testForceHasBegunFirstTurn(true)
+
+        for s: VoiceSessionState in [.thinking, .modelSpeaking, .transcribing, .connecting, .toolCalling, .refreshing, .fallingBack] {
+            vm._testForceVoiceState(s)
+            XCTAssertEqual(vm.micButtonRole, .busy,
+                           "state \(s) should route to busy")
+        }
+    }
+
+    // MARK: - Voice timer restart semantics (review-driven, 2026-04-23 device bug)
+    //
+    // Restart was losing track of duplicate step-scoped timers when a
+    // resumed session carried a leftover. The fix cancels ALL active
+    // step-scoped timers before starting the replacement, and the start
+    // guard was extended from `.running` to `.running || .paused || .pending`
+    // so the duplicate never gets created in the first place.
+
+    func test_startTimerFromVoice_noOpWhenPausedTimerExistsOnStep() async throws {
+        // Seeds the exact state the 2026-04-23 bug depended on: a
+        // paused step-scoped timer slipping past an older guard that
+        // only considered `.running`. With the fix, a subsequent voice
+        // start_timer on the same step must NOT create a second timer.
+        let step = try XCTUnwrap(recipePlan.stepArray.first)
+        step.timerSeconds = 60
+        try controller.save()
+
+        let session = try freshSession()
+        let vm = makeTimerAwareVM(session: session)
+
+        await vm.startTimerForCurrentStep()
+        let tm1 = try XCTUnwrap(vm.activeTimers.first)
+        XCTAssertEqual(tm1.typedState, .running)
+        await vm.pauseTimer(tm1)
+        XCTAssertEqual(vm.activeTimers.first?.typedState, .paused)
+        XCTAssertEqual(vm.activeTimers.count, 1)
+
+        // Voice says "start_timer" again — should no-op against the
+        // paused timer, not create a duplicate.
+        await vm.startTimerFromVoice(seconds: 120, label: "should not create")
+
+        XCTAssertEqual(vm.activeTimers.count, 1, "paused timer should block a duplicate start")
+        XCTAssertEqual(vm.activeTimers.first?.typedState, .paused)
+    }
+
+    func test_restartCurrentTimerFromVoice_cancelsAllStepScopedActiveTimers() async throws {
+        // Seeds two active timers on the same step (a state the new
+        // guard prevents from recurring, but which the cancel loop
+        // must still recover from if it's ever reached via migration,
+        // CloudKit sync, or a future code path). After restart, both
+        // originals must be .cancelled and exactly one fresh timer
+        // should be running on the step.
+        let step = try XCTUnwrap(recipePlan.stepArray.first)
+        step.timerSeconds = 60
+        try controller.save()
+
+        let session = try freshSession()
+        let timerRepo = CookTimerRepository(controller: controller)
+        let timerSvc = TimerService(
+            repository: timerRepo,
+            sessionRepository: CookingSessionRepository(controller: controller),
+            notificationCenter: PermissiveNotificationCenter(),
+        )
+        let vm = CookModeViewModel(
+            session: session,
+            recipePlan: recipePlan,
+            household: household,
+            source: .solve,
+            cookingSessionRepository: CookingSessionRepository(controller: controller),
+            cookTimerRepository: timerRepo,
+            timerService: timerSvc,
+        )
+
+        // tm1 via VM (populates vm.activeTimers through internal refresh).
+        await vm.startTimerForCurrentStep()
+        let tm1 = try XCTUnwrap(vm.activeTimers.first)
+        // Pause tm1 so the seeding of tm2 doesn't collide with any
+        // "running" state guards.
+        await vm.pauseTimer(tm1)
+
+        // tm2 seeded directly via repo + service, bypassing the VM
+        // guard — simulates the "duplicate already in state" worst case.
+        let tm2 = try timerRepo.createTimer(
+            for: session, step: step, label: "seeded tm2", durationSec: 90,
+        )
+        try await timerSvc.start(tm2, on: session)
+        // Force the VM's activeTimers to resync with the seeded row.
+        await vm.reconcileTimersOnForeground()
+        let stepId = step.id!
+        let beforeActive = vm.activeTimers.filter {
+            $0.step?.id == stepId
+            && ($0.typedState == .running || $0.typedState == .paused || $0.typedState == .pending)
+        }
+        XCTAssertEqual(beforeActive.count, 2, "seed must produce 2 step-scoped active timers")
+
+        _ = await vm.restartCurrentTimerFromVoice(seconds: 30, label: "restart")
+
+        let afterActive = vm.activeTimers.filter {
+            $0.step?.id == stepId
+            && ($0.typedState == .running || $0.typedState == .paused || $0.typedState == .pending)
+        }
+        XCTAssertEqual(afterActive.count, 1, "exactly one active step-scoped timer after restart")
+        XCTAssertEqual(afterActive.first?.typedState, .running)
+        XCTAssertEqual(Int(afterActive.first?.durationSec ?? 0), 30)
+
+        // Both originals must be cancelled — the fix explicitly loops
+        // over `first` + everything after it, instead of `first(where:)`.
+        XCTAssertEqual(
+            vm.activeTimers.first(where: { $0.objectID == tm1.objectID })?.typedState,
+            .cancelled,
+        )
+        XCTAssertEqual(
+            vm.activeTimers.first(where: { $0.objectID == tm2.objectID })?.typedState,
+            .cancelled,
+        )
+    }
+
+    /// VM factory with a real TimerService + PermissiveNotificationCenter
+    /// so timer lifecycle (createTimer / start / pause / cancel) actually
+    /// executes. The default `makeVM` uses FakeNotificationCenter which
+    /// fatalErrors on `notificationSettings()` — fine for non-timer tests
+    /// but the voice timer tests above need real notification-center
+    /// plumbing.
+    private func makeTimerAwareVM(session: CookingSession) -> CookModeViewModel {
+        let timerRepo = CookTimerRepository(controller: controller)
+        let timerSvc = TimerService(
+            repository: timerRepo,
+            sessionRepository: CookingSessionRepository(controller: controller),
+            notificationCenter: PermissiveNotificationCenter(),
+        )
+        return CookModeViewModel(
+            session: session,
+            recipePlan: recipePlan,
+            household: household,
+            source: .solve,
+            cookingSessionRepository: CookingSessionRepository(controller: controller),
+            cookTimerRepository: timerRepo,
+            timerService: timerSvc,
+        )
+    }
+
+    // MARK: - safeInstructionText (VAL-01 guard for empty step text)
+
+    func test_safeInstructionText_emptyStringReplacedWithPlaceholder() {
+        // Zod `text: z.string().min(1)` would reject "" and VAL-01
+        // the mint. Coercion produces a placeholder the model can
+        // acknowledge rather than hallucinate around.
+        XCTAssertEqual(
+            CookModeViewModel.safeInstructionText(""),
+            "(step instruction unavailable)",
+        )
+        XCTAssertEqual(
+            CookModeViewModel.safeInstructionText(nil),
+            "(step instruction unavailable)",
+        )
+        XCTAssertEqual(
+            CookModeViewModel.safeInstructionText("   \n\t  "),
+            "(step instruction unavailable)",
+        )
+    }
+
+    func test_safeInstructionText_realTextPassesThroughTrimmed() {
+        XCTAssertEqual(
+            CookModeViewModel.safeInstructionText("  Sauté onions.  "),
+            "Sauté onions.",
+        )
+        XCTAssertEqual(
+            CookModeViewModel.safeInstructionText("Add kale to boiling water."),
+            "Add kale to boiling water.",
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeVM(session: CookingSession, source: CookModeViewModel.EntrySource = .solve) -> CookModeViewModel {

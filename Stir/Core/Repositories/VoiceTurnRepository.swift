@@ -33,6 +33,10 @@ final class VoiceTurnRepository {
         /// latency isn't measurable (e.g. initial system turn).
         let latencyMs: Int
         let resultType: VoiceTurn.ResultType
+        /// Only set when `resultType == .error`. Stable slug identifying
+        /// the failure class (e.g. "turnComplete_timeout"). nil otherwise.
+        /// Callers that don't pass it default to nil.
+        var errorCode: String? = nil
     }
 
     @discardableResult
@@ -48,6 +52,7 @@ final class VoiceTurnRepository {
         turn.typedInputMode = input.inputMode
         turn.latencyMs = Int32(input.latencyMs)
         turn.typedResultType = input.resultType
+        turn.errorCode = input.errorCode
         turn.createdAt = Date()
         try context.save()
         return turn

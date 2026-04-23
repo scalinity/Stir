@@ -55,7 +55,7 @@ Substantive sections below are otherwise current as of the spike.
 
 **The context-accumulation problem.** Unlike OpenAI Realtime, Gemini Live does not bill cached input at a discount — caching is not supported at all. Every turn re-sends accumulated conversation context at full audio input rate. This makes aggressive context pruning the single most important cost-control lever.
 
-**Pruning strategy:** after every step advance, the iOS client issues `session.update` events that truncate audio items older than the last 3 turns. This caps steady-state per-turn input context at ~950 audio tokens regardless of session length.
+**Pruning strategy:** Gemini Live has no mid-session history truncation frame — the four client-to-server message types (Setup, ClientContent, RealtimeInput, ToolResponse) don't support it, and the docs explicitly state "You cannot update the configuration while the connection is open." The spec's ~950 audio token steady-state assumption was carried over from OpenAI Realtime where `session.update` with audio-item truncation exists. On Gemini Live the only viable mitigation is **session refresh** — mint a new ephemeral token with a compact recap appended to `systemInstruction`, open a new WebSocket, swap atomically. Triggers: every 10 turns since last refresh OR any single turn that exceeds 15,000 prompt tokens. See ADR 0014.
 
 **Per-turn cost (Premium/Pro, steady-state after pruning reaches cap):**
 
@@ -79,7 +79,7 @@ Voice Cook Mode is ~95% of total Premium AI cost and ~99% of Pro AI cost. Runawa
 
 **Cost levers (v1):**
 - `max_output_tokens: 150` at session config — caps assistant audio length per turn, eliminates long-monologue failure modes
-- Aggressive pruning to last 3 turns via `session.update` — dominant cost lever
+- Session refresh every 10 turns (or on >15k prompt-token bursts) with a ~200-300 token compact recap — the actual cost lever; replaces the conflated "pruning" term used in earlier drafts
 - Session refresh at 10 min / 15 turns — hard reset prevents long sessions from blowing context budget
 - `thinkingLevel: minimal` — lowest latency tier, avoids paying for unnecessary reasoning on conversational routing tasks
 - Semantic VAD (start) → server VAD (fallback) — semantic VAD avoids tokenizing ambient kitchen noise as speech
@@ -197,9 +197,12 @@ Net: Gemini Live's WebSocket-only story is materially less resilient on cellular
 4. Session is ready; user can speak immediately (no further setup handshake needed — config was baked into the token)
 
 **Protocol messages (client → server):**
-- `BidiGenerateContentRealtimeInput` — audio frames (PCM16 base64)
-- `BidiGenerateContentClientContent` — inject a text or tool-response item
-- `session.update` — update system instruction or tool list mid-session (used for step advance, timer completion, pruning audio items older than last 3 turns)
+- `BidiGenerateContentSetup` — first message only; session configuration including systemInstruction, tools, generationConfig, realtimeInputConfig. Immutable for the session's lifetime.
+- `BidiGenerateContentRealtimeInput` — audio frames (PCM16 base64), text, video, activity markers, audioStreamEnd
+- `BidiGenerateContentClientContent` — conversation history seeding (history-only on 3.1 Flash Live per sharp-edge #11)
+- `BidiGenerateContentToolResponse` — response to a server ToolCall, carrying matching `functionResponse.id`
+
+That's the full list. There is NO `session.update` or equivalent for mid-session config mutation (step advance, tool list changes, history truncation). Step-advance context flows via `realtimeInput.text` injections when needed, and pruning happens via session refresh (ADR 0014). Earlier drafts of this doc listed a fictional `session.update` frame; that was wrong.
 
 **Protocol messages (server → client):**
 - `serverContent.modelTurn.parts[].inlineData` — streamed audio chunks
@@ -511,7 +514,7 @@ Latency: p95 ~2.5s total round-trip (vs 250–500ms TTFA on Live API). Acceptabl
 - [ ] Verify token with `uses: 1` rejects on second use
 - [ ] Verify `new_session_expire_time` enforces the 60-second open window
 - [ ] Verify `expire_time` terminates the session at the hard deadline even mid-turn
-- [ ] Test `session.update` event mid-session prunes audio items older than last 3 turns, confirmed by next-turn input token count
+- [ ] Test `refreshSession()` mid-session mints a new token and swaps WebSocket with setupComplete handshake under 5s, confirmed by next-turn input tokens resetting to ~baseline after the swap
 - [ ] Test function call preamble pattern end-to-end: filler audio transcript frame arrives before `toolCall` frame
 - [ ] Measure `preamble_present_rate` across 120-turn eval set — target ≥95%
 - [ ] Measure actual TTFA on WebSocket from iOS on Wi-Fi and cellular

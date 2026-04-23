@@ -60,6 +60,8 @@ struct LeftoversPromptView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onDismiss)
                         .foregroundStyle(Color.Stir.ink700)
+                        .accessibilityLabel("Close")
+                        .accessibilityHint("Dismisses the leftovers prompt")
                 }
             }
         }
@@ -138,6 +140,8 @@ struct LeftoversPromptView: View {
                             .strokeBorder(Color.Stir.ink100, lineWidth: 1),
                     )
             }
+            .accessibilityLabel("No leftovers")
+            .accessibilityHint("Skips the leftovers flow")
             Button(action: { Task { await onFindIdea() } }) {
                 Text(selectedCountLabel)
                     .font(.system(size: 17, weight: .semibold))
@@ -151,6 +155,10 @@ struct LeftoversPromptView: View {
             }
             .disabled(viewModel.selectedItems.isEmpty)
             .frame(maxWidth: .infinity)
+            .accessibilityLabel(selectedCountLabel)
+            .accessibilityHint(viewModel.selectedItems.isEmpty
+                ? "Select at least one leftover item first"
+                : "Submits your leftovers for a follow-up idea")
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
@@ -198,8 +206,14 @@ private struct ItemRow: View {
                             .foregroundStyle(.white)
                     }
                 }
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(entry.displayName)
+            .accessibilityValue(entry.isSelected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(entry.isSelected ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityHint("Double-tap to toggle")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.displayName)

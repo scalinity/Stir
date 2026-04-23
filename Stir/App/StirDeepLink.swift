@@ -2,10 +2,7 @@
 //
 // Parses `stir://` URLs emitted by StirWidgets + TimerLiveActivity.
 // Widgets can't present views; they hand a URL back to the app and
-// the app decides where to land. For v1 the handler just categorizes
-// the destination and logs; full routing (navigating to a specific
-// DishPreview, scrolling to a solve, opening the paywall with widget
-// trigger) arrives with the step-8 router refactor.
+// the app decides where to land.
 //
 // Supported URLs (mirrors widget code):
 //   stir://scan/start
@@ -17,6 +14,13 @@
 // Unknown paths fall through to `.unknown` and the app opens to its
 // default destination — widgets failing silently is strictly better
 // than a routing crash on an unexpected path.
+//
+// Routing in v1 covers the two highest-intent taps (paywall → presentPaywall,
+// scan → coordinator signal consumed by TonightHomeView). Solve /
+// dishPreview / cookTimer land on the app's default screen for now —
+// the widget tap has already foregrounded the app, so the UX
+// degradation is "wrong screen" not "broken." Full in-app navigation
+// lands with the step-8 router refactor.
 
 import Foundation
 import OSLog
@@ -82,23 +86,40 @@ enum StirDeepLink: Equatable {
     }
 }
 
-/// Minimal router handed to RootView.onOpenURL. Parses the URL,
-/// records a breadcrumb, and — for v1 — relies on scene state to
-/// settle. Widgets already open the app; the default launch
-/// destination (Tonight Home or the user's last state) is acceptable
-/// until step-8 routes to specific screens.
+/// Router handed to RootView.onOpenURL. Parses the URL, records a
+/// breadcrumb, then dispatches to the coordinator for the cases we
+/// actively handle. MainActor-isolated because every downstream
+/// navigation mutation lands on main-actor state.
 @MainActor
 enum StirDeepLinkHandler {
-    static func handle(_ url: URL) {
+    static func handle(_ url: URL, coordinator: RootCoordinator) {
         let destination = StirDeepLink.parse(url)
         Logger.app.info(
-            "stir deep link \(destination.breadcrumbCategory, privacy: .public) url=\(url.absoluteString, privacy: .public)",
+            "stir deep link \(destination.breadcrumbCategory, privacy: .public) url=\(url.absoluteString, privacy: .private(mask: .hash))",
         )
-        // Step-8 TODO: route to specific destination. For v1 the
-        // widget tap has already brought the app to the foreground —
-        // users land on their last-active screen, which covers the
-        // "glance at tonight's dish" job. Specific destinations
-        // (DishPreview, paywall with widget source, Cook-mode-resume
-        // focused on a specific timer) come with the router refactor.
+        switch destination {
+        case .paywallWidget:
+            // Highest-intent conversion tap per spec §9 — widget shows
+            // "Widgets unlock with Premium" and the user taps through.
+            // PaywallTrigger.widgetsGate carries the source tag for
+            // downstream funnel analysis.
+            coordinator.presentPaywall(.widgetsGate)
+        case .scanStart:
+            // Flip the coordinator-owned signal; TonightHomeView
+            // observes via .onChange and flips its local showScanFlow
+            // cover. Deferred into a Task so a scenePhase .active
+            // transition happening in the same runloop tick finishes
+            // before the modal request lands — avoids the "cover
+            // presented during active bootstrap" iOS warning.
+            Task { @MainActor in
+                coordinator.requestDeepLinkScan()
+            }
+        case .solve, .dishPreview, .cookTimer, .unknown:
+            // v1: widget/Live-Activity tap foregrounds the app; the
+            // user lands on their last-active screen. Specific
+            // destination routing comes with the step-8 navigation
+            // refactor — see StirDeepLink top-level docstring.
+            break
+        }
     }
 }

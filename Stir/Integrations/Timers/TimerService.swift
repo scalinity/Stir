@@ -33,6 +33,11 @@ final class TimerService {
     private let repository: CookTimerRepository
     private let sessionRepository: CookingSessionRepository
     private let notificationCenter: UNUserNotificationCenterClient
+    /// Nil in unit tests that don't care about LiveActivity behavior;
+    /// production always injects a real manager. Every state transition
+    /// below (pause/resume/cancel/markCompleted) fans out so callers
+    /// don't need to pair-up VM-side (CR1-18).
+    private let liveActivityManager: LiveActivityManager?
 
     /// In-memory map of timerId → pauseStartedAt. Populated on pause,
     /// drained on resume. Not persisted — the state machine on disk
@@ -47,10 +52,22 @@ final class TimerService {
         repository: CookTimerRepository? = nil,
         sessionRepository: CookingSessionRepository? = nil,
         notificationCenter: UNUserNotificationCenterClient = DefaultUNUserNotificationCenter(),
+        liveActivityManager: LiveActivityManager? = LiveActivityManager(),
     ) {
         self.repository = repository ?? CookTimerRepository()
         self.sessionRepository = sessionRepository ?? CookingSessionRepository()
         self.notificationCenter = notificationCenter
+        self.liveActivityManager = liveActivityManager
+    }
+
+    /// Read-only accessor for the in-memory pause timestamp. Used by
+    /// `TimerCountdownView` to render a STATIC paused-remaining value
+    /// instead of one that keeps ticking down (the CookTimer.fireDate
+    /// itself doesn't shift on pause — only the in-memory delta does).
+    /// Returns nil when the timer isn't currently paused.
+    func pauseStartedAt(for timer: CookTimer) -> Date? {
+        guard let id = timer.id else { return nil }
+        return pauseStartedAt[id]
     }
 
     // MARK: - Authorization
@@ -102,21 +119,31 @@ final class TimerService {
 
     /// Pause a running timer. Cancels the scheduled notification (we'll
     /// re-schedule on resume with a new fire date). Records pause start
-    /// in memory so `resume` can compute the pause duration.
+    /// in memory so `resume` can compute the pause duration. Flushes
+    /// the paused-remaining snapshot to the Live Activity so Lock
+    /// Screen shows the static "2:14" not a ticking negative.
     func pause(_ timer: CookTimer, on session: CookingSession) async throws {
         guard timer.typedState == .running, let timerId = timer.id else { return }
+        // Capture remaining BEFORE the repo state flip; once .paused,
+        // remainingSeconds returns 0 and the activity would show 00:00.
+        let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer)
         pauseStartedAt[timerId] = Date()
         await cancelScheduledNotification(for: timerId)
         try repository.pause(timer)
-        // Purge the notification id from the session's list — we'll
-        // re-add it on resume. Keeps localNotificationIdsArray consistent
-        // with what's actually scheduled in UNUserNotificationCenter.
         removeNotificationId(timerId, from: session)
+        if let fire = timer.fireDate {
+            await liveActivityManager?.update(
+                timerId: timerId,
+                fireDate: fire,
+                pausedRemainingSec: pausedRemaining,
+            )
+        }
     }
 
     /// Resume a paused timer. Advances startedAt by the paused duration
     /// so `startedAt + durationSec == fireDate` remains authoritative,
-    /// then re-schedules the local notification.
+    /// then re-schedules the local notification AND refreshes the
+    /// Live Activity with the new fire date (paused flag cleared).
     func resume(_ timer: CookTimer, on session: CookingSession) async throws {
         guard timer.typedState == .paused, let timerId = timer.id else { return }
         let resumedAt = Date()
@@ -129,10 +156,18 @@ final class TimerService {
         let newStart = originalStart.addingTimeInterval(pausedFor)
         try repository.resume(timer, newStartedAt: newStart)
         try await scheduleNotification(for: timer, on: session)
+        if let fire = timer.fireDate {
+            await liveActivityManager?.update(
+                timerId: timerId,
+                fireDate: fire,
+                pausedRemainingSec: nil,
+            )
+        }
     }
 
     /// Cancel (user-stopped). Removes scheduled notification, sets
-    /// state=cancelled + endedAt=now.
+    /// state=cancelled + endedAt=now, ends the Live Activity with
+    /// reason .cancelled.
     func cancel(_ timer: CookTimer, on session: CookingSession) async throws {
         if let timerId = timer.id {
             await cancelScheduledNotification(for: timerId)
@@ -140,10 +175,15 @@ final class TimerService {
             pauseStartedAt.removeValue(forKey: timerId)
         }
         try repository.cancel(timer)
+        if let timerId = timer.id {
+            await liveActivityManager?.end(timerId: timerId, reason: .cancelled)
+        }
     }
 
     /// Mark naturally complete (timer fired). Also removes any straggler
-    /// notification that hadn't fired yet.
+    /// notification that hadn't fired yet, and ends the Live Activity
+    /// with reason .completed so the "Done" affordance can linger
+    /// briefly before dismissal.
     func markCompleted(_ timer: CookTimer, on session: CookingSession) async throws {
         if let timerId = timer.id {
             await cancelScheduledNotification(for: timerId)
@@ -151,6 +191,9 @@ final class TimerService {
             pauseStartedAt.removeValue(forKey: timerId)
         }
         try repository.markCompleted(timer)
+        if let timerId = timer.id {
+            await liveActivityManager?.end(timerId: timerId, reason: .completed)
+        }
     }
 
     // MARK: - Foreground reconciliation
@@ -169,6 +212,7 @@ final class TimerService {
             transitioned.append(timer)
             if let timerId = timer.id {
                 removeNotificationId(timerId, from: session)
+                await liveActivityManager?.end(timerId: timerId, reason: .completed)
             }
         }
         if !transitioned.isEmpty {
@@ -240,6 +284,15 @@ final class TimerService {
         guard let idx = ids.firstIndex(of: asString) else { return }
         ids.remove(at: idx)
         session.localNotificationIdsArray = ids
+    }
+
+    /// Paused-remaining snapshot used by pause() to flush the static
+    /// "2:14" into the Live Activity ContentState. Returns max(0, …)
+    /// so a timer already past its fire date reads as 0, not negative.
+    private func pausedRemainingSecondsSnapshot(for timer: CookTimer) -> Int {
+        guard timer.typedState == .running,
+              let fireDate = timer.fireDate else { return 0 }
+        return max(0, Int(fireDate.timeIntervalSinceNow.rounded()))
     }
 }
 

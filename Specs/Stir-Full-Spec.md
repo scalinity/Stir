@@ -253,7 +253,7 @@ Backend/
 | `/v1/session/bootstrap`   | POST   | none on first call; rate-limited by IP + install ID | Establish session, resolve canonical user key, fetch flags + entitlements summary | yes via `installation_id`   |
 | `/v1/config/bootstrap`    | GET    | session JWT                                         | Fetch feature flags, prompt versions, quota snapshot                              | cacheable                   |
 | `/v1/ai/pantry-parse`     | POST   | session JWT                                         | Parse scan image into structured ingredients                                      | yes via `client_request_id` |
-| `/v1/ai/dinner-solve`     | POST   | session JWT                                         | Generate 3 ranked dinner options                                                  | yes via `solve_request_id`  |
+| `/v1/ai/dinner-solve`     | POST   | session JWT; Premium+ entitlement when `context_hint=leftovers` | Generate 3 ranked dinner options. Leftovers mode (`context_hint=leftovers`) rejects Free users with `ENT-LEFTOVERS-01` before consuming quota. | yes via `solve_request_id`  |
 | `/v1/ai/realtime-session` | POST   | session JWT + Premium+ entitlement check            | Mint a short-lived Gemini Live ephemeral session token for Cook Mode voice. Server holds the Gemini API key and session config (model, voice, system prompt, allowed function calls, thinking level); client opens a stateful WebSocket directly to Gemini Live using the ephemeral token. Rejects with `ENT-VOICE-01` if user has no Cook Mode voice entitlement, or `RATE-01` if user has exceeded voice Cook Session quota. | session-scoped token; one mint per Realtime session, re-minted on session refresh (~every 10 min or 15 turns) |
 | `/v1/ai/cook-turn`        | POST   | session JWT                                         | Text fallback for Cook Mode voice when Live API is unavailable                    | no; conversational          |
 | `/v1/ai/substitution`     | POST   | session JWT                                         | Resolve missing ingredient / equipment / dietary change. Also invoked as the Realtime session's substitution function-call handler. | yes via `sub_event_id`      |
@@ -288,7 +288,7 @@ Backend/
   * current step
   * last 4 user/assistant turns
 * Cook Mode Live sessions bootstrap from the same typed state at session open; per-turn context then accumulates server-side within the session only, scoped to one Cook Session and discarded when the session closes
-* **Aggressive context pruning**: after every step advance, the client issues `session.update` events to truncate audio items older than the last 3 turns, capping per-turn input context at ~950 audio tokens regardless of session length. This is the primary cost control lever given that Gemini Live does not support prompt caching.
+* **Session refresh as pruning**: Gemini Live has no mid-session history truncation frame, so cost is bounded by minting a new ephemeral token with a compact recap appended to `systemInstruction` and atomically swapping the WebSocket. Triggers: every 10 turns since last refresh OR any single turn exceeding 15,000 prompt tokens. This is the primary cost control lever given that Gemini Live does not support prompt caching AND does not support client-side truncation. See ADR 0014 for the protocol-level correction.
 * On step advance / timer completion / substitution, the app sends a typed event to the active Live session so the model's notion of "current step" stays accurate
 * Imported recipes are always treated as **untrusted content**, never as executable instructions
 
@@ -815,6 +815,7 @@ Use these exact messages everywhere; each screen references applicable codes.
 | `PAY-01`        | "Purchase didn't go through. You weren't charged."                                          | Try Again / Choose Another Plan    |
 | `ENT-VOICE-01`  | "Cook Mode voice is a Premium feature. Try it free for 7 days."                             | Start Trial / See Plans            |
 | `ENT-MULTI-IMAGE-01` | "Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once."    | See Plans / Continue with one      |
+| `ENT-LEFTOVERS-01`   | "Turn leftovers into a next meal with Stir Premium. Try it free for 7 days."           | Start Trial / See Plans            |
 | `VAL-01`        | "Something went wrong. Please try again or contact support if this keeps happening."        | Retry / Contact Support            |
 | `AUTH-01`       | *(internal; auto-handled by iOS re-bootstrap)*                                              | Auto-refresh (silent)              |
 
@@ -1235,32 +1236,36 @@ Premium monthly net ARPU = **$8.4915**
 
 ### 12.1 Cost table
 
-**Voice Cook Mode cost model:** context accumulates across turns at full audio input rate (no cache). Mitigations applied: pruning to last 3 turns (~950 audio tokens steady-state context), session refresh at 10 min / 15 turns, `max_output_tokens: 150` cap.
+> **Updated 2026-04-22 PM with device-measured numbers.** Step 6 Cook Mode voice shipped and was exercised across multiple 9+ turn sessions. Per-turn prompt tokens came in ~3x higher than the ADR 0014 amendment modeled, because the baked-in systemInstruction + recipe context + pantry + household + AUDIO-mode overhead is ~3,800 tokens per turn, not ~1,500. Real 15-turn session cost lands at ~$0.13-0.16 (vs $0.12-0.15 projected), and 20-session/mo Premium cap lands at $2.56-$3.10/mo — **35-64% over the $1.89 AI budget line**. Mitigation options (not yet deployed): cap reduction 20 → ~13 sessions, prompt trim, or wait for Gemini context caching GA. See ADR 0014 "measured-reality cost correction" amendment.
 
-Per turn (Premium/Pro, steady-state after pruning reaches cap):
-- New user audio input: 125 tokens × $3/1M = $0.000375
-- Carried context audio (3 prior turns × 275 tokens): 825 × $3/1M = $0.002475
-- System prompt text input: 1000 × $0.75/1M = $0.00075
-- Output audio: 150 tokens × $12/1M = $0.0018
-- **Total per turn: ~$0.00540**
+**Voice Cook Mode cost model (device-measured):** context accumulates across turns at full audio input rate (no cache, no mid-session pruning — refresh IS the cost lever, ADR 0014). Refresh triggers at `turnCount - lastRefreshedAtTurn >= 4` OR `promptTokens > 10_000` on a single turn, `max_output_tokens: 400` cap (ADR 0010), pre-mint one turn before refresh (shaves ~1.9s off handoff).
 
-Per 15-turn Cook Session: ~$0.081
-Per 20 voice Cook Sessions/month (Premium): ~$1.62
-Per 60 voice Cook Sessions/month (Pro): ~$4.86
+Per turn, measured on 9-turn device session, cadence N=4, ~22% tool-call rate:
+- Non-tool turn (steady-state): ~4,527 prompt tokens + ~124 response audio tokens
+- Tool-call turn (double generation pass for toolCall + toolResponse): ~8,822 prompt tokens + ~150 response
+- Prompt split ≈ 75/25 text/audio at low end, 60/40 at high end (backend captures `prompt_audio_tokens` + `prompt_text_tokens` for exact per-call breakdown in `ai_request_log` → PostHog LLM Observability)
+- Blended rate at 75/25: $1.31/M prompt; at 60/40: $1.65/M prompt
+
+Session cost at ~22% tool-call rate (7 refreshes per 30 turns):
+- **15-turn session**: ~$0.13 (low end, 75/25) to ~$0.16 (high end, 60/40)
+- **20-turn session**: ~$0.17 to ~$0.21
+- **30-turn session**: ~$0.27 to ~$0.32
 
 | Feature                 | Model                 | Representative token budget                                 |                               Cost per interaction | Volume / Premium user / month | Monthly AI cost / Premium user | % of Premium net ARPU |
 | ----------------------- | --------------------- | ----------------------------------------------------------- | -------------------------------------------------: | ----------------------------: | -----------------------------: | --------------------: |
 | Pantry scan parse       | Gemini 3 Flash        | 1 image @1120 tokens + ~1080 text/context input, 450 output |  `(2200 × $0.50/1M) + (450 × $3.00/1M) = $0.00245` |                            10 |                     `$0.02450` |               `0.29%` |
 | Dinner solve            | Gemini 3 Flash        | 2400 input, 900 output                                      |  `(2400 × $0.50/1M) + (900 × $3.00/1M) = $0.00390` |                            12 |                     `$0.04680` |               `0.55%` |
-| Voice Cook Mode session (15 turns, pruned) | Gemini 3.1 Flash Live Preview (MINIMAL) | per turn: 950 audio input + 1000 text prompt input + 150 audio output | `(950 × $3/1M) + (1000 × $0.75/1M) + (150 × $12/1M) = $0.00540` × 15 turns | 20 sessions | `$1.62000` | `19.08%` |
+| Voice Cook Mode session (15 turns, measured) | Gemini 3.1 Flash Live Preview (MINIMAL) | ~4,527 prompt / non-tool turn + ~8,822 / tool-call turn + ~124 response audio/turn; 75/25 to 60/40 text:audio split | `~$0.142 per 15-turn session` (midpoint of $0.13-$0.16 range) | 20 sessions | `$2.84000` | `33.45%` |
 | Substitution rescue     | Gemini 3 Flash        | 1600 input, 260 output                                      |  `(1600 × $0.50/1M) + (260 × $3.00/1M) = $0.00158` |                             8 |                     `$0.01264` |               `0.15%` |
 | Recipe import normalize | Gemini 3.1 Flash-Lite | 2200 OCR text input, 550 output                             | `(2200 × $0.25/1M) + (550 × $1.50/1M) = $0.001375` |                             4 |                     `$0.00550` |               `0.06%` |
 | Grocery list generation | Gemini 3.1 Flash-Lite | 650 input, 140 output                                       | `(650 × $0.25/1M) + (140 × $1.50/1M) = $0.0003725` |                             4 |                     `$0.00149` |               `0.02%` |
 
-**Total monthly AI cost / Premium user = `0.02450 + 0.04680 + 1.62000 + 0.01264 + 0.00550 + 0.00149 = $1.71093`**
-**Total AI cost as % of Premium net ARPU = `1.71093 / 8.4915 = 20.15%`**
+**Total monthly AI cost / Premium user = `0.02450 + 0.04680 + 2.84000 + 0.01264 + 0.00550 + 0.00149 = $2.93093`**
+**Total AI cost as % of Premium net ARPU = `2.93093 / 8.4915 = 34.51%`**
 
-**Free user AI cost = `0.02450 (6 scans/10) + 0.04680 + 0.01264 (if 8 subs used) + 0.00550 (2 imports) + 0.00149 + $0 (no voice) ≈ $0.075/user/month`.** Voice is the dominant cost line; stripping it makes Free tier net-positive on AI spend.
+**⚠️ Over the 22.27% Premium AI budget line by ~12pp.** Mitigation decision (pending Daniel): drop Premium cap from 20 → ~13 voice sessions/mo to bring total to ~$1.89/mo (22.2% of ARPU). Alternative: launch at 20 and accept $2.93/mo until Gemini Live context caching GAs (would cache the ~3,000-token baseline at a 75% discount, dropping per-turn cost by ~40%).
+
+**Free user AI cost = `0.02450 (6 scans/10) + 0.04680 + 0.01264 (if 8 subs used) + 0.00550 (2 imports) + 0.00149 + $0 (no voice) ≈ $0.075/user/month`.** Voice is the dominant cost line; stripping it makes Free tier net-positive on AI spend. ADR-0008 temporarily overrides this by giving Free tier 20 voice sessions during step-6 development; reverts before step 9 beta prep.
 
 **Pro user AI cost ≈ $3.33/user/month** driven by 40 voice Cook Sessions at $0.081 each.
 
@@ -1329,7 +1334,7 @@ Voice Cook Mode is now **94.7% of a Premium user's AI cost** and **97.3% of a Pr
   * `max_output_tokens: 150` enforced at session config to prevent runaway output audio cost
   * **Tool Call Preamble pattern — [UNVALIDATED ASSUMPTION — week-one spike required before Cook Mode voice build proceeds].** The intent is that the system prompt instructs the model to say a short neutral filler ("Let me check", "One moment") simultaneously with emitting any tool call, masking the ~2s substitution backend round-trip. Unlike OpenAI's gpt-realtime family, Gemini Live is not known to produce preambles spontaneously, and its adherence to a prompt instruction to 'speak X then emit tool call' under MINIMAL reasoning has not been independently benchmarked. The week-one spike must measure preamble-present rate across ≥50 tool-call invocations. **Mandatory mitigation regardless of spike outcome: client-side pre-recorded filler audio.** The iOS client plays one of three pre-recorded neutral filler clips ("Let me check", "One moment", "Give me a second") the instant a `toolCall` frame arrives, independently of any model-emitted preamble. This covers the ~2s backend round-trip deterministically. The prompt-level preamble is best-effort polish on top; if it fires the client filler is skipped or overlapped cleanly. If spike shows model preamble rate <90%, the client-side clip is the primary UX and model preamble is disabled via system prompt to avoid double-speak.
   * Turn detection: start with `semantic_vad` (chunks based on utterance completion) to reduce false-positive tokenization of non-speech kitchen noise; fall back to `server_vad` if semantic VAD proves unreliable in testing
-  * Aggressive context pruning: after every step advance, truncate audio items older than the last 3 turns via `session.update` events to cap per-turn input context at ~950 audio tokens
+  * Session refresh as pruning (ADR 0014): trigger a new mint + WS swap every 10 turns OR whenever a single turn exceeds 15,000 prompt tokens, carrying a compact recap (~200-300 tokens) in the new session's `systemInstruction` for continuity. Earlier drafts specified `session.update` with audio-item truncation; that frame type doesn't exist on Gemini Live.
 * **Eval set**: `eval_cook_turns_v1.jsonl` with 120 scripted dialogues, run against **both** the Live API path and the text fallback path
 * **Success criteria**:
 
@@ -1653,13 +1658,14 @@ See §12.3. In addition:
 | `timer_started`                    | duration_bucket, generated_vs_manual (generated/manual/voice)                                    | timer adoption             | Cook Mode               |
 | `voice_affordance_tapped`          | tier (free/premium/pro), result (paywall_shown/voice_started/permission_denied/busy/voice_stopped) | conversion funnel          | Paywall + Cook Mode     |
 | `cook_turn_submitted`              | turn_type, current_step_index, path=live_api/gemini_fallback                                    | voice Q&A usage            | AI Ops                  |
-| `cook_turn_resolved`               | latency_ttfa_ms, latency_total_ms, barge_in, helpful_vote, path                                | Cook Mode quality          | AI Ops                  |
+| `cook_turn_resolved`               | latency_ttfa_ms, latency_total_ms, barge_in, path, result_type (normal/tool_call/error), error_code? | Cook Mode quality          | AI Ops                  |
 | `voice_session_token_snapshot`     | session_id, turns_so_far, cumulative_tokens, current_step_index                                | runaway cost detection     | AI Ops                  |
-| `voice_session_refreshed`          | session_id, refresh_reason (turns/minutes/tokens), turns_at_refresh                            | refresh cadence            | AI Ops                  |
-| `substitution_requested`           | problem_type, invocation=sheet/realtime_function_call                                          | rescue usage               | Cook Mode               |
-| `substitution_accepted`            | accepted, constraint_safe                                                                      | rescue quality             | Flywheel / AI Ops       |
+| `voice_session_refreshed`          | session_id, refresh_reason (turns/goaway; minutes/tokens reserved), turns_at_refresh           | refresh cadence            | AI Ops                  |
+| `substitution_requested`           | problem_type, invocation=sheet/realtime_function_call, sub_event_id                            | rescue usage               | Cook Mode               |
+| `substitution_accepted`            | accepted, constraint_safe, invocation=sheet/realtime_function_call, sub_event_id, reason (user_accepted/user_rejected/unsafe_acknowledged/auto_applied/unsafe_refused) | rescue quality             | Flywheel / AI Ops       |
 | `cook_session_completed`           | duration_min, steps_completed, voice_enabled                                                   | completion funnel          | Core Loop               |
 | `meal_rated`                       | rating, workload, taste, would_repeat                                                          | core success completion    | Core Loop               |
+| `meal_rating_skipped`              | recipe_plan_id                                                                                 | opt-out rate on rating sheet (complement to meal_rated; typically one of the pair follows every cook_session_completed — force-quit / crash / background-kill between sheet open and dismissal yield zero emissions, so dashboards should treat "neither fired" as a valid third state rather than a data bug) | Core Loop               |
 | `grocery_list_exported`            | item_count, destination=reminders/in_app                                                       | write-back success         | Utility                 |
 | `favorite_saved`                   | recipe_origin                                                                                  | retention asset            | Retention               |
 | `recipe_import_started`            | source_type                                                                                    | import funnel              | Import                  |
@@ -1678,6 +1684,65 @@ See §12.3. In addition:
 | `ai_request_failed`                | feature_key, error_type                                                                        | error rate                 | Reliability             |
 | `screen_error_shown`               | screen_name, error_code                                                                        | UX reliability             | Reliability             |
 | `sync_state_changed`               | state, device_count                                                                            | CloudKit health            | Reliability             |
+
+**Event property clarifications:**
+
+- **`cook_turn_resolved.result_type`** — every terminal turn path emits `cook_turn_resolved`, including errors and interruptions. Values: `normal` (successful reply), `tool_call` (successful reply that executed a model-suggested action — advance step, start timer), `error` (endTurn threw — emptyTranscript, network, AI-VOICE-01, rate limit, any StirError). Error emissions carry `error_code` (the Stir ErrorCode raw value) and `latency_ttfa_ms = 0` since TTFA couldn't be clocked. Submitted:resolved ratio must stay ~1:1 — a drift below 90% indicates silent error swallowing, not real turn failure.
+- **`cook_turn_resolved.latency_ttfa_ms`** — Live path: driver-level, from server's `inputTranscription.finished=true` to first `modelTurn.parts[].inlineData` audio chunk (frame-level precision). Fallback path: Speech-to-Text wall-clock latency. Zero on error paths where neither anchor was reached.
+- **`cook_turn_resolved.barge_in`** — `true` when the user tapped the mic during the prior turn's `modelSpeaking` state to start THIS turn. Semantics: "this turn began by interrupting the previous turn's playback", not "this turn was interrupted" (the resolved event fires at turnComplete, before playback finishes, so we can't retroactively flag an in-flight turn). Flag is reset after emission. `helpful_vote` was previously scaffolded-but-unwired; removed from the emission pending a thumbs-up/down UI.
+- **`voice_session_refreshed.refresh_reason`** — shipped values: `turns` (crossed `refreshAtTurnCount = 15` boundary), `goaway` (server emitted a goAway frame). Reserved for future triggers: `minutes` (crossed `refreshAtElapsedSec`), `tokens` (hit token soft cap). Historical note: pre-2026-04-22 drafts listed `minutes | tokens` as canonical — they weren't wired in the driver, which only emits `turns | goaway`.
+- **`substitution_requested.sub_event_id`** / **`substitution_accepted.sub_event_id`** + **`substitution_accepted.invocation`** — the rescue-usage funnel joins requested → accepted pairs on `sub_event_id`. Both events MUST fire for every substitution attempt on both the sheet and voice paths — no half-depth asymmetry. The voice path has no user confirm step, so safe results auto-emit `substitution_accepted` with `accepted=true, constraint_safe=true, reason=auto_applied`, and unsafe results auto-emit `accepted=false, constraint_safe=false, reason=unsafe_refused`. Sheet `reason` values are `user_accepted` / `user_rejected` / `unsafe_acknowledged`. Dashboards slice voice vs sheet on `invocation` and accept-rate via `reason`.
+
+### PostHog LLM Observability events
+
+Distinct from the product event table above. `$ai_generation` and `$ai_trace` feed PostHog's LLM Analytics dashboards natively (cost-by-feature, latency, error rate, trace view). Every AI call in Stir emits both an `ai_request_log` row (Supabase, authoritative billing record) and a `$ai_generation` event (PostHog, dashboard source) — they're dual-writes reconciled by request id.
+
+**Privacy posture:** neither `$ai_input` nor `$ai_output_choices` is ever populated. No user content, transcripts, or AI response text reaches PostHog. Only tokens, cost, latency, model metadata, and error flags.
+
+**Dashboard-join contract:**
+
+| PostHog field         | Stir value                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `distinct_id`         | `canonical_user_key_hash` (16-char SHA-256) — WHO                                                            |
+| `$ai_span_id`         | `ai_request_log.request_id` — WHICH call (1:1 reconciliation)                                                 |
+| `$ai_trace_id`        | Feature grouping id: `solve_request_id` \| `import_id` \| `sub_event_id` \| `session_id` \| `client_request_id` |
+| `$ai_parent_id`       | Unused in v1 (flat span structure)                                                                            |
+
+**`$ai_generation` properties (every AI call):**
+
+| Property                | Value                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `$ai_trace_id`          | feature grouping id                                                                                   |
+| `$ai_span_id`           | request id (= ai_request_log.request_id)                                                              |
+| `$ai_span_name`         | `pantry_parse` \| `dinner_solve` \| `substitution` \| `recipe_import` \| `grocery_generate` \| `cook_turn` \| `recipe_import_async` \| `voice_cook_turn` |
+| `$ai_model`             | Gemini model string                                                                                   |
+| `$ai_provider`          | `gemini` (always)                                                                                     |
+| `$ai_input_tokens`      | int                                                                                                   |
+| `$ai_output_tokens`     | int                                                                                                   |
+| `$ai_total_cost_usd`    | USD (6-decimal precision, server-computed)                                                             |
+| `$ai_latency`           | seconds                                                                                               |
+| `$ai_is_error`          | bool                                                                                                  |
+| `$ai_error`             | Stir ErrorCode (only when `$ai_is_error=true`)                                                        |
+| `feature`               | `ai_request_log.feature_key`                                                                          |
+| `prompt_version`        | e.g. `1.0.0`                                                                                          |
+| `thinking_level`        | `minimal` \| `low`                                                                                    |
+| `retry_count`           | int (0 = first try)                                                                                   |
+| `error_code`            | Stir ErrorCode duplicate for non-LLM filters                                                          |
+| `path`                  | `live_api` \| `gemini_fallback` — voice-turn calls only; absent on non-voice AI                       |
+
+**`$ai_trace` properties (voice sessions only in v1):** exactly ONE `$ai_trace` per session, fired from iOS `CookModeViewModel` at session close. Carries both input_state (captured at VM attach time) and output_state (session totals) in a single emission — PostHog is append-only, so a mint-time + close-time pair would create two sibling events rather than updating a single record (ADR 0009).
+
+| Property                | Value                                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `$ai_trace_id`          | `session_id`                                                                                                                  |
+| `$ai_span_name`         | `voice_session_start`                                                                                                         |
+| `$ai_input_state`       | `{ recipe_plan_id, cooking_session_id, current_step_number, prompt_version, path }`                                           |
+| `$ai_output_state`      | `{ total_turns, total_prompt_tokens, total_response_tokens, total_prompt_tokens_{text,audio}, total_response_tokens_{text,audio}, ended_reason, duration_ms, path }` |
+| `feature`               | `cook_mode_realtime`                                                                                                          |
+
+`ended_reason` values: `user_exit` \| `user_stop` \| `user_pause` \| `session_finish` \| `error`.
+
+Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and latencies under the same `$ai_trace_id` automatically. The explicit close-time `$ai_trace` surfaces Stir-semantic metadata (recipe_plan_id, total_turns, ended_reason) in the trace view that the pseudo-trace alone wouldn't carry.
 
 ### Core dashboards
 
@@ -1732,8 +1797,7 @@ See §12.3. In addition:
 * Cook Mode forced-fallback path (`disable_cook_realtime` flag on → verify Gemini text + AVSpeechSynthesizer still works end-to-end)
 * Voice entitlement enforcement: Free user hitting `/v1/ai/realtime-session` → 403 with `ENT-VOICE-01`
 * Supabase RLS policy tests: confirm a session JWT for user A cannot read user B's `usage_counters`, `ai_request_log`, or `entitlement_snapshots` rows
-* Session pruning: verify `session.update` events successfully remove old audio items and per-turn input context stays bounded
-* Session refresh: verify refresh at 10 min / 15 turns mints new token and opens new session with correct context carry-over
+* Session refresh (ADR 0014): verify refresh triggers at `turnCount - lastRefreshedAtTurn >= 10` AND on any single turn with `promptTokens > 15000`, that setupComplete on the new WS lands within 5s, and per-turn prompt tokens reset to ~6-7k baseline on the first turn of the new session. Earlier "session pruning via `session.update`" test was removed — the frame doesn't exist on Gemini Live.
 
 **Manual QA checklist before each beta/prod build**
 

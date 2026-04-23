@@ -7,7 +7,8 @@
 //   SolveViewModel.persistCompletedSolve
 //     → TonightSnapshotService.write(slots:solveId:)
 //     → SharedStorage.writeTonight(...)
-//     → WidgetCenter.shared.reloadAllTimelines()
+//     → WidgetReloadCoordinator.requestReload(.tonightWidget)
+//     → (debounced 500ms) → WidgetCenter.shared.reloadTimelines(ofKind:)
 //
 // Staleness boundary: a successful solve overwrites the snapshot. A
 // failed solve (slot errors, zero dishes) is a no-op — the widget keeps
@@ -19,14 +20,16 @@ import WidgetKit
 @MainActor
 struct TonightSnapshotService {
     private let storage: SharedStorage
-    private let reloadTimelines: () -> Void
+    private let requestReload: (WidgetReloadCoordinator.Kind) -> Void
 
     init(
         storage: SharedStorage = SharedStorage(),
-        reloadTimelines: @escaping () -> Void = { WidgetCenter.shared.reloadAllTimelines() },
+        requestReload: @escaping (WidgetReloadCoordinator.Kind) -> Void = { kind in
+            WidgetReloadCoordinator.shared.requestReload(kind)
+        },
     ) {
         self.storage = storage
-        self.reloadTimelines = reloadTimelines
+        self.requestReload = requestReload
     }
 
     /// Persist the top-3 dish brief from a just-completed solve. Pass the
@@ -54,14 +57,18 @@ struct TonightSnapshotService {
             capturedAt: Date(),
             topDishes: Array(briefs),
         )
+        // Skip the reload when the snapshot is identical to what's
+        // already persisted — another cheap win on the 40/hr budget
+        // and avoids unnecessary widget-process wakeups.
+        if storage.readTonight() == snapshot { return }
         storage.writeTonight(snapshot)
-        reloadTimelines()
+        requestReload(.tonightWidget)
     }
 
     /// Clear the snapshot. Used on logout or "delete account" flows.
     func clear() {
         storage.writeTonight(nil)
-        reloadTimelines()
+        requestReload(.tonightWidget)
     }
 
     // MARK: - Projection

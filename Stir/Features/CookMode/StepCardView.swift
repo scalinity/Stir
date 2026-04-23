@@ -109,9 +109,34 @@ struct StepCardView: View {
                 Text("Timer")
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                let matching = viewModel.activeTimers.first { $0.step?.id == step.id }
+                // Only treat running / paused / pending timers as "the
+                // step's current timer" for UI routing. Cancelled and
+                // completed timers stay in `activeTimers` for history
+                // + telemetry, but should NOT suppress the Start button
+                // — that was the 2026-04-22 bug where after cancelling
+                // the only visible control was another Cancel button
+                // with nothing to start.
+                //
+                // Register this view as a dependent of
+                // `timerStateVersion` so @Observable invalidation fires
+                // on every timer mutation. NSManagedObject property
+                // changes don't propagate through @Observable on their
+                // own, so without this dependency the button routing
+                // could stick on "running" even after a cancel. The
+                // binding is intentionally unused downstream — the
+                // read itself is what Observation tracks.
+                let _ = viewModel.timerStateVersion
+                let matching = viewModel.activeTimers.first {
+                    $0.step?.id == step.id
+                    && ($0.typedState == .running
+                        || $0.typedState == .paused
+                        || $0.typedState == .pending)
+                }
                 if let timer = matching {
-                    TimerCountdownView(timer: timer)
+                    TimerCountdownView(
+                        timer: timer,
+                        pauseStartedAt: viewModel.pauseStartedAt(for: timer),
+                    )
                     timerControlRow(for: timer)
                 } else {
                     Button {
@@ -280,52 +305,49 @@ struct StepCardView: View {
 
     private var micIconName: String {
         switch viewModel.micButtonRole {
-        case .submit:        return "stop.circle.fill"
-        case .busy:          return "stop.circle.fill"
-        case .askWithVoice:  return "mic.circle.fill"
+        case .submit, .busy, .listening: return "stop.circle.fill"
+        case .askWithVoice:              return "mic.circle.fill"
         }
     }
 
     private var micLabel: String {
         switch viewModel.micButtonRole {
+        case .listening:
+            // Session live, VAD hot, between turns. Explicit "go
+            // ahead and talk" affordance so users don't think the
+            // button needs another tap to resume listening.
+            return "Listening — tap to stop"
         case .submit:
-            // In hands-free mode the turn ends via VAD, not a tap —
-            // so this button during .userSpeaking is actually a
-            // "stop voice mode" affordance. Label matches meaning.
+            // User mid-utterance. Tap submits turn early.
             return "Stop voice"
         case .busy:
-            // Show what Stir is DOING (listening, thinking, speaking)
-            // so the user knows whether to keep talking or wait. The
-            // word "Stop" stays on the button via the accessibility
-            // hint — tap always means stop voice mode.
             if viewModel.voiceState == .thinking { return "Thinking…" }
             if viewModel.voiceState == .modelSpeaking { return "Stir speaking…" }
             if viewModel.voiceState == .transcribing { return "Getting that…" }
-            return "Listening…"
+            return "Working…"
         case .askWithVoice:
             return "Ask with voice"
         }
     }
 
     private var micTint: Color {
-        // Active session → red (matches "tap to stop" expectation,
-        // mirrors a recording/mute indicator). Idle → app accent.
         switch viewModel.micButtonRole {
-        case .submit, .busy: return .red
-        case .askWithVoice:  return .accentColor
+        case .submit, .busy, .listening: return .red
+        case .askWithVoice:              return .accentColor
         }
     }
 
     private var micAccessibilityLabel: String {
         switch viewModel.micButtonRole {
-        case .submit:       return "Stop voice mode"
-        case .busy:         return "Stop voice mode"
-        case .askWithVoice: return "Ask with voice"
+        case .submit, .busy, .listening: return "Stop voice mode"
+        case .askWithVoice:              return "Ask with voice"
         }
     }
 
     private var micAccessibilityHint: String {
         switch viewModel.micButtonRole {
+        case .listening:
+            return "Voice mode is active. Just speak — Stir is listening. Tap to stop voice mode."
         case .submit:
             return "Taps stop voice mode. Stir hears you automatically when you pause — no tap needed."
         case .busy:

@@ -48,6 +48,8 @@ struct GroceryListView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onDismiss)
                         .foregroundStyle(Color.Stir.ink700)
+                        .accessibilityLabel("Close")
+                        .accessibilityHint("Dismisses the grocery list")
                 }
             }
             .task {
@@ -131,6 +133,11 @@ struct GroceryListView: View {
             )
         }
         .disabled(viewModel.missingCount == 0 || exportInFlight)
+        .accessibilityLabel(exportInFlight ? "Exporting" : "Export to Reminders")
+        .accessibilityHint(viewModel.missingCount == 0
+            ? "No missing ingredients to export"
+            : "Sends your missing-ingredient list to Apple Reminders")
+        .accessibilityAddTraits(exportInFlight ? [.updatesFrequently] : [])
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)
@@ -200,8 +207,14 @@ private struct AisleRow: View {
                     }
                 }
                 .frame(width: 22, height: 22)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(title(for: item))
+            .accessibilityValue(item.isChecked ? "Checked" : "Not checked")
+            .accessibilityAddTraits(item.isChecked ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityHint("Double-tap to toggle")
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title(for: item))

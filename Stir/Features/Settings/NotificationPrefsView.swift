@@ -10,8 +10,13 @@
 // reminder especially — turning off should clear the in-flight
 // notification, not just stop scheduling future ones).
 //
-// Authorization status is surfaced at the top so users who've denied
-// at the OS level see why toggling has no effect + a link to Settings.app.
+// Authorization status distinguishes three presentation modes:
+//   - .authorized / .provisional / .ephemeral: banner hidden.
+//   - .notDetermined: "Request permission" prompt (iOS hasn't asked
+//     yet). Pre-fix this was conflated with .denied — misleading,
+//     the user had never seen the OS prompt (FD1-18 / W18).
+//   - .denied / .restricted: "Open Settings" deeplink because the
+//     in-app permission prompt can't re-request once denied.
 
 import SwiftUI
 import UserNotifications
@@ -20,7 +25,7 @@ struct NotificationPrefsView: View {
     @Environment(\.openURL) private var openURL
     @State private var prefs: NotificationPreferencesStore.Preferences =
         NotificationPreferencesStore.shared.preferences
-    @State private var systemAuthorized: Bool = true
+    @State private var authorizationStatus: UNAuthorizationStatus = .authorized
 
     private let store: NotificationPreferencesStore
 
@@ -30,10 +35,15 @@ struct NotificationPrefsView: View {
 
     var body: some View {
         List {
-            if !systemAuthorized {
-                Section {
-                    systemAuthDisabledRow
-                }
+            switch authorizationStatus {
+            case .notDetermined:
+                Section { notDeterminedRow }
+            case .denied:
+                Section { systemAuthDisabledRow }
+            case .authorized, .provisional, .ephemeral:
+                EmptyView()
+            @unknown default:
+                EmptyView()
             }
             Section {
                 Toggle(isOn: $prefs.trialReminder) { toggleRow(
@@ -78,6 +88,9 @@ struct NotificationPrefsView: View {
         .background(Color.Stir.paper50.ignoresSafeArea())
         .task {
             await refreshAuthorization()
+            // Re-seed prefs from the store in case the in-line @State
+            // default captured a stale snapshot (e.g. another screen
+            // toggled a pref between view init and appearance).
             prefs = store.preferences
         }
     }
@@ -96,6 +109,47 @@ struct NotificationPrefsView: View {
         }
     }
 
+    /// Shown when iOS hasn't yet prompted the user for notification
+    /// permission. Tap the button to trigger the OS prompt — if
+    /// granted, `refreshAuthorization` picks up `.authorized` and the
+    /// banner dismisses.
+    private var notDeterminedRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "bell.badge")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ember600)
+                Text("Enable notifications")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.32)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.Stir.ember600)
+            }
+            Text("Stir uses notifications for trial reminders, cook nudges, and import completion. You haven't been asked yet — turn it on and Stir will prompt iOS next.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.Stir.ink700)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                Task {
+                    _ = try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound, .badge])
+                    await refreshAuthorization()
+                }
+            } label: {
+                Text("Request permission")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ember600)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityHint("Prompts iOS for notification permission.")
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Shown when the user has explicitly denied notifications (or iOS
+    /// has restricted them). Can't re-prompt from in-app; deeplink to
+    /// Settings so the user can flip the toggle.
     private var systemAuthDisabledRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -120,7 +174,10 @@ struct NotificationPrefsView: View {
                 Text("Open Settings")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.Stir.ember600)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityHint("Opens iOS Settings to toggle notification permission.")
         }
         .padding(.vertical, 4)
     }
@@ -129,8 +186,6 @@ struct NotificationPrefsView: View {
 
     private func refreshAuthorization() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        systemAuthorized = settings.authorizationStatus == .authorized
-            || settings.authorizationStatus == .provisional
-            || settings.authorizationStatus == .ephemeral
+        authorizationStatus = settings.authorizationStatus
     }
 }

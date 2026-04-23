@@ -58,6 +58,33 @@ final class RecipeImportRepository {
         return row
     }
 
+    /// Insert a row that's ALREADY failed — for client-side rejections
+    /// (empty URL, bad scheme, OCR decode failure) where the attempt
+    /// never reached the backend. Single save: previously start +
+    /// markFailed was two transactions and a throw on the second left
+    /// orphaned `.pending` rows with no error code (CA1-13).
+    @discardableResult
+    func recordClientReject(
+        for household: HouseholdProfile,
+        input: StartInput,
+        errorCode: String,
+    ) throws -> RecipeImport {
+        let context = controller.viewContext
+        let row = RecipeImport(context: context)
+        row.id = input.importID
+        row.household = household
+        row.setSource(input.source)
+        row.sourceURL = input.sourceURL
+        row.ocrPageCount = input.ocrPageCount
+        row.rawTextHash = Self.sha256Hex(input.rawContent)
+        row.setStatus(.failed)
+        row.submittedAt = Date()
+        row.completedAt = Date()
+        row.errorCode = errorCode
+        try controller.save()
+        return row
+    }
+
     /// Mark the row as in-flight. Optional but useful when the Edge
     /// Function returns status='queued' (async path) so the UI can
     /// show an "importing…" state.

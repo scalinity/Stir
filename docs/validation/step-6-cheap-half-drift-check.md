@@ -84,7 +84,7 @@ This doc confirms the cheap-half is green. The expensive-half (CLAUDE.md Voice v
 1. TTFA p95 < 1.0 s across 20 real iPhone turns on Wi-Fi. Backend-side latency here (568 ms) is a lower bound; iPhone + network variance will add.
 2. Preamble-present rate ≥ 70 % across 50 tool calls. Not tested.
 3. Pre-recorded filler clip fires within 150 ms of `toolCall` frame. Not tested — iOS-only.
-4. Pruning via `session.update` holds input tokens at ~950/turn across 20 turns. Not tested.
+4. ~~Pruning via `session.update`~~ — invalidated on 2026-04-22 (ADR 0014): no such frame exists on Gemini Live. Replaced by: `refreshSession()` at 10-turn / 15k-token triggers keeps per-turn input below ~13-15k. Measured on 30-turn physical-device test.
 5. Session refresh silent at 10 min / 15 turn boundary. Not tested.
 
 ## Cleanup state

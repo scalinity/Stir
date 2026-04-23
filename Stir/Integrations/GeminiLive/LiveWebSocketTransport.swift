@@ -21,8 +21,55 @@
 import Foundation
 import OSLog
 
+/// Minimal async counting semaphore for single-slot FIFO serialization
+/// of awaited calls. Declared at file scope so it can be referenced in
+/// `LiveWebSocketTransport`'s stored properties without extra imports.
+/// Not exported as public API — transport-internal use only.
+///
+/// NSLock is thread-synchronous (blocks), DispatchSemaphore doesn't
+/// compose with `await`, and `actor` isolation doesn't by itself
+/// serialize across suspension points. This covers the gap.
+actor AsyncSemaphore {
+    private var count: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(value: Int) {
+        self.count = value
+    }
+
+    func wait() async {
+        if count > 0 {
+            count -= 1
+            return
+        }
+        await withCheckedContinuation { cont in
+            waiters.append(cont)
+        }
+    }
+
+    func signal() {
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.resume()
+        } else {
+            count += 1
+        }
+    }
+}
+
 @MainActor
 final class LiveWebSocketTransport {
+    #if DEBUG
+    /// Toggle to log every inbound envelope's top-level keys + full
+    /// JSON dump (audio base64 redacted) on turnComplete. Off by
+    /// default because it fires ~1–5 lines/second during a turn. Flip
+    /// to `true` when diagnosing Gemini wire-shape drift (e.g., token
+    /// reporting breaking after a Gemini API change). Used by
+    /// `handleInboundMessage` and gated via `#if DEBUG` so it's
+    /// stripped from release builds entirely.
+    static var verboseFrameLogging: Bool = false
+    #endif
+
     /// Inbound frame stream. Consumers take this once at open time and
     /// iterate with `for try await`. The stream terminates on close or
     /// on an unrecoverable transport error.
@@ -30,9 +77,26 @@ final class LiveWebSocketTransport {
     private var inboundContinuation: AsyncThrowingStream<LiveInboundFrame, Error>.Continuation!
 
     private let urlSession: URLSession
+    /// Whether `close()` should invalidate the URLSession. True when we
+    /// constructed the session ourselves; false when a caller injected
+    /// one (tests sharing a session across fixtures, future connection-
+    /// pool reuse). Without this flag an injected shared session would
+    /// be destroyed on every `close()` — a trap that the default-init
+    /// path narrowly avoids today only because nobody shares yet.
+    private let ownsSession: Bool
     private var wsTask: URLSessionWebSocketTask?
     private var isClosed = false
     private var receiveLoopTask: Task<Void, Never>?
+
+    /// Serializes outbound sends across `await` suspensions. The
+    /// `@MainActor` isolation alone doesn't help — each `await
+    /// task.send(...)` suspends the actor, letting the next `send`
+    /// callsite race into `URLSessionWebSocketTask.send` before the
+    /// first one's string has been enqueued. Mic forwarding emits at
+    /// 20 ms cadence, interleaving with toolResponse frames; under
+    /// cellular stalls a slow `task.send` could let ordering invert.
+    /// A single-slot AsyncSemaphore guarantees FIFO across callsites.
+    private let sendLock = AsyncSemaphore(value: 1)
 
     /// Error bucket for typed transport failures. Transport-level errors
     /// are distinct from session-level errors (bad wire shape, protocol
@@ -54,8 +118,23 @@ final class LiveWebSocketTransport {
         case sendAfterClose
     }
 
-    init(urlSession: URLSession = URLSession(configuration: .default)) {
-        self.urlSession = urlSession
+    /// Default-init creates and OWNS a URLSession — `close()` will
+    /// invalidate it. Use `init(sharedSession:)` for tests that inject
+    /// a session the caller continues to own.
+    init() {
+        self.urlSession = URLSession(configuration: .default)
+        self.ownsSession = true
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
+        self.inbound = stream
+        self.inboundContinuation = continuation
+    }
+
+    /// Test hook: accept a caller-owned URLSession. `close()` will NOT
+    /// invalidate it, so the caller can reuse it across multiple
+    /// transport instances. Not exercised in production paths.
+    init(sharedSession: URLSession) {
+        self.urlSession = sharedSession
+        self.ownsSession = false
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
         self.inbound = stream
         self.inboundContinuation = continuation
@@ -117,11 +196,12 @@ final class LiveWebSocketTransport {
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
         inboundContinuation?.finish()
-        // Explicit URLSession invalidation releases the delegate
-        // operation queue. Without this, URLSession objects accumulate
-        // per Cook Mode entry (Resume path creates a new session each
-        // time) and iOS 26 logs runtime warnings on dealloc.
-        urlSession.invalidateAndCancel()
+        // Only invalidate sessions we own. Caller-injected sessions
+        // are the caller's problem to release — invalidating here
+        // would kill any other transports sharing the session.
+        if ownsSession {
+            urlSession.invalidateAndCancel()
+        }
     }
 
     // MARK: - Send
@@ -154,7 +234,21 @@ final class LiveWebSocketTransport {
         guard let str = String(data: data, encoding: .utf8) else {
             throw TransportError.malformedInbound(message: "utf8 conversion failed")
         }
-        try await task.send(.string(str))
+        // Serialize across concurrent callers. Without the semaphore,
+        // an `await task.send(...)` that suspends during a cellular
+        // stall lets the next send-callsite race into
+        // URLSessionWebSocketTask.send — which documents FIFO only
+        // within a single call, not across concurrent ones. Mic frames
+        // at 20 ms cadence plus interleaved toolResponse frames made
+        // this a realistic ordering hazard.
+        await sendLock.wait()
+        do {
+            try await task.send(.string(str))
+            await sendLock.signal()
+        } catch {
+            await sendLock.signal()
+            throw error
+        }
     }
 
     // MARK: - Security helpers
@@ -249,10 +343,73 @@ final class LiveWebSocketTransport {
             )
             return
         }
-        guard let frame = LiveInboundFrame.parse(json) else {
+
+        #if DEBUG
+        // Diagnostic: dump every inbound envelope's top-level keys. If
+        // `usageMetadata` never appears in this stream, Gemini isn't
+        // emitting it (fix lives server-side or in setup config, not in
+        // parseAll). If it appears but under a different key, we see
+        // that key here. Kept DEBUG-only because the log volume is
+        // ~1–5 lines per second during an active turn.
+        if let dict = json as? [String: Any] {
+            let keys = Array(dict.keys).sorted().joined(separator: ",")
+            VoiceSessionLog.log("ws.inbound_keys", [
+                "keys": keys,
+                "size_bytes": data.count,
+            ])
+            // Extra: on turnComplete, dump the FULL envelope (audio base64
+            // redacted) so we can see exactly what Gemini sends at the
+            // token-accounting boundary. This is the envelope where
+            // usageMetadata should appear — if it's not at top level,
+            // seeing the full shape tells us where it actually lives.
+            if let serverContent = dict["serverContent"] as? [String: Any],
+               (serverContent["turnComplete"] as? Bool) == true {
+                let redacted = redactAudioBase64(dict)
+                if let data = try? JSONSerialization.data(
+                    withJSONObject: redacted, options: [.sortedKeys],
+                ), let str = String(data: data, encoding: .utf8) {
+                    VoiceSessionLog.log("ws.turnComplete_envelope", ["json": str])
+                }
+            }
+        }
+        #endif
+
+        let frames = LiveInboundFrame.parseAll(json)
+        if frames.isEmpty {
             Logger.voice.debug("live_ws_inbound_unparsed_shape")
             return
         }
-        inboundContinuation?.yield(frame)
+        // One Gemini Live envelope can carry multiple top-level frames
+        // (e.g., `{serverContent, usageMetadata}` on turn-complete). Yield
+        // each so the receive dispatcher handles them in order.
+        for frame in frames {
+            inboundContinuation?.yield(frame)
+        }
     }
+
+    #if DEBUG
+    /// Recursively replaces `inlineData.data` base64 strings with a
+    /// `<audio_NN_bytes>` placeholder so we can log envelope shapes
+    /// without flooding the console with megabytes of base64 PCM.
+    /// Used by the diagnostic `ws.turnComplete_envelope` log.
+    private func redactAudioBase64(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in dict {
+                if k == "data",
+                   let s = v as? String,
+                   s.count > 1000 {
+                    out[k] = "<base64_\(s.count)_chars>"
+                } else {
+                    out[k] = redactAudioBase64(v)
+                }
+            }
+            return out
+        }
+        if let arr = value as? [Any] {
+            return arr.map { redactAudioBase64($0) }
+        }
+        return value
+    }
+    #endif
 }

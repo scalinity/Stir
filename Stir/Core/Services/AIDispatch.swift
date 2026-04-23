@@ -290,6 +290,41 @@ actor AIDispatch {
         return response
     }
 
+    // MARK: - Voice Turn Usage (PostHog LLM Observability)
+
+    /// POST /v1/ai/voice-turn-usage. Fire-and-forget per-turn usage report
+    /// for Cook Mode voice sessions. Backend computes cost, inserts one
+    /// ai_request_log row per turn, captures one $ai_generation to PostHog.
+    ///
+    /// Callers should invoke this via `Task.detached` + `try?` — any
+    /// failure is an observability gap, not a user-facing issue. Do NOT
+    /// gate UI on this call.
+    ///
+    /// Timeout is 10s — tight because this is fire-and-forget and a long
+    /// hang would leak background Task cancellation into the next session.
+    func voiceTurnUsage(request body: VoiceTurnUsageRequest) async throws {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/voice-turn-usage")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.timeoutInterval = 10
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode voice-turn-usage body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.debug(
+            "voice_turn_usage_dispatch session_id=\(body.sessionID.uuidString, privacy: .public) turns=\(body.turns.count, privacy: .public)",
+        )
+        // Server returns 204 No Content — use the raw-status variant of
+        // SupabaseSessionClient so we don't try to decode an empty body.
+        try await session.performAuthenticatedNoContent(request)
+    }
+
     // MARK: - Dinner solve (SSE)
 
     /// Returns an AsyncThrowingStream emitting DinnerSolveEvents as they

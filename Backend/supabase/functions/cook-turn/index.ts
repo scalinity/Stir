@@ -6,21 +6,26 @@
 // etc.), iOS runs SFSpeechRecognizer locally, POSTs the transcript here,
 // and feeds the model's spoken_response to AVSpeechSynthesizer.
 //
-// Quota: voice_cook_session quota is consumed at realtime-session mint
-// time, NOT per fallback turn. The fallback is a degraded turn WITHIN an
-// already-metered voice session — one session = one quota increment
-// regardless of whether turns go through Live or fallback.
+// Quota: voice_cook_session is consumed only at realtime-session mint
+// time, not per fallback turn. cook-turn is "unmetered" in the
+// usage_counters sense — a user on the Live path with a mint charge
+// covered pays nothing extra for fallback turns in the same session.
 //
-// IP rate limit (ip:cook_turn_daily 300/day) as defense-in-depth against
-// a compromised Premium account burning Gemini budget.
+// Cost control for the persistent-C.3 path (kill switch engaged, or
+// chronic mint failures that route every turn to cook-turn): both an
+// IP-scoped cap (ip:cook_turn_daily 300/day — DoS defense across users)
+// AND a user-scoped cap (user:cook_turn_hourly 30/hour — worst-case
+// cost per account). Without the user cap, the 300/day IP window
+// permits ~$0.69/day/user against Premium's $1.89/mo AI budget — see
+// review 2026-04-22 §Critical #2.
 //
 // Flow:
 //   1. Auth: session JWT (AUTH-01 on failure)
 //   2. Body: Zod parse (VAL-01 on failure)
-//   3. IP rate limit (RATE-01)
+//   3. Rate limits: IP daily + user hourly (RATE-01)
 //   4. User row read: banned / merged / missing
 //   5. Entitlement: effectiveVoiceEnabled() → 403 ENT-VOICE-01 if Free
-//   6. Prompt: read active cook_turn v1.0.0
+//   6. Prompt: read active cook_turn v1.x
 //   7. Render system prompt with recipe + household + transcript
 //   8. Call gemini-3-flash-preview with responseSchema JSON output
 //   9. Parse + validate response; log ai_request_log; return.
@@ -33,7 +38,8 @@ import { readAppUser } from '../_shared/identity.ts';
 import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
 import { readActivePrompt, renderPrompt, USER_DATA_END, USER_DATA_START } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
-import { computeCostUSD, logAIRequest } from '../_shared/ai_request_log.ts';
+import { computeCostUSD } from '../_shared/ai_request_log.ts';
+import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { CookTurnRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
@@ -147,17 +153,36 @@ Deno.serve(async (req) => {
 
   const client = createServiceClient();
 
-  // 3. IP rate limit
+  // 3. Rate limits: IP (cross-user DoS defense) + user (cost cap).
+  // The user cap is the real cost control — voice_cook_session is
+  // NOT decremented for cook-turn (the fallback path is "unmetered"
+  // per spec §9), so without the user-scoped hourly cap a persistent
+  // C.3 user could burn through Premium budget at $0.69/day/user.
+  // See review 2026-04-22 §Critical #2.
   const sourceIP = extractSourceIP(req);
   try {
-    const rl = await checkAndIncrement(client, 'ip:cook_turn_daily', sourceIP);
-    if (!rl.allowed) {
+    const rlIP = await checkAndIncrement(client, 'ip:cook_turn_daily', sourceIP);
+    if (!rlIP.allowed) {
       userLog.warn('rate_limited', { scope: 'ip:cook_turn_daily' });
-      return buildRate01Response('ip:cook_turn_daily', rl.retry_after_seconds, rl.reset_at, requestId);
+      return buildRate01Response('ip:cook_turn_daily', rlIP.retry_after_seconds, rlIP.reset_at, requestId);
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
     // Fail open — limiter glitch shouldn't block an in-session voice user.
+  }
+  try {
+    const rlUser = await checkAndIncrement(
+      client, 'user:cook_turn_hourly', claims.canonical_user_key,
+    );
+    if (!rlUser.allowed) {
+      userLog.warn('rate_limited', { scope: 'user:cook_turn_hourly' });
+      return buildRate01Response(
+        'user:cook_turn_hourly', rlUser.retry_after_seconds, rlUser.reset_at, requestId,
+      );
+    }
+  } catch (err) {
+    userLog.error('rate_limiter_failed', err);
+    // Fail open — see above.
   }
 
   // 4. User row
@@ -232,6 +257,7 @@ Deno.serve(async (req) => {
     current_step_text_json: body.recipe_context.current_step_text,
     current_step_timer_seconds_json:
       body.recipe_context.current_step_timer_seconds ?? 0,
+    all_steps_json: body.recipe_context.all_steps,
     remaining_ingredients_json: body.recipe_context.remaining_ingredients,
     pantry_snapshot_json: body.household_context.pantry_snapshot,
     dietary_rules_json: body.household_context.dietary_rules,
@@ -298,7 +324,40 @@ Deno.serve(async (req) => {
 
   if (!parsed) {
     userLog.error('cook_turn_failed_after_retry', lastErr, { retry_count: retryCount });
-    logAIRequest(client, userLog, {
+    recordAIRequest(
+      client, userLog,
+      {
+        request_id: body.client_request_id,
+        canonical_user_key: claims.canonical_user_key,
+        feature_key: FEATURE_KEY,
+        model: MODEL,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        cost_usd: costUsd,
+        latency_ms: totalLatency,
+        thinking_level: 'minimal',
+        prompt_version: activePrompt.version,
+        retry_count: retryCount,
+      },
+      {
+        trace_id: body.client_request_id,
+        span_name: 'cook_turn',
+        is_error: true,
+        error_code: ErrorCode.AI_01,
+        path: 'gemini_fallback',
+      },
+    );
+    return jsonError(
+      ErrorCode.AI_01,
+      502,
+      { message: 'Voice fallback is taking longer than expected.' },
+      requestId,
+    );
+  }
+
+  recordAIRequest(
+    client, userLog,
+    {
       request_id: body.client_request_id,
       canonical_user_key: claims.canonical_user_key,
       feature_key: FEATURE_KEY,
@@ -310,28 +369,13 @@ Deno.serve(async (req) => {
       thinking_level: 'minimal',
       prompt_version: activePrompt.version,
       retry_count: retryCount,
-    });
-    return jsonError(
-      ErrorCode.AI_01,
-      502,
-      { message: 'Voice fallback is taking longer than expected.' },
-      requestId,
-    );
-  }
-
-  logAIRequest(client, userLog, {
-    request_id: body.client_request_id,
-    canonical_user_key: claims.canonical_user_key,
-    feature_key: FEATURE_KEY,
-    model: MODEL,
-    input_tokens: totalInputTokens,
-    output_tokens: totalOutputTokens,
-    cost_usd: costUsd,
-    latency_ms: totalLatency,
-    thinking_level: 'minimal',
-    prompt_version: activePrompt.version,
-    retry_count: retryCount,
-  });
+    },
+    {
+      trace_id: body.client_request_id,
+      span_name: 'cook_turn',
+      path: 'gemini_fallback',
+    },
+  );
 
   const wire: WireResponse = {
     spoken_response: parsed.spoken_response,

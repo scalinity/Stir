@@ -80,7 +80,13 @@ extension VoiceSessionState {
             //   while mic stays hot; iOS state at that moment is
             //   .ready and the first server frame is already model
             //   audio).
-            return next == .userSpeaking || next == .modelSpeaking
+            // .toolCalling: hands-free path may also land a tool call
+            //   between turns while state is .ready (VAD has closed
+            //   the user's turn and the very first server frame is a
+            //   toolCall). Observed 2026-04-22.
+            return next == .userSpeaking
+                || next == .modelSpeaking
+                || next == .toolCalling
         case .userSpeaking:
             // C.3 → transcribing.
             // C.2 hands-free: server VAD completes the turn server-
@@ -90,17 +96,29 @@ extension VoiceSessionState {
             //   without a .thinking pit stop.
             // C.2 tap-to-end: VM advances to .thinking explicitly.
             // .ready is the cancellation / empty-turn fallback.
+            // .toolCalling: model can emit advance_step / start_timer /
+            //   substitution_check mid-utterance in hands-free mode
+            //   before iOS has advanced past .userSpeaking (observed
+            //   2026-04-22: model called advance_step while state was
+            //   still .userSpeaking; handler dropped it, server sent
+            //   toolCallCancellation, screen never advanced).
             return next == .transcribing
                 || next == .thinking
                 || next == .modelSpeaking
                 || next == .ready
+                || next == .toolCalling
         case .transcribing:
             return next == .thinking
         case .thinking:
             return next == .modelSpeaking || next == .toolCalling || next == .ready
         case .modelSpeaking:
-            // Back to ready for the next turn, OR into a refresh (C.2).
-            return next == .ready || next == .refreshing
+            // Back to ready for the next turn, OR into a refresh (C.2),
+            // OR into a tool call (mid-speech: rare but legal — the
+            // model can interrupt its own spoken output with a tool
+            // invocation).
+            return next == .ready
+                || next == .refreshing
+                || next == .toolCalling
         case .toolCalling:
             return next == .modelSpeaking
         case .refreshing:
@@ -133,9 +151,16 @@ final class VoiceSessionStateMachine {
     /// the transition was illegal (state unchanged, warning logged).
     /// Debug builds assert on illegal transitions so protocol bugs
     /// surface loud.
+    ///
+    /// Self-transitions (current == next) are treated as idempotent
+    /// no-ops rather than illegal — useful for re-entrant handlers like
+    /// RealtimeSession.handleToolCall that may receive back-to-back
+    /// toolCall frames while already `.toolCalling`. No callback fires;
+    /// no log emission; caller sees `true` as if the request succeeded.
     @discardableResult
     func advance(to next: VoiceSessionState) -> Bool {
         let current = state
+        if current == next { return true }
         guard current.canTransition(to: next) else {
             Logger.voice.warning(
                 "illegal_state_transition from=\(current.rawValue, privacy: .public) to=\(next.rawValue, privacy: .public)",

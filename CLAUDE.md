@@ -43,9 +43,9 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 3. **User content lives in CloudKit, not Supabase.** Supabase Postgres holds operational metadata only (quotas, entitlements, prompt versions, AI request logs). Pantry items, recipes, and cooking sessions sync via CloudKit private database. Don't mirror user content in Postgres.
 4. **RLS on every ops table in Supabase.** All rows keyed on `canonical_user_key`. No exceptions, no "temporary" bypasses.
 5. **Hard-rule validator runs on every substitution output,** regardless of invocation path (Substitution Sheet or Live session function call).
-6. **Voice is Premium+ only.** Free tier gets unlimited tap-based Cook Mode, but the voice affordance triggers a hard paywall with `ENT-VOICE-01`.
-7. **Live session context pruned to last 3 turns.** `session.update` with audio-item truncation after every step advance. This is the only cost control that works — Gemini Live doesn't support caching.
-8. **Voice session `max_output_tokens: 150`.** Baked into the ephemeral-token mint config, not just client-side.
+6. **Voice is Premium+ only.** Free tier gets unlimited tap-based Cook Mode, but the voice affordance triggers a hard paywall with `ENT-VOICE-01`. Caps are `free: 0`, `premium: 13`, `pro: 27` voice Cook Sessions / month (ADR 0015, applied 2026-04-23). ADR-0008's testing override (Free 0→20 + `ENTITLEMENT_OVERRIDE_VOICE_FREE` env opening voice to all tiers) is **superseded** by ADR 0015; `effectiveVoiceEnabled()`'s env-based escape hatch is retained for future dev/staging runs only — production must keep `ENTITLEMENT_OVERRIDE_VOICE_FREE` unset (runbook: `supabase secrets list --project-ref ktqajarcomzplnpbczfo` before any cap-related deploy). See `docs/decisions/0015-voice-cap-reduction-and-live-caching-finding.md` and `docs/decisions/0008-voice-temporarily-free-for-testing.md` (Superseded).
+7. **Live sessions cannot be pruned mid-session — `refreshSession()` IS the pruning mechanism.** Gemini Live's protocol has four client-to-server message types (Setup, ClientContent, RealtimeInput, ToolResponse) and none support mid-session history truncation. Cost is bounded by silently minting a NEW ephemeral token with a compact recap appended to systemInstruction and swapping the WebSocket. Triggers: `turnCount - lastRefreshedAtTurn >= 10` OR `accum_prompt_tokens > 15_000` on a single turn. Earlier drafts called out `session.update` with audio-item truncation; that semantic was carried over from OpenAI Realtime and doesn't exist here. See ADR 0014.
+8. **Voice session `max_output_tokens: 400`** (bumped from 150 → 300 → 400 on 2026-04-22, ADR 0010). Baked into the ephemeral-token mint config, not just client-side. The invariant is "bounded cap exists" — specific value is tunable based on observed p95 response length. 400 tokens ≈ 16 s of audio at 25 tok/s.
 
 ---
 
@@ -93,13 +93,21 @@ Paid tier, per 1M tokens, April 2026:
 
 Audio tokens on Live: **25 tokens/second** both directions.
 
-### Cost model (steady-state, post-pruning, spike-validated April 2026)
+### Cost model (device-measured April 2026 post-step-6; supersedes spike projections)
 
-- Voice Cook turn: ~$0.00600 (125 new audio in + 825 carried audio in + ~200 AUDIO-mode overhead + 1000 text sys prompt in + 150 audio out)
-- Voice Cook session (15 turns): ~$0.090
-- Premium user AI / mo: **$1.89** (22.27% of $8.49 net ARPU)
-- Pro user AI / mo: **$3.69** (40 voice sessions; Pro cap deliberately below Premium's 3x-ratio ceiling to protect against power-law usage drift)
-- Free user AI / mo: **$0.075**
+Measured from 9+ turn device sessions with cadence N=4 refresh + pre-mint, 22% tool-call rate. Earlier spike projections (~$0.006/turn, ~$0.090/15-turn-session) under-modeled the baked-in-per-turn context (~3,800 token baseline: system prompt + recipe + pantry + household + AUDIO-mode overhead) by ~3x. ADR 0014 cost-correction amendment has the full breakdown.
+
+- Voice Cook turn (non-tool, steady-state): **~$0.008** (4,527 prompt tokens blended text+audio + 124 audio out)
+- Voice Cook turn (tool-call, double-pass): **~$0.014** (8,822 prompt tokens + 150 audio out)
+- Voice Cook session (15 turns, ~22% tool calls): **~$0.13-0.16**
+- Voice Cook session (30 turns): **~$0.27-0.32**
+- Premium user AI / mo: target **$1.89** (22.27% of $8.49 net ARPU); at **13-session × 15-turn cap (ADR 0015): ~$1.69-$2.08** — the 13 cap lands inside the guardrail without assuming caching savings.
+- Pro user AI / mo: target **$3.69**; at **27-session cap (ADR 0015): ~$3.51-$4.32**.
+- Free user AI / mo: target **$0.075** (unchanged; no voice quota — ADR 0008 Free 20 revert lands in the same release as ADR 0015).
+
+**Text:audio prompt-split uncertainty:** backend `ai_request_log.prompt_audio_tokens` vs `prompt_text_tokens` is captured but not yet aggregated into a single dashboard. Cost ranges above assume 75/25 (low) to 60/40 (high) text:audio split. PostHog LLM Observability has the per-request breakdown when exact costs are needed.
+
+**No caching on Live API** — permanent cost-model assumption per ADR 0015. Every voice-turn cost number above is computed against `usageMetadata.cachedContentTokenCount = 0`, which is what 50+ measured device turns have consistently returned. The Gemini 2.5/3 Flash implicit-caching behavior that `generateContent` callers get **does not fire** on `BidiGenerateContent` / Live API workloads; this is consistent with the published "cache — not supported" pricing row for `gemini-3.1-flash-live-preview`. Do NOT build cost-model scenarios, paywall economics, or margin projections that assume non-zero caching savings on voice turns. Observability for this signal is live (`ai_request_log.prompt_cached_tokens` column, PostHog `$ai_cache_read_input_tokens` property, migration `20260422000009` partial index); the cap-reversal trigger query sits in ADR 0015 for when the assumption needs re-checking.
 
 ### StoreKit SKUs
 
@@ -125,7 +133,7 @@ Family Sharing: **off** on all SKUs.
 | --- | --- | --- | --- |
 | Dinner Solves / mo | 6 | 40 | 120 |
 | Tap Cook Sessions | unlimited | unlimited | unlimited |
-| Voice Cook Sessions / mo | **0** | 20 | 40 |
+| Voice Cook Sessions / mo | **0** | **13** | **27** |
 | Recipe Imports / mo | 2 | unlimited | unlimited |
 | Remembered pantry items | 25 | 250 | 1000 |
 | Cook Mode voice | no | yes | yes |
@@ -144,16 +152,18 @@ Family Sharing: **off** on all SKUs.
 enum LiveSessionLimits {
     static let maxSessionDurationSec       = 30 * 60   // Gemini hard limit
     static let idleDisconnectSec           = 15 * 60   // Gemini hard limit
-    static let contextWindowTokens         = 131_072   // effectively non-binding with pruning
+    static let contextWindowTokens         = 131_072   // effectively non-binding with refresh cadence
     static let refreshAtElapsedSec         = 10 * 60   // Stir policy
-    static let refreshAtTurnCount          = 15        // Stir policy
-    static let maxOutputTokens             = 150       // Stir policy, baked into token mint
-    static let pruneKeepLastNTurns         = 3         // Stir policy, via session.update
+    static let refreshAtTurnCount          = 4         // Stir policy (15→10 AM, 10→7→2→4 PM on 2026-04-22; ADR 0014)
+    static let refreshAtPromptTokenCount   = 10_000    // Stir policy (burst trigger; 15k→10k PM on 2026-04-22; ADR 0014)
+    static let maxOutputTokens             = 400       // Stir policy, baked into token mint (ADR 0010)
     static let tokenSoftCapPerSession      = 40_000    // alert threshold
     static let tokenHardCapPerSession      = 80_000    // force session reset
     static let tokenMintOpenWindowSec      = 60        // new_session_expire_time offset
     static let tokenMintHardDeadlineSec    = 35 * 60   // expire_time offset
     static let tokenMintUses               = 1         // one session per token
+    // Removed: pruneKeepLastNTurns — Gemini Live has no mid-session
+    // truncation frame. Session refresh (above) IS pruning. ADR 0014.
 }
 ```
 
@@ -208,6 +218,7 @@ enum ErrorCode: String {
     case pay01       = "PAY-01"         // purchase failed
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
+    case entLeftovers01  = "ENT-LEFTOVERS-01" // leftovers mode requires Premium+
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
     case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale
                                          // iOS auto-re-bootstraps silently; invisible unless retry also fails
@@ -437,18 +448,20 @@ Client (PostHog):
 - `paywall_variant`
 - `widget_nudge_enabled`
 - `leftovers_mode_enabled`
-- `cook_voice_default_on`
-- `voice_turn_detection_mode` ∈ {`semantic_vad`, `server_vad`}
 
 Server (Supabase `feature_flags`):
 - `prompt_version_override`
 - `recipe_import_async_threshold`
 - `priority_queue_pro_enabled`
 - `cook_voice_thinking_level` ∈ {`minimal`, `low`}
+- `cook_voice_default_on` — auto-engage first voice turn on Cook Mode entry; read by `CookModeRoot` via `entitlements.flagBool`
+- `voice_turn_detection_mode` ∈ {`semantic_vad`, `server_vad`} — VAD profile; consumed by `_shared/live_mint.ts` at mint time
 - `disable_scan_parse`
 - `disable_cook_voice` / `disable_cook_realtime` (alias)
 - `disable_imports`
 - `force_saved_meals_only`
+
+Earlier drafts classified `cook_voice_default_on` and `voice_turn_detection_mode` as PostHog client flags; implementation consolidated both in Supabase because (a) `voice_turn_detection_mode` is consumed server-side at mint, (b) PostHog client-flag plumbing wasn't wired in iOS at step 5/6, and (c) mixing sources would mean two bootstrap paths for one decision surface.
 
 ### Expected environment variables
 
@@ -589,7 +602,7 @@ Everything here is where Gemini Live differs from OpenAI Realtime. Assume OpenAI
 5. **Ephemeral tokens have two expiries.** `new_session_expire_time` = window to open the session (~60s). `expire_time` = hard deadline for the session itself (~35 min from mint). `uses: 1` = one session per token.
 6. **Session refresh is silent by design.** 10 min or 15 turns, whichever first. Mint new token, open new WebSocket, close old one after new one's first response lands. If refresh fails → text fallback.
 7. **Semantic VAD is the starting choice, server VAD the fallback.** Semantic VAD chunks on utterance completion and avoids false-triggering on ambient kitchen noise. If testing shows misfires, flip `voice_turn_detection_mode` to `server_vad`.
-8. **`max_output_tokens: 150` is non-negotiable** for cost safety. Baked into the token mint's `generation_config`, not just client-side.
+8. **`max_output_tokens: 400`** (ADR 0010, bumped from 150 → 300 → 400 on 2026-04-22) for cost safety. Baked into the token mint's `generation_config`, not just client-side. The invariant is "bounded cap exists" — value is tunable based on observed p95 response length. Trigger to revisit: see ADR 0010.
 9. **Function response flow differs.** Gemini auto-continues after a `BidiGenerateContentToolResponse` frame. No explicit `response.create` needed (unlike OpenAI Realtime). Function responses are sent as `toolResponse` — not `clientContent` — carrying the matching `functionResponse.id`. If you find yourself writing `response.create` or wrapping a function result in `clientContent`, stop.
 10. **Audio format.** PCM16 at 16kHz for input; base64-encoded in `realtimeInput.audio` frames. Server returns base64-encoded audio in `serverContent.modelTurn.parts[].inlineData`.
 11. **`clientContent` is history-only on 3.1 Flash Live.** For in-session text injection (typed events like step advance, timer completion, substitution context), use `realtimeInput.text`. `clientContent` only seeds initial conversation history and requires `initial_history_in_client_content: true` in setup — Stir doesn't seed history, so Stir should not use `clientContent` at all.
@@ -605,6 +618,12 @@ Everything here is where Gemini Live differs from OpenAI Realtime. Assume OpenAI
 
 19. **Ephemeral-token sessions still require a client-sent `{"setup": {...}}` frame** as the first WebSocket message after `open`. The `bidiGenerateContentSetup` baked into the token acts as an authorization *ceiling* for what the session is allowed to do; it does **NOT** cause the server to auto-emit `setupComplete`. The server waits for the client's setup frame regardless. Symptom of missing the frame: `setupComplete` never arrives, any `awaitSetupComplete`-style timeout fires (Stir hit this 2026-04-20, 5-second budget exhausted on mint that was otherwise healthy). Verified against the official `google-gemini/gemini-live-api-examples/gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js → sendInitialSetupMessages()` reference, which sends the full setup after ephemeral-token WS open. Stir's mitigation: backend pre-serializes the exact setup frame at mint time and returns it as `setup_frame_json` on the `/v1/ai/realtime-session` response; iOS forwards it verbatim after `ws.open` via `LiveOutboundFrame.setup(payload:)`.
 
+20. **Gemini Live is preview-labeled and has stateful protocol bugs — assume every state transition is defensible, not guaranteed.** `gemini-3.1-flash-live-preview` is on the preview API surface and can drop load-bearing frames without warning. Two observed cases as of 2026-04-23:
+    - **Missing `turnComplete` after multi-pass tool-call turns.** Device test: after `start_timer`, Gemini ran three generation passes (post-tool narration, re-narration, second re-narration), emitted `generationComplete` after each pass, but never sent `turnComplete`. The iOS state machine stayed pinned in `.modelSpeaking` for 35+s until the user manually closed the session. Every subsequent user utterance was rejected as "already modelSpeaking." Stir mitigation: `turnStuckWatchdog` in `RealtimeSession.swift` (8-second threshold, armed on entry to `.modelSpeaking`, rearmed on every inbound audio chunk, cancelled on transition out). On fire, synthesizes a `turnComplete` transition, persists a VoiceTurn row with `resultType='error' + errorCode='turnComplete_timeout'`, and emits the `voice_turn_stuck_watchdog_fired` PostHog event. ADR 0015 trigger threshold: >5% of tool-call turns in a 7-day rolling window = revisit spec §18 vendor contingency.
+    - **`setupComplete` not auto-emitted on ephemeral-token sessions** (already documented as #19 above) — same class of bug: the server expects a client-authored state transition but doesn't telegraph that expectation.
+
+    **Defensive-by-default posture for Live path iOS code:** every `await` on a Gemini-initiated state transition (setupComplete, turnComplete, first audio chunk, pre-mint swap complete) MUST have a client-side timeout with a graceful recovery path. "The frame will arrive" is not a safe assumption on preview API. Keep the watchdog scope pinned to RealtimeSession.swift only — SpeechFallbackService talks to a different backend (`/v1/ai/cook-turn` HTTP, AVSpeechSynthesizer-local playback) and has zero exposure to this class of bug. Revisit all iOS-side Live-path timeouts when `gemini-3.1-flash-live-preview` moves to GA (Google has given no public timeline as of 2026-04-23).
+
 ---
 
 ## Backend contracts
@@ -614,7 +633,7 @@ All `/v1/*` endpoints authenticate via session JWT from `/v1/session/bootstrap`.
 Shared behaviors across endpoints:
 - 400 on request body validation failure → `{ error: "VAL-01", message, field_errors: [...] }`
 - 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale" }`
-- 403 on entitlement mismatch → `{ error: "ENT-VOICE-01" }` for voice, `{ error: "BILL-01" }` for general
+- 403 on entitlement mismatch → `{ error: "ENT-VOICE-01" }` for voice, `{ error: "ENT-LEFTOVERS-01" }` for leftovers mode, `{ error: "ENT-MULTI-IMAGE-01" }` for multi-image scan, `{ error: "BILL-01" }` for general
 - 429 on quota exhaustion → `{ error: "RATE-01" }`
 - 502 on Gemini outage → `{ error: "AI-01" }`
 - Every response body carries `{ error: CODE, message: string, ...structured_details }`. Never return a string-only error. Never return 4xx/5xx with no body.
@@ -628,6 +647,7 @@ Edge Function conventions:
 - Secrets via `Deno.env.get(...)` — never hardcoded
 - Validate session JWT first thing in every handler using the shared helper
 - Zod schema validation at the boundary of every handler (before any DB access)
+- **Every new `/v1/ai/*` (or any JWT-verifying) function MUST have `[functions.<name>] verify_jwt = false` added to `Backend/supabase/config.toml`.** Without it, Kong rejects every authenticated POST at the platform layer with an opaque 401 before the handler runs — the typed AUTH-01 reason never makes it to the client. Landed in the SAME PR as the new function; easy to forget and silent to debug (observed 2026-04-22 with voice-turn-usage: 100+ opaque 401s before the missing entry was noticed).
 
 ---
 
@@ -665,7 +685,8 @@ If you're about to write user content to Postgres: stop. That's always a bug unl
 - **Intro offer eligibility:** Apple platform enforces one per Apple ID per subscription group. Not our enforcement problem.
 - **Cohort math:** see spec §9. Pro annual year-1 margin is ~$4.13/mo after the April 2026 pricing bump and spike-validated cost model — flag before raising the voice cap or reducing Pro annual price below $139.99.
 - **Paywall trigger moments:** `voice_affordance_tapped` on Free tier is the highest-intent trigger. Lead the paywall with `stir.premium.annual.trial7`, always.
-- **Pro voice cap is 40 sessions/mo, not 60.** Earlier spec drafts used 60 and it yielded $0.01/mo year-1 Pro annual margin — fragile to any usage variance. Pro annual is priced at $139.99/yr (not $89.99 or the $119.99 intermediate) specifically because Pro users skew toward the cap and the realized average cost drifts toward the ceiling; the extra headroom also leaves room for founder-discount offer codes during beta without regressing below safe margin.
+- **Pro voice cap is 27 sessions/mo** (ADR 0015; was 40, was 60). The 60 cap yielded $0.01/mo year-1 Pro annual margin — fragile to any usage variance. The 40 cap held before the 2026-04-23 device-measured caching finding (implicit caching does not fire on Live API) invalidated the cost model. 27 is the new Pro cap; paired with Premium's 13 cap it keeps Premium AI spend under the 22.27% ARPU guardrail without a price raise. Pro annual is priced at $139.99/yr (not $89.99 or the $119.99 intermediate) specifically because Pro users skew toward the cap and the realized average cost drifts toward the ceiling; the extra headroom also leaves room for founder-discount offer codes during beta without regressing below safe margin.
+- **Premium voice cap is 13 sessions/mo** (ADR 0015; was 20). See Pro-cap note above for the shared caching-finding context.
 
 ---
 
@@ -681,8 +702,9 @@ dinner_solve_requested, dinner_solve_completed, suggested_dish_selected,
 cook_mode_started, cook_step_advanced, timer_started,
 voice_affordance_tapped, cook_turn_submitted, cook_turn_resolved,
 voice_session_token_snapshot, voice_session_refreshed,
+voice_turn_stuck_watchdog_fired,
 substitution_requested, substitution_accepted,
-cook_session_completed, meal_rated,
+cook_session_completed, meal_rated, meal_rating_skipped,
 grocery_list_exported, favorite_saved,
 recipe_import_started, recipe_import_completed,
 paywall_viewed, trial_started, trial_reminder_sent,
@@ -696,6 +718,8 @@ screen_error_shown, sync_state_changed
 Anchors:
 - `core_success_event`: scan → select → cook within 3 min → rate ≥4
 - `voice_conversion_event`: voice_affordance_tapped(free) → paywall_viewed → trial_started → purchase_completed
+
+PostHog LLM Observability events (`$ai_generation`, `$ai_trace`) are a SEPARATE class from the product-event list above — they feed PostHog's LLM Analytics dashboards natively. Every AI call emits both an `ai_request_log` row AND a `$ai_generation` event; the link is `$ai_span_id = ai_request_log.request_id`. See spec §15 "PostHog LLM Observability events" for property tables and the dashboard-join contract. Privacy posture: no `$ai_input` / `$ai_output_choices`, no user content, ever. ADR 0009.
 
 ---
 
@@ -774,11 +798,11 @@ Goals: validate that Gemini Live MINIMAL's real-world behavior on iOS matches th
 
 Before step 6 moves from "wire up the audio pipeline" to "productionize the UX", the following must all measure within spec:
 
-1. **TTFA on Wi-Fi, p95 <1.0s** across 20 representative turns. If p95 is 1.5s+, the Premium UX premise is wrong and the fallback-path pre-warm matters more than currently scoped.
+1. **TTFA on Wi-Fi — split gate on `cook_turn_resolved.result_type` (amended by ADR 0012 on 2026-04-22 PM):** TTFA(`normal`) p95 < **500 ms** AND TTFA(`tool_call`) p95 < **1500 ms** across 20 representative turns. Anchor: last pre-audio `inputTranscription` frame → first `modelTurn.parts[].inlineData` chunk, driver-level precision. Original spec said "p95 < 1.0 s" against the merged distribution; that lumped model-latency (normal turns, ~1–3 ms observed) and tool-dispatch structural latency (~1000 ms observed) into one number. Split-gate thresholds are provisional — revisit after 2 weeks of beta if either distribution sits at ≥ 80 % of its gate.
 2. **Preamble-present rate at MINIMAL ≥ 70%** across 50 tool-call invocations. If lower, disable model-emitted preambles entirely and rely on the client-side pre-recorded clip as the sole dead-air cover.
 3. **Client-side pre-recorded filler fires within 150ms of `toolCall` frame arrival** and masks the 2s backend round-trip cleanly in 95%+ of substitution invocations.
-4. **Pruning holds.** Run a scripted 20-turn session with `session.update` pruning after every step advance. Verify per-turn input token count from `usageMetadata` stays bounded at ~950 audio tokens and does not grow with session length.
-5. **Session refresh is silent.** At the 10-minute / 15-turn boundary, the refresh handoff completes without user-perceptible gap.
+4. **Refresh-bounded growth holds.** Run a scripted 30-turn session on a physical device. Verify `refreshSession()` fires at turns 10, 20, and 30 (logged as `live_session_refresh_complete`). Per-turn prompt tokens should grow linearly within each 10-turn window (baseline ~6-7k fresh → ~13-15k at turn 10) and RESET to the ~6-7k baseline immediately after each refresh. If tokens keep growing past turn 10 without a refresh event, the trigger is broken. If refreshes fire but per-turn tokens don't drop to baseline after swap, the recap path or setupComplete handshake is misbehaving. Superseded the original "pruning holds" criterion — Gemini Live has no mid-session truncation frame (ADR 0014).
+5. **Session refresh is silent.** At each 10-turn / 15k-prompt-token trigger, the handoff completes without user-perceptible gap. Mic mute window ≤ 5s. User speaking during a refresh is dropped until mic forwarding restarts (rare at turn boundaries).
 
 If 1 or 4 fail materially, stop and escalate — those are architectural problems, not tuning problems. 2, 3, 5 can be tuned.
 
@@ -864,7 +888,7 @@ These aren't restrictions on creativity — they're specific wrong paths that lo
 - Don't derive `voice_enabled` on iOS. It's server-computed in the bootstrap response.
 - Don't use object-keyed `quotas` in API responses. Always an iterable array.
 - Don't add new telemetry event names **or new property values on existing events** without updating spec §15 and this file. A new `result=busy` on `voice_affordance_tapped` is a wire-contract change just like adding a new event.
-- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, VAL-01, AUTH-01). New codes require updating both this file and spec §6.
+- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, ENT-LEFTOVERS-01, VAL-01, AUTH-01, METHOD-NOT-ALLOWED-01). New codes require updating both this file and spec §6.
 - Don't return 4xx/5xx with empty body or string-only error. Always `{ error: CODE, message, ...structured_details }`.
 - Don't skip the hard-rule validator on substitution output because "the model is trustworthy on this one." Not optional.
 - Don't use UIKit unless wrapping `AVCaptureVideoPreviewLayer` via `UIViewRepresentable`. SwiftUI-first, always.

@@ -50,7 +50,7 @@ export const COOK_MODE_TOOLS: Array<Record<string, unknown>> = [
   {
     name: 'start_timer',
     description:
-      'Start a timer for the current or upcoming step. Before calling, say "Starting timer now" out loud.',
+      'Start a timer for the current step. Use when the user says "start the timer", "set a timer for N minutes", or when they ask to begin a timed step. Before calling, say a short filler like "Starting timer now" out loud.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -61,10 +61,58 @@ export const COOK_MODE_TOOLS: Array<Record<string, unknown>> = [
     },
   },
   {
-    name: 'advance_step',
+    name: 'get_timer_status',
     description:
-      "Move to the next step when the user says they're done with the current one. No preamble needed — this is instantaneous.",
+      "Check the current timer's state and remaining time. Use when the user asks 'how much time is left', 'is the timer running', 'how long until the timer goes off', or any similar question. Returns { state, remaining_seconds, total_seconds, label }. No preamble needed — just call it.",
     parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'pause_timer',
+    description:
+      'Pause the currently running timer. Use when the user says "pause the timer", "hold on", "stop for a second", or similar pause intents. Before calling, say a short filler like "Pausing now" out loud.',
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'resume_timer',
+    description:
+      'Resume a paused timer. Use when the user says "resume the timer", "start it back up", "unpause", or similar. Before calling, say a short filler like "Resuming" out loud.',
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'cancel_timer',
+    description:
+      'Cancel the currently running or paused timer. Use when the user says "cancel the timer", "stop the timer entirely", or "nevermind the timer". Before calling, say a short filler like "Cancelling" out loud.',
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'restart_timer',
+    description:
+      'Restart the current timer — cancels the existing timer (if any) and starts a fresh one. Use when the user says "restart the timer", "start the timer over", "reset the timer", or "start the timer again". This is a SINGLE atomic tool call — do NOT call cancel_timer + start_timer separately. If the user specifies a new duration ("restart for 5 minutes"), pass seconds; otherwise omit seconds to reuse the existing timer\'s duration. Before calling, say a short filler like "Restarting timer" out loud.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        seconds: {
+          type: 'INTEGER',
+          description: 'Optional duration in seconds for the restarted timer. If omitted, reuses the existing timer\'s total duration. Required if no timer currently exists on this step.',
+        },
+        label: { type: 'STRING', description: 'Optional label for the restarted timer.' },
+      },
+    },
+  },
+  {
+    name: 'set_step',
+    description:
+      "Navigate the cooking UI to a specific step number. Use whenever the user says anything indicating they want to see a specific step — 'next step', 'I\\'m done with this step' (pass current_step+1), 'go back to step 3', 'jump to step 5', 'skip ahead', 'show me step N', 'let\\'s finish' (pass total_steps). Works forward OR backward. No preamble needed.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        step_number: {
+          type: 'INTEGER',
+          description: '1-indexed step number to navigate to. Must be between 1 and total_steps inclusive.',
+        },
+      },
+      required: ['step_number'],
+    },
   },
 ];
 
@@ -80,11 +128,23 @@ export interface LiveMintConfig {
   thinkingLevel?: 'minimal' | 'low';
   /** Prebuilt voice name. Default "Aoede" per Cook Mode Architecture. */
   voiceName?: string;
-  /** Max output audio tokens per turn. Stir policy: 150. CLAUDE.md #8. */
+  /** Max output audio tokens per turn. Stir policy: 300 (see CLAUDE.md
+   * #8 and ADR 0010). 150 was too tight — 2-sentence responses
+   * exceeding 6 seconds of speech (e.g., step instructions with an
+   * amount + a doneness cue) hit the cap mid-sentence. 300 covers
+   * ~12 seconds at 25 tokens/sec, which matches the "2 short sentences"
+   * prompt budget with a safety margin. */
   maxOutputTokens?: number;
   /** Turn coverage mode. April 2026 default:
    * TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO. */
   turnCoverage?: string;
+  /** VAD tuning profile. `semantic_vad` (default) uses the tuned
+   * silence/sensitivity config validated 2026-04-20..22 for kitchen
+   * noise tolerance. `server_vad` passes `{ disabled: false }` only,
+   * letting Gemini use its own defaults — a kill-switch fallback if
+   * the tuned profile misbehaves in prod. Driven by the
+   * `voice_turn_detection_mode` feature flag. */
+  turnDetectionMode?: 'semantic_vad' | 'server_vad';
 }
 
 export interface LiveMintResult {
@@ -110,11 +170,24 @@ export class LiveMintError extends Error {
   public readonly statusCode: number;
   public readonly upstreamBody: string;
   constructor(statusCode: number, upstreamBody: string) {
-    super(`Gemini Live mint failed: status=${statusCode} body=${upstreamBody.slice(0, 200)}`);
+    // SA3-12: .message MUST NOT contain the upstream body — Gemini
+    // error payloads can echo the rendered systemInstruction (which
+    // carries household dietary rules + recipe context rendered into
+    // the prompt). `upstreamBody` stays on the instance for targeted
+    // dev debugging; surface it through logs only when the explicit
+    // STIR_LOG_GEMINI_BODIES env flag is set (see callers below).
+    super(`Gemini Live mint failed: status=${statusCode}`);
     this.name = 'LiveMintError';
     this.statusCode = statusCode;
     this.upstreamBody = upstreamBody;
   }
+}
+
+/** Whether `LiveMintError.upstreamBody` may be logged. Defaults OFF in
+ * production. Set `STIR_LOG_GEMINI_BODIES=true` in dev/staging only. */
+export function shouldLogGeminiBodies(): boolean {
+  const raw = Deno.env.get('STIR_LOG_GEMINI_BODIES') ?? 'false';
+  return /^(1|true|yes|on)$/i.test(raw.trim());
 }
 
 /**
@@ -137,8 +210,22 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
 
   const thinkingLevel = config.thinkingLevel ?? 'minimal';
   const voiceName = config.voiceName ?? 'Aoede';
-  const maxOutputTokens = config.maxOutputTokens ?? 150;
+  const maxOutputTokens = config.maxOutputTokens ?? 400;
   const turnCoverage = config.turnCoverage ?? 'TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO';
+  const turnDetectionMode = config.turnDetectionMode ?? 'semantic_vad';
+
+  // VAD profile switch — `semantic_vad` is the tuned-for-kitchen
+  // config; `server_vad` is the escape hatch that defers to Gemini's
+  // defaults if the tuned config misbehaves.
+  const automaticActivityDetection = turnDetectionMode === 'server_vad'
+    ? { disabled: false }
+    : {
+        disabled: false,
+        silenceDurationMs: 800,
+        prefixPaddingMs: 300,
+        startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+      };
 
   const bidiGenerateContentSetup = {
     model: config.model,
@@ -172,13 +259,10 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
       //                              ambient kitchen noise.
       //   endOfSpeechSensitivity=LOW   — only fire on clear pauses,
       //                              not mid-utterance micropauses.
-      automaticActivityDetection: {
-        disabled: false,
-        silenceDurationMs: 800,
-        prefixPaddingMs: 300,
-        startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
-        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
-      },
+      //
+      // `server_vad` mode bypasses the tuned profile and passes just
+      // `{ disabled: false }` — escape hatch via feature flag.
+      automaticActivityDetection,
       turnCoverage,
     },
     // Transcription: diagnostic + long-term VoiceTurn persistence.

@@ -178,7 +178,7 @@ final class ImportViewModel {
             payload: .screenshotOCR(text: ocrResult.text, pageCount: ocrResult.pageCount),
             rawContent: ocrResult.text,
             sourceURL: nil,
-            ocrPageCount: Int16(ocrResult.pageCount),
+            ocrPageCount: Int16(clamping: ocrResult.pageCount),
         )
     }
 
@@ -189,6 +189,12 @@ final class ImportViewModel {
     /// invariant: "every import attempt persists a RecipeImport row".
     /// errorCode defaults to VAL-01 for input validation rejections;
     /// OCR-path failures pass IMPORT-01.
+    ///
+    /// Emits recipe_import_completed with parseQuality="failed" so the
+    /// import-quality funnel (spec §15) sees client-side rejections
+    /// alongside server failures. Uses repo.recordClientReject for a
+    /// single-save insert — previously start + markFailed was two saves
+    /// and a throw on the second left orphaned `.pending` rows (CA1-13).
     private func recordClientRejection(
         source: RecipeImportSource,
         rawContent: String,
@@ -204,12 +210,23 @@ final class ImportViewModel {
             rawContent: rawContent,
         )
         do {
-            let row = try importRepo.start(for: household, input: input)
-            try importRepo.markFailed(row, errorCode: errorCode)
+            let row = try importRepo.recordClientReject(
+                for: household,
+                input: input,
+                errorCode: errorCode,
+            )
             activeImportRow = row
         } catch {
             Logger.ui.warning("import client-reject audit write failed: \(error.localizedDescription, privacy: .public)")
         }
+        analytics.capture(
+            .recipeImportCompleted,
+            properties: StepSevenTelemetry.recipeImportCompleted(
+                source: source,
+                parseQuality: "failed",
+                editRequired: false,
+            ),
+        )
         stage = .error(code: errorCode, message: message)
     }
 
@@ -239,6 +256,10 @@ final class ImportViewModel {
         } catch {
             Logger.ui.error("import audit row create failed: \(error.localizedDescription, privacy: .public)")
             stage = .error(code: "VAL-01", message: "Couldn't start the import.")
+            // No audit row exists to mark failed — emit completed so the
+            // funnel still sees the failure. source_type is captured at
+            // activeSource assignment above.
+            emitImportCompleted(parseQuality: "failed")
             return
         }
         activeImportRow = importRow
@@ -265,6 +286,7 @@ final class ImportViewModel {
                 guard let recipe = response.recipe else {
                     stage = .error(code: "IMPORT-01", message: "The import came back empty.")
                     markFailed(importRow, errorCode: "IMPORT-01")
+                    emitImportCompleted(parseQuality: "failed")
                     return
                 }
                 stage = .review(recipe: recipe, parseQuality: recipe.parseQuality.rawValue)
@@ -275,24 +297,35 @@ final class ImportViewModel {
             Logger.ui.error("recipe import failed: \(error.localizedDescription, privacy: .public)")
             stage = .error(code: "IMPORT-01", message: "We couldn't read that recipe. Try again or paste the text.")
             markFailed(importRow, errorCode: "IMPORT-01")
+            emitImportCompleted(parseQuality: "failed")
         }
     }
 
     // MARK: - Review → persist
 
     /// Commit the reviewed recipe to Core Data as a RecipePlan.
+    ///
+    /// Writes RecipePlan + ingredients + steps AND audit-row completion
+    /// state in a SINGLE controller.save() call. Previously persistRecipePlan
+    /// saved internally and markCompleted saved again — if the second save
+    /// threw, the plan was already in Saved but the audit row sat at
+    /// `.processing` forever (CA1-13). The catch branch now calls
+    /// markFailed so the audit row finalizes with IMPORT-01, and emits
+    /// recipe_import_completed so the funnel sees the failure.
     func confirmAndSave() async {
         guard case .review(let recipe, let quality) = stage else { return }
         guard let importRow = activeImportRow else { return }
         stage = .saving
 
         do {
-            let planID = try persistRecipePlan(recipe, source: activeSource)
-            try importRepo.markCompleted(
-                importRow,
-                recipePlanID: planID,
-                aiRequestID: nil,
-            )
+            let planID = try buildRecipePlan(recipe, source: activeSource)
+            // Set audit completion fields on the same viewContext so the
+            // save below is a single atomic write.
+            importRow.setStatus(.completed)
+            importRow.completedAt = Date()
+            importRow.recipePlanId = planID
+            importRow.aiRequestId = nil
+            try controller.save()
             analytics.capture(
                 .recipeImportCompleted,
                 properties: StepSevenTelemetry.recipeImportCompleted(
@@ -305,19 +338,27 @@ final class ImportViewModel {
         } catch {
             Logger.ui.error("import save failed: \(error.localizedDescription, privacy: .public)")
             stage = .error(code: "IMPORT-01", message: "Couldn't save. Try again.")
+            markFailed(importRow, errorCode: "IMPORT-01")
+            emitImportCompleted(parseQuality: "failed")
         }
     }
 
     /// User cancelled the import on the review screen. Writes the audit
-    /// row as failed with USER_CANCELLED errorCode (CLAUDE.md default).
+    /// row as failed with USER_CANCELLED errorCode (CLAUDE.md default) —
+    /// unless the row is ALREADY `.failed`, in which case we leave the
+    /// prior errorCode intact (overwriting e.g. IMPORT-01 with
+    /// USER_CANCELLED would corrupt the audit trail on retry-after-error).
+    /// Emits recipe_import_completed with parseQuality="user_cancelled"
+    /// so the import funnel sees backouts (spec §15).
     func cancelImport() {
-        if let importRow = activeImportRow {
+        if let importRow = activeImportRow, importRow.statusEnum != .failed {
             do {
                 try importRepo.markFailed(importRow, errorCode: RecipeImportErrorCode.userCancelled)
             } catch {
                 Logger.ui.warning("markFailed on cancel: \(error.localizedDescription, privacy: .public)")
             }
         }
+        emitImportCompleted(parseQuality: "user_cancelled")
         stage = .idle
     }
 
@@ -331,12 +372,27 @@ final class ImportViewModel {
         }
     }
 
-    /// Persist the parsed recipe as a RecipePlan + RecipeIngredient +
-    /// RecipeStep rows. Sets `household` so the new plan shows up in
-    /// `CookingSessionRepository.savedMealEntries` (which filters on
-    /// household). Caution tags + isOptional flags are deferred (v1
-    /// import doesn't extract those; Saved detail view can add later).
-    private func persistRecipePlan(
+    /// Emit recipe_import_completed using the currently-active source.
+    /// Centralized so cancel/fail paths don't duplicate the StepSevenTelemetry
+    /// call shape — single edit-site if the property bag grows.
+    private func emitImportCompleted(parseQuality: String) {
+        analytics.capture(
+            .recipeImportCompleted,
+            properties: StepSevenTelemetry.recipeImportCompleted(
+                source: activeSource,
+                parseQuality: parseQuality,
+                editRequired: didEdit,
+            ),
+        )
+    }
+
+    /// Build RecipePlan + RecipeIngredient + RecipeStep entities on the
+    /// viewContext WITHOUT saving. Caller pairs this with an audit-row
+    /// update and a single controller.save() so the persist + audit-
+    /// completion state land atomically. Caution tags + isOptional flags
+    /// are deferred (v1 import doesn't extract those; Saved detail view
+    /// can add later).
+    private func buildRecipePlan(
         _ recipe: RecipeImportResponse.ImportedRecipe,
         source: RecipeImportSource,
     ) throws -> UUID {
@@ -346,8 +402,8 @@ final class ImportViewModel {
         plan.id = planID
         plan.household = household
         plan.title = recipe.title
-        plan.servings = Int16(recipe.servings ?? 2)
-        plan.estimatedMinutes = Int16(recipe.estimatedMinutes ?? 30)
+        plan.servings = Int16(clamping: recipe.servings ?? 2)
+        plan.estimatedMinutes = Int16(clamping: recipe.estimatedMinutes ?? 30)
         plan.createdAt = Date()
         plan.isFavorite = false
         plan.aiVersion = "recipe_import_v1"
@@ -358,18 +414,17 @@ final class ImportViewModel {
             row.displayName = ing.displayName
             row.canonicalIngredientSlug = ing.canonicalSlug
             row.amountText = ing.amountText
-            row.sortOrder = Int16(idx)
+            row.sortOrder = Int16(clamping: idx)
         }
         for step in recipe.steps {
             let row = RecipeStep(context: ctx)
             row.id = UUID()
             row.recipePlan = plan
-            row.stepNumber = Int16(step.stepNumber)
+            row.stepNumber = Int16(clamping: step.stepNumber)
             row.instructionText = step.instructionText
-            row.timerSeconds = Int32(step.timerSeconds ?? 0)
+            row.timerSeconds = Int32(clamping: step.timerSeconds ?? 0)
         }
         _ = source  // reserved for step-8 source_type telemetry on RecipePlan
-        try ctx.save()
         return planID
     }
 }

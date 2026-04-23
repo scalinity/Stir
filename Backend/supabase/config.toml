@@ -412,6 +412,12 @@ verify_jwt = false
 [functions.grocery-generate]
 verify_jwt = false
 
+# Step-6 / ADR-0009 addition. voice-turn-usage verifies the session JWT
+# itself so it can return typed AUTH-01 reasons; without this opt-out
+# Kong rejects every iOS POST at the platform layer with a generic 401.
+[functions.voice-turn-usage]
+verify_jwt = false
+
 [functions.push-register]
 verify_jwt = false
 

@@ -47,6 +47,8 @@ struct ImportEntryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onDismiss)
                         .foregroundStyle(Color.Stir.ink700)
+                        .accessibilityLabel("Close")
+                        .accessibilityHint("Cancels the import and closes this screen")
                 }
             }
             .onChange(of: pickerItem) { _, newItem in
@@ -93,11 +95,15 @@ struct ImportEntryView: View {
                     .keyboardType(.URL)
                     .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(Color.Stir.ink900)
+                    .accessibilityLabel("Recipe URL")
+                    .accessibilityHint("Paste a URL to a recipe you want to import")
                 if !urlText.isEmpty {
                     Button { urlText = "" } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(Color.Stir.ink300)
                     }
+                    .accessibilityLabel("Clear URL")
+                    .accessibilityHint("Clears the URL field")
                 }
             }
         }
@@ -135,6 +141,8 @@ struct ImportEntryView: View {
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isBusy)
+            .accessibilityLabel("Photo from library")
+            .accessibilityHint("Pick a recipe screenshot or photo for OCR import")
 
             Button { showPasteSheet = true } label: {
                 MethodRow(
@@ -145,6 +153,8 @@ struct ImportEntryView: View {
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isBusy)
+            .accessibilityLabel("Paste recipe text")
+            .accessibilityHint("Opens a sheet where you can paste recipe text from any source")
         }
     }
 
@@ -182,6 +192,9 @@ struct ImportEntryView: View {
             )
         }
         .disabled(urlText.isEmpty || viewModel.isBusy)
+        .accessibilityLabel(viewModel.isBusy ? "Importing" : "Import link")
+        .accessibilityHint(urlText.isEmpty ? "Enter a URL above to enable" : "Submits the URL for parsing")
+        .accessibilityAddTraits(viewModel.isBusy ? [.updatesFrequently] : [])
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)

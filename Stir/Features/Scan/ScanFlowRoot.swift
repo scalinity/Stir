@@ -27,6 +27,7 @@ struct ScanFlowRoot: View {
         householdStore: CurrentHouseholdStore,
         entitlements: EntitlementService,
         cameraService: CameraService = CameraService(),
+        presentPaywall: ((PaywallTrigger) -> Void)? = nil,
     ) {
         self._scanViewModel = State(wrappedValue: ScanViewModel(
             aiDispatch: aiDispatch,
@@ -38,6 +39,7 @@ struct ScanFlowRoot: View {
             aiDispatch: aiDispatch,
             solveRepo: solveRepo,
             householdStore: householdStore,
+            presentPaywall: presentPaywall,
         ))
         self.cameraService = cameraService
     }

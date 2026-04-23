@@ -10,20 +10,30 @@
 
 import SwiftUI
 
+/// Shared state between ShareViewController (which extracts the
+/// PendingImport asynchronously) and this root view. Replaces the
+/// NotificationCenter pattern whose subscription timing raced with
+/// the extraction post, leaving the UI permanently stuck on
+/// "Reading what you shared…" for text-only shares (CR1-22/DB1-22).
+@Observable
+@MainActor
+final class ShareExtractionState {
+    var pending: PendingImport?
+    var isWaitingForExtraction: Bool = true
+}
+
 struct ShareExtensionRootView: View {
     let onSend: (PendingImport) -> Void
     let onCancel: () -> Void
-
-    @State private var pending: PendingImport?
-    @State private var isWaitingForExtraction: Bool = true
+    @Bindable var state: ShareExtractionState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
 
-            if isWaitingForExtraction {
+            if state.isWaitingForExtraction {
                 PlaceholderCard()
-            } else if let pending {
+            } else if let pending = state.pending {
                 PayloadCard(pending: pending)
                 infoNote
             } else {
@@ -36,14 +46,6 @@ struct ShareExtensionRootView: View {
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.Stir.paper200.ignoresSafeArea())
-        .onReceive(NotificationCenter.default.publisher(
-            for: .stirShareExtensionDidExtract,
-        )) { note in
-            if let extracted = note.object as? PendingImport {
-                pending = extracted
-                isWaitingForExtraction = false
-            }
-        }
     }
 
     // MARK: - Sections
@@ -111,8 +113,10 @@ struct ShareExtensionRootView: View {
                             .strokeBorder(Color.Stir.ink100, lineWidth: 1),
                     )
             }
+            .accessibilityLabel("Cancel")
+            .accessibilityHint("Dismiss the share sheet without saving")
             Button {
-                if let pending { onSend(pending) }
+                if let pending = state.pending { onSend(pending) }
             } label: {
                 Text("Send to Stir")
                     .font(.system(size: 15, weight: .semibold))
@@ -121,10 +125,14 @@ struct ShareExtensionRootView: View {
                     .frame(height: 48)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(pending == nil ? Color.Stir.ink300 : Color.Stir.ember600),
+                            .fill(state.pending == nil ? Color.Stir.ink300 : Color.Stir.ember600),
                     )
             }
-            .disabled(pending == nil)
+            .disabled(state.pending == nil)
+            .accessibilityLabel("Send to Stir")
+            .accessibilityHint(state.pending == nil
+                ? "Waiting for the shared content to load"
+                : "Queues this recipe for import when you re-open Stir")
         }
     }
 }

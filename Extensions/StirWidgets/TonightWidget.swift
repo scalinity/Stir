@@ -72,6 +72,10 @@ struct TonightProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TonightEntry>) -> Void) {
         let storage = SharedStorage()
+        // First-seen signal for the `widget_added` Retention funnel.
+        // Idempotent — only the first getTimeline fetch sets the
+        // timestamp; main app drains on foreground.
+        storage.markWidgetFirstSeenIfNeeded()
         let entry = TonightEntry(
             date: .now,
             snapshot: storage.readTonight(),
@@ -102,12 +106,12 @@ struct TonightWidgetView: View {
 
     var body: some View {
         if isPremium(tier: entry.tier) {
-            if let snapshot = entry.snapshot, !snapshot.topDishes.isEmpty {
+            if let snapshot = entry.snapshot, let top = snapshot.topDishes.first {
                 switch family {
-                case .systemSmall:  SmallView(snapshot: snapshot)
-                case .systemMedium: MediumView(snapshot: snapshot)
+                case .systemSmall:  SmallView(snapshot: snapshot, top: top)
+                case .systemMedium: MediumView(snapshot: snapshot, top: top)
                 case .systemLarge:  LargeView(snapshot: snapshot)
-                default:            SmallView(snapshot: snapshot)
+                default:            SmallView(snapshot: snapshot, top: top)
                 }
             } else {
                 EmptyStateView()
@@ -118,7 +122,8 @@ struct TonightWidgetView: View {
     }
 
     private func isPremium(tier: String?) -> Bool {
-        tier == "premium" || tier == "pro"
+        guard let raw = tier, let t = SharedTier(rawValue: raw) else { return false }
+        return t.isPaid
     }
 }
 
@@ -126,9 +131,9 @@ struct TonightWidgetView: View {
 
 private struct SmallView: View {
     let snapshot: TonightSnapshot
+    let top: TonightSnapshot.DishBrief
 
     var body: some View {
-        let top = snapshot.topDishes[0]
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 5) {
                 StirGlyph(size: 14)
@@ -169,6 +174,9 @@ private struct SmallView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(URL(string: "stir://solve/\(snapshot.solveId)/dish/\(top.id)"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tonight: \(top.title), \(top.subtitle)")
+        .accessibilityHint("Tap to start cooking")
     }
 }
 
@@ -176,9 +184,9 @@ private struct SmallView: View {
 
 private struct MediumView: View {
     let snapshot: TonightSnapshot
+    let top: TonightSnapshot.DishBrief
 
     var body: some View {
-        let top = snapshot.topDishes[0]
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
@@ -216,6 +224,9 @@ private struct MediumView: View {
                 .frame(width: 100)
         }
         .widgetURL(URL(string: "stir://solve/\(snapshot.solveId)/dish/\(top.id)"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tonight: \(top.title), \(top.subtitle)")
+        .accessibilityHint("Tap to start cooking")
     }
 }
 
@@ -310,6 +321,28 @@ private struct LargeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(URL(string: "stir://solve/\(snapshot.solveId)"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(largeA11yLabel())
+        .accessibilityHint("Tap to open tonight's solve")
+    }
+
+    /// Reads tonight's picks as one coherent phrase rather than a wall
+    /// of per-dish sub-labels. "Tonight's picks, 3 of 3: Miso-Glazed
+    /// Salmon tops the list, followed by Kale Farro Salad and Stir-fry
+    /// veg."
+    private func largeA11yLabel() -> String {
+        let dishes = Array(snapshot.topDishes.prefix(3))
+        guard !dishes.isEmpty else { return "Tonight's picks: nothing saved yet" }
+        let titles = dishes.map(\.title)
+        let countPhrase = "\(dishes.count) of 3"
+        switch titles.count {
+        case 1:
+            return "Tonight's picks, \(countPhrase): \(titles[0])"
+        case 2:
+            return "Tonight's picks, \(countPhrase): \(titles[0]), and \(titles[1])"
+        default:
+            return "Tonight's picks, \(countPhrase): \(titles[0]) tops the list, followed by \(titles[1]) and \(titles[2])"
+        }
     }
 }
 
@@ -398,6 +431,9 @@ private struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(URL(string: "stir://scan/start"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stir. Run a scan to see tonight's idea")
+        .accessibilityHint("Tap to start a scan")
     }
 }
 
@@ -431,6 +467,9 @@ private struct UpgradeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(URL(string: "stir://paywall/widget"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Widgets unlock with Stir Premium")
+        .accessibilityHint("Tap to upgrade")
     }
 }
 

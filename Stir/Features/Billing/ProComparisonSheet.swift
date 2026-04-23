@@ -53,6 +53,23 @@ struct ProComparisonSheet: View {
     @ScaledMetric(relativeTo: .footnote) private var proColumnMinWidth: CGFloat = 48
 
     private var comparisonTable: some View {
+        // Voice row uses frequency framing per ADR 0015 paywall copy spec
+        // ("~3/week" vs "Every dinner" — reads as benefit, not rationing,
+        // and ages well if the cap ever moves). Other rows stay numeric
+        // because they're unit-count features that already read naturally
+        // (40 Dinner Solves isn't a rationing framing in the way "13 voice
+        // sessions" would be — voice sessions were the only cap users
+        // actively feel). Enforcement numbers (13 / 27) live in
+        // `_shared/entitlements.ts`; frequency labels here must stay
+        // truthful to those numbers — revisit if the cap changes.
+        //
+        // The voice row passes explicit a11y overrides because VoiceOver
+        // on some iOS versions pronounces "~3/week" literally as "tilde
+        // three slash week". The spoken form ("about 3 dinners a week")
+        // renders cleanly regardless of locale / reader version. Non-
+        // voice rows fall back to the default accessibilityLabel which
+        // reads the visible strings verbatim — fine for "40" / "120" /
+        // "250" / "✓" / "90 days".
         VStack(spacing: 0) {
             // Column header row. Sighted users see which number is Premium
             // vs Pro; VoiceOver hears "Premium column" before the data rows.
@@ -60,7 +77,13 @@ struct ProComparisonSheet: View {
             tableDivider
             row(label: "Dinner Solves / month", premium: "40", pro: "120")
             tableDivider
-            row(label: "Voice Cook Sessions / month", premium: "20", pro: "40")
+            row(
+                label: "Hands-free voice cooking",
+                premium: "~3/week",
+                pro: "Every dinner",
+                premiumA11y: "about 3 dinners a week",
+                proA11y: "every dinner",
+            )
             tableDivider
             row(label: "Remembered pantry items", premium: "250", pro: "1,000")
             tableDivider
@@ -101,7 +124,17 @@ struct ProComparisonSheet: View {
         .accessibilityLabel("Feature, Premium, Pro")
     }
 
-    private func row(label: String, premium: String, pro: String) -> some View {
+    /// Comparison table row. `premiumA11y` / `proA11y` override the
+    /// spoken label for cells where the visible string would read
+    /// badly via VoiceOver (e.g. "~3/week" pronounced as "tilde three
+    /// slash week"). Pass nil to use the visible string verbatim.
+    private func row(
+        label: String,
+        premium: String,
+        pro: String,
+        premiumA11y: String? = nil,
+        proA11y: String? = nil,
+    ) -> some View {
         HStack {
             Text(label)
                 .stirFont(.bodySm)
@@ -123,7 +156,9 @@ struct ProComparisonSheet: View {
         // "40", silence, "120" — leaving the user to infer which number
         // belongs to which column.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label). Premium: \(premium). Pro: \(pro).")
+        .accessibilityLabel(
+            "\(label). Premium: \(premiumA11y ?? premium). Pro: \(proA11y ?? pro).",
+        )
     }
 
     private var proCTAs: some View {

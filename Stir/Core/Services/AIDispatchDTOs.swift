@@ -484,6 +484,11 @@ struct RealtimeRecipeContext: Encodable, Sendable {
     /// VAL-01 "Required" on the mint. Using non-Optional forces
     /// explicit 0 on no-timer steps.
     let currentStepTimerSeconds: Int
+    /// Full numbered list of every step. Without this the model
+    /// hallucinates when asked about non-current steps (observed
+    /// 2026-04-22: model claimed step 3 was "sautéing with garlic"
+    /// when the real step 3 was "add kale to boiling water").
+    let allSteps: [StepDescription]
     let remainingIngredients: [RemainingIngredient]
 
     enum CodingKeys: String, CodingKey {
@@ -493,7 +498,27 @@ struct RealtimeRecipeContext: Encodable, Sendable {
         case totalSteps = "total_steps"
         case currentStepText = "current_step_text"
         case currentStepTimerSeconds = "current_step_timer_seconds"
+        case allSteps = "all_steps"
         case remainingIngredients = "remaining_ingredients"
+    }
+
+    struct StepDescription: Encodable, Sendable {
+        let stepNumber: Int
+        let text: String
+        /// Seconds for this step's timer; 0 = no timer. Non-Optional
+        /// because the backend schema is
+        /// `z.number().int().min(0).max(36000).nullable()` — the key is
+        /// REQUIRED on the wire even when there's no timer. Prior
+        /// `Int?` shape caused JSONEncoder to omit the key on nil and
+        /// tripped VAL-01 `timer_seconds=Required` on the mint. Same
+        /// pattern as `RealtimeRecipeContext.currentStepTimerSeconds`.
+        let timerSeconds: Int
+
+        enum CodingKeys: String, CodingKey {
+            case stepNumber = "step_number"
+            case text
+            case timerSeconds = "timer_seconds"
+        }
     }
 
     struct RemainingIngredient: Encodable, Sendable {
@@ -601,6 +626,36 @@ struct RealtimeSessionRequest: Encodable, Sendable {
     let currentStepNumber: Int
     let recipeContext: RealtimeRecipeContext
     let householdContext: RealtimeHouseholdContext
+    /// Optional ~200-300 token compact recap of the last 3 voice turns +
+    /// timer state. Backend appends to systemInstruction for continuity
+    /// across session refresh handoffs (ADR 0014). Absent on initial mint.
+    let recap: String?
+    /// True when this mint is a silent refresh within an already-active
+    /// cook session. Backend skips the voice_cook_session quota
+    /// increment on refresh mints — the initial session start already
+    /// consumed one slot (ADR 0014). Default false for all non-refresh
+    /// call sites (Codable will omit the field when false if needed).
+    let isRefresh: Bool
+
+    init(
+        clientRequestID: UUID,
+        cookingSessionID: UUID,
+        recipePlanID: UUID,
+        currentStepNumber: Int,
+        recipeContext: RealtimeRecipeContext,
+        householdContext: RealtimeHouseholdContext,
+        recap: String? = nil,
+        isRefresh: Bool = false,
+    ) {
+        self.clientRequestID = clientRequestID
+        self.cookingSessionID = cookingSessionID
+        self.recipePlanID = recipePlanID
+        self.currentStepNumber = currentStepNumber
+        self.recipeContext = recipeContext
+        self.householdContext = householdContext
+        self.recap = recap
+        self.isRefresh = isRefresh
+    }
 
     enum CodingKeys: String, CodingKey {
         case clientRequestID = "client_request_id"
@@ -609,6 +664,8 @@ struct RealtimeSessionRequest: Encodable, Sendable {
         case currentStepNumber = "current_step_number"
         case recipeContext = "recipe_context"
         case householdContext = "household_context"
+        case recap
+        case isRefresh = "is_refresh"
     }
 }
 
@@ -857,6 +914,101 @@ struct PushRegisterResponse: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case installationID = "installation_id"
         case environment
+    }
+}
+
+// MARK: - Voice Turn Usage (PostHog LLM Observability)
+//
+// Wire shape for POST /v1/ai/voice-turn-usage. Backend computes cost from
+// server-authoritative MODEL_PRICING constants, inserts one ai_request_log
+// row per turn (request_id = "voice:<session_id>:<turn_index>"), and
+// captures one $ai_generation to PostHog. Fire-and-forget from iOS.
+//
+// Batch shape from day 1 even though RealtimeSession sends single-item
+// arrays — future per-session buffering is a schema-free change.
+//
+// Do NOT compute cost on iOS. iOS sends tokens + latency only; the
+// pricing constants live server-side as the single source of truth (ADR
+// 0008).
+
+struct VoiceTurnUsageRequest: Encodable, Sendable, Equatable {
+    let sessionID: UUID
+    let turns: [TurnUsage]
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case turns
+    }
+
+    struct TurnUsage: Encodable, Sendable, Equatable {
+        let turnIndex: Int
+        let promptTokensText: Int
+        let promptTokensAudio: Int
+        /// Gemini's raw `promptTokenCount` summed across generation
+        /// passes. May exceed `text + audio` by the AUDIO-mode per-pass
+        /// overhead (CLAUDE.md sharp-edge #15) which Gemini doesn't
+        /// bucket into `promptTokensDetails`. Backend uses this for
+        /// `ai_request_log.input_tokens` (accurate dashboards) and
+        /// prices the uncategorized remainder at audio rate.
+        let promptTokensTotal: Int
+        /// Gemini Live `cachedContentTokenCount` — portion of
+        /// `promptTokensTotal` served from implicit context cache. Nil
+        /// when the accumulator was zero (caching didn't fire) — sent
+        /// only when > 0 so the wire stays tight on the common path.
+        /// Powers `ai_request_log.prompt_cached_tokens` + PostHog
+        /// `$ai_cache_read_input_tokens`. The spec §9 cap-reversal
+        /// trigger measures caching via this field.
+        let promptTokensCached: Int?
+        let responseTokensText: Int
+        let responseTokensAudio: Int
+        /// Gemini's raw `responseTokenCount` summed across generation
+        /// passes. Same contract as `promptTokensTotal` on the response
+        /// side — remainder priced at audio-out rate.
+        let responseTokensTotal: Int
+        let latencyMS: Int
+        let endedReason: EndedReason
+        let promptVersion: String
+        let path: Path
+        let endedAt: Date
+
+        enum CodingKeys: String, CodingKey {
+            case turnIndex = "turn_index"
+            case promptTokensText = "prompt_tokens_text"
+            case promptTokensAudio = "prompt_tokens_audio"
+            case promptTokensTotal = "prompt_tokens_total"
+            case promptTokensCached = "prompt_tokens_cached"
+            case responseTokensText = "response_tokens_text"
+            case responseTokensAudio = "response_tokens_audio"
+            case responseTokensTotal = "response_tokens_total"
+            case latencyMS = "latency_ms"
+            case endedReason = "ended_reason"
+            case promptVersion = "prompt_version"
+            case path
+            case endedAt = "ended_at"
+        }
+
+        /// Turn outcome from iOS's perspective. Mirrors the server enum.
+        /// `turnComplete` is the normal happy-path exit; `toolResponse`
+        /// marks a turn that ended on a Gemini tool call (substitution,
+        /// advance_step, start_timer); `error` marks an upstream WS
+        /// failure; `interrupted` marks a user barge-in.
+        enum EndedReason: String, Encodable, Sendable {
+            case turnComplete = "turn_complete"
+            case toolResponse = "tool_response"
+            case error
+            case interrupted
+        }
+
+        /// Voice driver path. Stir v1 only writes `liveAPI` here —
+        /// the backend Zod schema is `z.enum(['live_api'])` and will
+        /// reject anything else with VAL-01. The fallback path uses
+        /// `/v1/ai/cook-turn` which captures its own $ai_generation.
+        /// Reopening this enum requires a deliberate ADR update so
+        /// dashboards don't cross-contaminate semantically distinct
+        /// rows.
+        enum Path: String, Encodable, Sendable {
+            case liveAPI = "live_api"
+        }
     }
 }
 

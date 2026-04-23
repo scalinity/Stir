@@ -28,12 +28,12 @@ private let reactivationReminderID = "stir.reactivation.cook.7d"
 final class ReactivationScheduler {
     static let shared = ReactivationScheduler()
 
-    private let center: UNUserNotificationCenter
+    private let center: any UserNotificationCenterClient
     private let calendar: Calendar
     private let preferences: NotificationPreferencesStore
 
     init(
-        center: UNUserNotificationCenter = .current(),
+        center: any UserNotificationCenterClient = UNUserNotificationCenter.current(),
         calendar: Calendar = .current,
         preferences: NotificationPreferencesStore = .shared,
     ) {

@@ -278,6 +278,16 @@ struct CookModeRoot: View {
                     cookingSession: session,
                 )
                 try await liveDriver.preWarm()
+                // If the Task was cancelled during preWarm (user swiped
+                // down on the Cook Mode sheet, or parent re-rendered),
+                // don't leak the partially-wired driver into @State.
+                // Close it immediately so WS / audio / notification
+                // bookkeeping unwinds; return nil so the caller skips
+                // VM construction. Review 2026-04-22 §Warning #3.
+                if Task.isCancelled {
+                    liveDriver.close()
+                    return nil
+                }
                 self.voiceDriver = liveDriver
                 Logger.voice.info("cook_mode_voice_live_ready")
                 #if DEBUG
@@ -292,6 +302,7 @@ struct CookModeRoot: View {
                 #if DEBUG
                 VoiceSessionLog.logError("cookmode.live_to_c3_fallback", error: error)
                 #endif
+                if Task.isCancelled { return nil }
                 return await tryC3Fallback(session: session)
             }
         } else if canVoice && killSwitch {
@@ -314,13 +325,91 @@ struct CookModeRoot: View {
             liveDriver.onAdvanceStepRequested = { [weak vm] in
                 vm?.nextStep(advancedBy: "voice")
             }
+            liveDriver.onGoToStepRequested = { [weak vm] step1Indexed in
+                // Tool passes 1-indexed step number (matches what the
+                // user says and what the model speaks). VM's jumpToStep
+                // uses 0-indexed internally.
+                vm?.jumpToStep(step1Indexed - 1, advancedBy: "voice")
+            }
             liveDriver.onStartTimerRequested = { [weak vm] seconds, label in
-                Task { @MainActor [weak vm] in
-                    await vm?.startTimerFromVoice(seconds: seconds, label: label)
+                // Await the real timer creation + notification schedule
+                // so the tool response reflects the on-screen CookTimer
+                // state (NOT an LLM guess). `startTimerFromVoice` writes
+                // to Core Data + calls `timerService.start` which is
+                // what drives the countdown the user sees.
+                guard let vm else {
+                    return CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
                 }
+                await vm.startTimerFromVoice(seconds: seconds, label: label)
+                return vm.currentStepTimerSnapshot()
+            }
+            // Voice timer control. Closures return the post-action
+            // snapshot so the tool response carries accurate state
+            // back to the model for narration.
+            liveDriver.onTimerQueryRequested = { [weak vm] in
+                vm?.currentStepTimerSnapshot()
+                    ?? CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
+            }
+            liveDriver.onTimerPauseRequested = { [weak vm] in
+                await vm?.pauseCurrentTimerFromVoice()
+                    ?? CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
+            }
+            liveDriver.onTimerResumeRequested = { [weak vm] in
+                await vm?.resumeCurrentTimerFromVoice()
+                    ?? CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
+            }
+            liveDriver.onTimerCancelRequested = { [weak vm] in
+                await vm?.cancelCurrentTimerFromVoice()
+                    ?? CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
+            }
+            liveDriver.onTimerRestartRequested = { [weak vm] seconds, label in
+                await vm?.restartCurrentTimerFromVoice(seconds: seconds, label: label)
+                    ?? CookModeViewModel.VoiceTimerSnapshot(
+                        state: .none, remainingSeconds: 0, totalSeconds: 0, label: nil, stepNumber: nil,
+                    )
             }
             liveDriver.onVoiceStateChange = { [weak vm] state in
                 vm?.applyDriverStateChange(state)
+            }
+            liveDriver.onTurnFinalized = { [weak vm] summary in
+                vm?.recordLiveTurnSummary(summary)
+            }
+            liveDriver.onVoiceSessionRefreshResolved = { [weak vm] reason, turns, sessionID, success in
+                vm?.recordVoiceSessionRefresh(
+                    reason: reason,
+                    turnsAtRefresh: turns,
+                    sessionID: sessionID,
+                    success: success,
+                )
+            }
+            liveDriver.onSubstitutionRequestedFromVoice = { [weak vm] subEventID in
+                vm?.recordVoiceSubstitutionRequested(subEventID: subEventID)
+            }
+            liveDriver.onSubstitutionResolvedFromVoice = { [weak vm] constraintSafe, subEventID in
+                vm?.recordVoiceSubstitutionResolved(
+                    constraintSafe: constraintSafe,
+                    subEventID: subEventID,
+                )
+            }
+            liveDriver.onVoiceTurnStuckWatchdogFired = {
+                [weak vm] (sessionID: String, turnIndex: Int, toolCallType: String?, elapsedStuckMs: Int, turnLengthAtStuck: Int) in
+                vm?.recordVoiceTurnStuckWatchdogFired(
+                    sessionID: sessionID,
+                    turnIndex: turnIndex,
+                    toolCallType: toolCallType,
+                    elapsedStuckMs: elapsedStuckMs,
+                    turnLengthAtStuck: turnLengthAtStuck,
+                )
             }
         }
         if let fallbackDriver = driver as? SpeechFallbackService {

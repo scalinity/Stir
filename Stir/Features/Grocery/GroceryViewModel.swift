@@ -216,6 +216,20 @@ final class GroceryViewModel {
             }
         } catch {
             Logger.ui.error("grocery export unexpected: \(error.localizedDescription, privacy: .public)")
+            // CR3-14: pre-fix this catch silently returned false — no
+            // telemetry, no stage flip, no user-visible error. Now it
+            // mirrors the Failure.noReminderSource path: emits the
+            // inApp-destination event so the funnel stays 1:1 with
+            // export attempts, transitions to .error so the UI shows
+            // the retry state, and surfaces BILL-01 copy.
+            analytics.capture(
+                .groceryListExported,
+                properties: StepSevenTelemetry.groceryListExported(
+                    itemCount: inputs.count,
+                    destination: .inApp,
+                ),
+            )
+            stage = .error(code: "BILL-01", message: "Reminders export failed. Try again.")
             return false
         }
     }

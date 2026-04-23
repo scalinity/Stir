@@ -202,8 +202,14 @@ struct OutcomeFeedbackView: View {
     }
 
     /// Skip without rating — still count as completing the session, but
-    /// don't fire meal_rated. User can still see the meal in Saved.
+    /// don't fire meal_rated. Instead emit meal_rating_skipped so the
+    /// north-star funnel can distinguish "user opted out of rating" from
+    /// "user never reached the sheet." User can still see the meal in
+    /// Saved.
     private func skipAndDismiss() {
+        analytics.capture(.mealRatingSkipped, properties: [
+            "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "",
+        ])
         onSubmitted()
     }
 }

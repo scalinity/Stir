@@ -32,6 +32,12 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
+    /// Shared state owned by the VC, observed by ShareExtensionRootView
+    /// via @Bindable. Replaces the NotificationCenter-based
+    /// extraction→UI handoff whose subscription timing raced with the
+    /// extraction post (CR1-22/DB1-22).
+    private let extractionState = ShareExtractionState()
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -42,6 +48,7 @@ final class ShareViewController: UIViewController {
             onCancel: { [weak self] in
                 self?.complete(cancelled: true)
             },
+            state: extractionState,
         ))
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -63,11 +70,16 @@ final class ShareViewController: UIViewController {
 
     /// Parse NSExtensionItem attachments looking for a URL or plain
     /// text. iOS delivers both in the Safari share case — we prefer
-    /// URL. Updates `pending` on the root view via a notification
-    /// so SwiftUI can re-render with the captured payload.
+    /// URL. Updates the shared `extractionState` on the main actor so
+    /// SwiftUI re-renders with the captured payload — no publisher
+    /// timing dance required.
+    @MainActor
     private func extractInputs() async {
         guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
-              let providers = item.attachments else { return }
+              let providers = item.attachments else {
+            extractionState.isWaitingForExtraction = false
+            return
+        }
 
         var foundURL: String?
         var foundText: String?
@@ -93,16 +105,40 @@ final class ShareViewController: UIViewController {
             }
         }
 
+        // Length caps — defense against a malicious host app handing us
+        // a 50MB payload (CWE-770). Extension memory budget is ~120MB
+        // so even one multi-MB String can OOM us. 2KB is generous for a
+        // URL (Safari's hard cap is ~80KB); 200KB is generous for a
+        // pasted recipe (99th-percentile recipe text is <40KB).
+        if let u = foundURL, u.count > Self.maxURLChars {
+            foundURL = String(u.prefix(Self.maxURLChars))
+        }
+        if let t = foundText, t.count > Self.maxTextChars {
+            foundText = String(t.prefix(Self.maxTextChars))
+        }
+
+        // Bind the payload to the current user so the main app's
+        // consume path can drop cross-user-bleed cases (CWE-345). The
+        // extension reads SharedStorage — no Supabase access needed —
+        // which is populated by the main app at bootstrap + webhook
+        // refresh. Nil when no identity has ever been cached (fresh
+        // install pre-first-bootstrap); main app treats nil as "same
+        // user" to stay back-compat.
+        let userKey = SharedStorage().readCanonicalUserKey()
+
         let pending = PendingImport(
             url: foundURL,
             text: foundText,
             capturedAt: .now,
+            consumingUserKey: userKey,
         )
-        NotificationCenter.default.post(
-            name: .stirShareExtensionDidExtract,
-            object: pending,
-        )
+        extractionState.pending = pending
+        extractionState.isWaitingForExtraction = false
     }
+
+    /// Upper bounds for share-sheet payload size (SA1-7).
+    private static let maxURLChars = 2048
+    private static let maxTextChars = 200_000
 
     // MARK: - Send / cancel
 
@@ -120,10 +156,4 @@ final class ShareViewController: UIViewController {
             extensionContext?.completeRequest(returningItems: nil)
         }
     }
-}
-
-extension Notification.Name {
-    static let stirShareExtensionDidExtract = Notification.Name(
-        "stir.shareExtension.didExtract",
-    )
 }
