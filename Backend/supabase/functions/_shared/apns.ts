@@ -46,10 +46,14 @@ function readApnsEnv(): {
 // Cached JWT + expiry. APNs requires a new token every 20–60 minutes;
 // minting on every call is cheap but wasteful. Cache at module scope —
 // Edge Function worker lifetime is ~30 min on average so this amortizes
-// across many sends per worker.
+// across many sends per worker. `mintingPromise` coalesces concurrent
+// cold-worker mint attempts so we sign ES256 once, not N times per
+// contended cold-start window.
 let cachedProviderJwt: string | null = null;
 let cachedProviderJwtExpiresAt = 0; // seconds since epoch
+let mintingPromise: Promise<string> | null = null;
 const PROVIDER_JWT_TTL_SECONDS = 30 * 60; // APNs accepts up to 60 min; we use 30.
+const APNS_FETCH_TIMEOUT_MS = 10_000; // Stall guard — APNs HTTP/2 normally < 500 ms.
 
 export type APNsEnvironment = 'production' | 'sandbox';
 export type APNsCategory = 'reactivation' | 'import_completion' | 'trial_reminder' | 'cook_reminder';
@@ -83,27 +87,51 @@ async function getProviderJwt(): Promise<string> {
     return cachedProviderJwt;
   }
 
-  const { keyId, keyP8, teamId } = readApnsEnv();
-  if (!keyP8 || !keyId || !teamId) {
-    throw new Error('APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID');
+  // Coalesce concurrent mint attempts on a cold worker — the first call
+  // in creates the promise; later arrivers await the same work.
+  if (mintingPromise) return mintingPromise;
+
+  mintingPromise = (async () => {
+    const { keyId, keyP8, teamId } = readApnsEnv();
+    if (!keyP8 || !keyId || !teamId) {
+      throw new Error('APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID');
+    }
+
+    // Decode base64 → PEM-wrap for jose.importPKCS8. importPKCS8 throws on
+    // malformed DER/ASN.1; we let that propagate so operators see the real
+    // parse error rather than an opaque "config_invalid".
+    const rawPem = new TextDecoder().decode(base64Decode(keyP8));
+    const pem = rawPem.includes('BEGIN PRIVATE KEY')
+      ? rawPem
+      : `-----BEGIN PRIVATE KEY-----\n${rawPem.match(/.{1,64}/g)?.join('\n') ?? rawPem}\n-----END PRIVATE KEY-----`;
+
+    let privateKey;
+    try {
+      privateKey = await jose.importPKCS8(pem, 'ES256');
+    } catch (err) {
+      // Wrap with a clearer message; readers of logs should know this is
+      // a deploy-time misconfig, not a wire/APNs problem.
+      throw new Error(
+        `APNS_AUTH_KEY_P8 did not parse as ES256 PKCS#8: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const minted = await new jose.SignJWT({})
+      .setProtectedHeader({ alg: 'ES256', kid: keyId })
+      .setIssuer(teamId)
+      .setIssuedAt(now)
+      .sign(privateKey);
+
+    cachedProviderJwt = minted;
+    cachedProviderJwtExpiresAt = now + PROVIDER_JWT_TTL_SECONDS;
+    return minted;
+  })();
+
+  try {
+    return await mintingPromise;
+  } finally {
+    mintingPromise = null;
   }
-
-  // Decode base64 → PEM-wrap for jose.importPKCS8.
-  const rawPem = new TextDecoder().decode(base64Decode(keyP8));
-  const pem = rawPem.includes('BEGIN PRIVATE KEY')
-    ? rawPem
-    : `-----BEGIN PRIVATE KEY-----\n${rawPem.match(/.{1,64}/g)?.join('\n') ?? rawPem}\n-----END PRIVATE KEY-----`;
-  const privateKey = await jose.importPKCS8(pem, 'ES256');
-
-  const jwt = await new jose.SignJWT({})
-    .setProtectedHeader({ alg: 'ES256', kid: keyId })
-    .setIssuer(teamId)
-    .setIssuedAt(now)
-    .sign(privateKey);
-
-  cachedProviderJwt = jwt;
-  cachedProviderJwtExpiresAt = now + PROVIDER_JWT_TTL_SECONDS;
-  return jwt;
 }
 
 function base64Decode(b64: string): Uint8Array {
@@ -164,6 +192,7 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
       method: 'POST',
       headers,
       body: JSON.stringify(apsPayload),
+      signal: AbortSignal.timeout(APNS_FETCH_TIMEOUT_MS),
     });
   } catch (err) {
     return {
@@ -185,16 +214,27 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
     apnsReason = typeof errBody?.reason === 'string' ? errBody.reason : undefined;
   } catch { /* ignore */ }
 
-  const failReason: APNsFailureReason =
-    res.status === 400 || res.status === 410
-      ? 'bad_device_token'
-      : res.status === 403
-        ? 'config_invalid'
-        : res.status === 429
-          ? 'rate_limited'
-          : res.status >= 500
-            ? 'server_error'
-            : 'config_invalid';
+  // Classify by BOTH status and apnsReason. Apple documents 400 as covering
+  // BadDeviceToken *and* a family of payload/config bugs (BadExpirationDate,
+  // BadMessageId, BadPath, BadTopic, PayloadEmpty, PayloadTooLarge). Mapping
+  // all 400s to bad_device_token would cause the caller (pgmq-dispatch) to
+  // null out healthy push tokens on payload regressions. 410 is always
+  // Unregistered (dead token). Everything else routes by status.
+  const failReason = ((): APNsFailureReason => {
+    if (res.status === 410) return 'bad_device_token';
+    if (res.status === 400) {
+      // 400 + explicit BadDeviceToken/BadExpirationDate mapping per Apple:
+      // BadDeviceToken is the only 400 that means "token is dead and future
+      // sends to this token will keep failing." Everything else is a
+      // config/payload bug — retryable only after ops intervention.
+      if (apnsReason === 'BadDeviceToken') return 'bad_device_token';
+      return 'config_invalid';
+    }
+    if (res.status === 403) return 'config_invalid'; // MissingProviderToken
+    if (res.status === 429) return 'rate_limited';
+    if (res.status >= 500) return 'server_error';
+    return 'config_invalid';
+  })();
 
   return {
     ok: false,

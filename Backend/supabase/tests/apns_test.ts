@@ -209,3 +209,70 @@ Deno.test('sendAPNsPush: fetch throws → reason=network', async () => {
     restore();
   }
 });
+
+Deno.test('sendAPNsPush: 400 PayloadTooLarge → reason=config_invalid (NOT bad_device_token)', async () => {
+  // Pre-fix: every 400 → bad_device_token, so pgmq-dispatch would null
+  // healthy tokens on payload/config regressions. Post-fix (review C4):
+  // only 400+BadDeviceToken is classified as dead token; all other 400s
+  // are config_invalid and surface to ops as retryable-after-intervention.
+  const { restore } = installMockFetch(() => new Response(
+    JSON.stringify({ reason: 'PayloadTooLarge' }),
+    { status: 400, headers: { 'content-type': 'application/json' } },
+  ));
+  try {
+    const result = await sendAPNsPush({
+      token: 'healthy_token',
+      environment: 'sandbox',
+      category: 'reactivation',
+      alert: { title: 't', body: 'b' },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) {
+      assertEquals(result.reason, 'config_invalid');
+      assertEquals(result.apnsReason, 'PayloadTooLarge');
+    }
+  } finally {
+    restore();
+  }
+});
+
+Deno.test('sendAPNsPush: 400 with unparseable body → reason=config_invalid (conservative)', async () => {
+  // No JSON body / apnsReason unknown → don't assume bad_device_token.
+  // Conservative choice: config_invalid preserves the device token while
+  // surfacing the failure to ops.
+  const { restore } = installMockFetch(() => new Response('', { status: 400 }));
+  try {
+    const result = await sendAPNsPush({
+      token: 'token_with_unknown_400',
+      environment: 'sandbox',
+      category: 'reactivation',
+      alert: { title: 't', body: 'b' },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) {
+      assertEquals(result.reason, 'config_invalid');
+      assertEquals(result.apnsReason, undefined);
+    }
+  } finally {
+    restore();
+  }
+});
+
+Deno.test('sendAPNsPush: 403 MissingProviderToken → reason=config_invalid', async () => {
+  const { restore } = installMockFetch(() => new Response(
+    JSON.stringify({ reason: 'MissingProviderToken' }),
+    { status: 403, headers: { 'content-type': 'application/json' } },
+  ));
+  try {
+    const result = await sendAPNsPush({
+      token: 'x',
+      environment: 'sandbox',
+      category: 'reactivation',
+      alert: { title: 't', body: 'b' },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) assertEquals(result.reason, 'config_invalid');
+  } finally {
+    restore();
+  }
+});
