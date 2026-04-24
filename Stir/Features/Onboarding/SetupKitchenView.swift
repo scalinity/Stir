@@ -31,6 +31,10 @@ struct SetupKitchenView: View {
     let onComplete: () -> Void
     let onSkip: () -> Void
 
+    /// Scales the 36pt servings-stepper numeral with Dynamic Type.
+    /// Review finding W-F W25 (FD1).
+    @ScaledMetric(relativeTo: .largeTitle) private var servingsNumeralSize: CGFloat = 36
+
     init(
         viewModel: OnboardingViewModel,
         onBack: @escaping () -> Void = {},
@@ -170,8 +174,8 @@ struct SetupKitchenView: View {
                     // different presence needs than the `.monoLg` 44pt
                     // Cook Mode timer, so it's bespoke.
                     Text("\(viewModel.servingsDefault)")
-                        // justification: 36pt mono hero numeral for the servings stepper — one-off per §4.1 (see multi-line comment above)
-                        .font(.system(size: 36, weight: .medium, design: .monospaced))
+                        // justification: 36pt mono hero numeral for the servings stepper — one-off per §4.1 (see multi-line comment above), scaled via @ScaledMetric
+                        .font(.system(size: servingsNumeralSize, weight: .medium, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(Color.Stir.ink900)
                     Text(viewModel.servingsDefault == 1 ? "serving" : "servings")

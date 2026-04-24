@@ -73,6 +73,12 @@ struct InputField: View {
                     RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
                         .strokeBorder(borderColor, lineWidth: borderWidth),
                 )
+                // Surface validation state through VoiceOver's "value"
+                // channel so a user who sets focus on the field hears
+                // the error without having to navigate to the error
+                // Text below. Falls back to `text` (default behavior)
+                // when there's no error. Review finding W-F W27 (FD1).
+                .accessibilityValue(errorMessage.map { "Error: \($0)" } ?? text)
 
             if let errorMessage {
                 Text(errorMessage)

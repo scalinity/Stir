@@ -15,12 +15,16 @@ struct ConfigurationErrorView: View {
     let message: String
     let onRetry: (() -> Void)?
 
+    /// Scales the 56pt hero error glyph with Dynamic Type.
+    /// Review finding W-F W25 (FD1).
+    @ScaledMetric(relativeTo: .largeTitle) private var errorGlyphSize: CGFloat = 56
+
     var body: some View {
         VStack(spacing: CGFloat.Stir.space5) {
             Spacer()
 
             Image.Stir.softError
-                .font(.system(size: 56, weight: .regular)) // justification: hero error glyph — one-off per §4.1
+                .font(.system(size: errorGlyphSize, weight: .regular)) // justification: hero error glyph — one-off per §4.1
                 .foregroundStyle(Color.Stir.rust600)
 
             VStack(spacing: CGFloat.Stir.space3) {

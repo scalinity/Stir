@@ -92,6 +92,22 @@ struct SavedMealCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
+        // Expose the favorite toggle as a rotor action instead of a
+        // nested Button. Nested Buttons confuse VoiceOver — the card
+        // reads one way in linear navigation and another via the rotor
+        // depending on where touch-tracking lands. A single outer
+        // button + rotor action is the idiomatic SavedMealCard pattern
+        // and preserves the sighted tap affordance on the heart (the
+        // heart itself is `accessibilityHidden` below so VO doesn't
+        // see it twice). Review finding W-F W29 (FD1+CR1).
+        .accessibilityActions {
+            if let onToggleFavorite {
+                Button(
+                    isFavorite ? "Unfavorite" : "Favorite",
+                    action: onToggleFavorite,
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -102,8 +118,11 @@ struct SavedMealCard: View {
                 .foregroundStyle(Color.Stir.ink300)
                 .accessibilityHidden(true)
         } else if let onToggleFavorite {
-            // Inner button for the heart — tapping shouldn't bubble
-            // to the outer card tap. 44×44 tap target.
+            // Heart is the sighted-user affordance. VoiceOver reaches
+            // the same toggle via the outer card's rotor action
+            // (`.accessibilityActions` above) — so this Button is
+            // hidden from the a11y tree rather than tagged as a
+            // distinct element. Review finding W-F W29.
             Button(action: onToggleFavorite) {
                 (isFavorite ? Image.Stir.heartFill : Image.Stir.heart)
                     .font(.system(size: CGFloat.Stir.iconMd))
@@ -112,7 +131,7 @@ struct SavedMealCard: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isFavorite ? "Unfavorite \(title)" : "Favorite \(title)")
+            .accessibilityHidden(true)
         } else {
             // No favorite affordance (e.g., imported recipe without
             // favorite state) — render a static heart state for

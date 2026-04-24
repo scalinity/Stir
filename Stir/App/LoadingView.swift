@@ -25,6 +25,12 @@ struct LoadingView: View {
     /// launch (no caption); a non-nil string means session restore.
     let restoreCaption: String?
 
+    /// Scales the 96pt launch wordmark with Dynamic Type. Review
+    /// finding W-F W25 (FD1) — hero one-offs need `@ScaledMetric`
+    /// so xxxLarge / Accessibility text users don't get a launch
+    /// screen that ignores their preference.
+    @ScaledMetric(relativeTo: .largeTitle) private var launchWordmarkSize: CGFloat = 96
+
     init(restoreCaption: String? = nil) {
         self.restoreCaption = restoreCaption
     }
@@ -34,7 +40,7 @@ struct LoadingView: View {
             Color.Stir.paper50
                 .ignoresSafeArea()
 
-            StirWordmark(sizePoints: 96)
+            StirWordmark(sizePoints: launchWordmarkSize)
                 .accessibilityLabel("Stir")
 
             VStack(spacing: CGFloat.Stir.space3) {

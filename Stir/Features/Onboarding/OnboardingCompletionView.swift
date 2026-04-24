@@ -36,6 +36,10 @@ struct OnboardingCompletionView: View {
 
     @State private var errorMessage: String?
 
+    /// Scales the 36pt hero checkmark with Dynamic Type.
+    /// Review finding W-F W25 (FD1).
+    @ScaledMetric(relativeTo: .largeTitle) private var checkmarkSize: CGFloat = 36
+
     /// Dwell between completion-save and onFinished advance. Matches
     /// mockup annotation "roughly 1.5 seconds". Short enough to feel
     /// intentional, long enough to read the personalized summary.
@@ -104,7 +108,7 @@ struct OnboardingCompletionView: View {
                 .rotationEffect(.degrees(-90))
 
             Image.Stir.check
-                .font(.system(size: 36, weight: .semibold)) // justification: 36pt hero checkmark inside the 96pt ring — one-off hero size per §4.1
+                .font(.system(size: checkmarkSize, weight: .semibold)) // justification: 36pt hero checkmark inside the 96pt ring — one-off hero size per §4.1, scaled via @ScaledMetric
                 .foregroundStyle(Color.Stir.ember600)
         }
         .accessibilityElement()

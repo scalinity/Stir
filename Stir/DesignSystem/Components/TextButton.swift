@@ -39,7 +39,7 @@ struct TextButton: View {
                 .foregroundStyle(
                     isDisabled ? Color.Stir.textDisabled : Color.Stir.ember600,
                 )
-                .frame(minHeight: 44) // HIG tap-target floor
+                .frame(minWidth: 44, minHeight: 44) // HIG 44×44 tap-target floor (W-F W28)
                 .contentShape(Rectangle())
         }
         .disabled(isDisabled)

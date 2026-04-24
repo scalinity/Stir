@@ -24,6 +24,11 @@ struct WelcomeView: View {
     let onTryIt: () -> Void
     let onSeeSample: () -> Void
 
+    /// Scales the 22pt top-left wordmark + 40pt hero tagline with
+    /// Dynamic Type. Review finding W-F W25 (FD1).
+    @ScaledMetric(relativeTo: .largeTitle) private var topWordmarkSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .largeTitle) private var heroTaglineSize: CGFloat = 40
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             topWordmark
@@ -49,9 +54,9 @@ struct WelcomeView: View {
             .foregroundStyle(Color.Stir.ink900)
             + Text(".")
             .foregroundStyle(Color.Stir.ember600))
-            // justification: 22pt top-left wordmark — one-off hero size per §4.1 (see StirWordmark comment block above)
-            .font(.system(size: 22, weight: .semibold, design: .serif))
-            .tracking(-0.44) // 22 × -0.02em
+            // justification: 22pt top-left wordmark — one-off hero size per §4.1 (see StirWordmark comment block above), scaled via @ScaledMetric
+            .font(.system(size: topWordmarkSize, weight: .semibold, design: .serif))
+            .tracking(topWordmarkSize * -0.02) // -0.02em tight wordmark tracking, scales with size
             .padding(.leading, CGFloat.Stir.space1)
             .padding(.top, CGFloat.Stir.space1)
             .accessibilityLabel("Stir")
@@ -72,10 +77,10 @@ struct WelcomeView: View {
             // between display.xl (34pt) and a scaled-up bespoke 40pt for
             // the first-impression moment.
             Text("Cook what you already\u{00A0}have.")
-                // justification: 40pt hero tagline — one-off per §4.1 (between display.xl 34pt and bespoke Welcome scale-up)
-                .font(.system(size: 40, weight: .semibold, design: .serif))
-                .tracking(-1.0) // 40 × -0.025em
-                .lineSpacing(6)  // targets ~46pt line height at default
+                // justification: 40pt hero tagline — one-off per §4.1 (between display.xl 34pt and bespoke Welcome scale-up), scaled via @ScaledMetric
+                .font(.system(size: heroTaglineSize, weight: .semibold, design: .serif))
+                .tracking(heroTaglineSize * -0.025) // -0.025em tight tracking, scales with size
+                .lineSpacing(heroTaglineSize * 0.15) // ~46pt line height at default (40×1.15), scales proportionally
                 .foregroundStyle(Color.Stir.ink900)
                 .accessibilityAddTraits(.isHeader)
 

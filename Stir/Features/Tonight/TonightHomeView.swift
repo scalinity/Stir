@@ -35,6 +35,12 @@ struct TonightHomeView: View {
     let coordinator: RootCoordinator
 
     @Environment(EntitlementService.self) private var entitlements
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Scales the 36pt hero camera glyph inside the 80pt empty-state
+    /// tile with Dynamic Type. Review finding W-F W25 (FD1).
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyStateCameraSize: CGFloat = 36
+
     @State private var toastMessage: String?
     @State private var showSavedMeals = false
     @State private var resumableSession: CookingSession?
@@ -257,7 +263,7 @@ struct TonightHomeView: View {
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .fill(Color.Stir.ember100)
                     Image.Stir.camera
-                        .font(.system(size: 36, weight: .regular)) // justification: 36pt hero camera inside the 80pt tile — one-off per §4.1
+                        .font(.system(size: emptyStateCameraSize, weight: .regular)) // justification: 36pt hero camera inside the 80pt tile — one-off per §4.1, scaled via @ScaledMetric
                         .foregroundStyle(Color.Stir.ember600)
                 }
                 .frame(width: 80, height: 80)
@@ -590,11 +596,19 @@ struct TonightHomeView: View {
                         .fill(Color.Stir.ink900.opacity(0.85)),
                 )
                 .padding(.top, CGFloat.Stir.space3)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                // Reduce Motion drops the slide + opacity transition
+                // to an identity swap. The toast still appears and
+                // auto-dismisses at 2s; only the motion is suppressed.
+                // Review finding W-F W24 (FD1).
+                .transition(reduceMotion
+                    ? .identity
+                    : .move(edge: .top).combined(with: .opacity))
                 .id(toastMessage)
                 .task {
                     try? await Task.sleep(for: .seconds(2))
-                    withAnimation { self.toastMessage = nil }
+                    withStirAnimation(.Stir.standard, reduceMotion: reduceMotion) {
+                        self.toastMessage = nil
+                    }
                 }
         }
     }
