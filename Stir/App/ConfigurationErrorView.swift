@@ -3,6 +3,11 @@
 // Shown when AppConfig.load() throws or bootstrap returns a fatal error
 // (VAL-01, Core Data corruption, etc.). Retry button invokes coordinator
 // .retry(). Copy per spec §6 VAL-01 row (developer-safe generic).
+//
+// Turn 13 token migration: mockup 17 "Errors / permissions" visual
+// grammar — rust.600 soft-error glyph (§3.1 soft recoverable) +
+// displayLg title + bodyMd body + PrimaryButton retry + TextButton
+// support link.
 
 import SwiftUI
 
@@ -11,49 +16,60 @@ struct ConfigurationErrorView: View {
     let onRetry: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: CGFloat.Stir.space5) {
             Spacer()
 
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 56, weight: .regular))
-                .foregroundStyle(.orange)
+            Image.Stir.softError
+                .font(.system(size: 56, weight: .regular)) // justification: hero error glyph — one-off per §4.1
+                .foregroundStyle(Color.Stir.rust600)
 
-            VStack(spacing: 12) {
+            VStack(spacing: CGFloat.Stir.space3) {
                 Text("Something went wrong")
-                    .font(.title.weight(.semibold))
+                    .stirFont(.displayLg)
+                    .foregroundStyle(Color.Stir.ink900)
 
                 Text(message)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink500)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, CGFloat.Stir.space6)
             }
 
             Spacer()
 
             if let onRetry {
-                Button(action: onRetry) {
-                    Text("Retry")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.horizontal, 24)
+                PrimaryButton(title: "Retry", action: onRetry)
+                    .padding(.horizontal, CGFloat.Stir.space5)
             }
 
-            Link("Contact support", destination: URL(string: "mailto:scalinity.ai@gmail.com?subject=Stir%20Startup%20Issue")!)
-                .font(.footnote)
-                .padding(.bottom, 32)
+            Link(
+                destination: URL(string: "mailto:scalinity.ai@gmail.com?subject=Stir%20Startup%20Issue")!,
+            ) {
+                Text("Contact support")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ember600)
+            }
+            .padding(.bottom, CGFloat.Stir.space6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Color.Stir.paper50)
     }
 }
 
-#Preview {
+#Preview("Configuration error — light") {
     ConfigurationErrorView(
         message: "Please try again or contact support.",
         onRetry: {},
     )
+    .frame(width: 390, height: 844)
+    .preferredColorScheme(.light)
+}
+
+#Preview("Configuration error — dark") {
+    ConfigurationErrorView(
+        message: "Please try again or contact support.",
+        onRetry: {},
+    )
+    .frame(width: 390, height: 844)
+    .preferredColorScheme(.dark)
 }
