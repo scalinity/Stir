@@ -300,7 +300,10 @@ private struct AddCustomRow: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(Color.Stir.paper100),
                     )
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Add leftover item")
             .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(8)

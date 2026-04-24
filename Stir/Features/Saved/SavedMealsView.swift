@@ -191,6 +191,7 @@ struct SavedMealsView: View {
             HStack(spacing: CGFloat.Stir.space2) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(Color.Stir.ink500)
+                    .accessibilityHidden(true)
                 TextField("Search by title or ingredient", text: $searchQuery)
                     .textInputAutocapitalization(.sentences)
                     .autocorrectionDisabled()
@@ -199,7 +200,10 @@ struct SavedMealsView: View {
                     Button { searchQuery = "" } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(Color.Stir.ink300)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, CGFloat.Stir.space3)

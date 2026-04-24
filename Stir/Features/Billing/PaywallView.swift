@@ -16,6 +16,7 @@ import SwiftUI
 
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var viewModel: PaywallViewModel
 
     @State private var showProComparison = false
@@ -68,7 +69,7 @@ struct PaywallView: View {
     }
 
     private func handleSuccess() {
-        withAnimation(.spring(duration: 0.4)) {
+        withAnimation(reduceMotion ? nil : .spring(duration: 0.4)) {
             successIconBounce = true
         }
         // Asymmetric with `handleRestoreTap`'s race guard by design: toast

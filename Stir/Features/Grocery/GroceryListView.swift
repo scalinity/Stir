@@ -342,7 +342,10 @@ private struct RemindersDeniedToast: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Color.Stir.ink500)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, CGFloat.Stir.space3Half)
         .padding(.vertical, CGFloat.Stir.space2Half)
