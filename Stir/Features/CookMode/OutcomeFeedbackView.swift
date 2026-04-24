@@ -55,8 +55,8 @@ struct OutcomeFeedbackView: View {
                 if let submitError {
                     Section {
                         Text(submitError)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.crimson600)
                     }
                 }
             }
@@ -86,8 +86,8 @@ struct OutcomeFeedbackView: View {
                         rating = index
                     } label: {
                         Image(systemName: index <= rating ? "star.fill" : "star")
-                            .font(.title2)
-                            .foregroundStyle(index <= rating ? .yellow : .secondary)
+                            .font(.system(size: 24, weight: .regular)) // justification: 24pt star scale matches mockup 09 rating hit-target visual
+                            .foregroundStyle(index <= rating ? Color.Stir.ember600 : Color.Stir.ink300)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
