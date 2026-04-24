@@ -30,7 +30,7 @@ import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
-import { type APNsCategory, type APNsEnvironment, sendAPNsPush } from '../_shared/apns.ts';
+import { sendAPNsPush } from '../_shared/apns.ts';
 
 const CLAIM_LIMIT = 10;      // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
@@ -145,10 +145,18 @@ Deno.serve(async (req) => {
 
   // ---- Reclaim sweep: flip stuck 'processing' rows back to 'pending'.
   // If a prior tick crashed (OOM, 150s timeout, pod restart) mid-batch,
-  // rows stay wedged in 'processing' forever. Reclaim any row that's
-  // been 'processing' for more than STUCK_JOB_TIMEOUT_MINUTES without
-  // hitting MAX_ATTEMPTS. Rare in practice but essential for queue
-  // liveness (CA2-4).
+  // rows stay wedged in 'processing' forever. Rare in practice but
+  // essential for queue liveness (CA2-4).
+  //
+  // Two-part sweep (review C11 fix):
+  //   Part A: attempt_count < MAX_ATTEMPTS → back to 'pending' for retry.
+  //   Part B: attempt_count >= MAX_ATTEMPTS → dead-letter to 'failed'.
+  //           Pre-fix, these rows were permanently wedged because the
+  //           reclaim filter excluded them ("NOT attempt_count < MAX").
+  //           They had burned their retry budget before the crash that
+  //           left them in processing; the correct posture is terminal
+  //           failure, not another retry attempt.
+  const stuckCutoff = new Date(Date.now() - STUCK_JOB_TIMEOUT_MINUTES * 60_000).toISOString();
   try {
     const { data: reclaimed, error: reclaimErr } = await client
       .from('notification_jobs')
@@ -158,12 +166,28 @@ Deno.serve(async (req) => {
       })
       .eq('state', 'processing')
       .lt('attempt_count', MAX_ATTEMPTS)
-      .lt('updated_at', new Date(Date.now() - STUCK_JOB_TIMEOUT_MINUTES * 60_000).toISOString())
+      .lt('updated_at', stuckCutoff)
       .select('id');
     if (reclaimErr) {
       log.warn('reclaim_failed', { err: reclaimErr.message });
     } else if (reclaimed && reclaimed.length > 0) {
       log.info('stuck_jobs_reclaimed', { count: reclaimed.length });
+    }
+
+    const { data: deadLettered, error: deadErr } = await client
+      .from('notification_jobs')
+      .update({
+        state: 'failed',
+        error_message: 'reclaim_max_attempts_reached',
+      })
+      .eq('state', 'processing')
+      .gte('attempt_count', MAX_ATTEMPTS)
+      .lt('updated_at', stuckCutoff)
+      .select('id');
+    if (deadErr) {
+      log.warn('dead_letter_failed', { err: deadErr.message });
+    } else if (deadLettered && deadLettered.length > 0) {
+      log.warn('stuck_jobs_dead_lettered', { count: deadLettered.length });
     }
   } catch (err) {
     // Never fatal — the claim below still runs.
@@ -480,24 +504,37 @@ async function scheduleJobRetry(
 //   - config_invalid / missing_secret → THROW and page; means our APNs
 //     signing config is wrong, not a per-device issue.
 
-interface PushSendPayload {
-  template: APNsCategory;
-  title: string;
-  body: string;
-  deep_link?: string;
-  apns_token: string;
-  environment: APNsEnvironment;
-}
+// W24 (SA1 W3): runtime shape validation of push_send payload. Pre-fix
+// the handler used `as PushSendPayload` + presence check only — an errant
+// writer inserting a malformed payload would get no signal until APNs
+// rejected the malformed HTTP/2 request. Explicit Zod validation at the
+// boundary keeps the trust boundary explicit: `notification_jobs` is
+// service-role-only today, but one errant service caller (manual psql,
+// future recipe-import regression, etc.) can't cause CRLF-injection in
+// apns-collapse-id or misroute production pushes to sandbox.
+const PushSendPayloadSchema = z.object({
+  template: z.enum(['reactivation', 'import_completion', 'trial_reminder', 'cook_reminder']),
+  title: z.string().min(1).max(256),
+  body: z.string().min(1).max(2048),
+  deep_link: z.string().regex(/^stir:\/\//).max(512).optional(),
+  apns_token: z.string().regex(/^[0-9a-fA-F]{64}$/),
+  environment: z.enum(['production', 'sandbox']),
+}).strict();
+
+type PushSendPayload = z.infer<typeof PushSendPayloadSchema>;
 
 async function processPushSend(
   client: ReturnType<typeof createServiceClient>,
   job: ClaimedJob,
   log: Awaited<ReturnType<typeof createLogger>>,
 ): Promise<void> {
-  const payload = job.payload_json as PushSendPayload;
-  if (!payload?.apns_token || !payload?.environment || !payload?.template) {
-    throw new Error('invalid push_send payload: apns_token/environment/template required');
+  const parsed = PushSendPayloadSchema.safeParse(job.payload_json);
+  if (!parsed.success) {
+    throw new Error(
+      `invalid push_send payload: ${parsed.error.errors.map((e) => `${e.path.join('.')}=${e.message}`).join(', ')}`,
+    );
   }
+  const payload: PushSendPayload = parsed.data;
 
   const result = await sendAPNsPush({
     token: payload.apns_token,
