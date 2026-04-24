@@ -69,7 +69,9 @@ final class OnboardingViewModel {
     /// (b) NavigationStack re-running `.task` on OnboardingCompletion-
     /// View re-appearance (e.g. back-nav during the 1.5s dwell). See
     /// review finding C4 in review-ui-migration-findings.md.
-    private var hasFiredCompletedEvent = false
+    /// Exposed read-only (via `private(set)`) so the idempotency flip
+    /// is observable from the unit-test layer without a PostHog spy.
+    private(set) var hasFiredCompletedEvent = false
 
     /// Maximum grapheme-cluster count for a user-entered custom dislike.
     /// 32 chars is the user-visible cap driving the "+ Add" sheet UI.
@@ -385,6 +387,88 @@ final class OnboardingViewModel {
     func recordSkip(over stepID: String) {
         guard !skippedSteps.contains(stepID) else { return }
         skippedSteps.append(stepID)
+    }
+
+    // MARK: - Personalized completion copy
+    //
+    // Lifted from OnboardingCompletionView so the clause-composition
+    // logic is unit-testable without spinning up a SwiftUI host.
+    // Review finding W-A W1 (CR3 + DB1). View reads this string
+    // directly — the View owns no composition logic of its own.
+
+    /// Completion-screen body copy referencing the user's Setup 1
+    /// selections. Labels allergens distinctly from diets (they aren't
+    /// diets) and mentions dislikes when present. Falls back to generic
+    /// copy when every axis is empty (user skipped through Setup 1
+    /// without selecting anything). W-A W6.
+    var personalizedBody: String {
+        let dietsEmpty = selectedDiets.isEmpty
+        let allergensEmpty = selectedAllergens.isEmpty
+        let goalsEmpty = selectedGoals.isEmpty
+        let dislikesEmpty = selectedDislikes.isEmpty && customDislikes.isEmpty
+
+        if dietsEmpty, allergensEmpty, goalsEmpty, dislikesEmpty {
+            return "Loading a starter meal based on sensible defaults. You can edit preferences anytime in Settings."
+        }
+
+        var clauses: [String] = []
+        if !dietsEmpty {
+            clauses.append("your \(dietDescription) diet")
+        }
+        if !allergensEmpty {
+            clauses.append("keeping \(allergenDescription) out")
+        }
+        if !dislikesEmpty {
+            clauses.append("avoiding \(dislikeDescription)")
+        }
+        if !goalsEmpty {
+            clauses.append("your \(goalDescription) goals")
+        }
+
+        return "Tuning suggestions to " + joinClauses(clauses) + "."
+    }
+
+    /// Joins 1..N clauses with commas + "and" per English convention.
+    /// Kept `nonisolated` and `static`-friendly so the test doesn't
+    /// have to hop through a VM instance to verify grammar.
+    private func joinClauses(_ parts: [String]) -> String {
+        switch parts.count {
+        case 0:  return ""
+        case 1:  return parts[0]
+        case 2:  return "\(parts[0]) and \(parts[1])"
+        default:
+            let head = parts.dropLast().joined(separator: ", ")
+            return "\(head), and \(parts.last!)"
+        }
+    }
+
+    private var dietDescription: String {
+        selectedDiets
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+            .joined(separator: ", ")
+    }
+
+    private var allergenDescription: String {
+        selectedAllergens
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+            .joined(separator: ", ")
+    }
+
+    private var dislikeDescription: String {
+        let curated = selectedDislikes
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+        let custom = customDislikes.sorted()
+        return (curated + custom).joined(separator: ", ")
+    }
+
+    private var goalDescription: String {
+        selectedGoals
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+            .joined(separator: ", ")
     }
 
     // MARK: - Telemetry

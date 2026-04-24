@@ -94,6 +94,175 @@ final class OnboardingViewModelTests: XCTestCase {
         XCTAssertTrue(profile.onboardingCompleted)
     }
 
+    // MARK: - Custom dislike normalization (W-B W8 + W9)
+
+    func test_normalizeCustomDislike_trimsAndLowercases() throws {
+        let vm = makeVM()
+        // Deliberately NOT a curated DislikeOption so the fold branch
+        // doesn't short-circuit the result.
+        XCTAssertEqual(vm.normalizeCustomDislike("  RutaBaga  "), "rutabaga")
+    }
+
+    func test_normalizeCustomDislike_rejectsEmpty() throws {
+        let vm = makeVM()
+        XCTAssertNil(vm.normalizeCustomDislike(""))
+        XCTAssertNil(vm.normalizeCustomDislike("   "))
+        XCTAssertNil(vm.normalizeCustomDislike("\n\t "))
+    }
+
+    func test_normalizeCustomDislike_stripsUnicodeHazards() throws {
+        let vm = makeVM()
+        // Zero-width space + bidi RLE — both should be stripped and
+        // the underlying text preserved. Picks a non-curated label so
+        // the fold-to-curated branch doesn't short-circuit.
+        let input = "ok\u{200B}r\u{202A}a"
+        XCTAssertEqual(vm.normalizeCustomDislike(input), "okra")
+    }
+
+    func test_normalizeCustomDislike_rejectsAllHazardInput() throws {
+        let vm = makeVM()
+        let pureHazards = "\u{200B}\u{202A}\u{202E}\u{FEFF}"
+        // After strip, nothing remains — should fall through to empty-nil.
+        XCTAssertNil(vm.normalizeCustomDislike(pureHazards))
+    }
+
+    func test_normalizeCustomDislike_enforcesGraphemeCap() throws {
+        let vm = makeVM()
+        let tooLong = String(repeating: "a", count: 33) // 33 > customDislikeMaxLength=32
+        XCTAssertNil(vm.normalizeCustomDislike(tooLong))
+        let atCap = String(repeating: "a", count: 32)
+        XCTAssertEqual(vm.normalizeCustomDislike(atCap), atCap)
+    }
+
+    func test_normalizeCustomDislike_enforcesByteCap() throws {
+        let vm = makeVM()
+        // 22 CJK ideographs = 66 bytes (UTF-8), which exceeds the
+        // 64-byte cap even though grapheme count is well under 32.
+        let cjkOverByteCap = String(repeating: "字", count: 22)
+        XCTAssertEqual(cjkOverByteCap.count, 22)
+        XCTAssertGreaterThan(cjkOverByteCap.utf8.count, 64)
+        XCTAssertNil(vm.normalizeCustomDislike(cjkOverByteCap))
+    }
+
+    func test_normalizeCustomDislike_foldsToCuratedOption() throws {
+        let vm = makeVM()
+        // "cilantro" is a curated DislikeOption rawValue — normalizer
+        // returns nil so the caller can insert selectedDislikes directly.
+        XCTAssertNil(vm.normalizeCustomDislike("Cilantro"))
+    }
+
+    // MARK: - addCustomDislike
+
+    func test_addCustomDislike_acceptsAndStoresNormalized() throws {
+        let vm = makeVM()
+        XCTAssertTrue(vm.addCustomDislike("  OKRA  "))
+        XCTAssertTrue(vm.customDislikes.contains("okra"))
+    }
+
+    func test_addCustomDislike_rejectsInvalid() throws {
+        let vm = makeVM()
+        XCTAssertFalse(vm.addCustomDislike(""))
+        XCTAssertFalse(vm.addCustomDislike(String(repeating: "x", count: 33)))
+        XCTAssertFalse(vm.addCustomDislike("Cilantro")) // folds to curated
+        XCTAssertTrue(vm.customDislikes.isEmpty)
+    }
+
+    func test_addCustomDislike_capsSetCardinality() throws {
+        let vm = makeVM()
+        // Fill to exactly the cap.
+        for i in 0 ..< OnboardingViewModel.customDislikesMaxCount {
+            XCTAssertTrue(vm.addCustomDislike("item\(i)"))
+        }
+        XCTAssertEqual(vm.customDislikes.count, OnboardingViewModel.customDislikesMaxCount)
+        // One past cap — refused.
+        XCTAssertFalse(vm.addCustomDislike("item-overflow"))
+        // Re-adding an existing member is still true (set insert is a no-op).
+        XCTAssertTrue(vm.addCustomDislike("item0"))
+    }
+
+    // MARK: - Dislike hydration (W-B W11)
+
+    func test_dislikeHydration_caseInsensitivelyFoldsToCuratedOption() async throws {
+        let firstVM = makeVM()
+        // Simulate a legacy row written with uppercase rawValue. Add via
+        // savePreferences + direct write of a custom uppercase string.
+        firstVM.customDislikes = ["CILANTRO"]
+        try firstVM.savePreferences()
+
+        // Re-instantiate — hydration should recognize "CILANTRO" as
+        // curated and route it into `selectedDislikes`, not customs.
+        let secondVM = makeVM()
+        XCTAssertTrue(secondVM.selectedDislikes.contains(.cilantro))
+        XCTAssertFalse(secondVM.customDislikes.contains("CILANTRO"))
+        XCTAssertFalse(secondVM.customDislikes.contains("cilantro"))
+    }
+
+    // MARK: - recordSkip idempotency
+
+    func test_recordSkip_isIdempotent() throws {
+        let vm = makeVM()
+        vm.recordSkip(over: "setup_kitchen")
+        vm.recordSkip(over: "setup_kitchen") // should be a no-op
+        vm.recordSkip(over: "setup_preferences")
+        // Order preserved; duplicate kitchen entry suppressed.
+        XCTAssertEqual(vm.skippedSteps, ["setup_kitchen", "setup_preferences"])
+    }
+
+    // MARK: - fireOnboardingCompletedEvent idempotency (W-A W7)
+
+    func test_fireOnboardingCompletedEvent_isIdempotent() throws {
+        let vm = makeVM()
+        XCTAssertFalse(vm.hasFiredCompletedEvent)
+        vm.fireOnboardingCompletedEvent()
+        XCTAssertTrue(vm.hasFiredCompletedEvent)
+        // Second call early-returns — flag stays true, nothing explodes.
+        vm.fireOnboardingCompletedEvent()
+        XCTAssertTrue(vm.hasFiredCompletedEvent)
+    }
+
+    // MARK: - personalizedBody clause composition (W-A W6)
+
+    func test_personalizedBody_allEmpty_usesGenericFallback() throws {
+        let vm = makeVM()
+        let body = vm.personalizedBody
+        XCTAssertTrue(body.contains("sensible defaults"))
+    }
+
+    func test_personalizedBody_dietsOnly() throws {
+        let vm = makeVM()
+        vm.selectedDiets = [.vegetarian]
+        let body = vm.personalizedBody
+        XCTAssertTrue(body.contains("vegetarian diet"))
+        XCTAssertFalse(body.contains("keeping"))
+        XCTAssertFalse(body.contains("avoiding"))
+    }
+
+    func test_personalizedBody_fourAxisCompose() throws {
+        let vm = makeVM()
+        vm.selectedDiets = [.vegetarian]
+        vm.selectedAllergens = [.peanut]
+        vm.selectedDislikes = [.cilantro]
+        vm.selectedGoals = [.highProtein]
+        let body = vm.personalizedBody
+        // All four clauses present.
+        XCTAssertTrue(body.contains("vegetarian diet"))
+        XCTAssertTrue(body.contains("keeping peanut out"))
+        XCTAssertTrue(body.contains("avoiding cilantro"))
+        XCTAssertTrue(body.contains("high protein goals"))
+        // 4-part "..., ..., ..., and ..." grammar.
+        XCTAssertTrue(body.contains(", and "))
+    }
+
+    func test_personalizedBody_allergensLabeledDistinctFromDiets() throws {
+        let vm = makeVM()
+        vm.selectedAllergens = [.dairy]
+        let body = vm.personalizedBody
+        // Dairy should NOT be described as "your dairy diet" — allergens
+        // have a distinct "keeping ... out" framing. W-A W6.
+        XCTAssertFalse(body.contains("dairy diet"))
+        XCTAssertTrue(body.contains("keeping dairy out"))
+    }
+
     // MARK: - Helpers
 
     private func makeVM() -> OnboardingViewModel {

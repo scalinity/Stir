@@ -123,86 +123,12 @@ struct OnboardingCompletionView: View {
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
 
-            Text(personalizedBody)
+            Text(viewModel.personalizedBody)
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
         }
-    }
-
-    /// Personalized body copy referencing the user's Setup 1 selections.
-    /// Labels allergens distinctly from diets (they aren't diets) and
-    /// mentions dislikes when present. Review finding W-A W6 (CA1).
-    private var personalizedBody: String {
-        let dietsEmpty = viewModel.selectedDiets.isEmpty
-        let allergensEmpty = viewModel.selectedAllergens.isEmpty
-        let goalsEmpty = viewModel.selectedGoals.isEmpty
-        let dislikesEmpty = viewModel.selectedDislikes.isEmpty
-            && viewModel.customDislikes.isEmpty
-
-        // All empty → generic
-        if dietsEmpty, allergensEmpty, goalsEmpty, dislikesEmpty {
-            return "Loading a starter meal based on sensible defaults. You can edit preferences anytime in Settings."
-        }
-
-        // Compose clauses around whichever axes are non-empty.
-        var clauses: [String] = []
-        if !dietsEmpty {
-            clauses.append("your \(dietDescription) diet")
-        }
-        if !allergensEmpty {
-            clauses.append("keeping \(allergenDescription) out")
-        }
-        if !dislikesEmpty {
-            clauses.append("avoiding \(dislikeDescription)")
-        }
-        if !goalsEmpty {
-            clauses.append("your \(goalDescription) goals")
-        }
-
-        return "Tuning suggestions to " + joinedClauses(clauses) + "."
-    }
-
-    /// Joins 1..N clauses with commas + "and" per English convention.
-    private func joinedClauses(_ parts: [String]) -> String {
-        switch parts.count {
-        case 0:  return ""
-        case 1:  return parts[0]
-        case 2:  return "\(parts[0]) and \(parts[1])"
-        default:
-            let head = parts.dropLast().joined(separator: ", ")
-            return "\(head), and \(parts.last!)"
-        }
-    }
-
-    private var dietDescription: String {
-        viewModel.selectedDiets
-            .sorted(by: { $0.rawValue < $1.rawValue })
-            .map { $0.displayName.lowercased() }
-            .joined(separator: ", ")
-    }
-
-    private var allergenDescription: String {
-        viewModel.selectedAllergens
-            .sorted(by: { $0.rawValue < $1.rawValue })
-            .map { $0.displayName.lowercased() }
-            .joined(separator: ", ")
-    }
-
-    private var dislikeDescription: String {
-        let curated = viewModel.selectedDislikes
-            .sorted(by: { $0.rawValue < $1.rawValue })
-            .map { $0.displayName.lowercased() }
-        let custom = viewModel.customDislikes.sorted()
-        return (curated + custom).joined(separator: ", ")
-    }
-
-    private var goalDescription: String {
-        let parts = viewModel.selectedGoals
-            .sorted(by: { $0.rawValue < $1.rawValue })
-            .map { $0.displayName.lowercased() }
-        return parts.joined(separator: ", ")
     }
 
     private var checklist: some View {
