@@ -9,7 +9,17 @@
 // View saves `completeOnboarding()` on appear (so kill-during-dwell
 // still counts as completed — decision b), dwells ~1.5s, then fires
 // onFinished to flip coordinator phase to `.ready`.
+//
+// Double-tap defense (review finding C4):
+//   - `isAdvancing` gates every Continue/Skip/See-a-sample handler so
+//     rapid taps can't enqueue duplicate save+push tasks. `defer {
+//     isAdvancing = false }` releases the latch once the Task settles.
+//   - `OnboardingViewModel.fireOnboardingCompletedEvent()` is also
+//     idempotent at the VM level — belt-and-suspenders against
+//     NavigationStack's `.task` re-running on OnboardingCompletionView
+//     re-appearance.
 
+import OSLog
 import SwiftUI
 
 struct OnboardingRoot: View {
@@ -18,19 +28,28 @@ struct OnboardingRoot: View {
 
     @State private var path: [OnboardingRoute] = []
     @State private var errorMessage: String?
+    /// In-flight flag for the Welcome + Setup handlers below. Set at
+    /// Task entry, cleared via `defer` on Task exit. Prevents the
+    /// double-tap class of route-push + telemetry-double-fire bugs
+    /// (review finding C4).
+    @State private var isAdvancing = false
 
     var body: some View {
         NavigationStack(path: $path) {
             WelcomeView(
                 onTryIt: {
+                    guard !isAdvancing else { return }
                     path.append(.setupPreferences)
                 },
                 onSeeSample: {
+                    guard !isAdvancing else { return }
+                    isAdvancing = true
                     // Step-2 stub — sample path bypasses Setup 1/2
                     // entirely, so it records every subsequent step as
                     // skipped and fires `onboarding_completed` inline
                     // (no completion-transition for this path).
                     Task {
+                        defer { isAdvancing = false }
                         do {
                             viewModel.recordSkip(over: "setup_preferences")
                             viewModel.recordSkip(over: "setup_kitchen")
@@ -38,7 +57,10 @@ struct OnboardingRoot: View {
                             viewModel.fireOnboardingCompletedEvent()
                             onFinished()
                         } catch {
-                            errorMessage = "Something went wrong. Please try again."
+                            Logger.ui.error(
+                                "onboarding_sample_bypass_failed: \(error.localizedDescription, privacy: .public)",
+                            )
+                            errorMessage = ErrorPresenter.present(.sync01).message
                         }
                     }
                 },
@@ -50,11 +72,17 @@ struct OnboardingRoot: View {
                         viewModel: viewModel,
                         onBack: { path.removeLast() },
                         onContinue: {
+                            guard !isAdvancing else { return }
+                            isAdvancing = true
                             Task {
+                                defer { isAdvancing = false }
                                 do {
                                     try viewModel.savePreferences()
                                     path.append(.setupKitchen)
                                 } catch {
+                                    Logger.ui.error(
+                                        "onboarding_setup1_continue_failed: \(error.localizedDescription, privacy: .public)",
+                                    )
                                     errorMessage = ErrorPresenter.present(.sync01).message
                                 }
                             }
@@ -67,12 +95,18 @@ struct OnboardingRoot: View {
                             // The current step (Setup 1) counts as
                             // visited-and-partially-completed per
                             // decision (a).
+                            guard !isAdvancing else { return }
+                            isAdvancing = true
                             Task {
+                                defer { isAdvancing = false }
                                 do {
                                     try viewModel.savePreferences()
                                     viewModel.recordSkip(over: "setup_kitchen")
                                     path.append(.completionTransition)
                                 } catch {
+                                    Logger.ui.error(
+                                        "onboarding_setup1_skip_failed: \(error.localizedDescription, privacy: .public)",
+                                    )
                                     errorMessage = ErrorPresenter.present(.sync01).message
                                 }
                             }
@@ -83,11 +117,17 @@ struct OnboardingRoot: View {
                         viewModel: viewModel,
                         onBack: { path.removeLast() },
                         onComplete: {
+                            guard !isAdvancing else { return }
+                            isAdvancing = true
                             Task {
+                                defer { isAdvancing = false }
                                 do {
                                     try viewModel.saveKitchen()
                                     path.append(.completionTransition)
                                 } catch {
+                                    Logger.ui.error(
+                                        "onboarding_setup2_complete_failed: \(error.localizedDescription, privacy: .public)",
+                                    )
                                     errorMessage = ErrorPresenter.present(.sync01).message
                                 }
                             }
@@ -98,11 +138,17 @@ struct OnboardingRoot: View {
                             // — there are no steps AFTER Setup 2 to
                             // bypass; Setup 2 itself counts as
                             // partially-completed (decision a).
+                            guard !isAdvancing else { return }
+                            isAdvancing = true
                             Task {
+                                defer { isAdvancing = false }
                                 do {
                                     try viewModel.saveKitchen()
                                     path.append(.completionTransition)
                                 } catch {
+                                    Logger.ui.error(
+                                        "onboarding_setup2_skip_failed: \(error.localizedDescription, privacy: .public)",
+                                    )
                                     errorMessage = ErrorPresenter.present(.sync01).message
                                 }
                             }

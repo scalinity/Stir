@@ -60,6 +60,17 @@ final class OnboardingViewModel {
     /// funnel semantics for resumed flows.
     let onboardingStartedAt: Date = .init()
 
+    /// Idempotency guard for `fireOnboardingCompletedEvent()`. Closes
+    /// the double-emit class of bugs at the VM layer regardless of
+    /// caller debounce: any second invocation early-returns silently.
+    /// Triggered by (a) double-tap on Skip/Continue handlers that
+    /// each schedule their own `Task { savePreferences(); path.append(
+    /// .completionTransition) }` before iOS disables the Button,
+    /// (b) NavigationStack re-running `.task` on OnboardingCompletion-
+    /// View re-appearance (e.g. back-nav during the 1.5s dwell). See
+    /// review finding C4 in review-ui-migration-findings.md.
+    private var hasFiredCompletedEvent = false
+
     /// Maximum length for a user-entered custom dislike. 32 chars
     /// keeps the free-text from silently inflating the Gemini context
     /// payload on every dinner-solve (DietaryRule.value flows into
@@ -308,6 +319,15 @@ final class OnboardingViewModel {
     /// ownership moved here so both ViewModel-mediated paths fire
     /// through a single helper.
     func fireOnboardingCompletedEvent() {
+        // Belt-and-suspenders idempotency — even if both callers
+        // (`OnboardingCompletionView.task` + WelcomeView "See a sample"
+        // handler) are debounced, NavigationStack's `.task` re-fires
+        // on view re-appearance and a double-tap in the handler queue
+        // can land two dispatches before the first completes. Single
+        // flag covers both cases.
+        guard !hasFiredCompletedEvent else { return }
+        hasFiredCompletedEvent = true
+
         let durationSec = max(0, Int(Date().timeIntervalSince(onboardingStartedAt)))
         let hash = profile.canonicalUserKey.map(CanonicalKeyHash.hash) ?? ""
         PostHogClient.shared.capture(
