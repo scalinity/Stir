@@ -49,6 +49,7 @@ struct WelcomeView: View {
             .foregroundStyle(Color.Stir.ink900)
             + Text(".")
             .foregroundStyle(Color.Stir.ember600))
+            // justification: 22pt top-left wordmark — one-off hero size per §4.1 (see StirWordmark comment block above)
             .font(.system(size: 22, weight: .semibold, design: .serif))
             .tracking(-0.44) // 22 × -0.02em
             .padding(.leading, CGFloat.Stir.space1)
@@ -71,6 +72,7 @@ struct WelcomeView: View {
             // between display.xl (34pt) and a scaled-up bespoke 40pt for
             // the first-impression moment.
             Text("Cook what you already\u{00A0}have.")
+                // justification: 40pt hero tagline — one-off per §4.1 (between display.xl 34pt and bespoke Welcome scale-up)
                 .font(.system(size: 40, weight: .semibold, design: .serif))
                 .tracking(-1.0) // 40 × -0.025em
                 .lineSpacing(6)  // targets ~46pt line height at default

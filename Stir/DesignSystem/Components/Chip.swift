@@ -56,6 +56,7 @@ struct Chip: View {
         let content = HStack(spacing: CGFloat.Stir.space1 + 2) { // 6pt icon-to-label
             if let iconImage {
                 iconImage
+                    // justification: 12pt confidence/state icon on the chip — smaller than icon.sm (16pt) so it doesn't dominate the compact chip pill
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(iconColor)
                     .accessibilityHidden(true)

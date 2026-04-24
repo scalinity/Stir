@@ -137,6 +137,7 @@ private struct LeftoversOptionCard: View {
                     .frame(width: 52, height: 52)
                     .overlay(
                         Text(emoji(for: dish))
+                            // justification: 22pt emoji glyph inside a 52pt avatar tile — decorative one-off not tokenized
                             .font(.system(size: 22)),
                     )
 

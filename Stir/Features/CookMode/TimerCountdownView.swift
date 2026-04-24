@@ -95,6 +95,7 @@ struct TimerCountdownView: View {
 
     private func label(_ text: String, color: Color) -> some View {
         Text(text)
+            // justification: Cook Mode hero timer is 48pt rounded mono — one-off per §4.1 (spec's `.monoLg` = 44pt is the baseline; +4pt for Cook Mode's arm's-length readability per step-4 review)
             .font(.system(size: 48, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(color)
     }

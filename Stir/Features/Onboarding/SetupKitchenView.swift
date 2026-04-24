@@ -170,6 +170,7 @@ struct SetupKitchenView: View {
                     // different presence needs than the `.monoLg` 44pt
                     // Cook Mode timer, so it's bespoke.
                     Text("\(viewModel.servingsDefault)")
+                        // justification: 36pt mono hero numeral for the servings stepper — one-off per §4.1 (see multi-line comment above)
                         .font(.system(size: 36, weight: .medium, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(Color.Stir.ink900)

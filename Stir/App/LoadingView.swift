@@ -71,6 +71,7 @@ private struct StirWordmark: View {
             + Text(".")
             .foregroundStyle(Color.Stir.ember600)
         wordmark
+            // justification: wordmark sizes are one-off per §4.1 — bespoke per-screen (96pt Launch, 40pt Welcome tagline, 22pt Welcome top-left)
             .font(.system(size: sizePoints, weight: .semibold, design: .serif))
             .tracking(sizePoints * -0.04) // -0.04em tight display tracking
     }
