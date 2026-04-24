@@ -420,6 +420,34 @@ final class SolveViewModel {
     }
 }
 
+// MARK: - DishCard → FitLabelKind mapping
+//
+// Server → UI mapping lives on the wire DTO's feature-layer extension
+// rather than inside DinnerOptionsView — view layer shouldn't know the
+// server enum strings. Review finding W-C W17 (CR1). `uses_what_you_have`
+// and `new_to_you` collapse to `.bestFit` because spec §8.4 has no
+// distinct visual variants for them; extend FitLabelKind first if a
+// future mockup introduces one.
+
+extension DishCard {
+    /// Primary FitLabel variant for this card, derived from
+    /// `fit_label_primary` + `missing_ingredient_count`. Negative counts
+    /// clamp to zero (matches the defensive clamp in DishOptionCard —
+    /// W-H W36).
+    var preferredFitLabel: FitLabelKind {
+        let safeCount = max(0, missingIngredientCount)
+        switch fitLabelPrimary {
+        case "fastest":       return .fastest
+        case "least_waste":   return .leastWaste
+        case "best_fit",
+             "uses_what_you_have",
+             "new_to_you":    return .bestFit
+        default:
+            return safeCount > 0 ? .missing(count: safeCount) : .bestFit
+        }
+    }
+}
+
 extension Logger {
     static let solveFeature = Logger(subsystem: "com.scalinity.stir", category: "SolveFeature")
 }

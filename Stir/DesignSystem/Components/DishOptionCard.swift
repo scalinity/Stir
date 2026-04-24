@@ -151,9 +151,14 @@ struct DishOptionCardStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
+        // `.stirAnimation` handles the Reduce Motion gate internally,
+        // so the scale step still fires on press (gated by
+        // !reduceMotion) but the transition is instant under RM.
+        // Review finding W-C W12 — demonstrates the DS pattern so the
+        // tokens in Shared/Motion.swift aren't orphaned.
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
-            .animation(reduceMotion ? nil : .Stir.standard, value: configuration.isPressed)
+            .stirAnimation(.Stir.standard, value: configuration.isPressed)
             .overlay(
                 RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
                     .strokeBorder(

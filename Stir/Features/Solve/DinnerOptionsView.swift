@@ -72,10 +72,10 @@ struct DinnerOptionsView: View {
                     totalTimeMinutes: dish.totalTimeMinutes,
                     whyItFits: dish.whyItFits,
                     missingIngredientCount: dish.missingIngredientCount,
-                    fitKind: fitLabelKind(
-                        for: dish.fitLabelPrimary,
-                        missingCount: dish.missingIngredientCount,
-                    ),
+                    // Server→UI mapping lives on DishCard extension in
+                    // SolveViewModel.swift — view layer shouldn't know
+                    // the server enum strings. W-C W17.
+                    fitKind: dish.preferredFitLabel,
                 )
             }
             .buttonStyle(DishOptionCardStyle())
@@ -88,27 +88,6 @@ struct DinnerOptionsView: View {
             errorSlot(rank: slot.rank)
         } else {
             skeletonSlot(rank: slot.rank)
-        }
-    }
-
-    /// Maps the server-side fit-label enum string to Phase 2's
-    /// FitLabelKind. `uses_what_you_have` + `new_to_you` don't have
-    /// direct visual variants in spec §8.4 — collapse to `.bestFit`
-    /// (same voice tint) for now; if a future mockup introduces a
-    /// distinct visual variant, extend FitLabelKind.
-    private func fitLabelKind(for raw: String, missingCount: Int) -> FitLabelKind {
-        // Clamp defensively — a malformed server response with a
-        // negative missing-count could render "-2 missing" otherwise.
-        // Review finding W-H W36 (CA1).
-        let safeCount = max(0, missingCount)
-        switch raw {
-        case "fastest":       return .fastest
-        case "least_waste":   return .leastWaste
-        case "best_fit",
-             "uses_what_you_have",
-             "new_to_you":    return .bestFit
-        default:
-            return safeCount > 0 ? .missing(count: safeCount) : .bestFit
         }
     }
 
