@@ -58,12 +58,18 @@ struct FieldError: Sendable, Equatable, Codable {
 ///   signatureInvalid  — signature didn't verify (error + alert)
 ///   userStale         — JWT valid but canonical_user_key no longer resolves
 ///                       (merged forward, row missing). Info severity, silent retry.
+///   reauthRequired    — JWT issued before app_users.reauth_required_at; admin
+///                       used users.force_reauth to boot this session. Maps to
+///                       SIWA re-flow (NOT silent retry) — rotate Keychain
+///                       install_id, clear canonical_user_key, nav to SIWA.
+///                       See ADR 0023.
 enum AuthReason: String, Sendable, Equatable, Codable {
     case missing
     case expired
     case malformed
     case signatureInvalid = "signature_invalid"
     case userStale = "user_stale"
+    case reauthRequired = "reauth_required"
 }
 
 /// VOICE-SESSION-01 reason enum. Backend emits one of these on the 403

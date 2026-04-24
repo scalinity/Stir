@@ -193,6 +193,10 @@ actor SupabaseSessionClient {
                 message: body?.message ?? "stream 401",
                 endpoint: inRequest.url?.path ?? "?",
             )
+            // reauth_required (ADR 0023) bypasses silent retry — see perform().
+            if reason == .reauthRequired {
+                throw StirError.auth(reason: reason, message: body?.message ?? "reauth required")
+            }
             if !retriedAuth, let identity = lastBootstrapIdentity {
                 _ = try await bootstrap(
                     installationID: identity.installationID,
@@ -377,6 +381,14 @@ actor SupabaseSessionClient {
             let body = try parseErrorBody(data)
             let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
             logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
+            // reauth_required (ADR 0023) short-circuits the silent-retry path.
+            // Admin used users.force_reauth and wants THIS user kicked — silent
+            // re-bootstrap would issue a fresh JWT (iat > reauth_required_at)
+            // and bypass the ceremony. Surface immediately so RootCoordinator
+            // can route to SIWA re-flow.
+            if reason == .reauthRequired {
+                throw StirError.auth(reason: reason, message: body.message)
+            }
             if !retriedAuth {
                 // Silent re-bootstrap + retry ONCE.
                 guard let identity = lastBootstrapIdentity else {
@@ -468,6 +480,10 @@ actor SupabaseSessionClient {
             let body = try parseErrorBody(data)
             let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
             logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
+            // reauth_required (ADR 0023) bypasses silent retry — see perform().
+            if reason == .reauthRequired {
+                throw StirError.auth(reason: reason, message: body.message)
+            }
             if !retriedAuth {
                 guard let identity = lastBootstrapIdentity else {
                     throw StirError.auth(reason: reason, message: body.message)
@@ -521,7 +537,11 @@ actor SupabaseSessionClient {
     /// same severity map. Adding a new AuthReason must update this switch.
     private func logAuth01(reason: AuthReason, message: String, endpoint: String) {
         switch reason {
-        case .missing, .expired, .userStale:
+        case .missing, .expired, .userStale, .reauthRequired:
+            // reauthRequired is routine support / admin flow — info severity.
+            // The distinguishing concern (kick the session) is handled by
+            // callers routing StirError.auth(reason: .reauthRequired) to
+            // RootCoordinator.forceReauth(), not by our log level here.
             Logger.supabase.info(
                 "AUTH-01 reason=\(reason.rawValue, privacy: .public) endpoint=\(endpoint, privacy: .public)",
             )

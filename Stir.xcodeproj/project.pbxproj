@@ -166,6 +166,7 @@
 		9DE058EF3F2D0D11280F5F3A /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D53463A1456A15A5E95DB06 /* LiveActivityManager.swift */; };
 		9E1AAEFE1947F34FB201BDAB /* IdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9695B3F81139A97A1E549D40 /* IdentityService.swift */; };
 		9E1E55836E5C718412EC5C8D /* AIDispatchDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B57D15701FF047FC4C7C392 /* AIDispatchDTOs.swift */; };
+		9E770D5975DD1096D01F959E /* FlagOutputService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75142E3132B7B96CBE374625 /* FlagOutputService.swift */; };
 		9FD7CCAF1B3E98E917067C6D /* HouseholdProfile+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86B435CF4DE6F47DD7487DB2 /* HouseholdProfile+Extensions.swift */; };
 		A21C8BA83BE97D9A2088BDD5 /* IntentDonationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B62469F25DFD93ED348336 /* IntentDonationService.swift */; };
 		A33EDDC6FE22143B7CE44620 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392D02601EFD7683030D59D1 /* RootView.swift */; };
@@ -242,6 +243,7 @@
 		E090B09B9B28D30AE9CD2585 /* PendingImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EFFD4E7336367634B26DBFD /* PendingImport.swift */; };
 		E140B01C084A15E89FFFA6DE /* GroceryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CE3C0C9E61E7FCA4FDC541 /* GroceryViewModelTests.swift */; };
 		E1D5171A34C972E48BF2D863 /* StepSevenTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCE61E45AB4894CBE50897C /* StepSevenTelemetryTests.swift */; };
+		E3A3A3C99F0D52620C7C8349 /* FlagOutputSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C957CB4B0274A99793B9D69 /* FlagOutputSheet.swift */; };
 		E3D64FA4D05E02A7F16DFB25 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C653C4CC294FAC1B2AA7B81 /* Typography.swift */; };
 		E3E7BDB43BA459ACD8D44C08 /* ConstraintsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0D3A1CF905605DAE3309C2 /* ConstraintsSheet.swift */; };
 		E45AAD4677CB23B582050AE6 /* Shadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C360FB0B332A41A4A112ED /* Shadow.swift */; };
@@ -378,6 +380,7 @@
 		4BB49FCA03EF17C97D6C5DB9 /* Stir.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Stir.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychain.swift; sourceTree = "<group>"; };
 		4C6381522171782F672F7009 /* ProComparisonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProComparisonSheet.swift; sourceTree = "<group>"; };
+		4C957CB4B0274A99793B9D69 /* FlagOutputSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagOutputSheet.swift; sourceTree = "<group>"; };
 		4D53463A1456A15A5E95DB06 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntitlementService+Display.swift"; sourceTree = "<group>"; };
 		4ECE43357ACB78ADDBD0FD49 /* GroceryRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepositoryTests.swift; sourceTree = "<group>"; };
@@ -425,6 +428,7 @@
 		74588281F314D67EE09DCD8A /* StirError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirError.swift; sourceTree = "<group>"; };
 		74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeVoiceIntegrationTests.swift; sourceTree = "<group>"; };
 		74C8F073249E8EEA78771A0B /* GroceryList+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GroceryList+Extensions.swift"; sourceTree = "<group>"; };
+		75142E3132B7B96CBE374625 /* FlagOutputService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagOutputService.swift; sourceTree = "<group>"; };
 		761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNotificationDelegate.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
 		78604678E2CA07EB7DCA2028 /* VoiceTurnRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTurnRepository.swift; sourceTree = "<group>"; };
@@ -544,7 +548,7 @@
 		FCCB19696B57826A5C37D47C /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
-		"TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -594,6 +598,7 @@
 				FA3A2CACA16214E11B7E592C /* EntitlementService.swift */,
 				4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */,
 				5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */,
+				75142E3132B7B96CBE374625 /* FlagOutputService.swift */,
 				9695B3F81139A97A1E549D40 /* IdentityService.swift */,
 				374669111D98B028BEC3824D /* KeychainStorage.swift */,
 				64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */,
@@ -946,6 +951,7 @@
 			children = (
 				5760939C8F0B686F7EFE90EE /* CookModeRoot.swift */,
 				2D7561615148F2BA3D89570C /* CookModeViewModel.swift */,
+				4C957CB4B0274A99793B9D69 /* FlagOutputSheet.swift */,
 				31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */,
 				CE134A139A7012C16D913543 /* StepCardView.swift */,
 				6A66A56A43AFBAC2E42363C7 /* TimerCountdownView.swift */,
@@ -1192,10 +1198,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_9B5DD26E-6FCB-4AE2-BE89-5CFA2D0D52D7" /* Stir */ = {
+		"TEMP_FF4FF612-552A-4BD8-AC06-61D69C459100" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */,
+				"TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -1507,6 +1513,8 @@
 				DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */,
 				13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */,
 				F8AE79D8A6D222663EEB7FED /* FitLabel.swift in Sources */,
+				9E770D5975DD1096D01F959E /* FlagOutputService.swift in Sources */,
+				E3A3A3C99F0D52620C7C8349 /* FlagOutputSheet.swift in Sources */,
 				298EC85302A48928040CFF86 /* GroceryItem+Extensions.swift in Sources */,
 				335A73CED94D3A086B028F95 /* GroceryList+Extensions.swift in Sources */,
 				A903B2695334DC122C276C95 /* GroceryListView.swift in Sources */,
@@ -1654,7 +1662,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1673,7 +1681,7 @@
 		};
 		31827A9937F057BAAC188E1F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1693,7 +1701,7 @@
 		};
 		4601BB06DB748D5B073B7BB6 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1732,7 +1740,7 @@
 		};
 		7C64730273A2D161C4EFB4FB /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1751,7 +1759,7 @@
 		};
 		85EEACE6A36591361EF20DD8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1771,7 +1779,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_CC9F5F52-CDAE-476F-A825-84DD97CB74B8" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
