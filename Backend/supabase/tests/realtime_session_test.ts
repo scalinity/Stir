@@ -270,3 +270,83 @@ Deno.test('realtime-session: Premium user reaches mint (502 AI-01 on placeholder
   assertEquals(res.status, 502);
   assertEquals(res.body.error, 'AI-01');
 });
+
+// ---------------------------------------------------------------------------
+// is_refresh: quota-skip + rate-limit (P1-N)
+// ---------------------------------------------------------------------------
+//
+// Refresh mints bypass the monthly voice_cook_session quota (ADR 0014 —
+// `is_refresh` skips increment). The tests below pin both observable
+// consequences of `didConsumeQuota = !body.is_refresh`:
+//
+//   (1) quota-skip: `is_refresh=true` must NOT increment the counter,
+//       and must NOT be blocked by `used_count >= cap_count`. A user at
+//       cap can still refresh.
+//   (2) refund-guard gating (implicit): both refund paths (no active
+//       prompt, mint-throw) gate on `didConsumeQuota && consumedPeriodStart`,
+//       so a mint-failure on the `is_refresh=true` path MUST NOT fire
+//       `refundQuota`. The post-call `used_count` being identical to
+//       the pre-call value pins this — if the refund fired incorrectly,
+//       the counter would decrement below the pre-call value.
+//
+// Not pinned here (filed to §Deferred): the `is_refresh=false`
+// increment-then-refund path on mint failure. On the placeholder-key
+// CI path, refund returns used_count to its pre-call value, so post-
+// call state is indistinguishable from "never incremented". Requires
+// either a real mint (STIR_RUN_AI_INTEGRATION_TESTS) or refund-audit
+// observability to disambiguate.
+
+Deno.test('realtime-session: is_refresh=true skips quota increment even at cap', async () => {
+  if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') {
+    // A real mint would burn Gemini quota on every CI run. The
+    // invariant under test is the pre-mint quota-skip branch; the
+    // 502-AI-01 proxy on the placeholder-key path is sufficient.
+    return;
+  }
+  const bs = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(bs.canonical_user_key);
+
+  // Set used_count = cap_count. On the non-refresh path this would
+  // return 429 RATE-01 (see "RATE-01 when voice_cook_session cap
+  // reached"). On the refresh path, the whole quota branch is
+  // skipped, so the call proceeds to mint.
+  const client = serviceClient();
+  await client
+    .from('usage_counters')
+    .update({ used_count: 20 })
+    .eq('canonical_user_key', bs.canonical_user_key)
+    .eq('feature_key', 'voice_cook_session');
+
+  const res = await callRealtimeSession(
+    validBody({ is_refresh: true }),
+    bs.session_jwt,
+  );
+
+  // Pin (1a): at-cap + is_refresh=true does NOT produce 429. The
+  // 502-AI-01 proxy proves the handler reached mint — all pre-mint
+  // logic including the quota-branch skip worked.
+  assertEquals(
+    res.status,
+    502,
+    `expected 502 (reached mint) but got ${res.status}; is_refresh may not be skipping the quota branch`,
+  );
+  assertEquals(res.body.error, 'AI-01');
+
+  // Pin (1b): post-call used_count is unchanged from the pre-call
+  // value (20). If didConsumeQuota=false had been violated and the
+  // increment ran anyway, used_count would be 21. If the mint-
+  // failure refund path had fired incorrectly (ignoring
+  // didConsumeQuota guard), used_count would be 19 (decrement). 20
+  // is the only correct value.
+  const { data: counter } = await client
+    .from('usage_counters')
+    .select('used_count')
+    .eq('canonical_user_key', bs.canonical_user_key)
+    .eq('feature_key', 'voice_cook_session')
+    .single();
+  assertEquals(
+    (counter as { used_count: number } | null)?.used_count,
+    20,
+    'is_refresh=true must not mutate used_count (no increment, no refund)',
+  );
+});
