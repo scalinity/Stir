@@ -249,6 +249,7 @@
 		E6EF274F7C8D0CFBD09526E0 /* ReactivationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BA5D3B10982CD095498B875 /* ReactivationScheduler.swift */; };
 		E95184C0B1B99CA43802F88D /* TonightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF37DA19B86E1118F282ABF /* TonightWidget.swift */; };
 		EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */; };
+		EA728DEFFBE7495D23A90289 /* StarRatingRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */; };
 		EBA79945C63853EDEE2A74A3 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC5321E6BA6620E00B90593 /* CameraService.swift */; };
 		EBAFD48F13DB89C80E076752 /* SolveRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63CF6906E3F3379752C78928 /* SolveRepository.swift */; };
 		EDC2FF0AEC809F14EF50ECD0 /* AudioInterruptionObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398460FFFE5E6FE795B22E21 /* AudioInterruptionObserver.swift */; };
@@ -315,6 +316,7 @@
 
 /* Begin PBXFileReference section */
 		016A78A0278372166E393E65 /* StirApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirApp.swift; sourceTree = "<group>"; };
+		01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StarRatingRow.swift; sourceTree = "<group>"; };
 		01D66ABEE50D3262039974DC /* LeftoversPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoversPromptView.swift; sourceTree = "<group>"; };
 		03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncTimeout.swift; sourceTree = "<group>"; };
 		0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentHouseholdStore.swift; sourceTree = "<group>"; };
@@ -540,7 +542,7 @@
 		FCCB19696B57826A5C37D47C /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
-		"TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1160,6 +1162,7 @@
 				E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */,
 				B05B575B500921F4E51EFB78 /* SavedMealCard.swift */,
 				B15773184EB5F4E8BF129A85 /* SecondaryButton.swift */,
+				01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */,
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
 			);
@@ -1186,10 +1189,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_01FE006A-E417-460D-BA8F-AC0C93B2266D" /* Stir */ = {
+		"TEMP_E0AD7C32-916E-44AA-9F42-E0B32AD78EE7" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */,
+				"TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -1585,6 +1588,7 @@
 				73A22EC1010979DB1BC91B6B /* SolveViewModel.swift in Sources */,
 				1CE38F980B47427B71317210 /* Spacing.swift in Sources */,
 				37B6BE6E1E28976143207FED /* SpeechFallbackService.swift in Sources */,
+				EA728DEFFBE7495D23A90289 /* StarRatingRow.swift in Sources */,
 				6EB61EC83C39B1E5CC77587E /* StartNewDinnerSolveIntent.swift in Sources */,
 				7E93C41D0727C092E9C7E7FB /* StepCard.swift in Sources */,
 				DCA61E2D1E63CBBF42E1D623 /* StepCardView.swift in Sources */,
@@ -1646,7 +1650,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1665,7 +1669,7 @@
 		};
 		31827A9937F057BAAC188E1F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1685,7 +1689,7 @@
 		};
 		4601BB06DB748D5B073B7BB6 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1724,7 +1728,7 @@
 		};
 		7C64730273A2D161C4EFB4FB /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1743,7 +1747,7 @@
 		};
 		85EEACE6A36591361EF20DD8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1763,7 +1767,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_D95B7EA3-FC57-47CB-A299-9A2D8D7F5F8C" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

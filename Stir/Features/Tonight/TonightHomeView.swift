@@ -44,13 +44,40 @@ struct TonightHomeView: View {
     @State private var toastMessage: String?
     @State private var showSavedMeals = false
     @State private var resumableSession: CookingSession?
-    @State private var recentCompleted: [CookingSession] = []
+    @State private var recentCompleted: [RecentMealEntry] = []
     @State private var activeModal: ActiveModal?
 
     enum ActiveModal: String, Identifiable {
         case scan
         case `import`
         var id: String { rawValue }
+    }
+
+    /// Value-type row projection for the Recent meals list. Pre-
+    /// extracts the display fields (title, endedAt, rating) once at
+    /// load time so body evals don't re-walk CookingSession's
+    /// managed-object relationships (`.recipePlan?.title`,
+    /// `.outcomeFeedback?.rating`) on every render triggered by toast
+    /// flips, navigation, or entitlement changes. The CookingSession
+    /// ref is still held for the "Cook again" tap path — it's never
+    /// touched during render, only on user action.
+    /// Review finding W-E W22 (CA3).
+    fileprivate struct RecentMealEntry: Identifiable {
+        let id: UUID
+        let title: String
+        let endedAt: Date?
+        let rating: Int?
+        let session: CookingSession
+
+        init?(from session: CookingSession) {
+            guard let id = session.id else { return nil }
+            self.id = id
+            self.title = session.recipePlan?.title ?? "Untitled recipe"
+            self.endedAt = session.endedAt
+            let rawRating = session.outcomeFeedback?.rating ?? 0
+            self.rating = rawRating > 0 ? Int(rawRating) : nil
+            self.session = session
+        }
     }
 
     var body: some View {
@@ -184,12 +211,17 @@ struct TonightHomeView: View {
         }
     }
 
+    /// Weekday ("Tuesday") · locale-short time ("3:45 PM"). Migrated
+    /// from per-body-eval `DateFormatter()` allocation (two per call)
+    /// to `Date.FormatStyle`, which is value-type and cheap to invoke.
+    /// The old pattern spun up two `NSDateFormatter` instances on
+    /// every TonightHome re-render (navigation returns, Entitlement
+    /// changes, tab switches) — allocator churn on the main thread.
+    /// Review finding W-E W21 (CA3).
     private var greetingSubtitle: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE"
-        let weekday = formatter.string(from: Date())
-        formatter.dateFormat = "h:mm a"
-        let time = formatter.string(from: Date())
+        let now = Date()
+        let weekday = now.formatted(.dateTime.weekday(.wide))
+        let time = now.formatted(date: .omitted, time: .shortened)
         return "\(weekday) · \(time)"
     }
 
@@ -465,17 +497,20 @@ struct TonightHomeView: View {
                     .foregroundStyle(Color.Stir.ink500)
 
                 VStack(spacing: CGFloat.Stir.space2) {
-                    ForEach(recentCompleted.prefix(5), id: \.id) { session in
-                        recentMealRow(session: session)
+                    ForEach(recentCompleted.prefix(5)) { entry in
+                        recentMealRow(entry: entry)
                     }
                 }
             }
         }
     }
 
-    private func recentMealRow(session: CookingSession) -> some View {
+    private func recentMealRow(entry: RecentMealEntry) -> some View {
         Button {
-            if let fresh = makeFreshSessionIfPossible(from: session) {
+            // Access the CookingSession only on tap — body eval never
+            // touches it, which keeps the NSManagedObject relationship
+            // walk out of the hot render path. W-E W22.
+            if let fresh = makeFreshSessionIfPossible(from: entry.session) {
                 coordinator.resumeCookMode(fresh)
             } else {
                 toastMessage = "Couldn't start this one again. Try from Saved or pick another meal."
@@ -492,19 +527,19 @@ struct TonightHomeView: View {
                 .frame(width: 40, height: 40)
 
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
-                    Text(session.recipePlan?.title ?? "Untitled recipe")
+                    Text(entry.title)
                         .stirFont(.labelLg)
                         .foregroundStyle(Color.Stir.ink900)
                         .lineLimit(1)
 
                     HStack(spacing: CGFloat.Stir.space2) {
-                        if let endedAt = session.endedAt {
+                        if let endedAt = entry.endedAt {
                             Text(endedAt, format: .relative(presentation: .named))
                                 .stirFont(.bodySm)
                                 .foregroundStyle(Color.Stir.ink500)
                         }
-                        if let rating = session.outcomeFeedback?.rating, rating > 0 {
-                            ratingStars(rating: Int(rating))
+                        if let rating = entry.rating {
+                            StarRatingRow(rating: rating, size: .micro)
                         }
                     }
                 }
@@ -527,21 +562,8 @@ struct TonightHomeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(session.recipePlan?.title ?? "Untitled recipe")
+        .accessibilityLabel(entry.title)
         .accessibilityHint("Cook this again")
-    }
-
-    private func ratingStars(rating: Int) -> some View {
-        HStack(spacing: 2) {
-            ForEach(1 ... 5, id: \.self) { idx in
-                Image(systemName: idx <= rating ? "star.fill" : "star")
-                    .font(.system(size: 11)) // justification: 11pt micro-star scale matches mockup's recent-meal rating row
-                    .foregroundStyle(idx <= rating ? Color.Stir.ember600 : Color.Stir.ink300)
-                    .accessibilityHidden(true)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Rated \(rating) of 5")
     }
 
     // MARK: - State helpers
@@ -568,7 +590,11 @@ struct TonightHomeView: View {
         let repo = CookingSessionRepository()
         do {
             self.resumableSession = try repo.resumableSession(for: household)
-            self.recentCompleted = try repo.recentCompletedSessions(for: household, limit: 5)
+            let sessions = try repo.recentCompletedSessions(for: household, limit: 5)
+            // Project into value-type rows once; prevents body evals
+            // from re-walking NSManagedObject relationships per render.
+            // Review finding W-E W22.
+            self.recentCompleted = sessions.compactMap(RecentMealEntry.init(from:))
         } catch {
             Logger.ui.error("TonightHome refresh failed: \(error.localizedDescription, privacy: .public)")
         }

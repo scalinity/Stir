@@ -293,16 +293,9 @@ struct SavedMealsView: View {
     @ViewBuilder
     private func ratingLine(rating: Int?) -> some View {
         if let rating, rating > 0 {
-            HStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight 5-star cluster
-                ForEach(1...5, id: \.self) { index in
-                    Image(systemName: index <= rating ? "star.fill" : "star")
-                        .stirFont(.bodySm)
-                        .foregroundStyle(index <= rating ? Color.Stir.ember600 : Color.Stir.ink300)
-                        .accessibilityHidden(true)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Rated \(rating) out of 5")
+            // Delegates to the shared DesignSystem component.
+            // Review finding W-E W23 (CA3).
+            StarRatingRow(rating: rating, size: .bodySm)
         }
     }
 
