@@ -1,8 +1,12 @@
 // DinnerOptionsView
 //
-// Renders 3 dish cards as they stream in. Skeleton placeholders before
-// each arrives; progressive fill as the SSE events land. Tapping a card
-// pushes DishPreviewView.
+// Renders 3 dish cards as they stream in (mockup 05 §Dinner Options).
+// Skeleton placeholders before each arrives; progressive fill as the
+// SSE events land. Tapping a card pushes DishPreviewView.
+//
+// Uses Phase 2 DishOptionCard for the populated slot. Slot-specific
+// skeleton + error surfaces stay inline — they're one-off during-stream
+// states, not reusable components.
 
 import SwiftUI
 
@@ -11,14 +15,8 @@ struct DinnerOptionsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3 + 2) { // 14pt
                 header
-                // Surface the top-level .error phase BEFORE the slot
-                // cards. RATE-01 now also presents the paywall via
-                // SolveViewModel.presentPaywall, but the row stays
-                // rendered so the user returns to a recoverable screen
-                // (retry CTA) instead of a stuck skeleton after paywall
-                // dismissal.
                 if case .error(let message, let code) = viewModel.phase {
                     errorBanner(message: message, code: code)
                 }
@@ -26,12 +24,13 @@ struct DinnerOptionsView: View {
                     slotCard(slot)
                 }
             }
-            .padding()
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.vertical, CGFloat.Stir.space4)
         }
+        .background(Color.Stir.paper50)
         .navigationTitle("Tonight's options")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: "solve-once") {
-            // First-appearance trigger ONLY if the stream hasn't started yet.
             if viewModel.phase == .constraints {
                 viewModel.startSolve()
             }
@@ -41,17 +40,20 @@ struct DinnerOptionsView: View {
     // MARK: - Sections
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
             Text("Three that fit tonight")
-                .font(.title3.weight(.semibold))
+                .stirFont(.displayLg)
+                .foregroundStyle(Color.Stir.ink900)
+                .accessibilityAddTraits(.isHeader)
+
             if viewModel.phase == .solving {
                 Text("Looking at your pantry and constraints…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
             } else if viewModel.slots.allSatisfy({ $0.dish == nil && $0.errorCode == nil }) {
                 Text("Preparing…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
             }
         }
     }
@@ -59,13 +61,19 @@ struct DinnerOptionsView: View {
     @ViewBuilder
     private func slotCard(_ slot: SolveViewModel.SlotState) -> some View {
         if let dish = slot.dish {
-            // Wrap the dish in the parent stack's Route case — a bare
-            // `NavigationLink(value: dish)` would not activate because
-            // the stack's typed path is `[ScanFlowRoot.Route]`, not
-            // `[DishCard]`. SwiftUI silently refuses links whose value
-            // type doesn't match the path.
             NavigationLink(value: ScanFlowRoot.Route.preview(dish)) {
-                DishCardView(dish: dish)
+                DishOptionCard(
+                    rank: slot.rank,
+                    title: dish.title,
+                    totalTimeMinutes: dish.totalTimeMinutes,
+                    whyItFits: dish.whyItFits,
+                    missingIngredientCount: dish.missingIngredientCount,
+                    fitKind: fitLabelKind(
+                        for: dish.fitLabelPrimary,
+                        missingCount: dish.missingIngredientCount,
+                    ),
+                    onTap: {},
+                )
             }
             .buttonStyle(.plain)
         } else if let code = slot.errorCode {
@@ -75,134 +83,105 @@ struct DinnerOptionsView: View {
         }
     }
 
+    /// Maps the server-side fit-label enum string to Phase 2's
+    /// FitLabelKind. `uses_what_you_have` + `new_to_you` don't have
+    /// direct visual variants in spec §8.4 — collapse to `.bestFit`
+    /// (same voice tint) for now; if a future mockup introduces a
+    /// distinct visual variant, extend FitLabelKind.
+    private func fitLabelKind(for raw: String, missingCount: Int) -> FitLabelKind {
+        switch raw {
+        case "fastest":       return .fastest
+        case "least_waste":   return .leastWaste
+        case "best_fit",
+             "uses_what_you_have",
+             "new_to_you":    return .bestFit
+        default:
+            return missingCount > 0 ? .missing(count: missingCount) : .bestFit
+        }
+    }
+
     private func skeletonSlot(rank: Int) -> some View {
-        RoundedRectangle(cornerRadius: 14)
-            .fill(Color(.tertiarySystemFill))
-            .frame(height: 104)
+        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+            .fill(Color.Stir.paper100)
+            .frame(height: 140)
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
             .overlay(alignment: .topLeading) {
-                Text("Rank \(rank)")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(10)
+                Text("\(rank)")
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink300)
+                    .padding(CGFloat.Stir.space4)
             }
             .overlay(
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .tint(.secondary),
+                    .tint(Color.Stir.ember600),
             )
+            .accessibilityLabel("Option \(rank), loading")
     }
 
     private func errorBanner(message: String, code: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+        HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+            Image.Stir.softError
+                .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                .foregroundStyle(Color.Stir.rust600)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1 + 2) {
                 Text(message)
-                    .font(.subheadline.weight(.semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink900)
                 Text(code)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                Button("Try again") {
+                    .stirFont(.monoQuote)
+                    .foregroundStyle(Color.Stir.ink500)
+                TextButton(title: "Try again") {
                     viewModel.startSolve()
                 }
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             Spacer()
         }
-        .padding()
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .padding(CGFloat.Stir.space3)
+        .background(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .fill(Color.Stir.amber100),
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1),
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .strokeBorder(Color.Stir.amber600.opacity(0.3), lineWidth: 1),
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(message). Error code \(code).")
     }
 
     private func errorSlot(rank: Int, code: ErrorCode) -> some View {
-        // `code` is preserved in the signature for future per-code copy
-        // (AI-02 vs AI-01) but isn't surfaced distinctly in step-3 UI.
         let _ = code
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 4) {
+        return HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+            Image.Stir.softError
+                .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                .foregroundStyle(Color.Stir.amber600)
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                 Text("Option \(rank) didn't pass your rules.")
-                    .font(.subheadline.weight(.semibold))
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink900)
                 Text("Try loosening one constraint and re-solving.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
             }
             Spacer()
         }
-        .padding()
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1),
+        .padding(CGFloat.Stir.space3)
+        .background(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .fill(Color.Stir.amber100),
         )
-    }
-}
-
-// MARK: - DishCardView
-
-struct DishCardView: View {
-    let dish: DishCard
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(dish.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                Spacer()
-                Text("\(dish.totalTimeMinutes) min")
-                    .font(.subheadline.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            Text(dish.whyItFits)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                label(text: dish.fitLabelPrimary, tint: tint(for: dish.fitLabelPrimary))
-                if let secondary = dish.fitLabelSecondary {
-                    label(text: secondary, tint: .secondary)
-                }
-                Spacer()
-                if dish.missingIngredientCount > 0 {
-                    Label("\(dish.missingIngredientCount) missing", systemImage: "cart")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func label(text: String, tint: Color) -> some View {
-        Text(text.replacingOccurrences(of: "_", with: " "))
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(tint.opacity(0.2), in: Capsule())
-            .foregroundStyle(tint)
-            .textCase(.uppercase)
-    }
-
-    private func tint(for label: String) -> Color {
-        switch label {
-        case "fastest":            return .orange
-        case "least_waste":        return .green
-        case "best_fit":           return .blue
-        case "uses_what_you_have": return .teal
-        case "new_to_you":         return .purple
-        default:                    return .secondary
-        }
+        .overlay(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .strokeBorder(Color.Stir.amber600.opacity(0.3), lineWidth: 1),
+        )
     }
 }

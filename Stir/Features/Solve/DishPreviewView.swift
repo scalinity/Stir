@@ -38,14 +38,16 @@ struct DishPreviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                 header
                 missingIngredientsSection
                 ingredientsSection
                 stepsSection
             }
-            .padding()
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.vertical, CGFloat.Stir.space4)
         }
+        .background(Color.Stir.paper50)
         .navigationTitle(dish.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -110,25 +112,29 @@ struct DishPreviewView: View {
     // MARK: - Sections
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
             HStack {
-                Label("\(dish.totalTimeMinutes) min", systemImage: "clock")
-                    .accessibilityLabel("\(dish.totalTimeMinutes) minutes total time")
+                HStack(spacing: CGFloat.Stir.space1) {
+                    Image.Stir.clock
+                        .font(.system(size: CGFloat.Stir.iconSm))
+                    Text("\(dish.totalTimeMinutes) min")
+                        .stirFont(.bodySm)
+                }
                 Spacer()
-                Label("Rank \(dish.rank)", systemImage: "trophy")
-                    .accessibilityLabel("Rank \(dish.rank)")
+                FitLabel(kind: .bestFit)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.Stir.ink500)
+            .accessibilityLabel("\(dish.totalTimeMinutes) minutes total, rank \(dish.rank)")
 
             Text(dish.whyItFits)
-                .font(.body)
+                .stirFont(.bodyLg)
+                .foregroundStyle(Color.Stir.ink900)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !dish.reasoningSummary.isEmpty {
                 Text(dish.reasoningSummary)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -137,74 +143,112 @@ struct DishPreviewView: View {
     @ViewBuilder
     private var missingIngredientsSection: some View {
         if dish.missingIngredientCount > 0 {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Missing from your pantry", systemImage: "cart")
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                HStack(spacing: CGFloat.Stir.space1 + 2) {
+                    Image.Stir.cart
+                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                        .foregroundStyle(Color.Stir.amber600)
+                    Text("Missing from your pantry")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ink900)
+                }
                 Text("We'll flag these — pick them up or swap via substitution later.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
                 Text("\(dish.missingIngredientCount) item\(dish.missingIngredientCount == 1 ? "" : "s")")
-                    .font(.subheadline.weight(.medium))
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.amber600)
             }
-            .padding()
-            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            .padding(CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.amber100),
+            )
         }
     }
 
     private var ingredientsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Ingredients")
-                .font(.headline)
-            Text("Serves \(dish.recipePlan.servings)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Ingredients")
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink900)
+                Spacer()
+                Text("Serves \(dish.recipePlan.servings)")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
+            }
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1 + 2) {
                 ForEach(Array(dish.recipePlan.ingredients.enumerated()), id: \.offset) { _, ing in
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: CGFloat.Stir.space2) {
                         Text(ing.amountText)
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            // `minWidth`, not `width` — at AX1+ sizes the
-                            // text may legitimately need more space than
-                            // 80pt; a hard width would clip. Flexible lower
-                            // bound keeps the column aligned at body size.
+                            .stirFont(.monoMd)
+                            .foregroundStyle(Color.Stir.ink500)
                             .frame(minWidth: amountColumnMinWidth, alignment: .leading)
                         Text(ing.displayName + (ing.isOptional == true ? "  (optional)" : ""))
-                            .font(.subheadline)
+                            .stirFont(.bodyMd)
+                            .foregroundStyle(Color.Stir.ink900)
                     }
                     .accessibilityElement(children: .combine)
                 }
             }
-            .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .padding(CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
         }
     }
 
     private var stepsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
             Text("Steps")
-                .font(.headline)
-            VStack(alignment: .leading, spacing: 10) {
+                .stirFont(.displayMd)
+                .foregroundStyle(Color.Stir.ink900)
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
                 ForEach(Array(dish.recipePlan.steps.enumerated()), id: \.offset) { idx, step in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: CGFloat.Stir.space3 - 2) {
                         Text("\(idx + 1).")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
+                            .stirFont(.labelLg)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.Stir.ink500)
+                        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                             Text(step.instructionText)
-                                .font(.subheadline)
+                                .stirFont(.bodyMd)
+                                .foregroundStyle(Color.Stir.ink900)
                                 .fixedSize(horizontal: false, vertical: true)
                             if let secs = step.timerSeconds, secs > 0 {
-                                Label("\(secs / 60) min timer", systemImage: "timer")
-                                    .font(.footnote)
-                                    .foregroundStyle(.orange)
+                                HStack(spacing: CGFloat.Stir.space1) {
+                                    Image.Stir.timer
+                                        .font(.system(size: CGFloat.Stir.iconSm))
+                                    Text("\(secs / 60) min timer")
+                                        .stirFont(.bodySm)
+                                }
+                                .foregroundStyle(Color.Stir.ember600)
                             }
                         }
                     }
                 }
             }
-            .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .padding(CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
         }
     }
 
@@ -270,14 +314,10 @@ struct DishPreviewView: View {
         // nullify case, same guard as TonightHome.resumeCookMode), fall
         // through silently — no Cook Mode presents, no crash. Upstream
         // error handling catches the UX gap.
-        Button {
+        PrimaryButton(title: "Start Cooking") {
             guard let plan = viewModel.persistedRecipePlan(for: dish),
                   let household = viewModel.currentHousehold
             else {
-                // Rare: CloudKit Nullify race or a solve-persistence
-                // failure. Surface a toast + log so the user knows the
-                // tap landed AND Sentry sees the miss. Silent no-op
-                // left the user tapping a dead button.
                 Logger.ui.error(
                     "dish_preview_start_cooking_missing_plan_or_household rank=\(dish.rank, privacy: .public)",
                 )
@@ -290,17 +330,7 @@ struct DishPreviewView: View {
             }
             coordinator.startCookMode(recipePlan: plan, household: household)
             dismiss()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "flame.fill")
-                    .accessibilityHidden(true)
-                Text("Start Cooking")
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.borderedProminent)
         .accessibilityHint("Opens Cook Mode step-by-step with optional timers.")
     }
 }

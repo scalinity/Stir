@@ -44,16 +44,17 @@ struct ConstraintsSheet: View {
                 }
 
                 Section {
-                    Button {
-                        commit()
-                        onSolve()
-                        dismiss()
-                    } label: {
-                        Text("Find dinners")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .disabled(viewModel.ingredientsForSolve.isEmpty)
+                    PrimaryButton(
+                        title: "Find me dinner",
+                        isDisabled: viewModel.ingredientsForSolve.isEmpty,
+                        action: {
+                            commit()
+                            onSolve()
+                            dismiss()
+                        },
+                    )
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
             }
             .navigationTitle("Tonight's constraints")
