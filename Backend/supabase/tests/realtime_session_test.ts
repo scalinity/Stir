@@ -350,3 +350,54 @@ Deno.test('realtime-session: is_refresh=true skips quota increment even at cap',
     'is_refresh=true must not mutate used_count (no increment, no refund)',
   );
 });
+
+Deno.test('realtime-session: is_refresh=true still trips user-scoped rate limiter at cap', async () => {
+  if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') return;
+  const bs = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(bs.canonical_user_key);
+
+  // Pre-fill the per-user mint rate-limit bucket at cap. Policy
+  // (from _shared/rate_limiter.ts RATE_LIMIT_POLICIES):
+  //   scope: 'user:realtime_session_hourly'
+  //   windowSeconds: 3600
+  //   maxCount: 40
+  //
+  // The RPC `stir_rate_limit_check` SUMs count across all rows
+  // where `window_start > now() - windowSeconds`. Inserting a single
+  // row at `window_start = now()` with `count = 40` puts the
+  // sum at cap; the cap-check (`v_current_count >= p_max_count`)
+  // fires before any insert, returning 429 RATE-01.
+  const client = serviceClient();
+  const { error: insertErr } = await client
+    .from('rate_limit_buckets')
+    .insert({
+      scope_key: 'user:realtime_session_hourly',
+      bucket_key: bs.canonical_user_key,
+      window_start: new Date().toISOString(),
+      count: 40,
+    });
+  if (insertErr) throw insertErr;
+
+  // Call with is_refresh=true. Quota branch is skipped, but the
+  // rate limiter runs BEFORE the quota check (realtime-session
+  // /index.ts:247-288). Pre-filled user-scoped bucket at cap must
+  // trip 429 regardless of is_refresh — rate-limiting protects
+  // against a runaway is_refresh=true loop driving Gemini API
+  // spend indefinitely (ADR 0014 comment at index.ts:241-245).
+  const res = await callRealtimeSession(
+    validBody({ is_refresh: true }),
+    bs.session_jwt,
+  );
+
+  assertEquals(
+    res.status,
+    429,
+    `expected 429 (rate-limited) but got ${res.status}; is_refresh may be skipping the rate limiter`,
+  );
+  assertEquals(res.body.error, 'RATE-01');
+  assertEquals(
+    res.body.scope,
+    'user:realtime_session_hourly',
+    'rate-limit scope must identify the user-scoped mint limiter',
+  );
+});
