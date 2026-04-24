@@ -314,10 +314,7 @@ struct SubstitutionSheetView: View {
                 .padding(.top, CGFloat.Stir.space2)
             }
             .padding(CGFloat.Stir.space5)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.crimson100),
-            )
+            .stirCard(fill: Color.Stir.crimson100, borderColor: nil)
             .padding(.horizontal, CGFloat.Stir.space5)
             .padding(.vertical, CGFloat.Stir.space4)
         }

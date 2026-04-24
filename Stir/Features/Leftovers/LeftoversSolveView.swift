@@ -109,13 +109,9 @@ struct LeftoversSolveView: View {
                     .foregroundStyle(Color.Stir.ink700)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.Stir.paper100),
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.Stir.ink100, lineWidth: 1),
+                    .stirCard(
+                        borderColor: Color.Stir.ink100,
+                        radius: CGFloat.Stir.radiusMd,
                     )
             }
         }
@@ -172,17 +168,12 @@ private struct LeftoversOptionCard: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.Stir.ink500)
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isBestFit ? Color.Stir.ember100 : Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(
-                        isBestFit ? Color.Stir.ember600 : Color.Stir.ink100,
-                        lineWidth: isBestFit ? 1.5 : 1,
-                    ),
+            .padding(CGFloat.Stir.space3Half)
+            .stirCard(
+                fill: isBestFit ? Color.Stir.ember100 : Color.Stir.paper100,
+                borderColor: isBestFit ? Color.Stir.ember600 : Color.Stir.ink100,
+                borderWidth: isBestFit ? 1.5 : 1,
+                radius: CGFloat.Stir.radiusLg,
             )
         }
         .buttonStyle(.plain)

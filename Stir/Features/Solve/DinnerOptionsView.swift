@@ -135,13 +135,9 @@ struct DinnerOptionsView: View {
             Spacer()
         }
         .padding(CGFloat.Stir.space3)
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .fill(Color.Stir.amber100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .strokeBorder(Color.Stir.amber600.opacity(0.3), lineWidth: 1),
+        .stirCard(
+            fill: Color.Stir.amber100,
+            borderColor: Color.Stir.amber600.opacity(0.3),
         )
         // NOTE: no `.combine` — the Try again TextButton is an
         // interactive child. Combining would flatten it into the
@@ -168,13 +164,9 @@ struct DinnerOptionsView: View {
             Spacer()
         }
         .padding(CGFloat.Stir.space3)
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .fill(Color.Stir.amber100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .strokeBorder(Color.Stir.amber600.opacity(0.3), lineWidth: 1),
+        .stirCard(
+            fill: Color.Stir.amber100,
+            borderColor: Color.Stir.amber600.opacity(0.3),
         )
     }
 }

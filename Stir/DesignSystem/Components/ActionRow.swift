@@ -49,14 +49,7 @@ struct ActionRow: View {
                 trailingChevron
             }
             .padding(CGFloat.Stir.space3Half) // 14pt
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

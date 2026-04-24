@@ -204,13 +204,9 @@ struct SavedMealsView: View {
             }
             .padding(.horizontal, CGFloat.Stir.space3)
             .padding(.vertical, CGFloat.Stir.space2)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .strokeBorder(Color.Stir.ink100, lineWidth: 1),
+            .stirCard(
+                borderColor: Color.Stir.ink100,
+                radius: CGFloat.Stir.radiusMd,
             )
         }
     }

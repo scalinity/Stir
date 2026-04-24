@@ -162,10 +162,7 @@ struct DishPreviewView: View {
             }
             .padding(CGFloat.Stir.space4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.amber100),
-            )
+            .stirCard(fill: Color.Stir.amber100, borderColor: nil)
         }
     }
 
@@ -197,14 +194,7 @@ struct DishPreviewView: View {
             }
             .padding(CGFloat.Stir.space4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
         }
     }
 
@@ -241,14 +231,7 @@ struct DishPreviewView: View {
             }
             .padding(CGFloat.Stir.space4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
         }
     }
 

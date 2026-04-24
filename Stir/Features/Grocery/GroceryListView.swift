@@ -344,16 +344,12 @@ private struct RemindersDeniedToast: View {
                     .foregroundStyle(Color.Stir.ink500)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.Stir.paper100),
+        .padding(.horizontal, CGFloat.Stir.space3Half)
+        .padding(.vertical, CGFloat.Stir.space2Half)
+        .stirCard(
+            borderColor: Color.Stir.ink100,
+            radius: CGFloat.Stir.radiusMd,
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.Stir.ink100, lineWidth: 1),
-        )
-        .padding(.horizontal, 18)
+        .padding(.horizontal, CGFloat.Stir.space4Half)
     }
 }

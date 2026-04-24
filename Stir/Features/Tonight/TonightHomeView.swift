@@ -266,14 +266,10 @@ struct TonightHomeView: View {
                         .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
                         .foregroundStyle(Color.Stir.ink300)
                 }
-                .padding(CGFloat.Stir.space3 + 2) // 14pt
-                .background(
-                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                        .fill(Color.Stir.ember100),
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                        .strokeBorder(Color.Stir.ember600.opacity(0.4), lineWidth: 1),
+                .padding(CGFloat.Stir.space3Half) // 14pt
+                .stirCard(
+                    fill: Color.Stir.ember100,
+                    borderColor: Color.Stir.ember600.opacity(0.4),
                 )
             }
             .buttonStyle(.plain)
@@ -512,14 +508,7 @@ struct TonightHomeView: View {
                     .foregroundStyle(Color.Stir.ink300)
             }
             .padding(CGFloat.Stir.space3)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

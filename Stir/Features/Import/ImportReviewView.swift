@@ -94,14 +94,10 @@ struct ImportReviewView: View {
                 .foregroundStyle(Color.Stir.ink700)
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.Stir.rust600.opacity(0.4), lineWidth: 1),
+        .padding(CGFloat.Stir.space3Half)
+        .stirCard(
+            borderColor: Color.Stir.rust600.opacity(0.4),
+            radius: CGFloat.Stir.radiusMd,
         )
     }
 
@@ -135,10 +131,7 @@ struct ImportReviewView: View {
                     }
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
+            .stirCard(borderColor: nil, radius: CGFloat.Stir.radiusMd)
         }
     }
 

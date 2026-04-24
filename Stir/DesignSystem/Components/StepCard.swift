@@ -100,14 +100,7 @@ struct StepCard: View {
         }
         .padding(CGFloat.Stir.space5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                .strokeBorder(Color.Stir.divider, lineWidth: 1),
-        )
+        .stirCard(radius: CGFloat.Stir.radiusLg)
         .stirShadow(StirShadow.cookStepCard(for: colorScheme))
     }
 

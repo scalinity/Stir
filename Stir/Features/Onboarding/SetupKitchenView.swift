@@ -197,14 +197,7 @@ struct SetupKitchenView: View {
                 )
             }
             .padding(CGFloat.Stir.space3)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
         }
     }
 
@@ -253,17 +246,10 @@ private struct EquipmentTile: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, CGFloat.Stir.space2)
-            .padding(.vertical, CGFloat.Stir.space3 + 2) // 14pt
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(isSelected ? Color.Stir.ember100 : Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? Color.Stir.ember600 : Color.Stir.divider,
-                        lineWidth: 1,
-                    ),
+            .padding(.vertical, CGFloat.Stir.space3Half) // 14pt
+            .stirCard(
+                fill: isSelected ? Color.Stir.ember100 : Color.Stir.paper100,
+                borderColor: isSelected ? Color.Stir.ember600 : Color.Stir.divider,
             )
             .frame(minHeight: 80)
             .contentShape(Rectangle())

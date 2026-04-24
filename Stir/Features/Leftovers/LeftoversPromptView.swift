@@ -130,13 +130,9 @@ struct LeftoversPromptView: View {
                     .foregroundStyle(Color.Stir.ink700)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.Stir.paper100),
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.Stir.ink100, lineWidth: 1),
+                    .stirCard(
+                        borderColor: Color.Stir.ink100,
+                        radius: CGFloat.Stir.radiusMd,
                     )
             }
             .accessibilityLabel("No leftovers")
@@ -257,17 +253,10 @@ private struct ItemRow: View {
                     onSetAmount(localAmount)
                 }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(entry.isSelected ? Color.Stir.sage100 : Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    entry.isSelected ? Color.Stir.sage600 : Color.Stir.ink100,
-                    lineWidth: 1,
-                ),
+        .padding(CGFloat.Stir.space3Half)
+        .stirCard(
+            fill: entry.isSelected ? Color.Stir.sage100 : Color.Stir.paper100,
+            borderColor: entry.isSelected ? Color.Stir.sage600 : Color.Stir.ink100,
         )
         .onAppear {
             if !seeded {

@@ -218,14 +218,7 @@ struct ScanReviewView: View {
         }
         .padding(CGFloat.Stir.space4)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                .strokeBorder(Color.Stir.divider, lineWidth: 1),
-        )
+        .stirCard()
     }
 
     // MARK: - Helpers

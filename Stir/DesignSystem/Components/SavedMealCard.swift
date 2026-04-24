@@ -79,14 +79,7 @@ struct SavedMealCard: View {
                 trailingIcon
             }
             .padding(CGFloat.Stir.space4)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

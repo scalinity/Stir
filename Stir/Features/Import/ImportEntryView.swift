@@ -104,17 +104,10 @@ struct ImportEntryView: View {
                 }
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    urlText.isEmpty ? Color.Stir.ink100 : Color.Stir.ember600,
-                    lineWidth: urlText.isEmpty ? 1 : 1.5,
-                ),
+        .padding(CGFloat.Stir.space3Half)
+        .stirCard(
+            borderColor: urlText.isEmpty ? Color.Stir.ink100 : Color.Stir.ember600,
+            borderWidth: urlText.isEmpty ? 1 : 1.5,
         )
     }
 
@@ -157,12 +150,10 @@ struct ImportEntryView: View {
         Text("Anything you import stays private to your account. We don't train on your cookbook.")
             .stirFont(.bodySm)
             .foregroundStyle(Color.Stir.ink500)
-            .padding(12)
+            .padding(CGFloat.Stir.space3)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
+            // justification: bespoke 10pt radius sits between radiusSm (8) and radiusMd (12) — hint-card scale
+            .stirCard(borderColor: nil, radius: 10)
     }
 
     // MARK: - Footer CTA

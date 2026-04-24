@@ -245,13 +245,10 @@ struct StepCardView: View {
             }
             .foregroundStyle(timerControlForeground(style))
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(timerControlBackground(style)),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .strokeBorder(timerControlBorder(style), lineWidth: 1),
+            .stirCard(
+                fill: timerControlBackground(style),
+                borderColor: timerControlBorder(style),
+                radius: CGFloat.Stir.radiusMd,
             )
             .contentShape(Rectangle())
         }
@@ -309,14 +306,7 @@ struct StepCardView: View {
             }
             .foregroundStyle(Color.Stir.ink900)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
+            .stirCard(radius: CGFloat.Stir.radiusMd)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("Substitute a missing ingredient")
@@ -380,13 +370,10 @@ struct StepCardView: View {
             }
             .foregroundStyle(micForeground)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(micBackground),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .strokeBorder(micBorder, lineWidth: 1),
+            .stirCard(
+                fill: micBackground,
+                borderColor: micBorder,
+                radius: CGFloat.Stir.radiusMd,
             )
             .contentShape(Rectangle())
         }

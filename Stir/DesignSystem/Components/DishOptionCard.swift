@@ -69,14 +69,7 @@ struct DishOptionCard: View {
         }
         .padding(CGFloat.Stir.space4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                .strokeBorder(Color.Stir.divider, lineWidth: 1),
-        )
+        .stirCard(radius: CGFloat.Stir.radiusLg)
         .contentShape(Rectangle())
         // Collapse the card's inner Text + FitLabel + metadata subtree
         // and substitute the single card-level label. Without `.ignore`,
