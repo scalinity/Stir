@@ -60,6 +60,38 @@ enum DietOption: String, CaseIterable, Sendable, Equatable {
     }
 }
 
+enum DislikeOption: String, CaseIterable, Sendable, Equatable {
+    case cilantro
+    case mushrooms
+    case olives
+    case blueCheese       = "blue_cheese"
+    case anchovies
+    case liver
+    case bellPepper       = "bell_pepper"
+    case beets
+    case tofu
+    case eggplant
+    case seafood
+    case brusselsSprouts  = "brussels_sprouts"
+
+    var displayName: String {
+        switch self {
+        case .cilantro:          return "Cilantro"
+        case .mushrooms:         return "Mushrooms"
+        case .olives:            return "Olives"
+        case .blueCheese:        return "Blue cheese"
+        case .anchovies:         return "Anchovies"
+        case .liver:             return "Liver"
+        case .bellPepper:        return "Bell pepper"
+        case .beets:             return "Beets"
+        case .tofu:              return "Tofu"
+        case .eggplant:          return "Eggplant"
+        case .seafood:           return "Seafood"
+        case .brusselsSprouts:   return "Brussels sprouts"
+        }
+    }
+}
+
 enum GoalOption: String, CaseIterable, Sendable, Equatable {
     case quickWeeknights = "quick_weeknights"
     case highProtein = "high_protein"

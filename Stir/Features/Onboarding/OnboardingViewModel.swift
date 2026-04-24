@@ -23,6 +23,15 @@ final class OnboardingViewModel {
 
     var selectedAllergens: Set<AllergenOption> = []
     var selectedDiets: Set<DietOption> = []
+    /// Curated dislike selections from the ~12-option DislikeOption enum.
+    /// Written to DietaryRule rows as `(kind: .dislike, severity: .soft)`.
+    var selectedDislikes: Set<DislikeOption> = []
+    /// Free-text dislikes from the "+ Add" affordance. Each entry is
+    /// trimmed + lowercased + length-capped at `customDislikeMaxLength`
+    /// on write via `addCustomDislike(_:)`. Each also gets a DietaryRule
+    /// row with `kind: .dislike, severity: .soft` and the normalized
+    /// string as `value`.
+    var customDislikes: Set<String> = []
     var selectedGoals: Set<GoalOption> = []
 
     // MARK: - Setup 2 state (kitchen + servings)
@@ -30,6 +39,22 @@ final class OnboardingViewModel {
     var selectedEquipment: Set<KitchenEquipment.CommonCode> = []
     var servingsDefault: Int16 = 2
     var preferredUnits: HouseholdProfile.PreferredUnits = .imperial
+
+    // MARK: - Skip / telemetry state
+
+    /// Step IDs that were bypassed via a Skip action. A step visited
+    /// and then Skipped mid-form counts as partially-completed (state
+    /// is saved) and is NOT recorded — only steps that come AFTER the
+    /// current one and get jumped over are recorded. Attached to the
+    /// `onboarding_completed` PostHog event in commit 3.
+    private(set) var skippedSteps: [String] = []
+
+    /// Maximum length for a user-entered custom dislike. 32 chars
+    /// keeps the free-text from silently inflating the Gemini context
+    /// payload on every dinner-solve (DietaryRule.value flows into
+    /// every solve prompt via HouseholdProfile context). Not enforced
+    /// at the Core Data layer — applied at ViewModel intake.
+    static let customDislikeMaxLength = 32
 
     // MARK: - Error surface
 
@@ -69,7 +94,17 @@ final class OnboardingViewModel {
                 if let raw = rule.value, let opt = GoalOption(rawValue: raw) {
                     selectedGoals.insert(opt)
                 }
-            case .dislike, .none:
+            case .dislike:
+                // Predefined dislikes hydrate into the enum set; any
+                // value outside the curated 12 lands in `customDislikes`
+                // as the free-text entry the user typed via "+ Add".
+                guard let raw = rule.value else { break }
+                if let opt = DislikeOption(rawValue: raw) {
+                    selectedDislikes.insert(opt)
+                } else {
+                    customDislikes.insert(raw)
+                }
+            case .none:
                 break
             }
         }
@@ -91,8 +126,20 @@ final class OnboardingViewModel {
 
     // MARK: - Writes
 
-    /// Commit preferences (allergens/diets/goals) to Core Data.
-    /// Idempotent — re-runs on back-then-forward are safe.
+    /// Commit preferences (allergens/diets/dislikes/goals) to Core Data.
+    /// Idempotent — re-runs on back-then-forward are safe. Deactivates
+    /// rules no longer selected (isActive=false, not hard-delete — the
+    /// repository reactivates in place if the user re-selects later),
+    /// then upserts newly-selected rules via `DietaryRuleRepository.add()`
+    /// which handles `(household, kind, value)` uniqueness.
+    ///
+    /// Dislikes split into two iterations: predefined `DislikeOption`
+    /// cases write with the enum rawValue; custom strings from the
+    /// "+ Add" affordance write the already-normalized free-text value.
+    /// Both land as `(kind: .dislike, severity: .soft)` — the severity
+    /// field is what prevents the hard-rule validator from treating a
+    /// soft preference like an allergen (spec §4.2 orthogonal
+    /// hard/soft enforcement axis).
     func savePreferences() throws {
         // Deactivate any existing rules that are no longer selected.
         for rule in profile.dietaryRuleArray where rule.isActive {
@@ -107,7 +154,17 @@ final class OnboardingViewModel {
             case .goal:
                 stillSelected = rule.value.flatMap(GoalOption.init(rawValue:))
                     .map(selectedGoals.contains) ?? false
-            case .dislike, .none:
+            case .dislike:
+                guard let raw = rule.value else {
+                    stillSelected = false
+                    break
+                }
+                if let opt = DislikeOption(rawValue: raw) {
+                    stillSelected = selectedDislikes.contains(opt)
+                } else {
+                    stillSelected = customDislikes.contains(raw)
+                }
+            case .none:
                 stillSelected = false
             }
             if !stillSelected {
@@ -124,6 +181,16 @@ final class OnboardingViewModel {
         for opt in selectedDiets {
             try dietaryRepo.add(
                 to: profile, kind: .diet, value: opt.rawValue, severity: .hard,
+            )
+        }
+        for opt in selectedDislikes {
+            try dietaryRepo.add(
+                to: profile, kind: .dislike, value: opt.rawValue, severity: .soft,
+            )
+        }
+        for raw in customDislikes {
+            try dietaryRepo.add(
+                to: profile, kind: .dislike, value: raw, severity: .soft,
             )
         }
         for opt in selectedGoals {
@@ -154,5 +221,61 @@ final class OnboardingViewModel {
     /// Setup 2 Continue handler) saves preferences + kitchen first.
     func completeOnboarding() throws {
         try profileRepo.markOnboardingComplete(profile)
+    }
+
+    // MARK: - Custom dislike intake
+
+    /// Normalizes a user-entered free-text dislike. Trims whitespace,
+    /// lowercases, length-caps at `customDislikeMaxLength`. Returns nil
+    /// if the input is empty, too long, or collapses to a predefined
+    /// DislikeOption rawValue / displayName — in which case the caller
+    /// can insert into `selectedDislikes` directly rather than adding
+    /// a duplicate custom entry.
+    func normalizeCustomDislike(_ raw: String) -> String? {
+        let trimmed = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !trimmed.isEmpty, trimmed.count <= Self.customDislikeMaxLength else {
+            return nil
+        }
+        // If the user typed something matching a curated option, fold
+        // into the enum set rather than doubling up as a custom entry.
+        if DislikeOption.allCases.contains(where: {
+            $0.rawValue == trimmed
+                || $0.displayName.lowercased() == trimmed
+        }) {
+            return nil
+        }
+        return trimmed
+    }
+
+    /// Add a free-text custom dislike. Returns `true` if the input was
+    /// accepted; `false` if it was empty, too long, or folded into the
+    /// curated options. This helper deliberately does NOT cross the
+    /// boundary between predefined and custom — if the user's typed
+    /// input matches a curated option, the return is `false` and the
+    /// UI can insert the matching `DislikeOption` into
+    /// `selectedDislikes` directly.
+    @discardableResult
+    func addCustomDislike(_ raw: String) -> Bool {
+        guard let normalized = normalizeCustomDislike(raw) else {
+            return false
+        }
+        customDislikes.insert(normalized)
+        return true
+    }
+
+    // MARK: - Skip
+
+    /// Record a step that was bypassed by a Skip action. `stepID` is
+    /// the route identifier of the step that was jumped OVER (e.g.
+    /// "setup_kitchen" when the user taps Skip on Setup 1 and fast-
+    /// forwards past Setup 2). The current step isn't added — its
+    /// state gets saved at skip-time, so it counts as "visited, not
+    /// skipped" per decision (a). Attached to `onboarding_completed`
+    /// in commit 3.
+    func recordSkip(over stepID: String) {
+        guard !skippedSteps.contains(stepID) else { return }
+        skippedSteps.append(stepID)
     }
 }

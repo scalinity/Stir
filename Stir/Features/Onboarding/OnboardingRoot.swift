@@ -65,6 +65,17 @@ struct OnboardingRoot: View {
                             }
                         },
                     )
+                case .completionTransition:
+                    // Placeholder. Commit 2 (ui(onboarding): apply
+                    // mockup 02) replaces this with the real
+                    // OnboardingCompletionView and re-wires Setup 2's
+                    // onComplete handler to push `.completionTransition`
+                    // instead of calling onFinished directly. Left
+                    // unreachable at runtime in commit 1 — the route
+                    // case is declared here so commit 2 can activate it
+                    // without a route-enum change.
+                    ProgressView()
+                        .controlSize(.large)
                 }
             }
         }
