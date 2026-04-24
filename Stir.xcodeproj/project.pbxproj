@@ -133,6 +133,7 @@
 		748C83FFA964356F5B7AB06A /* CoreDataRoundtripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF11728D8ED6F68DAFF296E /* CoreDataRoundtripTests.swift */; };
 		7786E284F2CDA90252BBF4E3 /* InputField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD9C5AB044ACAEE7F60EA42 /* InputField.swift */; };
 		795414CE1EDDCCC6B9B4241D /* CanonicalKeyHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */; };
+		7A18D861DEE852A9E77CC785 /* SelectableChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */; };
 		7AFF5D305AE22295B02DBA8B /* ImportReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A31891426E68CB9EB60A83 /* ImportReviewView.swift */; };
 		7E93C41D0727C092E9C7E7FB /* StepCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BFEBB31097C1FCA950EB7A /* StepCard.swift */; };
 		80CCA5D609322C18919146D3 /* StirWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 716195C66F01014A62815D22 /* StirWidgetsBundle.swift */; };
@@ -526,6 +527,7 @@
 		EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallViewModelTests.swift; sourceTree = "<group>"; };
 		EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTest.swift; sourceTree = "<group>"; };
 		F0D72B1E8BC34F51F6DD0059 /* UserNotificationCenterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserNotificationCenterClient.swift; sourceTree = "<group>"; };
+		F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChip.swift; sourceTree = "<group>"; };
 		F2075E34D782898B6DAC024A /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F22AE7BFB6D533E20798A3C4 /* StartNewDinnerSolveIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartNewDinnerSolveIntent.swift; sourceTree = "<group>"; };
 		F249813ED8FAA7B054BFF055 /* DinnerOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DinnerOptionsView.swift; sourceTree = "<group>"; };
@@ -542,7 +544,7 @@
 		FCCB19696B57826A5C37D47C /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
-		"TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1162,6 +1164,7 @@
 				E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */,
 				B05B575B500921F4E51EFB78 /* SavedMealCard.swift */,
 				B15773184EB5F4E8BF129A85 /* SecondaryButton.swift */,
+				F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */,
 				01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */,
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
@@ -1189,10 +1192,10 @@
 			path = Sentry;
 			sourceTree = "<group>";
 		};
-		"TEMP_E0AD7C32-916E-44AA-9F42-E0B32AD78EE7" /* Stir */ = {
+		"TEMP_9B5DD26E-6FCB-4AE2-BE89-5CFA2D0D52D7" /* Stir */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */,
+				"TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */,
 			);
 			path = Stir;
 			sourceTree = "<group>";
@@ -1574,6 +1577,7 @@
 				C53777475685FB585A315191 /* ScanReviewView.swift in Sources */,
 				8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */,
 				0CC6EF781F17377F12FFF940 /* SecondaryButton.swift in Sources */,
+				7A18D861DEE852A9E77CC785 /* SelectableChip.swift in Sources */,
 				0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */,
 				B92301183E9FC07571959AE1 /* SentryReporting.swift in Sources */,
 				04E5EBC3A45393DA0AD37C33 /* SessionDTOs.swift in Sources */,
@@ -1650,7 +1654,7 @@
 /* Begin XCBuildConfiguration section */
 		06A33D2C84664F061CD8D360 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1669,7 +1673,7 @@
 		};
 		31827A9937F057BAAC188E1F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1689,7 +1693,7 @@
 		};
 		4601BB06DB748D5B073B7BB6 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1728,7 +1732,7 @@
 		};
 		7C64730273A2D161C4EFB4FB /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirShareExtension/StirShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1747,7 +1751,7 @@
 		};
 		85EEACE6A36591361EF20DD8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Extensions/StirWidgets/StirWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1767,7 +1771,7 @@
 		};
 		CDA00888465A341A284D4EC7 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_B594600A-FE5F-484C-9AC6-D01F51D8B253" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_6E289A3A-8AF5-4923-9FCA-BB73AF48A799" /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

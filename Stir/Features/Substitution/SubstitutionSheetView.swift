@@ -100,54 +100,97 @@ struct SubstitutionSheetView: View {
 
     // MARK: - Idle form
 
+    /// Rebuilt from stock SwiftUI Form chrome to a tokenized VStack +
+    /// SelectableChip + InputField pattern. Ingredient selection
+    /// becomes a horizontal chip row (one chip per recipe ingredient
+    /// + a trailing "Something else" chip); "tell me what's going
+    /// on" uses the InputField component so the sheet matches the
+    /// rest of the app's grammar instead of reading as a Settings
+    /// form. Review finding W-G W30 (FD1).
     private func idleForm(vm: SubstitutionSheetViewModel) -> some View {
-        Form {
-            Section("What's missing?") {
-                Picker("Ingredient", selection: Binding(
-                    get: { vm.selectedIngredientID },
-                    set: { vm.selectedIngredientID = $0 },
-                )) {
-                    Text("Something else…").tag(Optional<UUID>.none)
-                    ForEach(recipePlan.ingredientArray, id: \.id) { ing in
-                        if let id = ing.id {
-                            Text(ing.displayName ?? "")
-                                .tag(Optional(id))
-                        }
-                    }
-                }
-                .pickerStyle(.menu)
-
-                if vm.selectedIngredientID == nil {
-                    TextField("e.g. I don't have a blender", text: Binding(
-                        get: { vm.freeTextName },
-                        set: { vm.freeTextName = $0 },
-                    ))
-                    .textInputAutocapitalization(.sentences)
-                }
-            }
-
-            Section("Tell me what's going on (optional)") {
-                TextField(
-                    "e.g. out of heavy cream, only have milk",
-                    text: Binding(
-                        get: { vm.userProblem },
-                        set: { vm.userProblem = $0 },
-                    ),
-                    axis: .vertical,
-                )
-                .textInputAutocapitalization(.sentences)
-                .lineLimit(2...5)
-            }
-
-            Section {
+        let ingredients = recipePlan.ingredientArray.compactMap { ing -> (UUID, String)? in
+            guard let id = ing.id, let name = ing.displayName, !name.isEmpty else { return nil }
+            return (id, name)
+        }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                ingredientSection(vm: vm, ingredients: ingredients)
+                freeTextSection(vm: vm)
+                problemSection(vm: vm)
+                Spacer(minLength: CGFloat.Stir.space3)
                 PrimaryButton(
                     title: "Find a swap",
                     isDisabled: !vm.canSubmit,
                     action: { Task { await vm.submit() } },
                 )
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
             }
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.vertical, CGFloat.Stir.space4)
+        }
+        .background(Color.Stir.paper50)
+    }
+
+    private func ingredientSection(
+        vm: SubstitutionSheetViewModel,
+        ingredients: [(UUID, String)],
+    ) -> some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("What's missing?")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    ForEach(ingredients, id: \.0) { id, name in
+                        SelectableChip(
+                            label: name,
+                            tone: .accent,
+                            isSelected: vm.selectedIngredientID == id,
+                            action: { vm.selectedIngredientID = id },
+                        )
+                    }
+                    SelectableChip(
+                        label: "Something else…",
+                        tone: .accent,
+                        isSelected: vm.selectedIngredientID == nil,
+                        action: { vm.selectedIngredientID = nil },
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func freeTextSection(vm: SubstitutionSheetViewModel) -> some View {
+        if vm.selectedIngredientID == nil {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                Text("Describe it")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.ink500)
+                InputField(
+                    placeholder: "e.g. I don't have a blender",
+                    text: Binding(
+                        get: { vm.freeTextName },
+                        set: { vm.freeTextName = $0 },
+                    ),
+                    autocapitalization: .sentences,
+                )
+            }
+        }
+    }
+
+    private func problemSection(vm: SubstitutionSheetViewModel) -> some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("Tell me what's going on (optional)")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            InputField(
+                placeholder: "e.g. out of heavy cream, only have milk",
+                text: Binding(
+                    get: { vm.userProblem },
+                    set: { vm.userProblem = $0 },
+                ),
+                autocapitalization: .sentences,
+            )
         }
     }
 

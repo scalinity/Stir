@@ -4,6 +4,12 @@
 // "Use first" and "Avoid equipment" are advanced knobs; step 3 exposes
 // them via free-text chip input. Step 4's Saved Meals surfaces more
 // presets for common goals ("weeknight fast", "date night").
+//
+// Previously rendered as a stock SwiftUI `Form` with default grouping,
+// default row chrome, and a Menu picker. Rebuilt in step-7 review (W30 /
+// FD1) as a tokenized VStack + InputField + SelectableChip pattern so
+// the sheet inherits the app's card/pill grammar instead of reading as
+// a Settings-style form.
 
 import SwiftUI
 
@@ -12,51 +18,31 @@ struct ConstraintsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onSolve: () -> Void
 
-    @State private var maxTimeIndex: Int = 2  // 30 min default
+    @State private var maxTimeIndex: Int = 2 // 30 min default
     @State private var cuisine: String = ""
     @State private var goalDraft: String = ""
 
+    /// 5 time-budget preset pills. The first preset is "Any" (nil
+    /// maxTimeMinutes); the rest are bounded caps. Index into the
+    /// parallel `maxTimeOptions` array; keeping the two aligned lets
+    /// the ForEach iterate indices without a separate preset struct.
     private let maxTimeOptions: [Int?] = [nil, 15, 30, 45, 60]
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Time budget") {
-                    // Menu picker rather than segmented — 5 segments clip
-                    // at Dynamic Type XL+ (spec §6 requires XXXL support).
-                    // Menu style is text-based and grows cleanly.
-                    Picker("Max cook time", selection: $maxTimeIndex) {
-                        ForEach(0..<maxTimeOptions.count, id: \.self) { idx in
-                            Text(label(for: maxTimeOptions[idx])).tag(idx)
-                        }
-                    }
-                    .pickerStyle(.menu)
+            ScrollView {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                    timeBudgetSection
+                    cuisineSection
+                    goalSection
+                    Spacer(minLength: CGFloat.Stir.space3)
+                    solveButton
                 }
-
-                Section("Cuisine lean") {
-                    TextField("e.g. Italian, quick Thai, comfort", text: $cuisine)
-                        .textInputAutocapitalization(.sentences)
-                }
-
-                Section("Tonight's goal") {
-                    TextField("optional — e.g. \"use up the salmon\"", text: $goalDraft)
-                        .textInputAutocapitalization(.sentences)
-                }
-
-                Section {
-                    PrimaryButton(
-                        title: "Find me dinner",
-                        isDisabled: viewModel.ingredientsForSolve.isEmpty,
-                        action: {
-                            commit()
-                            onSolve()
-                            dismiss()
-                        },
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.top, CGFloat.Stir.space4)
+                .padding(.bottom, CGFloat.Stir.space5)
             }
+            .background(Color.Stir.paper50)
             .navigationTitle("Tonight's constraints")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -66,6 +52,71 @@ struct ConstraintsSheet: View {
             }
         }
     }
+
+    // MARK: - Sections
+
+    private var timeBudgetSection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("Time budget")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            // Horizontal flow; wraps to two rows on smaller widths
+            // because the pills collectively exceed the viewport at
+            // Dynamic Type XL+ (spec §6 requires XXXL support).
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    ForEach(0 ..< maxTimeOptions.count, id: \.self) { idx in
+                        SelectableChip(
+                            label: label(for: maxTimeOptions[idx]),
+                            tone: .accent,
+                            isSelected: maxTimeIndex == idx,
+                            action: { maxTimeIndex = idx },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var cuisineSection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("Cuisine lean")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            InputField(
+                placeholder: "e.g. Italian, quick Thai, comfort",
+                text: $cuisine,
+                autocapitalization: .sentences,
+            )
+        }
+    }
+
+    private var goalSection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("Tonight's goal")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            InputField(
+                placeholder: "optional — e.g. \"use up the salmon\"",
+                text: $goalDraft,
+                autocapitalization: .sentences,
+            )
+        }
+    }
+
+    private var solveButton: some View {
+        PrimaryButton(
+            title: "Find me dinner",
+            isDisabled: viewModel.ingredientsForSolve.isEmpty,
+            action: {
+                commit()
+                onSolve()
+                dismiss()
+            },
+        )
+    }
+
+    // MARK: - Helpers
 
     private func label(for minutes: Int?) -> String {
         guard let m = minutes else { return "Any" }
