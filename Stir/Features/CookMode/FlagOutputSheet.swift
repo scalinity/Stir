@@ -9,6 +9,9 @@
 // hero layout — this is a utility, not a feature.
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct FlagOutputSheet: View {
     let featureKey: FlagOutputService.FeatureKey
@@ -56,8 +59,15 @@ struct FlagOutputSheet: View {
                 } header: {
                     Text("Help us improve Stir")
                 } footer: {
+                    // W30 (FD1 #10): Dynamic Type AX5 safety. The footer's
+                    // default Text layout wraps "/500 characters" and pushes
+                    // the TextField up, potentially sliding the Submit button
+                    // behind the keyboard. One-line + scale-to-fit keeps the
+                    // CTA anchored.
                     Text("\(reason.count)/\(maxChars) characters")
                         .foregroundStyle(reason.count > maxChars ? .red : .secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .accessibilityLabel("\(reason.count) of \(maxChars) characters")
                 }
 
@@ -66,6 +76,12 @@ struct FlagOutputSheet: View {
                         Text(err)
                             .foregroundStyle(.red)
                             .font(.footnote)
+                            // W31 (FD1 #11): announce the error via VoiceOver
+                            // when it appears so keyboard-only / screen-reader
+                            // users aren't left staring at a silently-disabled
+                            // Submit button.
+                            .accessibilityAddTraits(.isStaticText)
+                            .accessibilityLabel("Submission error: \(err)")
                     }
                 }
             }
@@ -108,8 +124,42 @@ struct FlagOutputSheet: View {
             onDone(.success(response))
             dismiss()
         } catch {
-            submissionError = "Couldn't submit. Check your connection and try again."
+            // S15 (FD1 #15): error-code-aware copy. Pre-fix was a single
+            // "check your connection" string regardless of whether the
+            // failure was NET-01, AUTH-01 (expired mid-sheet), VAL-01
+            // (500-char bypass), or RATE-01. Map to user-meaningful copy.
+            submissionError = userCopy(for: error)
             onDone(.failure(error))
+
+            // W31: explicit VoiceOver announcement when the error appears.
+            // .accessibilityLabel above handles the re-read after focus,
+            // but a .announcement notification triggers the read even if
+            // focus doesn't move back to the error element.
+            #if canImport(UIKit)
+            UIAccessibility.post(notification: .announcement, argument: submissionError)
+            #endif
+        }
+    }
+
+    private func userCopy(for error: any Error) -> String {
+        guard let stir = error as? StirError else {
+            return "Couldn't submit. Please try again."
+        }
+        switch stir {
+        case .networkUnreachable:
+            return "Check your connection and try again."
+        case .auth:
+            return "Your session expired. Sign out and back in, then retry."
+        case .validation(_, let message):
+            // VAL-01 here is almost always "reason too long"; surface the
+            // specific message if we have one.
+            return message.isEmpty
+                ? "Please shorten your description and try again."
+                : message
+        case .rateLimited:
+            return "Too many reports just now. Please wait a minute and try again."
+        default:
+            return "Couldn't submit. Please try again."
         }
     }
 }
