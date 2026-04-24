@@ -3,8 +3,12 @@
 // NavigationStack + routing wrapper. Instantiated by RootCoordinator when
 // HouseholdProfile.onboardingCompleted == false (commit 9).
 //
-// onFinished: fires after the final step commits to Core Data. RootCoordinator
-// swaps to TonightHome.
+// Mockup 02 adds the `.completionTransition` surface between Setup 2
+// and `onFinished()`. Setup 2's handler now pushes the transition
+// route instead of calling onFinished directly; OnboardingCompletion-
+// View saves `completeOnboarding()` on appear (so kill-during-dwell
+// still counts as completed — decision b), dwells ~1.5s, then fires
+// onFinished to flip coordinator phase to `.ready`.
 
 import SwiftUI
 
@@ -39,6 +43,7 @@ struct OnboardingRoot: View {
                 case .setupPreferences:
                     SetupPreferencesView(
                         viewModel: viewModel,
+                        onBack: { path.removeLast() },
                         onContinue: {
                             Task {
                                 do {
@@ -49,33 +54,32 @@ struct OnboardingRoot: View {
                                 }
                             }
                         },
+                        // Skip wiring lands in commit 3 — no-op here
+                        // preserves the affordance visually without
+                        // changing behavior mid-phase-3.
+                        onSkip: {},
                     )
                 case .setupKitchen:
                     SetupKitchenView(
                         viewModel: viewModel,
+                        onBack: { path.removeLast() },
                         onComplete: {
                             Task {
                                 do {
                                     try viewModel.saveKitchen()
-                                    try viewModel.completeOnboarding()
-                                    onFinished()
+                                    path.append(.completionTransition)
                                 } catch {
                                     errorMessage = ErrorPresenter.present(.sync01).message
                                 }
                             }
                         },
+                        onSkip: {},
                     )
                 case .completionTransition:
-                    // Placeholder. Commit 2 (ui(onboarding): apply
-                    // mockup 02) replaces this with the real
-                    // OnboardingCompletionView and re-wires Setup 2's
-                    // onComplete handler to push `.completionTransition`
-                    // instead of calling onFinished directly. Left
-                    // unreachable at runtime in commit 1 — the route
-                    // case is declared here so commit 2 can activate it
-                    // without a route-enum change.
-                    ProgressView()
-                        .controlSize(.large)
+                    OnboardingCompletionView(
+                        viewModel: viewModel,
+                        onFinished: onFinished,
+                    )
                 }
             }
         }
