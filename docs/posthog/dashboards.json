@@ -1,0 +1,140 @@
+{
+  "_comment": "PostHog dashboard import blueprints for Stir step-8 ops surfaces. See docs/posthog/README.md for import instructions. Every event property referenced here is declared in spec §15 Telemetry events.",
+  "_version": "2026-04-24-v1",
+  "dashboards": [
+    {
+      "name": "Onboarding Funnel",
+      "description": "Spec §15 Core dashboards #1",
+      "tiles": [
+        {
+          "type": "funnel",
+          "steps": [
+            "onboarding_started",
+            "onboarding_completed",
+            "scan_started",
+            "dinner_solve_completed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Core Success Funnel",
+      "description": "Spec §15 anchor — core_success_event precursor sequence",
+      "tiles": [
+        {
+          "type": "funnel",
+          "steps": [
+            "scan_submitted",
+            "dinner_solve_completed",
+            "suggested_dish_selected",
+            { "event": "cook_mode_started", "filters": { "within_3min": true } },
+            "cook_session_completed",
+            { "event": "meal_rated", "filters": { "rating__gte": 4 } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Voice Conversion Funnel",
+      "description": "Spec §15 Core dashboards #3 — voice_conversion_event",
+      "tiles": [
+        {
+          "type": "funnel",
+          "steps": [
+            { "event": "voice_affordance_tapped", "filters": { "tier": "free" } },
+            { "event": "paywall_viewed",          "filters": { "trigger": "voice" } },
+            "trial_started",
+            "purchase_completed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Billing Funnel",
+      "description": "Spec §15 Core dashboards #4",
+      "tiles": [
+        {
+          "type": "funnel",
+          "steps": [
+            "paywall_viewed",
+            "purchase_started",
+            "purchase_completed",
+            { "event": "entitlement_state_changed", "filters": { "from_state": "trial", "to_state": "active" } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Retention (weekly cook cohorts)",
+      "description": "Spec §15 Core dashboards #5",
+      "tiles": [
+        {
+          "type": "retention",
+          "target_event": "cook_session_completed",
+          "return_event": "cook_session_completed",
+          "period": "weekly"
+        }
+      ]
+    },
+    {
+      "name": "AI Ops",
+      "description": "Spec §15 Core dashboards #6 — cost, reliability, voice health",
+      "tiles": [
+        {
+          "name": "Cost / user / tier (24h)",
+          "type": "insight",
+          "source": "$ai_generation",
+          "aggregation": "sum($ai_total_cost_usd)",
+          "breakdown": ["feature", "$ai_model"],
+          "interval": "day"
+        },
+        {
+          "name": "Voice session token distribution (p50/p95/p99)",
+          "type": "insight",
+          "source": "voice_session_token_snapshot",
+          "aggregation": "percentile(cumulative_tokens, [50, 95, 99])",
+          "interval": "hour"
+        },
+        {
+          "name": "Voice fallback share (Live API vs Speech)",
+          "type": "insight",
+          "source": "cook_turn_submitted",
+          "breakdown": ["path"],
+          "interval": "hour"
+        },
+        {
+          "name": "Voice TTFA p95 (ms)",
+          "type": "insight",
+          "source": "cook_turn_resolved",
+          "aggregation": "percentile(latency_ttfa_ms, [95])",
+          "filters": { "path": "live_api", "result_type__in": ["normal", "tool_call"] },
+          "breakdown": ["result_type"]
+        },
+        {
+          "name": "Preamble present rate on tool-call turns",
+          "type": "insight",
+          "source": "cook_turn_resolved",
+          "filters": { "path": "live_api", "result_type": "tool_call" },
+          "aggregation": "preamble_present_rate"
+        },
+        {
+          "name": "AI request failure rate by feature",
+          "type": "insight",
+          "source": "ai_request_failed",
+          "breakdown": ["feature_key"],
+          "interval": "hour"
+        }
+      ]
+    },
+    {
+      "name": "Flywheel",
+      "description": "Spec §15 Core dashboards #7",
+      "tiles": [
+        { "type": "insight", "source": "ingredient_corrected",      "breakdown": ["action"] },
+        { "type": "insight", "source": "substitution_accepted",     "breakdown": ["reason", "invocation"] },
+        { "type": "insight", "source": "meal_rated",                "breakdown": ["rating"] },
+        { "type": "insight", "source": "favorite_saved",            "breakdown": ["recipe_origin"] }
+      ]
+    }
+  ]
+}
