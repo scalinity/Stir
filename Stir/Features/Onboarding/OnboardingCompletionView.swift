@@ -66,6 +66,11 @@ struct OnboardingCompletionView: View {
             // event has already fired by the time the dwell starts.
             viewModel.fireOnboardingCompletedEvent()
             try? await Task.sleep(for: Self.dwellDuration)
+            // If the view was torn down mid-dwell (NavigationStack
+            // pop, memory pressure), don't call onFinished — the task
+            // is already cancelled and the coordinator may be in a
+            // different phase. Review finding W-A W5 (CA1 + CA2).
+            guard !Task.isCancelled else { return }
             onFinished()
         }
         .alert("Something went wrong", isPresented: Binding(
@@ -123,32 +128,70 @@ struct OnboardingCompletionView: View {
     }
 
     /// Personalized body copy referencing the user's Setup 1 selections.
-    /// Falls back to generic copy when the user skipped Setup 1.
+    /// Labels allergens distinctly from diets (they aren't diets) and
+    /// mentions dislikes when present. Review finding W-A W6 (CA1).
     private var personalizedBody: String {
-        let dietBits = dietDescription
-        let goalBits = goalDescription
+        let dietsEmpty = viewModel.selectedDiets.isEmpty
+        let allergensEmpty = viewModel.selectedAllergens.isEmpty
+        let goalsEmpty = viewModel.selectedGoals.isEmpty
+        let dislikesEmpty = viewModel.selectedDislikes.isEmpty
+            && viewModel.customDislikes.isEmpty
 
-        switch (dietBits.isEmpty, goalBits.isEmpty) {
-        case (true, true):
+        // All empty → generic
+        if dietsEmpty, allergensEmpty, goalsEmpty, dislikesEmpty {
             return "Loading a starter meal based on sensible defaults. You can edit preferences anytime in Settings."
-        case (true, false):
-            return "Tuning suggestions around your \(goalBits) goals."
-        case (false, true):
-            return "Tuning suggestions to your \(dietBits) diet."
-        case (false, false):
-            return "Tuning suggestions to your \(dietBits) diet and your \(goalBits) goals."
+        }
+
+        // Compose clauses around whichever axes are non-empty.
+        var clauses: [String] = []
+        if !dietsEmpty {
+            clauses.append("your \(dietDescription) diet")
+        }
+        if !allergensEmpty {
+            clauses.append("keeping \(allergenDescription) out")
+        }
+        if !dislikesEmpty {
+            clauses.append("avoiding \(dislikeDescription)")
+        }
+        if !goalsEmpty {
+            clauses.append("your \(goalDescription) goals")
+        }
+
+        return "Tuning suggestions to " + joinedClauses(clauses) + "."
+    }
+
+    /// Joins 1..N clauses with commas + "and" per English convention.
+    private func joinedClauses(_ parts: [String]) -> String {
+        switch parts.count {
+        case 0:  return ""
+        case 1:  return parts[0]
+        case 2:  return "\(parts[0]) and \(parts[1])"
+        default:
+            let head = parts.dropLast().joined(separator: ", ")
+            return "\(head), and \(parts.last!)"
         }
     }
 
     private var dietDescription: String {
-        var parts: [String] = []
-        for diet in viewModel.selectedDiets.sorted(by: { $0.rawValue < $1.rawValue }) {
-            parts.append(diet.displayName.lowercased())
-        }
-        for allergen in viewModel.selectedAllergens.sorted(by: { $0.rawValue < $1.rawValue }) {
-            parts.append("\(allergen.displayName.lowercased())-free")
-        }
-        return parts.joined(separator: ", ")
+        viewModel.selectedDiets
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+            .joined(separator: ", ")
+    }
+
+    private var allergenDescription: String {
+        viewModel.selectedAllergens
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+            .joined(separator: ", ")
+    }
+
+    private var dislikeDescription: String {
+        let curated = viewModel.selectedDislikes
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .map { $0.displayName.lowercased() }
+        let custom = viewModel.customDislikes.sorted()
+        return (curated + custom).joined(separator: ", ")
     }
 
     private var goalDescription: String {

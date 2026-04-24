@@ -329,14 +329,19 @@ final class OnboardingViewModel {
         hasFiredCompletedEvent = true
 
         let durationSec = max(0, Int(Date().timeIntervalSince(onboardingStartedAt)))
-        let hash = profile.canonicalUserKey.map(CanonicalKeyHash.hash) ?? ""
-        PostHogClient.shared.capture(
-            .onboardingCompleted,
-            properties: [
-                "canonical_user_key_hash": hash,
-                "duration_sec": durationSec,
-                "skipped_steps": skippedSteps,
-            ],
-        )
+        // Omit `canonical_user_key_hash` entirely when the profile lacks a
+        // canonicalUserKey (unbootstrapped race, or install-only identity
+        // that hasn't re-resolved). Emitting `""` pollutes PostHog funnel
+        // filters and turns this into a quiet cohort of "anonymous
+        // completions that aren't actually anonymous". Review finding
+        // W-A W7 (CR3).
+        var properties: [String: Any] = [
+            "duration_sec": durationSec,
+            "skipped_steps": skippedSteps,
+        ]
+        if let key = profile.canonicalUserKey {
+            properties["canonical_user_key_hash"] = CanonicalKeyHash.hash(key)
+        }
+        PostHogClient.shared.capture(.onboardingCompleted, properties: properties)
     }
 }

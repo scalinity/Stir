@@ -51,6 +51,16 @@ struct OnboardingRoot: View {
                     Task {
                         defer { isAdvancing = false }
                         do {
+                            // Persist whatever state the VM holds
+                            // (zero-selection defaults) BEFORE flipping
+                            // onboardingCompleted=true. Prevents the
+                            // 'onboardingCompleted=true but no dietary
+                            // rules / no kitchen equipment' partial
+                            // state that downstream context-builders
+                            // would interpret as user-confirmed-empty.
+                            // Review finding W-A W4 (SA2).
+                            try viewModel.savePreferences()
+                            try viewModel.saveKitchen()
                             viewModel.recordSkip(over: "setup_preferences")
                             viewModel.recordSkip(over: "setup_kitchen")
                             try viewModel.completeOnboarding()
