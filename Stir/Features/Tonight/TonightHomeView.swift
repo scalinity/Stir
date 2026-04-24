@@ -1,11 +1,32 @@
 // TonightHomeView
 //
-// Step-3 iteration:
-//   - Scan Kitchen → presents ScanFlowRoot as fullScreenCover
-//   - Import Recipe + Cook Saved remain disabled (step 4 + step 7)
-//   - Respects the disable_scan_parse kill switch from the latest config
-//     bootstrap response by rendering Scan Kitchen in a disabled state
-//     with "Temporarily unavailable" copy.
+// Tonight Home — Stir's default control center (Spec §6 + mockup 03).
+//
+// DRIFT NOTE: Mockup 03's "Default state" shows a hero "Tonight's pick"
+// card with a freshly-solved recipe waiting for the user to tap Start
+// Cooking. That UX implies a "last solve, sitting here waiting"
+// persisted state that's not in Spec §4 and not in current code —
+// Solve flows directly into Cook Mode via user selection in
+// ScanFlowRoot/DishPreview. Spec §6's Tonight Home row lists "Scan
+// Kitchen, Import Recipe, Cook Saved" as user actions, not a pre-
+// resolved hero card. Per source priority (spec > mockup), this view
+// keeps the 3-action primary-surface structure from step-3 and
+// migrates visuals to tokens rather than re-designing around a data
+// concept that doesn't exist. Mockup 03's hero-card pattern is
+// deferred pending a Spec §4 + §6 update that introduces a "last-
+// solve" entity — tracked for a future task.
+//
+// What DOES map from mockup 03:
+//   - `Tonight` display.lg title + bodyMd subtitle (greeting)
+//   - `resumableBanner` rendered as an ember-tinted "Resume cooking"
+//     card when a CookingSession is mid-flow — closest analogue to
+//     the mockup's hero-card-with-CTA concept
+//   - Empty/first-use state: dashed-border card with ember-tint camera
+//     glyph tile + Scan Kitchen PrimaryButton + "Try the sample"
+//     TextButton (matches mockup 03 §First-use empty)
+//   - Recent meals list: token-migrated SavedMealCard-style rows
+//   - "Why Stir works" strip: dropped in favor of the empty-state CTA
+//     sufficiency (the why-strip was a step-3 placeholder)
 
 import OSLog
 import SwiftUI
@@ -18,11 +39,6 @@ struct TonightHomeView: View {
     @State private var showSavedMeals = false
     @State private var resumableSession: CookingSession?
     @State private var recentCompleted: [CookingSession] = []
-    /// Consolidates scan + import entry covers into one fullScreenCover
-    /// driven by this enum (CR1-23). Peer `.fullScreenCover` modifiers
-    /// on the same view — even when at-most-one is active — trip
-    /// iOS 18/26's "Currently, only presenting a single sheet is
-    /// supported" warning.
     @State private var activeModal: ActiveModal?
 
     enum ActiveModal: String, Identifiable {
@@ -34,30 +50,27 @@ struct TonightHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    resumableBanner
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     greeting
-                    primaryActions
-                    recentMealsSection
-                    whyStirStrip
+                    resumableBanner
+                    mainContent
                 }
-                .padding()
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.top, CGFloat.Stir.space2)
+                .padding(.bottom, CGFloat.Stir.space5)
             }
-            .navigationTitle("Tonight")
-            .navigationBarTitleDisplayMode(.large)
+            .background(Color.Stir.paper50)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink { SettingsRootView() } label: {
-                        Image(systemName: "gearshape")
+                        Image.Stir.settings
                     }
                     .accessibilityLabel("Settings")
                 }
             }
             .overlay(alignment: .top) { toastOverlay }
             .onChange(of: coordinator.pendingDeepLinkScan) { _, new in
-                // Widget-origin `stir://scan/start` tap arrived while
-                // TonightHome is on screen. Route to the scan cover
-                // iff we're not already presenting one.
                 guard new != nil, activeModal == nil else { return }
                 activeModal = .scan
                 coordinator.clearDeepLinkScan()
@@ -65,11 +78,6 @@ struct TonightHomeView: View {
             .fullScreenCover(item: $activeModal) { modal in
                 switch modal {
                 case .scan:
-                    // Match CookModeRoot.swift pattern: strong-capture the
-                    // coordinator. RootCoordinator is owned by RootView for
-                    // the app lifetime, so the `[weak]` was theatre — and
-                    // inconsistency across paywall wire-ups makes the
-                    // pattern harder to grep.
                     let capturedCoordinator = coordinator
                     ScanFlowRoot(
                         aiDispatch: coordinator.aiDispatch,
@@ -106,13 +114,6 @@ struct TonightHomeView: View {
                     )
                 }
             }
-            // Single unified fullScreenCover for ALL Cook Mode entry
-            // paths. Multiple concurrent fullScreenCover modifiers on
-            // the same view — even when at most one has a non-nil
-            // item — trip iOS 18/26's "Currently, only presenting a
-            // single sheet is supported" warning and queue later
-            // presentations indefinitely. Consolidating to one cover
-            // driven by a coordinator-owned enum avoids that entirely.
             .fullScreenCover(item: Binding(
                 get: { coordinator.activeCookLaunch },
                 set: { coordinator.activeCookLaunch = $0 },
@@ -130,14 +131,6 @@ struct TonightHomeView: View {
                         },
                     )
                 case let .resume(session):
-                    // Guard: CloudKit Nullify delete can leave a
-                    // CookingSession with nil recipePlan/household
-                    // (cross-device race), OR the session itself can
-                    // be `isDeleted` if the managed context deleted it
-                    // between state-set and fullScreenCover render.
-                    // Both paths land in the fallback to avoid a
-                    // zombie-access crash or a blank undismissable
-                    // modal. Mirrors DishPreview's fallback copy.
                     if !session.isDeleted,
                        let plan = session.recipePlan,
                        let household = session.household {
@@ -153,16 +146,16 @@ struct TonightHomeView: View {
                             },
                         )
                     } else {
-                        VStack(spacing: 12) {
+                        VStack(spacing: CGFloat.Stir.space3) {
                             Text("Couldn't load this dish")
-                                .font(.headline)
-                            Button("Close") {
+                                .stirFont(.displaySm)
+                                .foregroundStyle(Color.Stir.ink900)
+                            PrimaryButton(title: "Close") {
                                 coordinator.dismissCookMode()
                                 Task { await refreshCookingState() }
                             }
-                            .buttonStyle(.borderedProminent)
                         }
-                        .padding(40)
+                        .padding(CGFloat.Stir.space7 - 8)  // 40pt — hero error margin
                     }
                 }
             }
@@ -173,127 +166,299 @@ struct TonightHomeView: View {
     // MARK: - Sections
 
     private var greeting: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("What's for dinner?")
-                .font(.title2.weight(.semibold))
-            Text("Start from your kitchen, a saved meal, or a recipe you found.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+            Text("Tonight")
+                .stirFont(.displayLg)
+                .foregroundStyle(Color.Stir.ink900)
+                .accessibilityAddTraits(.isHeader)
+
+            Text(greetingSubtitle)
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.ink500)
         }
     }
 
-    private var primaryActions: some View {
-        VStack(spacing: 12) {
-            scanKitchenButton
+    private var greetingSubtitle: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        let weekday = formatter.string(from: Date())
+        formatter.dateFormat = "h:mm a"
+        let time = formatter.string(from: Date())
+        return "\(weekday) · \(time)"
+    }
+
+    @ViewBuilder
+    private var resumableBanner: some View {
+        if let session = resumableSession, let plan = session.recipePlan {
             Button {
-                activeModal = .import
+                coordinator.resumeCookMode(session)
             } label: {
-                buttonRow(
-                    systemImage: "square.and.arrow.down.on.square",
-                    title: "Import Recipe",
-                    subtitle: "Paste a URL, pick a screenshot, or paste the text of any recipe.",
-                    tint: .purple,
-                    enabled: true,
+                HStack(spacing: CGFloat.Stir.space3) {
+                    Image.Stir.play
+                        .font(.system(size: CGFloat.Stir.iconLg, weight: .semibold))
+                        .foregroundStyle(Color.Stir.ember600)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                                .fill(Color.Stir.ember100),
+                        )
+
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                        Text("Resume cooking")
+                            .stirFont(.labelLg)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.Stir.ink900)
+                        Text(plan.title ?? "In progress")
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.ink500)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Image.Stir.disclosure
+                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                        .foregroundStyle(Color.Stir.ink300)
+                }
+                .padding(CGFloat.Stir.space3 + 2) // 14pt
+                .background(
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                        .fill(Color.Stir.ember100),
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                        .strokeBorder(Color.Stir.ember600.opacity(0.4), lineWidth: 1),
                 )
             }
             .buttonStyle(.plain)
-            Button {
-                showSavedMeals = true
-            } label: {
-                buttonRow(
-                    systemImage: "bookmark.fill",
+            .accessibilityLabel("Resume cooking \(plan.title ?? "in progress")")
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if isFirstUse {
+            firstUseEmpty
+        } else {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                primaryActions
+                recentMealsSection
+            }
+        }
+    }
+
+    /// Empty-state branch — user has never scanned, never cooked, no
+    /// resumable session. Matches mockup 03 §First-use empty.
+    private var firstUseEmpty: some View {
+        VStack(spacing: CGFloat.Stir.space3 + 2) { // 14pt
+            VStack(spacing: CGFloat.Stir.space3 + 2) {
+                // Camera glyph tile — 80pt rounded ember-tint square
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.Stir.ember100)
+                    Image.Stir.camera
+                        .font(.system(size: 36, weight: .regular)) // justification: 36pt hero camera inside the 80pt tile — one-off per §4.1
+                        .foregroundStyle(Color.Stir.ember600)
+                }
+                .frame(width: 80, height: 80)
+
+                VStack(spacing: CGFloat.Stir.space2) {
+                    Text("Let's see what you've got.")
+                        .stirFont(.displayMd)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .multilineTextAlignment(.center)
+
+                    Text("Scan your fridge and pantry. I'll find three dinners you can make right now.")
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
+                }
+
+                PrimaryButton(title: "Scan your kitchen") {
+                    handleScanTap()
+                }
+                .padding(.top, CGFloat.Stir.space1 + 2) // 6pt
+
+                TextButton(title: "Try the sample instead") {
+                    toastMessage = "Sample scan is coming soon."
+                }
+            }
+            .padding(.horizontal, CGFloat.Stir.space5)
+            .padding(.vertical, CGFloat.Stir.space6 + 8) // 40pt
+            .frame(maxWidth: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(
+                        Color.Stir.ink300,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]),
+                    ),
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+
+            // Type-it-in secondary — currently routes to Import flow as a
+            // reasonable "manual ingredient entry" proxy until a dedicated
+            // type-it path lands.
+            typeItInRow
+        }
+        .padding(.top, CGFloat.Stir.space3)
+    }
+
+    private var typeItInRow: some View {
+        Button {
+            activeModal = .import
+        } label: {
+            HStack(spacing: CGFloat.Stir.space3) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                        .fill(Color.Stir.paper200)
+                    Text("Aa")
+                        .font(.system(size: 18, weight: .semibold, design: .serif)) // justification: 18pt serif "Aa" glyph is a one-off typographic tile per §4.1
+                        .foregroundStyle(Color.Stir.ink700)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                    Text("Type it in instead")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ink900)
+                    Text("List what's in your kitchen by hand")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ink500)
+                }
+
+                Spacer()
+
+                Image.Stir.disclosure
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
+            }
+            .padding(CGFloat.Stir.space3 + 2) // 14pt
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Type in your kitchen by hand")
+    }
+
+    private var primaryActions: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            Text("Start from")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+
+            VStack(spacing: CGFloat.Stir.space3) {
+                scanKitchenButton
+                actionRow(
+                    icon: Image.Stir.imported,
+                    title: "Import Recipe",
+                    subtitle: "Paste a URL, pick a screenshot, or paste recipe text.",
+                    action: { activeModal = .import },
+                )
+                actionRow(
+                    icon: Image.Stir.bookmark,
                     title: "Cook Saved",
                     subtitle: "One-tap replay for your favorites.",
-                    tint: .indigo,
-                    enabled: true,
+                    action: { showSavedMeals = true },
                 )
             }
-            .buttonStyle(.plain)
         }
     }
 
     private var scanKitchenButton: some View {
         let killed = scanIsKillSwitched
-        return Button {
-            if killed {
-                toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
-            } else {
-                activeModal = .scan
-            }
-        } label: {
-            buttonRow(
-                systemImage: "camera.viewfinder",
-                title: killed ? "Kitchen scan temporarily unavailable" : "Scan Kitchen",
-                subtitle: killed
-                    ? "We've paused scans while we investigate an issue."
-                    : "Point at ingredients to get three dinner options.",
-                tint: killed ? .secondary : .orange,
-                enabled: !killed,
-            )
-        }
-        .buttonStyle(.plain)
+        return actionRow(
+            icon: Image.Stir.scan,
+            title: killed ? "Kitchen scan temporarily unavailable" : "Scan Kitchen",
+            subtitle: killed
+                ? "We've paused scans while we investigate an issue."
+                : "Point at ingredients to get three dinner options.",
+            enabled: !killed,
+            action: {
+                if killed {
+                    toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
+                } else {
+                    activeModal = .scan
+                }
+            },
+        )
     }
 
-    private func primaryButton(
-        systemImage: String,
-        title: String,
-        subtitle: String,
-        tint: Color,
-        enabled: Bool,
-        comingSoon: String,
-    ) -> some View {
-        Button {
-            if !enabled { toastMessage = comingSoon }
-        } label: {
-            buttonRow(systemImage: systemImage, title: title, subtitle: subtitle, tint: tint, enabled: enabled)
+    private func handleScanTap() {
+        if scanIsKillSwitched {
+            toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
+        } else {
+            activeModal = .scan
         }
-        .buttonStyle(.plain)
-        // Keep the row tappable so VoiceOver/sighted users see a hint
-        // surface; the accessibility hint conveys the coming-soon state
-        // so the button isn't a bare dead control.
-        .accessibilityHint(enabled ? "" : comingSoon)
     }
 
-    private func buttonRow(
-        systemImage: String,
+    private func actionRow(
+        icon: Image,
         title: String,
         subtitle: String,
-        tint: Color,
-        enabled: Bool,
+        enabled: Bool = true,
+        action: @escaping () -> Void,
     ) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: systemImage)
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(enabled ? tint : .secondary)
+        Button(action: action) {
+            HStack(alignment: .top, spacing: CGFloat.Stir.space3 + 2) { // 14pt
+                ZStack {
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                        .fill(enabled ? Color.Stir.ember100 : Color.Stir.paper200)
+                    icon
+                        .font(.system(size: CGFloat.Stir.iconMd + 4, weight: .semibold)) // justification: 24pt action-row icon — slightly larger than icon.md (20pt) so the primary-action tile reads at arm's length
+                        .foregroundStyle(enabled ? Color.Stir.ember600 : Color.Stir.ink500)
+                }
                 .frame(width: 44, height: 44)
-                .background(enabled ? tint.opacity(0.15) : Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline).foregroundStyle(enabled ? Color.primary : .secondary)
-                Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                    Text(title)
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(enabled ? Color.Stir.ink900 : Color.Stir.ink500)
+                    Text(subtitle)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: CGFloat.Stir.space2)
+
+                Image.Stir.disclosure
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            .padding(CGFloat.Stir.space3 + 2) // 14pt
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .contentShape(Rectangle())
         }
-        .padding()
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
     }
 
+    @ViewBuilder
     private var recentMealsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Recent meals")
-                .font(.headline)
-            if recentCompleted.isEmpty {
-                Text("No recent meals yet — cook one to see it here.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, minHeight: 80)
-                    .padding()
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-            } else {
-                VStack(spacing: 10) {
+        if !recentCompleted.isEmpty {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                Text("Recent meals")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.ink500)
+
+                VStack(spacing: CGFloat.Stir.space2) {
                     ForEach(recentCompleted.prefix(5), id: \.id) { session in
                         recentMealRow(session: session)
                     }
@@ -304,89 +469,81 @@ struct TonightHomeView: View {
 
     private func recentMealRow(session: CookingSession) -> some View {
         Button {
-            // Cook Again — open a fresh Cook Mode on the same plan. If
-            // session construction fails (e.g. RecipePlan nullified by
-            // a CloudKit cross-device delete), surface a toast instead
-            // of silently no-op'ing so the user knows the tap landed
-            // (CA2-R7).
             if let fresh = makeFreshSessionIfPossible(from: session) {
                 coordinator.resumeCookMode(fresh)
             } else {
                 toastMessage = "Couldn't start this one again. Try from Saved or pick another meal."
             }
         } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "fork.knife")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.indigo)
-                    .frame(width: 40, height: 40)
-                    .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: CGFloat.Stir.space3) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                        .fill(Color.Stir.paper200)
+                    Image.Stir.fork
+                        .font(.system(size: CGFloat.Stir.iconMd, weight: .regular))
+                        .foregroundStyle(Color.Stir.ink700)
+                }
+                .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
                     Text(session.recipePlan?.title ?? "Untitled recipe")
-                        .font(.subheadline.weight(.medium))
-                    if let endedAt = session.endedAt {
-                        Text(endedAt, format: .relative(presentation: .named))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let rating = session.outcomeFeedback?.rating, rating > 0 {
-                        HStack(spacing: 2) {
-                            ForEach(1...5, id: \.self) { idx in
-                                Image(systemName: idx <= Int(rating) ? "star.fill" : "star")
-                                    .font(.caption2)
-                                    .foregroundStyle(idx <= Int(rating) ? .yellow : .secondary)
-                                    .accessibilityHidden(true)
-                            }
+                        .stirFont(.labelLg)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .lineLimit(1)
+
+                    HStack(spacing: CGFloat.Stir.space2) {
+                        if let endedAt = session.endedAt {
+                            Text(endedAt, format: .relative(presentation: .named))
+                                .stirFont(.bodySm)
+                                .foregroundStyle(Color.Stir.ink500)
                         }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Rated \(Int(rating)) out of 5")
+                        if let rating = session.outcomeFeedback?.rating, rating > 0 {
+                            ratingStars(rating: Int(rating))
+                        }
                     }
                 }
+
                 Spacer()
-                Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(.tertiary)
+
+                Image.Stir.refresh
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
             }
-            .padding(12)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .padding(CGFloat.Stir.space3)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(session.recipePlan?.title ?? "Untitled recipe")
         .accessibilityHint("Cook this again")
     }
 
-    @ViewBuilder
-    private var resumableBanner: some View {
-        if let session = resumableSession, let plan = session.recipePlan {
-            Button {
-                coordinator.resumeCookMode(session)
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Resume cooking")
-                            .font(.subheadline.weight(.semibold))
-                        Text(plan.title ?? "In progress")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(14)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+    private func ratingStars(rating: Int) -> some View {
+        HStack(spacing: 2) {
+            ForEach(1 ... 5, id: \.self) { idx in
+                Image(systemName: idx <= rating ? "star.fill" : "star")
+                    .font(.system(size: 11)) // justification: 11pt micro-star scale matches mockup's recent-meal rating row
+                    .foregroundStyle(idx <= rating ? Color.Stir.ember600 : Color.Stir.ink300)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Resume cooking \(plan.title ?? "in progress")")
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Rated \(rating) of 5")
     }
 
-    /// The "Cook Again" flow opens a NEW CookingSession so history is
-    /// preserved. For step 4 we create it inside the repository before
-    /// presenting. Returns nil when either relationship is missing
-    /// (CloudKit nullified it cross-device) or the insert throws —
-    /// caller surfaces a toast on nil (CA2-R7).
+    // MARK: - State helpers
+
+    private var isFirstUse: Bool {
+        resumableSession == nil && recentCompleted.isEmpty
+    }
+
     private func makeFreshSessionIfPossible(from completed: CookingSession) -> CookingSession? {
         guard let plan = completed.recipePlan,
               let household = completed.household else { return nil }
@@ -411,31 +568,6 @@ struct TonightHomeView: View {
         }
     }
 
-    private var whyStirStrip: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Why Stir works")
-                .font(.headline)
-            VStack(alignment: .leading, spacing: 10) {
-                whyItem(icon: "fork.knife", text: "Your actual kitchen, not a generic recipe index.")
-                whyItem(icon: "bolt.fill", text: "Three real dinners in under two minutes.")
-                whyItem(icon: "hand.raised.fill", text: "Hard rules like allergies are never broken.")
-            }
-            .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
-    }
-
-    private func whyItem(icon: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            Text(text).font(.subheadline)
-        }
-    }
-
     // MARK: - Kill switch
 
     private var scanIsKillSwitched: Bool {
@@ -448,17 +580,17 @@ struct TonightHomeView: View {
     private var toastOverlay: some View {
         if let toastMessage {
             Text(toastMessage)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.85), in: Capsule())
-                .padding(.top, 12)
+                .stirFont(.bodySm)
+                .fontWeight(.medium)
+                .foregroundStyle(Color.Stir.paper50)
+                .padding(.horizontal, CGFloat.Stir.space3 + 2) // 14pt
+                .padding(.vertical, CGFloat.Stir.space2 + 2)   // 10pt
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.Stir.ink900.opacity(0.85)),
+                )
+                .padding(.top, CGFloat.Stir.space3)
                 .transition(.move(edge: .top).combined(with: .opacity))
-                // `.id(message)` forces `.task` to re-attach whenever the
-                // toast text changes; without it, the 2-second timer from
-                // the first tap would dismiss a message the user just
-                // replaced with a second tap.
                 .id(toastMessage)
                 .task {
                     try? await Task.sleep(for: .seconds(2))
