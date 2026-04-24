@@ -135,6 +135,40 @@ export interface ErrorExtras {
   [key: string]: unknown;
 }
 
+/**
+ * Wire contract — the shape every 4xx/5xx response body MUST satisfy.
+ *
+ * Spec §6 (Error Copy Codes) declares the envelope as `{ error: CODE,
+ * message: string, ...structured_details }`. This type pins that
+ * contract so refactors to jsonError() can't silently drift.
+ *
+ * Extra keys vary by code:
+ *   - AUTH-01:   `reason: AuthReason`
+ *   - VOICE-SESSION-01: `reason: VoiceSessionReason`
+ *   - VAL-01:    `field_errors: FieldError[]`
+ *   - RATE-01:   `scope`, `retry_after_seconds`, `reset_at`
+ *
+ * Callers emit via jsonError(); iOS decodes via a single shared
+ * StirErrorEnvelope struct. The wire-envelope test pins both sides.
+ *
+ * Step 9 M4 (pre-beta drift protection).
+ */
+export interface ErrorEnvelope {
+  /** One of the ErrorCode string values (e.g., "VAL-01"). */
+  error: string;
+  /** Human-readable message. Dev/Sentry-facing for VAL-01; user-
+   *  facing copy lives in iOS ErrorPresenter for user-visible codes. */
+  message: string;
+  /** AUTH-01 / VOICE-SESSION-01 only. Narrows to AuthReason |
+   *  VoiceSessionReason at the type boundary; wire-shape-wise is a
+   *  string. */
+  reason?: string;
+  /** VAL-01 only. Structured field-level validation errors. */
+  field_errors?: FieldError[];
+  /** RATE-01 + escape hatch for code-specific extras. */
+  [key: string]: unknown;
+}
+
 /** Build a typed JSON error Response with optional extras. */
 export function jsonError(
   code: ErrorCode,
