@@ -37,19 +37,55 @@ Deno.test('verifySessionJWT: reauth_required_at NULL → no check, JWT passes', 
   assertEquals(claims.canonical_user_key, session.canonical_user_key);
 });
 
-Deno.test('verifySessionJWT: client omitted → check skipped even when reauth set', async () => {
+Deno.test('verifySessionJWT: client omitted → check STILL runs (review C1 fix — internal client)', async () => {
+  // Pre-fix contract was "check skipped when client omitted". Force-reauth
+  // was dead code because no production caller passed the client. Post-fix
+  // (review C1): verifySessionJWT creates a module-scope service client
+  // internally so the gate runs universally. Sleep 1.1s so iat < reauthAt.
   const session = await quickBootstrap();
   const svc = serviceClient();
+  await new Promise((r) => setTimeout(r, 1100));
 
-  // Bump reauth_required_at so the gate WOULD reject if it ran.
   await svc
     .from('app_users')
     .update({ reauth_required_at: new Date().toISOString() })
     .eq('canonical_user_key', session.canonical_user_key);
 
-  // Call without client — backward-compatible path. JWT is accepted.
-  const claims = await verifySessionJWT(reqWithJWT(session.session_jwt));
-  assertEquals(claims.canonical_user_key, session.canonical_user_key);
+  await assertRejects(
+    () => verifySessionJWT(reqWithJWT(session.session_jwt)),
+    AuthError,
+  ).then((err: AuthError) => {
+    assertEquals(err.reason, 'reauth_required');
+  });
+});
+
+Deno.test('verifySessionJWT: iat == reauth_required_at (same-second collision) → rejects (review W5 iat<= fix)', async () => {
+  // Pre-fix: iat < reauthAtSec (strict less-than) passed same-second
+  // collisions. Real timing: JWT iat is Math.floor(Date.now()/1000) and
+  // Postgres now() truncates to seconds — same-second writes produce
+  // identical integers. Post-fix: iat <= reauthAtSec rejects conservatively.
+  const session = await quickBootstrap();
+  const svc = serviceClient();
+  const iatSec = Math.floor(Date.now() / 1000);
+
+  const jwt = await issueSessionJWT({
+    canonical_user_key: session.canonical_user_key,
+    installation_id: crypto.randomUUID(),
+    tier: 'free',
+  });
+
+  // Write reauth_required_at at exactly the same second as the JWT iat.
+  await svc
+    .from('app_users')
+    .update({ reauth_required_at: new Date(iatSec * 1000).toISOString() })
+    .eq('canonical_user_key', session.canonical_user_key);
+
+  await assertRejects(
+    () => verifySessionJWT(reqWithJWT(jwt), serviceClient()),
+    AuthError,
+  ).then((err: AuthError) => {
+    assertEquals(err.reason, 'reauth_required');
+  });
 });
 
 Deno.test('verifySessionJWT: JWT.iat < reauth_required_at → AuthError reauth_required', async () => {

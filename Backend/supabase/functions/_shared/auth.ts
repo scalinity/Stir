@@ -15,7 +15,9 @@
 
 import * as jose from 'jose';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createServiceClient } from './db.ts';
 import type { AuthReason } from './errors.ts';
+import { createLogger } from './logger.ts';
 
 // Named STIR_JWT_SECRET (not SUPABASE_JWT_SECRET) because Supabase's Edge
 // Runtime filters SUPABASE_*-prefixed vars from .env to protect reserved
@@ -77,20 +79,34 @@ export async function issueSessionJWT(
     .sign(SECRET_BYTES);
 }
 
+// Cached module-scope service client for the reauth check. One per
+// Edge Function worker — amortizes the createClient() cost (tens of µs)
+// across many verifies within the worker's ~30-min lifetime.
+let reauthCheckClient: SupabaseClient | null = null;
+function reauthClient(): SupabaseClient {
+  if (!reauthCheckClient) reauthCheckClient = createServiceClient();
+  return reauthCheckClient;
+}
+
 /**
  * Verify the session JWT on an incoming Request. Throws AuthError with a
- * typed `reason` for missing / malformed / expired / signature_invalid.
+ * typed `reason` for missing / malformed / expired / signature_invalid /
+ * reauth_required.
  *
  * The handler catches AuthError and returns 401 with AUTH-01 + reason.
  *
- * Optional `client` parameter (Phase 2, step-8 ADR 0023): when provided,
- * queries `app_users.reauth_required_at` after JWT verification succeeds.
- * If `reauth_required_at > JWT.iat` the JWT is rejected with reason
- * `reauth_required`. Set by the admin `users.force_reauth` action; iOS
- * maps this reason to a Sign-in-with-Apple re-flow rather than the
- * silent-retry path used for expired/missing. Callers that don't care
- * about force-reauth (e.g., endpoints that don't touch app_users at all)
- * can omit the client — existing call sites stay backward-compatible.
+ * Force-reauth gate (ADR 0023, review C1 fix): after JWT verification the
+ * reauth check ALWAYS runs — previously the gate was behind an optional
+ * `client` parameter no caller ever passed, making users.force_reauth a
+ * no-op feature. We now create a module-scope service client internally,
+ * following the app_users.merged_into chain one hop so an alias-forwarded
+ * user is still kicked when their merged target has reauth_required_at
+ * set (review W39). The DB error path fails open with a log.warn —
+ * transient Postgres blips shouldn't invalidate every in-flight session,
+ * but a permanent fault surfaces via the log event.
+ *
+ * The optional `client` argument is preserved for tests that want to
+ * inject a mock client; production handlers should omit it.
  */
 export async function verifySessionJWT(
   req: Request,
@@ -153,35 +169,62 @@ export async function verifySessionJWT(
     throw new AuthError('malformed', 'missing iat/exp');
   }
 
-  // Force-reauth gate (Phase 2, ADR 0023). Only runs when caller supplies a
-  // service-role client — lets endpoints that don't touch app_users skip the
-  // round-trip. Query is a single indexed PK lookup (~1-2 ms).
+  // Force-reauth gate (ADR 0023, review C1 fix). Always runs after JWT
+  // verification. Single indexed PK lookup + at most one merged_into hop
+  // (~1-3 ms total). Uses caller-supplied client when present (test seam),
+  // else the module-scope reauth client.
   //
   // Semantics: admin sets `reauth_required_at = now()` via users.force_reauth;
-  // any existing JWT (iat < now()) is rejected with reason=reauth_required on
-  // its next verifying call. iOS maps that reason to SIWA re-flow; fresh JWT
-  // minted after the bump passes naturally (iat > reauth_required_at).
-  if (client) {
-    const { data: row, error: rowErr } = await client
+  // any existing JWT (iat <= now()) is rejected with reason=reauth_required
+  // on its next verifying call. iOS maps that reason to SIWA re-flow; fresh
+  // JWT minted after the bump passes naturally (iat > reauth_required_at).
+  //
+  // merged_into follow: an alias-forwarded user whose install-keyed row
+  // holds `status='merged' AND merged_into=<ck>` is kicked when the ck
+  // target has reauth_required_at set. Without this, admin force_reauth
+  // on the target never reaches the install-keyed JWT holder (review W39).
+  const checkClient = client ?? reauthClient();
+  const reauthLog = await createLogger('_shared/auth', '_shared/auth.verifySessionJWT');
+  try {
+    const { data: row, error: rowErr } = await checkClient
       .from('app_users')
-      .select('reauth_required_at')
+      .select('reauth_required_at, merged_into')
       .eq('canonical_user_key', canonical_user_key)
-      .maybeSingle<{ reauth_required_at: string | null }>();
-    // Row-missing is handled by the caller's identity-resolution layer (not
-    // our concern here); a DB error doesn't fail closed — we don't want a
-    // transient Postgres blip to invalidate every in-flight session.
-    if (!rowErr && row && row.reauth_required_at) {
-      const reauthAtMs = Date.parse(row.reauth_required_at);
-      if (!Number.isNaN(reauthAtMs)) {
-        const reauthAtSec = Math.floor(reauthAtMs / 1000);
-        if (iat < reauthAtSec) {
-          throw new AuthError(
-            'reauth_required',
-            `JWT iat=${iat} predates reauth_required_at=${reauthAtSec}`,
-          );
+      .maybeSingle<{ reauth_required_at: string | null; merged_into: string | null }>();
+
+    if (rowErr) {
+      // Fail-open with observability — a permanent fault should surface.
+      reauthLog.warn('reauth_check_db_error', {
+        err: rowErr.message,
+        canonical_user_key_hash: await hashKeyForLog(canonical_user_key),
+      });
+    } else if (row) {
+      // Direct hit on the claim's key.
+      await rejectIfReauthRequired(iat, row.reauth_required_at);
+
+      // If the row is a merged alias, also check the winning target.
+      if (row.merged_into) {
+        const { data: target, error: targetErr } = await checkClient
+          .from('app_users')
+          .select('reauth_required_at')
+          .eq('canonical_user_key', row.merged_into)
+          .maybeSingle<{ reauth_required_at: string | null }>();
+
+        if (targetErr) {
+          reauthLog.warn('reauth_check_merged_target_db_error', {
+            err: targetErr.message,
+          });
+        } else if (target) {
+          await rejectIfReauthRequired(iat, target.reauth_required_at);
         }
       }
     }
+  } catch (err) {
+    // Rethrow AuthError; swallow anything else fail-open (observability above).
+    if (err instanceof AuthError) throw err;
+    reauthLog.warn('reauth_check_unexpected', {
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return {
@@ -192,4 +235,33 @@ export async function verifySessionJWT(
     iat,
     exp,
   };
+}
+
+async function rejectIfReauthRequired(iat: number, reauthRequiredAt: string | null): Promise<void> {
+  if (!reauthRequiredAt) return;
+  const reauthAtMs = Date.parse(reauthRequiredAt);
+  if (Number.isNaN(reauthAtMs)) return;
+  const reauthAtSec = Math.floor(reauthAtMs / 1000);
+  // iat <= reauthAt (not strict <): JWTs issued in the same second as the
+  // force-reauth bump are rejected. JWT iat is second-precision; Postgres
+  // now() is microsecond-precision but truncates to seconds on the JWT
+  // side, so same-second collisions are realistic (review W5).
+  if (iat <= reauthAtSec) {
+    throw new AuthError(
+      'reauth_required',
+      `JWT iat=${iat} predates reauth_required_at=${reauthAtSec}`,
+    );
+  }
+}
+
+async function hashKeyForLog(key: string): Promise<string> {
+  // Lightweight PII-safe key fingerprint for log correlation. Not a full
+  // hashCanonicalKey (which lives in _shared/hashing.ts and is async-heavy
+  // for tight-loop calls) — just enough for "same user keeps failing"
+  // pattern detection in logs.
+  const buf = new TextEncoder().encode(key);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash).slice(0, 4))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
