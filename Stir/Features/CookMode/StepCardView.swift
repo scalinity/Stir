@@ -2,9 +2,29 @@
 //
 // Single Cook Mode step: large instruction text, step X of Y, optional
 // countdown timer + controls, Next / Previous / Ask / Exit. Designed
-// for arm's-length readability — `.title` font for the instruction,
-// Dynamic Type respected, 44pt minimum hit targets per spec §6
-// accessibility baseline.
+// for arm's-length readability — `.displayMd` New York Semibold for
+// the instruction, Dynamic Type respected, 44pt minimum hit targets
+// per spec §6 accessibility baseline.
+//
+// Step-9 design-review resolution (review finding C2):
+//   - Primary navigation (Next/Finish/Previous) uses the Phase 2
+//     PrimaryButton/SecondaryButton components for consistent ember
+//     chrome across the app.
+//   - Other buttons stay custom because each carries state the Phase 2
+//     components don't model: the voice row has a 4-role micButtonRole
+//     state machine with variable icon/label/tint/progress, the Ask
+//     row has an icon-plus-label layout, and the timer controls
+//     switch between pause/resume/cancel based on CookTimer.typedState.
+//   - All spacing/padding/radius/icon literals moved to `CGFloat.Stir.*`
+//     and `Image.Stir.*` tokens. A few literals remain with inline
+//     `// justification:` comments — paddings specific to this view's
+//     bottom-nav clearance (140pt) and the voice row's 48pt floor
+//     (slightly taller than PrimaryButton's 52pt to keep the pressed
+//     state reachable with one hand).
+//
+// Previously a critical drift point (FD1) — 20+ bare literals,
+// `Image(systemName:)` raw calls, `.buttonStyle(.bordered*)` chrome,
+// `.tint(.red)` — now consolidated with the rest of the migration.
 
 import SwiftUI
 
@@ -16,14 +36,18 @@ struct StepCardView: View {
             topBar
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepHeader
                     instructionBody
                     timerSection
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 24)
-                .padding(.bottom, 140)  // leave room for the bottom nav bar
+                .padding(.horizontal, CGFloat.Stir.screenMarginHero)
+                .padding(.top, CGFloat.Stir.space5)
+                // justification: 140pt bottom clearance reserves room
+                // for the safeAreaInset bottom bar (voice row + ask row
+                // + prev/next row). One-off screen chrome spacing — not
+                // a generic token case.
+                .padding(.bottom, 140)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -50,11 +74,11 @@ struct StepCardView: View {
     // MARK: - Top bar
 
     private var topBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: CGFloat.Stir.space3) {
             Button {
                 viewModel.requestExitConfirm()
             } label: {
-                Image(systemName: "xmark")
+                Image.Stir.close
                     .stirFont(.bodyMd).fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ink900)
                     .frame(width: 44, height: 44)
@@ -66,6 +90,7 @@ struct StepCardView: View {
 
             Text(viewModel.recipePlan.title ?? "Cook Mode")
                 .stirFont(.labelLg).fontWeight(.semibold)
+                .foregroundStyle(Color.Stir.ink900)
                 .lineLimit(1)
 
             Spacer()
@@ -73,8 +98,8 @@ struct StepCardView: View {
             // Balance the x button — transparent ghost so the title stays centered.
             Color.clear.frame(width: 44, height: 44)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space2)
     }
 
     // MARK: - Content
@@ -88,6 +113,7 @@ struct StepCardView: View {
             if let step = viewModel.currentStep, let title = step.title, !title.isEmpty {
                 Text(title)
                     .stirFont(.labelMd).fontWeight(.medium)
+                    .foregroundStyle(Color.Stir.ink700)
                     .lineLimit(1)
             }
         }
@@ -96,6 +122,7 @@ struct StepCardView: View {
     private var instructionBody: some View {
         Text(viewModel.currentStep?.instructionText ?? "")
             .stirFont(.displayMd)
+            .foregroundStyle(Color.Stir.ink900)
             .lineSpacing(6)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -105,9 +132,10 @@ struct StepCardView: View {
     @ViewBuilder
     private var timerSection: some View {
         if let step = viewModel.currentStep, step.timerSeconds > 0 {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
                 Text("Timer")
                     .stirFont(.labelLg).fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink900)
                     .accessibilityAddTraits(.isHeader)
                 // Only treat running / paused / pending timers as "the
                 // step's current timer" for UI routing. Cancelled and
@@ -142,113 +170,179 @@ struct StepCardView: View {
                     Button {
                         Task { await viewModel.startTimerForCurrentStep() }
                     } label: {
-                        Label("Start \(Int(step.timerSeconds) / 60) min timer", systemImage: "timer")
-                            .stirFont(.labelLg).fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                        HStack(spacing: CGFloat.Stir.space2) {
+                            Image.Stir.timer
+                            Text("Start \(Int(step.timerSeconds) / 60) min timer")
+                                .stirFont(.labelLg).fontWeight(.semibold)
+                        }
+                        .foregroundStyle(Color.Stir.paper50)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .frame(minHeight: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                                .fill(Color.Stir.ember600),
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
                     .accessibilityHint("Schedules a local notification for when the step is done.")
                 }
             }
-            .padding()
-            .background(Color.Stir.paper100, in: RoundedRectangle(cornerRadius: 12))
+            .padding(CGFloat.Stir.space4)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
         }
     }
 
     private func timerControlRow(for timer: CookTimer) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: CGFloat.Stir.space3) {
             switch timer.typedState {
             case .running:
-                Button {
-                    Task { await viewModel.pauseTimer(timer) }
-                } label: {
-                    Label("Pause", systemImage: "pause.fill")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
+                timerControlButton(
+                    title: "Pause",
+                    icon: Image.Stir.pause,
+                    style: .neutral,
+                    action: { Task { await viewModel.pauseTimer(timer) } },
+                )
             case .paused:
-                Button {
-                    Task { await viewModel.resumeTimer(timer) }
-                } label: {
-                    Label("Resume", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderedProminent)
+                timerControlButton(
+                    title: "Resume",
+                    icon: Image.Stir.play,
+                    style: .emberFilled,
+                    action: { Task { await viewModel.resumeTimer(timer) } },
+                )
             case .pending, .completed, .cancelled:
                 EmptyView()
             }
-            Button(role: .destructive) {
-                Task { await viewModel.cancelTimer(timer) }
-            } label: {
-                Label("Cancel", systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.bordered)
+            timerControlButton(
+                title: "Cancel",
+                // justification: "stop.fill" has no direct Image.Stir.*
+                // token; adding one just for Cook Mode's timer-cancel
+                // glyph isn't pattern-wide. Keeping inline keeps the
+                // icon catalog focused on the semantic set defined in
+                // spec §6.
+                icon: Image(systemName: "stop.fill"),
+                style: .destructive,
+                action: { Task { await viewModel.cancelTimer(timer) } },
+            )
         }
-        .stirFont(.labelMd).fontWeight(.medium)
+    }
+
+    private enum TimerControlStyle { case neutral, emberFilled, destructive }
+
+    private func timerControlButton(
+        title: String,
+        icon: Image,
+        style: TimerControlStyle,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: CGFloat.Stir.space2) {
+                icon
+                Text(title)
+                    .stirFont(.labelMd).fontWeight(.medium)
+            }
+            .foregroundStyle(timerControlForeground(style))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(timerControlBackground(style)),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .strokeBorder(timerControlBorder(style), lineWidth: 1),
+            )
+            .contentShape(Rectangle())
+        }
+    }
+
+    private func timerControlForeground(_ style: TimerControlStyle) -> Color {
+        switch style {
+        case .neutral:      return Color.Stir.ink900
+        case .emberFilled:  return Color.Stir.paper50
+        case .destructive:  return Color.Stir.crimson600
+        }
+    }
+
+    private func timerControlBackground(_ style: TimerControlStyle) -> Color {
+        switch style {
+        case .neutral:      return Color.Stir.paper100
+        case .emberFilled:  return Color.Stir.ember600
+        case .destructive:  return Color.Stir.paper100
+        }
+    }
+
+    private func timerControlBorder(_ style: TimerControlStyle) -> Color {
+        switch style {
+        case .neutral:      return Color.Stir.divider
+        case .emberFilled:  return Color.Stir.ember600
+        case .destructive:  return Color.Stir.crimson600.opacity(0.4)
+        }
     }
 
     // MARK: - Bottom bar
 
     private var bottomBar: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: CGFloat.Stir.space3) {
             voiceRow
-            // Secondary row — "Ask" opens Substitution Sheet.
-            Button {
-                viewModel.requestSubstitution()
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "questionmark.bubble")
-                    Text("Something missing?")
-                        .stirFont(.labelMd).fontWeight(.medium)
-                }
-                .foregroundStyle(Color.Stir.ink900)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
+            askRow
+            navigationRow
+        }
+        .padding(.horizontal, CGFloat.Stir.space4)
+        .padding(.top, CGFloat.Stir.space3 - 2) // 10pt
+        .padding(.bottom, CGFloat.Stir.space3 - 2) // 10pt
+    }
+
+    private var askRow: some View {
+        Button {
+            viewModel.requestSubstitution()
+        } label: {
+            HStack(spacing: CGFloat.Stir.space3 - 2) { // 10pt
+                // justification: "questionmark.bubble" is a Cook Mode-
+                // specific Ask affordance glyph; no Image.Stir.* token
+                // (the Icons catalog uses `.help` = "questionmark.circle"
+                // for generic help, which reads differently).
+                Image(systemName: "questionmark.bubble")
+                Text("Something missing?")
+                    .stirFont(.labelMd).fontWeight(.medium)
             }
-            .buttonStyle(.bordered)
-            .accessibilityLabel("Substitute a missing ingredient")
+            .foregroundStyle(Color.Stir.ink900)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Substitute a missing ingredient")
+    }
 
-            // Primary row — Prev / Next.
-            HStack(spacing: 12) {
-                Button {
-                    viewModel.previousStep()
-                } label: {
-                    HStack { Image(systemName: "arrow.left"); Text("Previous") }
-                        .stirFont(.labelLg).fontWeight(.semibold)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isFirstStep)
-                .accessibilityLabel("Previous step")
+    private var navigationRow: some View {
+        HStack(spacing: CGFloat.Stir.space3) {
+            SecondaryButton(
+                title: "Previous",
+                isDisabled: viewModel.isFirstStep,
+                action: { viewModel.previousStep() },
+            )
+            .accessibilityLabel("Previous step")
 
-                Button {
+            PrimaryButton(
+                title: viewModel.isLastStep ? "Finish" : "Next",
+                action: {
                     if viewModel.isLastStep {
                         viewModel.finish()
                     } else {
                         viewModel.nextStep()
                     }
-                } label: {
-                    HStack {
-                        Text(viewModel.isLastStep ? "Finish" : "Next")
-                        Image(systemName: viewModel.isLastStep ? "checkmark" : "arrow.right")
-                    }
-                    .stirFont(.labelLg).fontWeight(.semibold)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityLabel(viewModel.isLastStep ? "Finish cooking" : "Next step")
-            }
+                },
+            )
+            .accessibilityLabel(viewModel.isLastStep ? "Finish cooking" : "Next step")
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
     }
 
     // MARK: - Voice row
@@ -264,11 +358,14 @@ struct StepCardView: View {
     /// creates two distinct SwiftUI view types and forces a remount on
     /// state flip, breaking `Button.isPressed` mid-gesture and forcing
     /// accessibility to re-read the whole control.
+    ///
+    /// State-dependent chrome is too rich for PrimaryButton/SecondaryButton
+    /// (4 role × tint × icon × label × optional spinner). Keeping custom.
     private var voiceRow: some View {
         Button {
             Task { await viewModel.handleMicTap() }
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: CGFloat.Stir.space3 - 2) { // 10pt
                 Image(systemName: micIconName)
                     .stirFont(.labelLg).fontWeight(.semibold)
                     .accessibilityHidden(true)
@@ -278,13 +375,21 @@ struct StepCardView: View {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .controlSize(.small)
+                        .tint(micForeground)
                 }
             }
+            .foregroundStyle(micForeground)
             .frame(maxWidth: .infinity, minHeight: 48)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(micBackground),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .strokeBorder(micBorder, lineWidth: 1),
+            )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
-        .tint(micTint)
         // Button stays enabled during `.busy` — hands-free contract
         // says tap = "exit voice mode", and users were getting stuck
         // in a spinning state when the button was `.disabled` with
@@ -305,6 +410,11 @@ struct StepCardView: View {
 
     private var micIconName: String {
         switch viewModel.micButtonRole {
+        // justification: stop.circle.fill / mic.circle.fill are
+        // role-specific composite glyphs (icon-in-circle) that don't
+        // map to the Image.Stir semantic catalog. Raw SFSymbol is
+        // the right abstraction level here — a token would be
+        // specific to one call site.
         case .submit, .busy, .listening: return "stop.circle.fill"
         case .askWithVoice:              return "mic.circle.fill"
         }
@@ -330,10 +440,24 @@ struct StepCardView: View {
         }
     }
 
-    private var micTint: Color {
+    private var micForeground: Color {
         switch viewModel.micButtonRole {
-        case .submit, .busy, .listening: return .red
-        case .askWithVoice:              return .accentColor
+        case .submit, .busy, .listening: return Color.Stir.crimson600
+        case .askWithVoice:              return Color.Stir.ember600
+        }
+    }
+
+    private var micBackground: Color {
+        switch viewModel.micButtonRole {
+        case .submit, .busy, .listening: return Color.Stir.crimson100
+        case .askWithVoice:              return Color.Stir.paper100
+        }
+    }
+
+    private var micBorder: Color {
+        switch viewModel.micButtonRole {
+        case .submit, .busy, .listening: return Color.Stir.crimson600.opacity(0.4)
+        case .askWithVoice:              return Color.Stir.divider
         }
     }
 
@@ -357,4 +481,3 @@ struct StepCardView: View {
         }
     }
 }
-
