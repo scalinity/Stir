@@ -492,13 +492,20 @@ final class RootCoordinator {
         }
     }
 
-    /// Called by OnboardingRoot when the flow finishes (Setup 2 Continue).
+    /// Called by OnboardingRoot when the flow finishes — either via
+    /// the Setup 2 completion transition, a Skip-forward shortcut,
+    /// or the Welcome "See a sample" bypass. Fires the coordinator
+    /// phase flip + clears the onboarding VM.
+    ///
+    /// Note: `onboarding_completed` PostHog emission is now owned by
+    /// OnboardingViewModel.fireOnboardingCompletedEvent() (called from
+    /// OnboardingCompletionView + the See-a-sample handler in
+    /// OnboardingRoot). Moved out of the coordinator so every
+    /// emission site picks up Spec §15 properties (duration_sec +
+    /// skipped_steps) from the ViewModel — the coordinator doesn't
+    /// hold the onboarding start-time anchor or the skipped-steps
+    /// list, so it can't assemble the full payload.
     func handleOnboardingFinished() {
-        guard let profile = household.profile else { return }
-        let hash = profile.canonicalUserKey.map(CanonicalKeyHash.hash) ?? ""
-        PostHogClient.shared.capture(.onboardingCompleted, properties: [
-            "canonical_user_key_hash": hash,
-        ])
         self.onboardingViewModel = nil
         self.phase = .ready
     }

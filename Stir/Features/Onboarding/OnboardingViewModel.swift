@@ -46,8 +46,19 @@ final class OnboardingViewModel {
     /// and then Skipped mid-form counts as partially-completed (state
     /// is saved) and is NOT recorded — only steps that come AFTER the
     /// current one and get jumped over are recorded. Attached to the
-    /// `onboarding_completed` PostHog event in commit 3.
+    /// `onboarding_completed` PostHog event via
+    /// `fireOnboardingCompletedEvent()`.
     private(set) var skippedSteps: [String] = []
+
+    /// Wall-clock anchor for the `duration_sec` property on
+    /// `onboarding_completed`. Set at VM init — onboarding effectively
+    /// starts when RootCoordinator instantiates the VM post-bootstrap,
+    /// which matches when the user lands on Welcome. A user who
+    /// abandons and re-enters onboarding (pre-completion kill +
+    /// relaunch) gets a fresh anchor; duration captures per-session
+    /// time, not calendar-time-to-complete. That matches PostHog's
+    /// funnel semantics for resumed flows.
+    let onboardingStartedAt: Date = .init()
 
     /// Maximum length for a user-entered custom dislike. 32 chars
     /// keeps the free-text from silently inflating the Gemini context
@@ -272,10 +283,40 @@ final class OnboardingViewModel {
     /// "setup_kitchen" when the user taps Skip on Setup 1 and fast-
     /// forwards past Setup 2). The current step isn't added — its
     /// state gets saved at skip-time, so it counts as "visited, not
-    /// skipped" per decision (a). Attached to `onboarding_completed`
-    /// in commit 3.
+    /// skipped" per decision (a).
     func recordSkip(over stepID: String) {
         guard !skippedSteps.contains(stepID) else { return }
         skippedSteps.append(stepID)
+    }
+
+    // MARK: - Telemetry
+
+    /// Fire the `onboarding_completed` PostHog event with the Spec §15
+    /// properties: `duration_sec` (wall-clock since VM init) +
+    /// `skipped_steps` (array) + `canonical_user_key_hash`. Caller
+    /// is responsible for ordering — fire AFTER
+    /// `completeOnboarding()` saves durable onboardingCompleted=true,
+    /// BEFORE any auto-advance dwell, so a user who kills during the
+    /// dwell still counts as completed (decision b).
+    ///
+    /// Two emission sites:
+    ///   - `OnboardingCompletionView.task` (normal flow via Setup 2 +
+    ///     Skip shortcuts)
+    ///   - `OnboardingRoot` "See a sample" Welcome handler (stub path
+    ///     that bypasses Setup 1/2 entirely)
+    /// RootCoordinator.handleOnboardingFinished no longer emits —
+    /// ownership moved here so both ViewModel-mediated paths fire
+    /// through a single helper.
+    func fireOnboardingCompletedEvent() {
+        let durationSec = max(0, Int(Date().timeIntervalSince(onboardingStartedAt)))
+        let hash = profile.canonicalUserKey.map(CanonicalKeyHash.hash) ?? ""
+        PostHogClient.shared.capture(
+            .onboardingCompleted,
+            properties: [
+                "canonical_user_key_hash": hash,
+                "duration_sec": durationSec,
+                "skipped_steps": skippedSteps,
+            ],
+        )
     }
 }

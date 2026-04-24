@@ -26,11 +26,16 @@ struct OnboardingRoot: View {
                     path.append(.setupPreferences)
                 },
                 onSeeSample: {
-                    // Step-2 stub — sample path lands in step 3. For now,
-                    // skip straight to Tonight Home with a shell profile.
+                    // Step-2 stub — sample path bypasses Setup 1/2
+                    // entirely, so it records every subsequent step as
+                    // skipped and fires `onboarding_completed` inline
+                    // (no completion-transition for this path).
                     Task {
                         do {
+                            viewModel.recordSkip(over: "setup_preferences")
+                            viewModel.recordSkip(over: "setup_kitchen")
                             try viewModel.completeOnboarding()
+                            viewModel.fireOnboardingCompletedEvent()
                             onFinished()
                         } catch {
                             errorMessage = "Something went wrong. Please try again."
@@ -54,10 +59,24 @@ struct OnboardingRoot: View {
                                 }
                             }
                         },
-                        // Skip wiring lands in commit 3 — no-op here
-                        // preserves the affordance visually without
-                        // changing behavior mid-phase-3.
-                        onSkip: {},
+                        onSkip: {
+                            // Skip from Setup 1 saves whatever the
+                            // user has selected so far, records
+                            // "setup_kitchen" as bypassed, and routes
+                            // straight to the completion transition.
+                            // The current step (Setup 1) counts as
+                            // visited-and-partially-completed per
+                            // decision (a).
+                            Task {
+                                do {
+                                    try viewModel.savePreferences()
+                                    viewModel.recordSkip(over: "setup_kitchen")
+                                    path.append(.completionTransition)
+                                } catch {
+                                    errorMessage = ErrorPresenter.present(.sync01).message
+                                }
+                            }
+                        },
                     )
                 case .setupKitchen:
                     SetupKitchenView(
@@ -73,7 +92,21 @@ struct OnboardingRoot: View {
                                 }
                             }
                         },
-                        onSkip: {},
+                        onSkip: {
+                            // Skip from Setup 2 saves kitchen state
+                            // and routes to completion. No recordSkip
+                            // — there are no steps AFTER Setup 2 to
+                            // bypass; Setup 2 itself counts as
+                            // partially-completed (decision a).
+                            Task {
+                                do {
+                                    try viewModel.saveKitchen()
+                                    path.append(.completionTransition)
+                                } catch {
+                                    errorMessage = ErrorPresenter.present(.sync01).message
+                                }
+                            }
+                        },
                     )
                 case .completionTransition:
                     OnboardingCompletionView(

@@ -60,10 +60,11 @@ struct OnboardingCompletionView: View {
                 errorMessage = ErrorPresenter.present(.sync01).message
                 return
             }
-            // TODO(commit 3): fire PostHog `onboarding_completed`
-            // event here — BEFORE the dwell so a user who kills during
-            // the 1.5s still counts. Properties: duration_sec +
-            // skipped_steps (from viewModel.skippedSteps).
+            // Fire BEFORE the dwell — decision b. A user who kills
+            // during the 1.5s still counts as completed; the durable
+            // onboardingCompleted=true is already written, and the
+            // event has already fired by the time the dwell starts.
+            viewModel.fireOnboardingCompletedEvent()
             try? await Task.sleep(for: Self.dwellDuration)
             onFinished()
         }
