@@ -149,20 +149,47 @@ final class ScanViewModel {
 
     // MARK: - Chip edits in review
 
+    /// Maximum grapheme-cluster count for a manually-entered or edited
+    /// ingredient name. 32 chars is past any realistic culinary label
+    /// ("extra-virgin olive oil" is 22) and caps adversarial input from
+    /// inflating every downstream dinner-solve prompt. Review finding
+    /// W-B W10 (CA2).
+    static let ingredientNameMaxLength = 32
+
+    /// UTF-8 byte cap for an ingredient name. Pairs with the grapheme
+    /// cap the same way the onboarding dislike caps pair (user-visible
+    /// axis + payload-byte axis). 64 bytes = ~21 CJK chars or 64 ASCII.
+    static let ingredientNameMaxBytes = 64
+
+    /// Clamp `raw` to within both caps. Trims whitespace, then drops
+    /// from the grapheme-count limit down, then from the UTF-8 byte
+    /// limit down. Returns empty for all-whitespace input (caller
+    /// interprets empty as "delete").
+    private static func clampedIngredientName(_ raw: String) -> String {
+        var bounded = String(
+            raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(ingredientNameMaxLength),
+        )
+        while bounded.utf8.count > ingredientNameMaxBytes, !bounded.isEmpty {
+            bounded = String(bounded.dropLast())
+        }
+        return bounded
+    }
+
     func editIngredient(id: UUID, newName: String) {
         guard let idx = ingredients.firstIndex(where: { $0.id == id }) else { return }
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        let bounded = Self.clampedIngredientName(newName)
+        if bounded.isEmpty {
             // Clearing the field is interpreted as delete — matches the
             // context-menu delete affordance without needing two gestures.
             deleteIngredient(id: id)
             return
         }
-        ingredients[idx].displayName = trimmed
+        ingredients[idx].displayName = bounded
         ingredients[idx].confidence = .confirmed // user typed it → confident
         PostHogClient.shared.capture(.ingredientCorrected, properties: [
             "action": "edit",
-            "final_name_length": trimmed.count,
+            "final_name_length": bounded.count,
         ])
     }
 
@@ -172,15 +199,15 @@ final class ScanViewModel {
     }
 
     func addIngredientManually(_ name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let bounded = Self.clampedIngredientName(name)
+        guard !bounded.isEmpty else { return }
         ingredients.append(Ingredient(
-            displayName: trimmed,
+            displayName: bounded,
             confidence: .confirmed,
         ))
         PostHogClient.shared.capture(.ingredientCorrected, properties: [
             "action": "add",
-            "name_length": trimmed.count,
+            "name_length": bounded.count,
         ])
     }
 

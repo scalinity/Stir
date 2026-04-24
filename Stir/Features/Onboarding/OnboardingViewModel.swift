@@ -71,12 +71,49 @@ final class OnboardingViewModel {
     /// review finding C4 in review-ui-migration-findings.md.
     private var hasFiredCompletedEvent = false
 
-    /// Maximum length for a user-entered custom dislike. 32 chars
-    /// keeps the free-text from silently inflating the Gemini context
-    /// payload on every dinner-solve (DietaryRule.value flows into
-    /// every solve prompt via HouseholdProfile context). Not enforced
-    /// at the Core Data layer — applied at ViewModel intake.
+    /// Maximum grapheme-cluster count for a user-entered custom dislike.
+    /// 32 chars is the user-visible cap driving the "+ Add" sheet UI.
+    /// See also `customDislikeMaxBytes` (payload cap) — both apply.
     static let customDislikeMaxLength = 32
+
+    /// Maximum UTF-8 byte payload for a user-entered custom dislike.
+    /// 64 bytes lets ~20 CJK ideographs or 64 ASCII chars through —
+    /// caps the Gemini context-bloat risk that `customDislikeMaxLength`
+    /// alone misses when input is multi-byte. DietaryRule.value flows
+    /// into every dinner-solve prompt via HouseholdProfile context;
+    /// adversarial input could have been up to 32 × 4-byte CJK = 128
+    /// bytes before this cap. Review finding W-B W9 (SA1+DB1).
+    static let customDislikeMaxBytes = 64
+
+    /// Maximum cardinality of `customDislikes`. 10 is well past any
+    /// realistic preference set and caps a tap-storm / UI-loop bug
+    /// class that could otherwise inflate the Gemini context payload
+    /// linearly. Enforced at `addCustomDislike` intake.
+    /// Review finding W-B W9 (SA1+DB1).
+    static let customDislikesMaxCount = 10
+
+    /// Unicode scalars stripped from normalized custom-dislike input to
+    /// avoid prompt-injection hazards flowing into Gemini context on
+    /// every dinner-solve (CWE-1336). Covers:
+    ///   - C0/C1 control chars (null, backspace, escape, ...)
+    ///   - bidi formatting marks (LRE/RLE/PDF/LRO/RLO, U+202A–U+202E)
+    ///   - bidi isolate marks (LRI/RLI/FSI/PDI, U+2066–U+2069)
+    ///   - zero-width + directional marks (U+200B–U+200F)
+    ///   - line/paragraph separators (U+2028, U+2029)
+    ///   - byte-order mark (U+FEFF)
+    /// Stripping (not rejecting) is the gentler UX — user copy-pasting
+    /// from a richtext source still gets their content through.
+    /// Review finding W-B W8 (SA1).
+    private static let customDislikeUnicodeHazards: CharacterSet = {
+        var set = CharacterSet.controlCharacters
+        set.insert(charactersIn: "\u{202A}"..."\u{202E}")
+        set.insert(charactersIn: "\u{2066}"..."\u{2069}")
+        set.insert(charactersIn: "\u{200B}"..."\u{200F}")
+        set.insert("\u{2028}")
+        set.insert("\u{2029}")
+        set.insert("\u{FEFF}")
+        return set
+    }()
 
     // MARK: - Error surface
 
@@ -120,12 +157,29 @@ final class OnboardingViewModel {
                 // Predefined dislikes hydrate into the enum set; any
                 // value outside the curated 12 lands in `customDislikes`
                 // as the free-text entry the user typed via "+ Add".
+                // Two-step match + normalize-on-hydrate prevents phantom
+                // duplicates from case/whitespace variance in historical
+                // rows (e.g. "CILANTRO" + "cilantro" both re-written as
+                // distinct rows on next savePreferences()). Review
+                // finding W-B W11 (CA1+SA1).
                 guard let raw = rule.value else { break }
-                if let opt = DislikeOption(rawValue: raw) {
+                let lowered = raw
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                if let opt = DislikeOption(rawValue: lowered) {
                     selectedDislikes.insert(opt)
-                } else {
-                    customDislikes.insert(raw)
+                } else if let opt = DislikeOption.allCases.first(where: {
+                    $0.displayName.lowercased() == lowered
+                }) {
+                    // Historical rows may have been written with
+                    // displayName semantics rather than rawValue.
+                    selectedDislikes.insert(opt)
+                } else if let normalized = normalizeCustomDislike(raw) {
+                    customDislikes.insert(normalized)
                 }
+                // Else: row is empty post-normalization or all-hazard —
+                // drop rather than carry invalid state into a fresh
+                // dinner-solve payload.
             case .none:
                 break
             }
@@ -247,17 +301,34 @@ final class OnboardingViewModel {
 
     // MARK: - Custom dislike intake
 
-    /// Normalizes a user-entered free-text dislike. Trims whitespace,
-    /// lowercases, length-caps at `customDislikeMaxLength`. Returns nil
-    /// if the input is empty, too long, or collapses to a predefined
-    /// DislikeOption rawValue / displayName — in which case the caller
-    /// can insert into `selectedDislikes` directly rather than adding
-    /// a duplicate custom entry.
+    /// Normalizes a user-entered free-text dislike. Pipeline:
+    ///   1. Trim whitespace + lowercase.
+    ///   2. Strip Unicode hazards (control/bidi/zero-width/BOM) and
+    ///      re-trim in case leading/trailing whitespace surfaced.
+    ///   3. Length-cap: grapheme count AND UTF-8 byte count.
+    ///   4. Fold into curated DislikeOption if there's an exact match.
+    /// Returns nil if the input is empty, too long on either axis, or
+    /// collapses to a predefined DislikeOption rawValue / displayName
+    /// (in which case the caller can insert into `selectedDislikes`
+    /// directly rather than adding a duplicate custom entry).
     func normalizeCustomDislike(_ raw: String) -> String? {
-        let trimmed = raw
+        var trimmed = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard !trimmed.isEmpty, trimmed.count <= Self.customDislikeMaxLength else {
+        // Strip Unicode prompt-injection hazards before length checks —
+        // otherwise zero-width padding could fit under the grapheme cap
+        // while still flowing into Gemini context. Re-trim in case the
+        // strip exposed leading/trailing whitespace. Review finding
+        // W-B W8 (SA1, CWE-1336).
+        trimmed = trimmed
+            .components(separatedBy: Self.customDislikeUnicodeHazards)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !trimmed.isEmpty,
+            trimmed.count <= Self.customDislikeMaxLength,
+            trimmed.utf8.count <= Self.customDislikeMaxBytes
+        else {
             return nil
         }
         // If the user typed something matching a curated option, fold
@@ -281,6 +352,15 @@ final class OnboardingViewModel {
     @discardableResult
     func addCustomDislike(_ raw: String) -> Bool {
         guard let normalized = normalizeCustomDislike(raw) else {
+            return false
+        }
+        // Cap set cardinality. Refuse only when the new entry would
+        // grow the set past the cap — re-adding an existing member is
+        // always a no-op insert that returns `true`. Review finding
+        // W-B W9.
+        if !customDislikes.contains(normalized),
+           customDislikes.count >= Self.customDislikesMaxCount
+        {
             return false
         }
         customDislikes.insert(normalized)
