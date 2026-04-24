@@ -960,9 +960,9 @@ v1 does not request time-sensitive notification privileges. Use normal interrupt
 | Tier            |     Price | Includes                                                                                                                                        | Overage behavior          |
 | --------------- | --------: | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | Free            |        $0 | 6 Dinner Solves/mo, **unlimited tap-based Cook Sessions** (no voice), 25 remembered pantry items, 2 recipe imports/mo, text-based Substitution Sheet | hard cap on solves/imports until reset; tap Cook Mode always available |
-| Premium monthly |  $9.99/mo | 40 Dinner Solves/mo, 20 voice Cook Sessions/mo (plus unlimited tap), 250 remembered pantry items, unlimited imports, widgets, shortcuts, leftovers, saved favorites | hard cap; upgrade or wait |
+| Premium monthly |  $9.99/mo | 40 Dinner Solves/mo, 13 voice Cook Sessions/mo (plus unlimited tap), 250 remembered pantry items, unlimited imports, widgets, shortcuts, leftovers, saved favorites | hard cap; upgrade or wait |
 | Premium annual  | $69.99/yr | same as Premium monthly + **7-day free trial**                                                                                                  | hard cap; upgrade or wait |
-| Pro monthly     | $14.99/mo | 120 Dinner Solves/mo, 40 voice Cook Sessions/mo (plus unlimited tap), 1,000 remembered pantry items, multi-image scans, priority inference queue, 365-day household memory | hard cap; upgrade or wait |
+| Pro monthly     | $14.99/mo | 120 Dinner Solves/mo, 27 voice Cook Sessions/mo (plus unlimited tap), 1,000 remembered pantry items, multi-image scans, priority inference queue, 365-day household memory | hard cap; upgrade or wait |
 | Pro annual      | $139.99/yr | same as Pro monthly                                                                                                                            | hard cap; upgrade or wait |
 
 **Tier design rationale.** Cook Mode voice is the headline differentiator — the feature that materially changes the cooking experience. Free tier gets the full scan-to-plan core loop (the aha moment) plus tap-based Cook Mode, but voice is Premium+. This creates a clear, experiential upgrade trigger: users see exactly what they're paying for the moment they tap the voice affordance.
@@ -1060,25 +1060,25 @@ Use the AI cost model from §12.
 Assumptions (per active user, per month):
 
 * **Free AI cost**: $0.075 (scan + solve + import + grocery; no voice)
-* **Premium AI cost**: $1.71 (Free features + 20 voice Cook Sessions)
-* **Pro AI cost**: $3.33 (Premium features + scaled to 40 voice Cook Sessions)
+* **Premium AI cost**: $1.89 (Free features + 13 voice Cook Sessions at ADR 0015 caps; measured range $1.69–$2.08)
+* **Pro AI cost**: $3.69 (Premium features + scaled to 27 voice Cook Sessions at ADR 0015 caps; measured range $3.51–$4.32)
 * backend + observability = **$0.20**
 * support reserve = **$0.15**
 
 | Tier                          | Net revenue/mo |    AI | Infra | Support | Contribution margin/mo | 4-month CAC ceiling |
 | ----------------------------- | -------------: | ----: | ----: | ------: | ---------------------: | ------------------: |
 | Free                          |         0.0000 | 0.075 |  0.20 |    0.15 |           **−0.4250** |                 n/a |
-| Premium monthly               |         8.4915 |  1.71 |  0.20 |    0.15 |             **6.4315** |           **25.73** |
-| Pro monthly                   |        12.7415 |  3.33 |  0.20 |    0.15 |             **9.0615** |           **36.25** |
-| Premium annual (steady-state) |         4.9576 |  1.71 |  0.20 |    0.15 |             **2.8976** |           **11.59** |
-| Pro annual (steady-state)     |         9.9159 |  3.33 |  0.20 |    0.15 |             **6.2359** |           **24.94** |
-| Premium annual (year 1)       |         4.0828 |  1.71 |  0.20 |    0.15 |             **2.0228** |            **8.09** |
-| Pro annual (year 1)           |         8.1661 |  3.33 |  0.20 |    0.15 |             **4.4861** |           **17.94** |
+| Premium monthly               |         8.4915 |  1.89 |  0.20 |    0.15 |             **6.2515** |           **25.01** |
+| Pro monthly                   |        12.7415 |  3.69 |  0.20 |    0.15 |             **8.7015** |           **34.81** |
+| Premium annual (steady-state) |         4.9576 |  1.89 |  0.20 |    0.15 |             **2.7176** |           **10.87** |
+| Pro annual (steady-state)     |         9.9159 |  3.69 |  0.20 |    0.15 |             **5.8759** |           **23.50** |
+| Premium annual (year 1)       |         4.0828 |  1.89 |  0.20 |    0.15 |             **1.8428** |            **7.37** |
+| Pro annual (year 1)           |         8.1661 |  3.69 |  0.20 |    0.15 |             **4.1261** |           **16.50** |
 
 **Margin flags:**
 
-* **Pro annual year-1 contribution margin is $4.49/mo — healthy.** The Pro voice cap is deliberately set at 40 sessions (not 60) and Pro annual priced at $139.99 to protect against the power-law usage distribution — a small fraction of Pro users consume at the cap while average users leave quota unused, so the realized average drifts toward the cap, not the mean. The $89.99/60-session and $119.99/40-session intermediate configurations were both considered and rejected in spec revision — the first yielded ~$0.01/mo year-1 margin fragile to any usage variance, the second left insufficient headroom for founder-discount promotional codes during beta. If beta telemetry shows <15% of Pro users hitting the 40-session cap, consider raising the cap selectively (opt-in) rather than across the board.
-* **Premium monthly is the healthiest SKU.** $6.43/mo contribution margin, $25.73 4-month CAC ceiling. Optimize acquisition here.
+* **Pro annual year-1 contribution margin is $4.13/mo — healthy.** The Pro voice cap is deliberately set at 27 sessions per ADR 0015 (2026-04-23 revision after device-measured Live API cost data revealed the implicit-caching assumption was empirically false) and Pro annual priced at $139.99 to protect against the power-law usage distribution — a small fraction of Pro users consume at the cap while average users leave quota unused, so the realized average drifts toward the cap, not the mean. Pre-ADR-0015 configurations (40 and 60-session caps at various price points) were considered and rejected — they yielded fragile margins that couldn't absorb the per-turn cost reality plus any usage variance, and left insufficient headroom for founder-discount promotional codes during beta. The "preserve price, trim cap" tradeoff was durable where the alternative was a price-raise cliff. If beta telemetry shows <15% of Pro users hitting the 27-session cap AND caching emerges on Live API (ADR 0015 trigger query), consider raising the cap selectively via a superseding ADR rather than across the board.
+* **Premium monthly is the healthiest SKU.** $6.25/mo contribution margin, $25.01 4-month CAC ceiling. Optimize acquisition here.
 * **Free tier is $0.43/mo net negative.** At 5% free-to-paid conversion over 6 months and ~8 months average paid retention, each converted free user generates ~$30–60 lifetime value depending on SKU mix minus ~$2.55 in free-tier cost — comfortably net-positive at projected economics. Worth monitoring if free-tier cost drifts above $0.50/mo or if conversion falls below 3%.
 
 ### Billing edge cases
@@ -1121,7 +1121,7 @@ Apple's current docs confirm Billing Grace Period behavior, support for offer co
 | ------------------------ | -------: | --------: | --------: |
 | Dinner Solves / month    |        6 |        40 |       120 |
 | Tap Cook Sessions / month | unlimited | unlimited | unlimited |
-| **Voice Cook Sessions / month** | **0**  |       **20** |       **40** |
+| **Voice Cook Sessions / month** | **0**  |       **13** |       **27** |
 | Recipe Imports / month   |        2 | unlimited | unlimited |
 | Remembered pantry items  |       25 |       250 |     1,000 |
 | **Cook Mode voice**      |     **no** |     **yes** |     **yes** |
@@ -1239,7 +1239,7 @@ Premium monthly net ARPU = **$8.4915**
 
 ### 12.1 Cost table
 
-> **Updated 2026-04-22 PM with device-measured numbers.** Step 6 Cook Mode voice shipped and was exercised across multiple 9+ turn sessions. Per-turn prompt tokens came in ~3x higher than the ADR 0014 amendment modeled, because the baked-in systemInstruction + recipe context + pantry + household + AUDIO-mode overhead is ~3,800 tokens per turn, not ~1,500. Real 15-turn session cost lands at ~$0.13-0.16 (vs $0.12-0.15 projected), and 20-session/mo Premium cap lands at $2.56-$3.10/mo — **35-64% over the $1.89 AI budget line**. Mitigation options (not yet deployed): cap reduction 20 → ~13 sessions, prompt trim, or wait for Gemini context caching GA. See ADR 0014 "measured-reality cost correction" amendment.
+> **Updated 2026-04-23 with ADR 0015 cap reshuffle.** Step 6 Cook Mode voice shipped and was exercised across multiple 9+ turn sessions. Per-turn prompt tokens came in ~3x higher than the ADR 0014 amendment modeled, because the baked-in systemInstruction + recipe context + pantry + household + AUDIO-mode overhead is ~3,800 tokens per turn, not ~1,500. Real 15-turn session cost lands at ~$0.13-0.16 (vs $0.12-0.15 projected). Pre-ADR-0015, the 20-session/mo Premium cap would have landed at $2.56-$3.10/mo — 35-64% over the $1.89 AI budget line. ADR 0015 (2026-04-23) cut caps to Premium 13 / Pro 27 after a second device-measured finding confirmed implicit caching empirically does NOT fire on `gemini-3.1-flash-live-preview` (50+ turns checked, `usageMetadata.cachedContentTokenCount` zero or absent throughout). The "wait for caching GA" mitigation option is permanently assumed unavailable in cost models; the trigger-to-revisit query in ADR 0015 is the only path to reopen. See ADR 0014 "measured-reality cost correction" amendment and ADR 0015 for the full caching-finding + cap-reshuffle rationale.
 
 **Voice Cook Mode cost model (device-measured):** context accumulates across turns at full audio input rate (no cache, no mid-session pruning — refresh IS the cost lever, ADR 0014). Refresh triggers at `turnCount - lastRefreshedAtTurn >= 4` OR `promptTokens > 10_000` on a single turn, `max_output_tokens: 400` cap (ADR 0010), pre-mint one turn before refresh (shaves ~1.9s off handoff).
 
@@ -1258,21 +1258,21 @@ Session cost at ~22% tool-call rate (7 refreshes per 30 turns):
 | ----------------------- | --------------------- | ----------------------------------------------------------- | -------------------------------------------------: | ----------------------------: | -----------------------------: | --------------------: |
 | Pantry scan parse       | Gemini 3 Flash        | 1 image @1120 tokens + ~1080 text/context input, 450 output |  `(2200 × $0.50/1M) + (450 × $3.00/1M) = $0.00245` |                            10 |                     `$0.02450` |               `0.29%` |
 | Dinner solve            | Gemini 3 Flash        | 2400 input, 900 output                                      |  `(2400 × $0.50/1M) + (900 × $3.00/1M) = $0.00390` |                            12 |                     `$0.04680` |               `0.55%` |
-| Voice Cook Mode session (15 turns, measured) | Gemini 3.1 Flash Live Preview (MINIMAL) | ~4,527 prompt / non-tool turn + ~8,822 / tool-call turn + ~124 response audio/turn; 75/25 to 60/40 text:audio split | `~$0.142 per 15-turn session` (midpoint of $0.13-$0.16 range) | 20 sessions | `$2.84000` | `33.45%` |
+| Voice Cook Mode session (15 turns, measured) | Gemini 3.1 Flash Live Preview (MINIMAL) | ~4,527 prompt / non-tool turn + ~8,822 / tool-call turn + ~124 response audio/turn; 75/25 to 60/40 text:audio split | `~$0.142 per 15-turn session` (midpoint of $0.13-$0.16 range) | 13 sessions (ADR 0015) | `$1.84600` | `21.74%` |
 | Substitution rescue     | Gemini 3 Flash        | 1600 input, 260 output                                      |  `(1600 × $0.50/1M) + (260 × $3.00/1M) = $0.00158` |                             8 |                     `$0.01264` |               `0.15%` |
 | Recipe import normalize | Gemini 3.1 Flash-Lite | 2200 OCR text input, 550 output                             | `(2200 × $0.25/1M) + (550 × $1.50/1M) = $0.001375` |                             4 |                     `$0.00550` |               `0.06%` |
 | Grocery list generation | Gemini 3.1 Flash-Lite | 650 input, 140 output                                       | `(650 × $0.25/1M) + (140 × $1.50/1M) = $0.0003725` |                             4 |                     `$0.00149` |               `0.02%` |
 
-**Total monthly AI cost / Premium user = `0.02450 + 0.04680 + 2.84000 + 0.01264 + 0.00550 + 0.00149 = $2.93093`**
-**Total AI cost as % of Premium net ARPU = `2.93093 / 8.4915 = 34.51%`**
+**Total monthly AI cost / Premium user = `0.02450 + 0.04680 + 1.84600 + 0.01264 + 0.00550 + 0.00149 = $1.93693`**
+**Total AI cost as % of Premium net ARPU = `1.93693 / 8.4915 = 22.81%`**
 
-**⚠️ Over the 22.27% Premium AI budget line by ~12pp.** Mitigation decision (pending Daniel): drop Premium cap from 20 → ~13 voice sessions/mo to bring total to ~$1.89/mo (22.2% of ARPU). Alternative: launch at 20 and accept $2.93/mo until Gemini Live context caching GAs (would cache the ~3,000-token baseline at a 75% discount, dropping per-turn cost by ~40%).
+**Lands inside the 22.27% Premium AI guardrail per ADR 0015.** At 13-session × 15-turn cap, total is ~$1.94/mo (22.8% of ARPU) — hugs the guardrail with minimal slack; measured range $1.69–$2.08/mo accounts for tool-call rate variance (12%–35% observed band). Slack is in the cap itself, not per-call cost. If usage concentrates toward the heavy tail OR average session length exceeds 15 turns OR tool-call rate trends above 22%, margin tightens. Monitor `ai_cost_usd_per_active_user` during beta; revisit via ADR 0015 trigger query (`prompt_cached_tokens / input_tokens` rolling median ≥ 0.30) if cap hit-rate is low but realized cost drifts.
 
-**Free user AI cost = `0.02450 (6 scans/10) + 0.04680 + 0.01264 (if 8 subs used) + 0.00550 (2 imports) + 0.00149 + $0 (no voice) ≈ $0.075/user/month`.** Voice is the dominant cost line; stripping it makes Free tier net-positive on AI spend. ADR-0008 temporarily overrides this by giving Free tier 20 voice sessions during step-6 development; reverts before step 9 beta prep.
+**Free user AI cost = `0.02450 (6 scans/10) + 0.04680 + 0.01264 (if 8 subs used) + 0.00550 (2 imports) + 0.00149 + $0 (no voice) ≈ $0.075/user/month`.** Voice is the dominant cost line; stripping it makes Free tier net-positive on AI spend. ADR 0008 (Free 20 voice sessions during step-6 development) is Superseded by ADR 0015 — Free reverts to 0 voice sessions in the ADR 0015 release, consolidating with the Premium 20→13 and Pro 40→27 cap changes.
 
-**Pro user AI cost ≈ $3.33/user/month** driven by 40 voice Cook Sessions at $0.081 each.
+**Pro user AI cost ≈ $3.69/user/month** driven by 27 voice Cook Sessions at ~$0.133 each (per ADR 0015; measured range $3.51–$4.32/mo).
 
-Voice Cook Mode is now **94.7% of a Premium user's AI cost** and **97.3% of a Pro user's AI cost**. This is a feature-concentrated cost profile — runaway voice cost is the single most likely way unit economics break. Operational monitoring of per-user voice session token consumption is therefore critical.
+Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pro user's AI cost**. This is a feature-concentrated cost profile — runaway voice cost is the single most likely way unit economics break. Operational monitoring of per-user voice session token consumption is therefore critical.
 
 ### 12.2 Feature-by-feature audit
 
@@ -2242,8 +2242,8 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 8. **Will Gemini Live Preview remain behaviorally stable through v1 launch?**
    The API is in preview. Mitigated by the `disable_cook_realtime` kill switch (instant cutover to text fallback) and the weekly eval runs that would catch behavioral drift. Revisit at GA.
 
-9. **Does the Pro tier's 60-session voice cap burn through margin at scale?**
-   Pro annual year-1 contribution margin is ~$0.01/mo at the 60-session cap. Post-beta, if Pro users actually consume 60 voice sessions/mo consistently, consider raising Pro annual price or lowering the cap to 40 sessions.
+9. **Do the 13/27 voice-session caps (ADR 0015) match real usage shapes?**
+   Premium 13 / Pro 27 caps were set using step-6 device-measured per-turn cost + the permanent-no-caching assumption (implicit caching empirically doesn't fire on `gemini-3.1-flash-live-preview`). The caps align with median weekday-cooker patterns (~3 cooking-heavy days × 4 weeks ≈ 12 sessions) but may be tight for a daily-cooker segment. Watch cap hit-rate + post-cap churn during beta. If >30% of Premium users hit the cap AND churn spikes after, consider a superseding ADR that either raises the cap (if the ADR 0015 caching-trigger query also fires) or shifts tier pricing. Trigger criteria detailed in ADR 0015 "Trigger to revisit."
 
 ### Post-launch risk areas
 
