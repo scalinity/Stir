@@ -484,3 +484,113 @@ Deno.test(
     assertEquals(result.status, 204);
   },
 );
+
+// ---------------------------------------------------------------------------
+// AUDIO-mode overhead remainder (P1-O)
+// ---------------------------------------------------------------------------
+//
+// Gemini Live charges ~200 audio-input tokens per turn beyond the literal
+// text+audio breakdown — the AUDIO-mode per-pass overhead (CLAUDE.md
+// sharp-edge #15, empirically observed April 2026 spike). The handler at
+// voice-turn-usage/index.ts:398-405 prices this remainder at the audio
+// rate for the relevant modality:
+//
+//   promptRemainder = max(0, inputTokens - (prompt_text + prompt_audio))
+//   remainderCost   = promptRemainder   * audioInPer1M  / 1_000_000
+//                   + responseRemainder * audioOutPer1M / 1_000_000
+//
+// Unit-level math (coefficients, clamping, cached-token discount) is
+// pinned by compute_cost_usd_test.ts. The existing "expected shape"
+// test (line 180) pins the happy path where total == text + audio
+// (no remainder). This test pins the integration path where total >
+// text + audio — the common AUDIO-mode case — and confirms both
+// input_tokens persistence (raw total, not breakdown sum) and the
+// remainder-priced cost survive the full flow to ai_request_log.
+
+Deno.test(
+  'voice-turn-usage AUDIO-mode prompt remainder flows through to ai_request_log cost',
+  async () => {
+    const boot = await quickBootstrap();
+    await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
+    const sessionId = crypto.randomUUID();
+    await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
+
+    // Payload shape: 200-token prompt remainder + 10-token response
+    // remainder. The 200 matches the empirical AUDIO-mode overhead
+    // observed in the April 2026 spike.
+    const body = validBody({
+      session_id: sessionId,
+      turns: [{
+        turn_index: 1,
+        prompt_tokens_text: 1000,
+        prompt_tokens_audio: 1150,
+        prompt_tokens_total: 2350, // text + audio + 200 remainder
+        response_tokens_text: 0,
+        response_tokens_audio: 150,
+        response_tokens_total: 160, // text + audio + 10 remainder
+        latency_ms: 1400,
+        ended_reason: 'turn_complete',
+        prompt_version: '1.0.0',
+        path: 'live_api',
+        ended_at: new Date().toISOString(),
+      }],
+    });
+    const result = await callVoiceTurnUsage(body, boot.session_jwt);
+    assertEquals(result.status, 204);
+
+    const client = serviceClient();
+    const { data, error } = await client
+      .from('ai_request_log')
+      .select('input_tokens, output_tokens, cost_usd')
+      .eq('request_id', `voice:${sessionId}:1`)
+      .maybeSingle();
+    assertEquals(error, null);
+    assertExists(data);
+
+    // Pin (1): input_tokens is the raw total (2350), NOT the breakdown
+    // sum (2150). The handler clamps to max(total, sum); this payload
+    // uses total > sum (the common AUDIO-mode case), so raw-total
+    // survives.
+    assertEquals(
+      data!.input_tokens,
+      2350,
+      'input_tokens must be the raw Gemini total, not the breakdown sum',
+    );
+
+    // Pin (2): output_tokens same invariant — raw total, not breakdown.
+    assertEquals(
+      data!.output_tokens,
+      160,
+      'output_tokens must be the raw Gemini total',
+    );
+
+    // Pin (3): "remainder exists" invariant against the request's
+    // declared breakdown. Not inferable from pin (1) alone — a future
+    // refactor that clamped input_tokens to the breakdown sum while
+    // also mutating the total would pass pins (1+2) silently. This
+    // pin catches that by asserting the delta is positive.
+    const requestBreakdownSum = 1000 + 1150;
+    assertEquals(
+      data!.input_tokens > requestBreakdownSum,
+      true,
+      'input_tokens must exceed breakdown sum — remainder must survive the integration',
+    );
+
+    // Pin (4): cost_usd includes the remainder priced at audio rates.
+    //   text in:      1000 * $0.75  / 1_000_000 = $0.000750
+    //   audio in:     1150 * $3.00  / 1_000_000 = $0.003450
+    //   prompt rem:    200 * $3.00  / 1_000_000 = $0.000600 (audio-in rate)
+    //   audio out:     150 * $12.00 / 1_000_000 = $0.001800
+    //   response rem:   10 * $12.00 / 1_000_000 = $0.000120 (audio-out rate)
+    //   total                                   = $0.006720
+    // Tolerance 1e-6 matches production's Math.round(× 1e6) / 1e6 rounding
+    // in voice-turn-usage/index.ts:410 (ai_request_log.cost_usd NUMERIC(10,6)).
+    const cost = Number(data!.cost_usd);
+    const expected = 0.006720;
+    if (Math.abs(cost - expected) > 1e-6) {
+      throw new Error(
+        `cost_usd ${cost} differs from expected ${expected} by more than 1e-6 (production rounding precision)`,
+      );
+    }
+  },
+);
