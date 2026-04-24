@@ -71,9 +71,9 @@ Color is semantic, not decorative. Every value has a named role.
 | `ember.500` | `#E26340` | Ember hover/pressed |
 | `ember.100` | `#FBEAE0` | Ember tint (selected chip, subtle highlight) |
 | `ember.700` | `#8F3B1D` | Deep ember — gradient pair with `ember.600` on premium/Pro cards only. Never used as a flat fill. |
-| `sage.600` | `#4A7C59` | **Success / positive** — confirmed ingredients, completed timers, meal ratings |
+| `sage.600` | `#3E6849` | **Success / positive** — confirmed ingredients, completed timers, meal ratings. Deepened 2026-04-23 for WCAG AA body 4.5:1 on `sage.100` (prev `#4A7C59` hit ~3.75:1). |
 | `sage.100` | `#E4EEE6` | Sage tint |
-| `amber.600` | `#B8860B` | **Warning / needs attention** — low-confidence parse chips, pending review |
+| `amber.600` | `#7A5908` | **Warning / needs attention** — low-confidence parse chips, pending review. Deepened 2026-04-23 for WCAG AA body 4.5:1 on `amber.100` (prev `#B8860B` hit only 2.70:1). |
 | `amber.100` | `#F5ECD5` | Amber tint |
 | `crimson.600` | `#9A2E2E` | **Critical / error / allergen** — dietary rule violations, hard-rule blocks |
 | `crimson.100` | `#F2DCDC` | Crimson tint |

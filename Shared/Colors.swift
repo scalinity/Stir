@@ -56,16 +56,25 @@ extension Color.Stir {
 
     // MARK: - Sage (success / positive)
 
-    /// Success, confirmed, completed. Light `#4A7C59` / Dark `#6FA07C`.
-    static let sage600 = dualColor(light: 0x4A7C59, dark: 0x6FA07C)
+    /// Success, confirmed, completed. Light `#3E6849` (deepened from
+    /// step-9 `#4A7C59` to reach WCAG AA body 4.5:1 on `sage.100` —
+    /// the previous value hit only ~3.75:1 on 13pt regular, failing
+    /// on DishOptionCard "You have it all" + FitLabel `.leastWaste`
+    /// + confirmed-confidence chip. Review finding C5.)
+    /// Dark `#6FA07C` unchanged — clears ~4.9:1 on dark sage.100.
+    static let sage600 = dualColor(light: 0x3E6849, dark: 0x6FA07C)
     /// Sage tint. Light `#E4EEE6` / Dark `#1E2E23`.
     static let sage100 = dualColor(light: 0xE4EEE6, dark: 0x1E2E23)
 
     // MARK: - Amber (warning / needs attention)
 
     /// Pending review, low-confidence chip, billing-grace banner.
-    /// Light `#B8860B` / Dark `#D4A21F`.
-    static let amber600 = dualColor(light: 0xB8860B, dark: 0xD4A21F)
+    /// Light `#7A5908` (deepened from step-9 `#B8860B` to reach WCAG
+    /// AA body contrast 4.5:1 on `amber.100` — the previous value hit
+    /// only 2.70:1 which failed 13pt regular body on warning banners,
+    /// fit labels, and billing copy. See review finding C5.)
+    /// Dark `#D4A21F` unchanged — already clears ~6.4:1 on dark amber.100.
+    static let amber600 = dualColor(light: 0x7A5908, dark: 0xD4A21F)
     /// Amber tint. Light `#F5ECD5` / Dark `#2E2614`.
     static let amber100 = dualColor(light: 0xF5ECD5, dark: 0x2E2614)
 

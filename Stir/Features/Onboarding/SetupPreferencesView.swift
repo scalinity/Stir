@@ -313,8 +313,16 @@ private struct SelectableChip: View {
                         .foregroundStyle(foregroundColor)
                 }
                 Text(label)
-                    .stirFont(.labelMd)
-                    .fontWeight(isSelected ? .semibold : .medium)
+                    .stirFont(.labelLg)
+                    // Selected chips use .bold (weight 700) + 15pt
+                    // (labelLg) to satisfy WCAG AA-Large 3:1 — the
+                    // ember.600-on-ember.100 and crimson.600-on-
+                    // crimson.100 pairings only hit ~3.67:1 body, but
+                    // 15pt bold qualifies as "large" under AA so 3:1
+                    // is the applicable threshold. Idle chips stay at
+                    // .medium (500) on neutral paper.100 where body
+                    // contrast passes comfortably. Review finding C5.
+                    .fontWeight(isSelected ? .bold : .medium)
                     .foregroundStyle(foregroundColor)
             }
             .padding(.horizontal, CGFloat.Stir.space3 + 2) // 14pt
