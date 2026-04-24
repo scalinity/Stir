@@ -17,7 +17,14 @@
 
 import { assertEquals, assertExists } from '@std/assert';
 import { quickBootstrap, seedVoiceSessionOwner, testIPHeaders } from './_helpers/factory.ts';
-import { serviceClient } from './_helpers/pg.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+
+// Kong overrides x-real-ip; clear rate buckets so bootstrap doesn't trip
+// ip:bootstrap_hourly across repeated test-file runs. Mirrors the
+// file-scope reset in realtime_session_test.ts — without this, the
+// cumulative bootstrap count across runs eventually trips 429 and
+// every test that calls `quickBootstrap()` fails.
+await clearRateLimitBuckets();
 
 const FUNCTIONS_URL = Deno.env.get('SUPABASE_URL')
   ? `${Deno.env.get('SUPABASE_URL')}/functions/v1`
@@ -70,6 +77,35 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     ended_at: new Date().toISOString(),
   }];
   return { session_id: sessionId, turns, ...overrides };
+}
+
+/** Promote a bootstrapped Free user to Premium + fresh voice quota.
+ * Copied verbatim from realtime_session_test.ts so the two files stay
+ * style-consistent; consolidate into tests/_helpers/factory.ts when a
+ * third caller emerges. (Filed as session-note §Deferred for the
+ * backend test audit commit following P1-O.)
+ *
+ * Without this call, the voice-turn-usage entitlement gate
+ * (voice-turn-usage/index.ts:210-211) rejects the Free user bootstrap
+ * with 403 ENT-VOICE-01 before reaching the success path — the reason
+ * every 204-expecting test in this file was red pre-fix. */
+async function promoteToPremiumWithVoiceQuota(canonicalKey: string): Promise<void> {
+  const client = serviceClient();
+  const { error: entErr } = await client.from('entitlement_snapshots').upsert({
+    canonical_user_key: canonicalKey,
+    tier: 'premium',
+    billing_state: 'active',
+    is_trial: false,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'canonical_user_key' });
+  if (entErr) throw entErr;
+  const { error: quotaErr } = await client
+    .from('usage_counters')
+    .update({ cap_count: 20, updated_at: new Date().toISOString() })
+    .eq('canonical_user_key', canonicalKey)
+    .eq('feature_key', 'voice_cook_session');
+  if (quotaErr) throw quotaErr;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +179,7 @@ Deno.test('voice-turn-usage 400 VAL-01 on empty turns array', async () => {
 
 Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async () => {
   const boot = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
   const sessionId = crypto.randomUUID();
   // P1-B (2026-04-23): seed ownership binding so the handler's new
   // IDOR check passes. Production writes this at mint time.
@@ -185,6 +222,7 @@ Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async
 
 Deno.test('voice-turn-usage idempotency: repeat POST with same (session_id, turn_index) is no-op', async () => {
   const boot = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
   const sessionId = crypto.randomUUID();
   await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
   const body = validBody({ session_id: sessionId });
@@ -207,6 +245,7 @@ Deno.test('voice-turn-usage idempotency: repeat POST with same (session_id, turn
 
 Deno.test('voice-turn-usage batch writes N rows', async () => {
   const boot = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
   const sessionId = crypto.randomUUID();
   await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
   const now = new Date().toISOString();
@@ -244,6 +283,7 @@ Deno.test(
   'voice-turn-usage persists prompt_tokens_cached into ai_request_log',
   async () => {
     const boot = await quickBootstrap();
+    await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
     const sessionId = crypto.randomUUID();
     await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     const body = validBody({
@@ -283,6 +323,7 @@ Deno.test(
   'voice-turn-usage leaves prompt_cached_tokens NULL when field absent',
   async () => {
     const boot = await quickBootstrap();
+    await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
     const sessionId = crypto.randomUUID();
     await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     // validBody() deliberately omits prompt_tokens_cached — the common
@@ -357,14 +398,19 @@ Deno.test('voice-turn-usage 403 when session_id has no owner row (unbooted sessi
 });
 
 Deno.test(
-  'voice-turn-usage 403 ENT-VOICE-01 session_closed when session was superseded by a newer mint',
+  'voice-turn-usage 403 VOICE-SESSION-01 session_closed when session was superseded by a newer mint',
   async () => {
     // Simulates: iOS mints a session, iOS refreshes → new session, iOS
     // posts a turn under the OLD session_id (e.g., in-flight POST that
     // crossed the supersede UPDATE on the backend). Ownership check
     // passes (same user) but lifecycle check rejects with a distinct
     // reason so ops can split this from IDOR failures.
+    //
+    // Migrated to VOICE-SESSION-01 per ADR 0017. Free user would hit
+    // entitlement gate before owner-binding check; promote so the
+    // lifecycle path actually runs.
     const boot = await quickBootstrap();
+    await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
     const oldSessionId = crypto.randomUUID();
     await seedVoiceSessionOwner({
       sessionId: oldSessionId,
@@ -385,7 +431,7 @@ Deno.test(
     );
     assertEquals(result.status, 403);
     const body = result.body as { error: string; reason?: string };
-    assertEquals(body.error, 'ENT-VOICE-01');
+    assertEquals(body.error, 'VOICE-SESSION-01');
     assertEquals(body.reason, 'session_closed');
   },
 );
@@ -413,6 +459,7 @@ Deno.test(
     // can happen on a turn that replays the same systemInstruction with
     // no new user content yet — rare but legal).
     const boot = await quickBootstrap();
+    await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
     const sessionId = crypto.randomUUID();
     await seedVoiceSessionOwner({ sessionId, canonicalUserKey: boot.canonical_user_key });
     const body = validBody({
