@@ -28,12 +28,17 @@ struct CookModeRoot: View {
     @Environment(RootCoordinator.self) private var coordinator
 
     @State private var viewModel: CookModeViewModel?
-    /// Retained reference to the concrete voice driver so the view
-    /// owns its lifetime for the duration of Cook Mode. May be either
-    /// a `RealtimeSession` (C.2 Live path) or a `SpeechFallbackService`
-    /// (C.3 fallback) — typed as the protocol existential so the view
-    /// doesn't branch on driver type.
-    @State private var voiceDriver: (any VoiceSessionDriver)?
+    /// Teardown closure captured at each driver build. On dismiss the
+    /// closure is invoked — which closes WHICHEVER driver was built
+    /// most recently. Replaces the prior `@State voiceDriver` pattern
+    /// because the @State could desync from what the VM currently
+    /// holds after a close-and-rebuild cycle (closeVoiceSession nils
+    /// the VM's driver, then `onRequestNewVoiceSession` builds a new
+    /// one — the @State pointer didn't automatically track across
+    /// that handoff). A closure strongly captures its driver on build
+    /// and is guaranteed-correct for whatever build replaced it.
+    /// Review finding W-D W18 (CA2).
+    @State private var driverTeardown: (@MainActor () -> Void)?
     @State private var initError: String?
 
     init(
@@ -117,6 +122,24 @@ struct CookModeRoot: View {
         }
         .task {
             guard viewModel == nil, initError == nil else { return }
+
+            // Surface an initError affordance after 15s if setup
+            // hasn't produced a VM — users whose network has stalled
+            // on the Gemini Live mint, or whose Core Data createSession
+            // is blocked on sync, shouldn't be stuck on a ProgressView
+            // with no Close button. If setup ultimately succeeds after
+            // the 15s tripwire, `viewModel` flips non-nil and the init-
+            // error branch is hidden again (UI prefers viewModel if
+            // both are set). Review finding W-D W19 (CA2).
+            let timeoutTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(15))
+                if self.viewModel == nil, self.initError == nil {
+                    self.initError = "Cook Mode is taking longer than expected. Check your connection and try again."
+                    Logger.ui.warning("cook_mode_init_timeout_15s")
+                }
+            }
+            defer { timeoutTask.cancel() }
+
             do {
                 let repo = CookingSessionRepository()
                 let session: CookingSession
@@ -208,18 +231,14 @@ struct CookModeRoot: View {
             // deactivate), but if the user dismisses via a code path
             // that doesn't run exit() — e.g., a swipe-down on the
             // fullScreenCover, or the parent dismissing for another
-            // reason — close() on the driver still needs to fire so
-            // the WebSocket/mic tap/audio session all tear down. Both
-            // calls are idempotent (close() has internal guards;
-            // deactivate() uses an isActiveForCookMode flag), so a
-            // second invocation after VM exit is a safe no-op.
-            //
-            // Reading `self.voiceDriver` (which some VM paths nil
-            // mid-session on invariant violations) would miss teardown
-            // if nil'd before this fires. `voiceDriver?.close()` on a
-            // nil @State is a no-op — acceptable because the nil-ing
-            // path already called close(). Kept simple by design.
-            voiceDriver?.close()
+            // reason — the most-recently-built driver still needs
+            // close(). Both calls are idempotent (close() has internal
+            // guards; deactivate() uses an isActiveForCookMode flag),
+            // so a second invocation after VM exit is a safe no-op.
+            // The teardown closure is captured at driver-build time,
+            // so rebuilds swap it atomically and there's no stale-@
+            // State race. Review finding W-D W18 (CA2).
+            driverTeardown?()
             AVAudioSessionConfigurator.deactivate()
         }
         // Paywall presentation from inside Cook Mode.
@@ -270,8 +289,10 @@ struct CookModeRoot: View {
     /// Called from `.task` at Cook Mode entry AND from the VM's
     /// `onRequestNewVoiceSession` closure when the user reopens voice
     /// after a `closeVoiceSession()` teardown. Same logic either way.
-    /// Self is a SwiftUI View struct; writes to `@State self.voiceDriver`
-    /// flow through the property wrapper normally.
+    /// Self is a SwiftUI View struct; writes to `@State self.driverTeardown`
+    /// flow through the property wrapper normally. The teardown closure
+    /// strongly captures the built driver so dismiss always tears down
+    /// whichever driver was most recently assembled.
     @MainActor
     private func buildVoiceDriver(
         session: CookingSession,
@@ -311,7 +332,7 @@ struct CookModeRoot: View {
                     liveDriver.close()
                     return nil
                 }
-                self.voiceDriver = liveDriver
+                self.driverTeardown = { [liveDriver] in liveDriver.close() }
                 Logger.voice.info("cook_mode_voice_live_ready")
                 #if DEBUG
                 VoiceSessionLog.log("cookmode.driver_selected", ["path": "live"])
@@ -465,7 +486,7 @@ struct CookModeRoot: View {
         do {
             try AVAudioSessionConfigurator.activateForCookMode()
             try await driver.preWarm()
-            self.voiceDriver = driver
+            self.driverTeardown = { [driver] in driver.close() }
             return driver
         } catch {
             Logger.voice.warning(
@@ -474,7 +495,7 @@ struct CookModeRoot: View {
             // Still return the driver — VM routes taps to
             // recognizerUnavailable cleanly rather than crashing on
             // a nil driver unexpectedly.
-            self.voiceDriver = driver
+            self.driverTeardown = { [driver] in driver.close() }
             return driver
         }
     }

@@ -33,36 +33,47 @@ struct SubstitutionSheetView: View {
     let aiDispatch: AIDispatch
     let onDismiss: () -> Void
 
-    @State private var viewModel: SubstitutionSheetViewModel?
+    @State private var viewModel: SubstitutionSheetViewModel
+
+    init(
+        recipePlan: RecipePlan,
+        household: HouseholdProfile,
+        session: CookingSession,
+        currentStep: RecipeStep?,
+        aiDispatch: AIDispatch,
+        onDismiss: @escaping () -> Void,
+    ) {
+        self.recipePlan = recipePlan
+        self.household = household
+        self.session = session
+        self.currentStep = currentStep
+        self.aiDispatch = aiDispatch
+        self.onDismiss = onDismiss
+        // Construct the VM eagerly so the sheet opens directly into the
+        // idle form — the prior `.task { if nil { ... } }` pattern
+        // produced a ProgressView flash on every presentation because
+        // .task runs after the first body eval. Matches ScanFlowRoot.
+        // Review finding W-D W20 (CA2).
+        _viewModel = State(initialValue: SubstitutionSheetViewModel(
+            recipePlan: recipePlan,
+            household: household,
+            session: session,
+            currentStep: currentStep,
+            aiDispatch: aiDispatch,
+            onFinished: onDismiss,
+        ))
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let vm = viewModel {
-                    content(vm: vm)
-                } else {
-                    ProgressView()
+            content(vm: viewModel)
+                .navigationTitle("Substitute")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", action: onDismiss)
+                    }
                 }
-            }
-            .navigationTitle("Substitute")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: onDismiss)
-                }
-            }
-        }
-        .task {
-            if viewModel == nil {
-                viewModel = SubstitutionSheetViewModel(
-                    recipePlan: recipePlan,
-                    household: household,
-                    session: session,
-                    currentStep: currentStep,
-                    aiDispatch: aiDispatch,
-                    onFinished: onDismiss,
-                )
-            }
         }
     }
 
