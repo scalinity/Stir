@@ -5,3 +5,23 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
+
+/* Review C7 (FD1 #4): visible focus rings on all interactive elements.
+   Chrome/Safari default black-dotted rings are invisible on neutral-800
+   inputs and amber-500 buttons. WCAG 2.2 SC 2.4.11 + 2.4.13 require
+   keyboard-visible focus. Individual buttons can still override via
+   their own focus-visible:* classes where a different offset color is
+   needed (e.g., ring-offset-neutral-900 inside dialog overlays). */
+@layer base {
+  button:not([data-no-default-focus]),
+  input,
+  select,
+  textarea,
+  a {
+    @apply focus-visible:outline-none
+           focus-visible:ring-2
+           focus-visible:ring-amber-500
+           focus-visible:ring-offset-2
+           focus-visible:ring-offset-neutral-950;
+  }
+}

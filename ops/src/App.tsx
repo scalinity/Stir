@@ -38,12 +38,16 @@ function DeferredPage({ page }: { page: string }) {
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-4">{page}</h1>
-      <p className="text-neutral-400 text-sm">
-        Page scaffolded; backend action already shipped in Phase 2. Full UI lands in step 9 polish.
+      <p className="text-neutral-300 text-sm">
+        This page ships in step 9 polish. Scaffolded so the nav surface is complete.
       </p>
-      <p className="text-neutral-500 text-xs mt-4">
-        Backend call: <code className="text-neutral-300">POST /v1/ops/admin {`{action: '${page.toLowerCase().replace(/ /g, '_')}.list', params: {...}}`}</code>
-      </p>
+      {/* W32 (FD1 #12): endpoint-shape hint only visible in local dev —
+          prevents leaking API shape to any admin with browser devtools in prod. */}
+      {import.meta.env.DEV && (
+        <p className="text-neutral-400 text-xs mt-4">
+          Dev hint · backend call: <code className="text-neutral-200">POST /v1/ops/admin {`{action: '${page.toLowerCase().replace(/ /g, '_')}.list', params: {...}}`}</code>
+        </p>
+      )}
     </div>
   );
 }

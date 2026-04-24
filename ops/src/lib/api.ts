@@ -31,18 +31,36 @@ export class AdminApiError extends Error {
   }
 }
 
-export async function callAdmin<T>(action: AdminActionName, params: unknown): Promise<T> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new AdminApiError('AUTH-01', 401, 'missing', 'not signed in');
-
-  const res = await fetch(OPS_ADMIN_URL, {
+async function send(session: { access_token: string }, action: AdminActionName, params: unknown): Promise<Response> {
+  return await fetch(OPS_ADMIN_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'authorization': `Bearer ${session.access_token}`,
+      'x-request-id': (crypto.randomUUID?.() ?? Date.now().toString(16)),
     },
     body: JSON.stringify({ action, params }),
   });
+}
+
+export async function callAdmin<T>(action: AdminActionName, params: unknown): Promise<T> {
+  let { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new AdminApiError('AUTH-01', 401, 'missing', 'not signed in');
+
+  let res = await send(session, action, params);
+
+  // W43 (DB1 #16): silent refresh on a single 401. getSession() returns
+  // the cached session; @supabase/supabase-js auto-refreshes on a timer
+  // but not on-demand. A token seconds-from-expiry → 401 → the old flow
+  // immediately surfaced AdminApiError. Try a single refresh + retry
+  // before giving up.
+  if (res.status === 401) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session) {
+      session = refreshed.session;
+      res = await send(session, action, params);
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: 'NET-01', message: 'no body' }));
