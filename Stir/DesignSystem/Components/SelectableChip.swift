@@ -1,19 +1,32 @@
 // SelectableChip
 //
-// Pill chip with two tonal families keyed to the mockup's semantic
-// distinction: `.accent` = ember for prefer-positive (diet rules,
-// goals, time presets); `.danger` = crimson for prefer-negative
-// (dislikes).
+// User-toggleable pill with two tonal families keyed to the mockup's
+// semantic distinction: `.accent` = ember for prefer-positive (diet
+// rules, goals, time presets); `.danger` = crimson for prefer-negative
+// (dislikes). Used in Setup 1 preferences, ConstraintsSheet time
+// presets, SubstitutionSheet ingredient picker.
 //
 // The selected variant shows an inline checkmark in the label color per
-// mockup 02's chip grammar — deliberately distinct from Phase 2's Chip
-// component (spec §8.2: Selected has no icon). Lifted from
+// mockup 02's chip grammar — deliberately distinct from Phase 2's
+// `Chip` component (spec §8.2: Selected has no icon). Lifted from
 // SetupPreferencesView so ConstraintsSheet + other "select one of N
-// preset pills" surfaces can adopt the same grammar without duplicating
-// the 70-line state machine. Moved here from
+// preset pills" surfaces can adopt the same grammar without
+// duplicating the 70-line state machine. Moved here from
 // `Features/Onboarding/SetupPreferencesView.swift` during W-Group-G
-// (Form → tokens) per review finding W30. Partially addresses W13
-// (Chip duplication) by making the DS-level home explicit.
+// (Form → tokens) per review finding W30.
+//
+// ## SelectableChip vs Chip — why both exist
+//
+// See the longer rationale in `Chip.swift` header. TL;DR:
+//   - `SelectableChip` = user toggle (capsule, labelLg bold, 44pt).
+//     Mockup 02 grammar.
+//   - `Chip` = system-assigned status (rounded rect, labelMd, 32pt+).
+//     Mockup 04 grammar.
+//
+// Review finding W13 proposed collapsing the two into one Chip with a
+// tonal variant; rejected after implementation audit — the state
+// spaces model different concepts (user-chosen vs system-assigned)
+// and the visual languages are materially different. Both stay.
 //
 // WCAG AA-Large 3:1 compliance: selected chips use .bold (weight 700)
 // at 15pt (labelLg). ember.600-on-ember.100 and crimson.600-on-

@@ -1,15 +1,17 @@
 // Chip
 //
-// Small selectable pill used extensively on Scan Review (ingredient
-// chips with confidence signals) and Setup onboarding (preference
-// chips). Spec §8.2 defines six visual states; this component models
-// them via a ChipState enum.
+// Small pill used to surface a system-assigned status on a label —
+// primarily Scan Review (confidence signals on AI-parsed ingredients)
+// and mockup-04 chip grids. Spec §8.2 defines six visual states; this
+// component models them via a ChipState enum.
 //
 // States:
-//   - `.default`             → paper.100 fill, ink.700 label, ink.100
+//   - `.normal`              → paper.100 fill, ink.700 label, divider
 //                              border (unselected resting)
 //   - `.selected`            → ember.100 fill, ember.600 label+border
-//                              (user toggled on — Setup preferences)
+//                              (included for symmetry with other pills
+//                              — production toggle UI uses
+//                              `SelectableChip` instead; see below)
 //   - `.confidenceConfirmed` → default + sage.600 checkmark
 //   - `.confidenceReview`    → amber.100 fill, amber.600 label, amber
 //                              questionmark (AI flagged for review)
@@ -18,6 +20,30 @@
 //                              should confirm staples like salt)
 //   - `.allergenWarning`     → crimson.100 fill, crimson.600 label,
 //                              crimson allergen triangle (hard rule)
+//
+// ## Chip vs SelectableChip — why both exist
+//
+// `Chip` here models "what the system knows about this label" — it's
+// the confidence surface. State encodes semantic (AI verdict, allergen
+// hazard, staple status), not user toggle position.
+//
+// `SelectableChip` (DesignSystem/Components/SelectableChip.swift)
+// models "what the user has chosen" — toggle UI on onboarding Setup 1,
+// ConstraintsSheet time presets, SubstitutionSheet ingredient picker.
+// It's a Capsule pill (not a rounded rect), renders .labelLg bold at
+// 44pt, and carries a .accent/.danger tonal distinction. Visual
+// grammar per mockup 02 differs intentionally from mockup 04's
+// confidence chips — the two components serve different design intents
+// and sharing a base type would force compromise on one or the other.
+//
+// Review finding W13 proposed consolidation (either extend ChipState
+// with `.onboardingSelected(tone:)` or add `Chip.onboardingVariant`
+// init). Rejected after implementation audit: the state spaces model
+// different concepts (system-assigned-status vs user-chosen), the
+// visual languages are materially different (rounded rect vs capsule,
+// labelMd vs labelLg-bold, 32pt vs 44pt min height), and the
+// production call sites don't overlap (ScanReview uses Chip; Setup +
+// Constraints + Substitution use SelectableChip).
 //
 // Minimum tap target: 44×44pt. Chips render compact; transparent
 // padding fills the gap to HIG floor.
