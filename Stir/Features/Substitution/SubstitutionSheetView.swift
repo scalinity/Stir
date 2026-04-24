@@ -129,33 +129,34 @@ struct SubstitutionSheetView: View {
             }
 
             Section {
-                Button {
-                    Task { await vm.submit() }
-                } label: {
-                    HStack {
-                        Image(systemName: "sparkles")
-                        Text("Find a swap")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!vm.canSubmit)
+                PrimaryButton(
+                    title: "Find a swap",
+                    isDisabled: !vm.canSubmit,
+                    action: { Task { await vm.submit() } },
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
             }
         }
     }
 
     private var requestingIndicator: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
+                .progressViewStyle(.circular)
+                .tint(Color.Stir.ember600)
             Text("Checking for a safe swap…")
-                .font(.headline)
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.ink900)
             Text("We cross-reference your household's dietary rules to avoid anything unsafe.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, CGFloat.Stir.space7 - 8) // 40pt
         }
-        .padding(40)
+        .padding(CGFloat.Stir.space7 - 8) // 40pt
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Stir.paper50)
     }
 
     // MARK: - Results
@@ -167,58 +168,58 @@ struct SubstitutionSheetView: View {
         reasoning: String,
     ) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Label("Suggested swap", systemImage: "sparkles")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5 - 6) { // 18pt
+                HStack(spacing: CGFloat.Stir.space1 + 2) {
+                    Image.Stir.success
+                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    Text("Suggested swap")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.Stir.sage600)
 
                 Text(text)
-                    .font(.title3)
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink900)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let conversion = amountConversion, !conversion.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                         Text("Amount")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .stirFont(.labelEyebrow)
+                            .foregroundStyle(Color.Stir.ink500)
                         Text(conversion)
-                            .font(.body.monospacedDigit())
+                            .stirFont(.monoMd)
+                            .foregroundStyle(Color.Stir.ink900)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                     Text("Why this works")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .stirFont(.labelEyebrow)
+                        .foregroundStyle(Color.Stir.ink500)
                     Text(reasoning)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink700)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                HStack(spacing: 12) {
-                    Button {
+                HStack(spacing: CGFloat.Stir.space3) {
+                    SecondaryButton(title: "Reject") {
                         Task { await vm.reject() }
-                    } label: {
-                        Label("Reject", systemImage: "xmark")
-                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.bordered)
                     .accessibilityHint("Dismiss without using this substitute")
 
-                    Button {
+                    PrimaryButton(title: "Accept") {
                         Task { await vm.accept() }
-                    } label: {
-                        Label("Accept", systemImage: "checkmark")
-                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.borderedProminent)
                     .accessibilityHint("Use this substitute in the recipe")
                 }
-                .padding(.top, 8)
+                .padding(.top, CGFloat.Stir.space2)
             }
-            .padding(20)
+            .padding(CGFloat.Stir.space5)
         }
+        .background(Color.Stir.paper50)
     }
 
     private func unsafeResultCard(
@@ -227,68 +228,67 @@ struct SubstitutionSheetView: View {
         reason: String,
     ) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Label("Can't swap safely", systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5 - 6) {
+                HStack(spacing: CGFloat.Stir.space1 + 2) {
+                    Image.Stir.allergen
+                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    Text("Can't swap safely")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.Stir.crimson600)
 
                 Text(message)
-                    .font(.title3)
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink900)
                     .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
                     Text("Why")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .stirFont(.labelEyebrow)
+                        .foregroundStyle(Color.Stir.ink500)
                     Text(reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink700)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Button {
+                PrimaryButton(title: "OK, I'll pick another option") {
                     Task { await vm.acknowledgeUnsafe() }
-                } label: {
-                    Text("OK, I'll pick another option")
-                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.borderedProminent)
                 .accessibilityHint("Dismiss and choose a different ingredient")
-                .padding(.top, 8)
+                .padding(.top, CGFloat.Stir.space2)
             }
-            .padding(20)
-            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(CGFloat.Stir.space5)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                    .fill(Color.Stir.crimson100),
+            )
+            .padding(.horizontal, CGFloat.Stir.space5)
+            .padding(.vertical, CGFloat.Stir.space4)
         }
+        .background(Color.Stir.paper50)
     }
 
     private func errorCard(vm: SubstitutionSheetViewModel, message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundStyle(.orange)
+        VStack(spacing: CGFloat.Stir.space4) {
+            Image.Stir.softError
+                .font(.system(size: 34, weight: .regular)) // justification: large-title hero error glyph — one-off per §4.1
+                .foregroundStyle(Color.Stir.rust600)
                 .accessibilityHidden(true)
             Text(message)
-                .font(.body)
+                .stirFont(.bodyLg)
+                .foregroundStyle(Color.Stir.ink900)
                 .multilineTextAlignment(.center)
-            HStack(spacing: 12) {
-                Button {
-                    onDismiss()
-                } label: {
-                    Text("Close")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                Button {
+            HStack(spacing: CGFloat.Stir.space3) {
+                SecondaryButton(title: "Close", action: onDismiss)
+                PrimaryButton(title: "Try again") {
                     Task { await vm.submit() }
-                } label: {
-                    Label("Try again", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
-        .padding(40)
+        .padding(CGFloat.Stir.space7 - 8) // 40pt
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Stir.paper50)
     }
 }
