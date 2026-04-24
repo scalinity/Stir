@@ -40,6 +40,8 @@ import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
 
+const CONTEXT_SNAPSHOT_MAX_BYTES = 4096;
+
 const FlagOutputRequest = z.object({
   feature_key: z.enum([
     'dinner_solve',
@@ -52,7 +54,17 @@ const FlagOutputRequest = z.object({
   ]),
   request_id: z.string().min(1).max(256),
   flag_reason: z.string().min(1).max(500),
-  context_snapshot: z.record(z.unknown()).optional(),
+  // W22 (SA1 W1): 4 KiB cap on serialized JSON. Pre-fix there was only a
+  // docstring comment claiming "max 4 KiB"; nothing enforced it. Postgres
+  // JSONB TOAST accepts up to ~1 GB, so a single abusive row could freeze
+  // the admin browser tab on `<pre>{JSON.stringify(...)}</pre>`. Also SQL
+  // CHECK added via ALTER TABLE in migration 20260424000005.
+  context_snapshot: z
+    .record(z.unknown())
+    .refine((v) => JSON.stringify(v).length <= CONTEXT_SNAPSHOT_MAX_BYTES, {
+      message: `context_snapshot exceeds ${CONTEXT_SNAPSHOT_MAX_BYTES}-byte JSON cap`,
+    })
+    .optional(),
 }).strict();
 
 Deno.serve(async (req) => {

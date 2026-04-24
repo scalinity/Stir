@@ -707,12 +707,16 @@ Relevance: any `COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'`
 | `ai_request_log.session_id UUID` | voice session id; replaces `split_part(request_id,':',2)` for aggregations; partial index `idx_ai_request_log_voice_session` on `(feature_key, session_id, created_at DESC) WHERE feature_key='cook_mode_realtime'` | `20260424000003_performance_indexes_and_session_id.sql` |
 | `UNIQUE(canonical_user_key_hash, request_id)` on `ops_flagged_outputs` | atomic dedup (forever) | `20260424000002` |
 | `idx_app_users_last_seen_at` partial on `status='active'` | hot path for `stir_ops_list_users` + reactivation enqueue | `20260424000003` |
+| `cost_anomalies` two-phase dispatch columns: `dispatched_at`, `sentry_request_id`, `confirmed_at`, `confirm_attempts` | Sentry outage no longer silently loses alerts | `20260424000004_cost_anomaly_two_phase_dispatch.sql` |
 
 ### Column-value CHECK constraints worth knowing
 
 | Column | Allowed values | Enforced by |
 | --- | --- | --- |
 | `device_installations.apns_environment` | `'production'` OR `'sandbox'` | `device_installations_apns_environment_check` |
+| `ops_flagged_outputs.flag_reason` | `length(...) <= 500` | `ops_flagged_outputs_flag_reason_check` (tightened from 2000 in `20260424000005`) |
+| `ops_flagged_outputs.context_snapshot_json` | `pg_column_size(...) <= 4096` | `ops_flagged_outputs_context_snapshot_size_check` |
+| `ops_flagged_outputs.canned_fallback_json` | `pg_column_size(...) <= 65536` | `ops_flagged_outputs_canned_fallback_size_check` |
 
 iOS `/v1/push/register` must send exactly one of those two values — `'development'` isn't a real APNs gateway and is rejected with VAL-01 at the Zod layer (ideally) or the DB CHECK (last line of defense).
 

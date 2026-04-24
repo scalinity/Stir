@@ -4,7 +4,7 @@ import './_helpers/env.ts';
 import { assertEquals, assertNotEquals } from '@std/assert';
 import { serviceClient } from './_helpers/pg.ts';
 
-Deno.test('dispatch: NULL SENTRY_DSN → returns 0, no rows marked alerted', async () => {
+Deno.test('dispatch: NULL SENTRY_DSN → returns 0, no rows marked dispatched', async () => {
   const svc = serviceClient();
   // Confirm no DSN set locally.
   await svc.from('app_settings').update({ value: null }).eq('key', 'SENTRY_DSN');
@@ -18,11 +18,12 @@ Deno.test('dispatch: NULL SENTRY_DSN → returns 0, no rows marked alerted', asy
   });
 
   const { data: sent } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
-  // With null DSN, function returns 0 and leaves alerted_at NULL.
+  // With null DSN, function returns 0 and leaves dispatched_at NULL.
   assertEquals(sent, 0);
   const { data: after } = await svc.from('cost_anomalies')
-    .select('alerted_at').eq('canonical_user_key_hash', uniqHash).single();
-  assertEquals(after?.alerted_at, null);
+    .select('dispatched_at, confirmed_at').eq('canonical_user_key_hash', uniqHash).single();
+  assertEquals(after?.dispatched_at, null);
+  assertEquals(after?.confirmed_at, null);
 });
 
 Deno.test('dispatch: malformed DSN → RAISE WARNING, returns 0', async () => {
@@ -36,40 +37,44 @@ Deno.test('dispatch: malformed DSN → RAISE WARNING, returns 0', async () => {
   await svc.from('app_settings').update({ value: null }).eq('key', 'SENTRY_DSN');
 });
 
-Deno.test('dispatch: valid DSN + unsent rows → enqueues via pg_net + stamps alerted_at', async () => {
+Deno.test('dispatch: valid DSN + unsent rows → enqueues via pg_net + stamps dispatched_at (review C15 two-phase)', async () => {
   const svc = serviceClient();
-  // Use a DSN pointing at a real-looking hostname. pg_net queues the HTTP POST
-  // asynchronously — we're not verifying Sentry receives it (it won't; hostname
-  // is synthetic), just that our function parses the DSN, enqueues the request,
-  // and marks alerted_at.
-  await svc.from('app_settings').update({
-    value: 'https://abcdef1234567890@o0000000.ingest.sentry.io/1234567',
-  }).eq('key', 'SENTRY_DSN');
+  try {
+    await svc.from('app_settings').update({
+      value: 'https://abcdef1234567890@o0000000.ingest.sentry.io/1234567',
+    }).eq('key', 'SENTRY_DSN');
 
-  const uniqHash = 'hash-dispatch-sent-' + crypto.randomUUID().slice(0, 8);
-  await svc.from('cost_anomalies').insert({
-    canonical_user_key_hash: uniqHash,
-    anomaly_type: 'daily_spend_hard_cap',
-    severity: 'critical',
-    details_json: { spend_24h_usd: 12.5 },
-  });
+    const uniqHash = 'hash-dispatch-sent-' + crypto.randomUUID().slice(0, 8);
+    await svc.from('cost_anomalies').insert({
+      canonical_user_key_hash: uniqHash,
+      anomaly_type: 'daily_spend_hard_cap',
+      severity: 'critical',
+      details_json: { spend_24h_usd: 12.5 },
+    });
 
-  const { data: sent } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
-  assertEquals((sent as number) >= 1, true);
+    const { data: sent } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
+    assertEquals((sent as number) >= 1, true);
 
-  const { data: after } = await svc.from('cost_anomalies')
-    .select('alerted_at').eq('canonical_user_key_hash', uniqHash).single();
-  assertNotEquals(after?.alerted_at, null);
+    // Post-fix: dispatched_at is set immediately with the pg_net handle;
+    // confirmed_at is NULL until phase-2 (stir_ops_cost_anomaly_alert_confirm)
+    // reads net._http_response.
+    const { data: after } = await svc.from('cost_anomalies')
+      .select('dispatched_at, sentry_request_id, confirmed_at')
+      .eq('canonical_user_key_hash', uniqHash).single();
+    assertNotEquals(after?.dispatched_at, null);
+    assertNotEquals(after?.sentry_request_id, null);
+    assertEquals(after?.confirmed_at, null);
 
-  // Subsequent dispatch doesn't re-alert (alerted_at is set).
-  const { data: sentAgain } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
-  // sentAgain could be > 0 if OTHER pending rows existed; scope to this hash.
-  const { data: stampCount } = await svc.from('cost_anomalies')
-    .select('id', { count: 'exact', head: true })
-    .eq('canonical_user_key_hash', uniqHash)
-    .is('alerted_at', null);
-  assertEquals(stampCount ?? null, null); // head:true returns count in meta not data
-
-  // Cleanup
-  await svc.from('app_settings').update({ value: null }).eq('key', 'SENTRY_DSN');
+    // Second dispatch should skip this row (dispatched_at IS NOT NULL).
+    const { data: sentAgain } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
+    void sentAgain;
+    const { count: stillPending } = await svc.from('cost_anomalies')
+      .select('id', { count: 'exact', head: true })
+      .eq('canonical_user_key_hash', uniqHash)
+      .is('dispatched_at', null);
+    assertEquals(stillPending, 0);
+  } finally {
+    // W35 (CR3 #2): cleanup in finally so test failures don't leak DSN state.
+    await svc.from('app_settings').update({ value: null }).eq('key', 'SENTRY_DSN');
+  }
 });
