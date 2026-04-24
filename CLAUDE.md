@@ -695,6 +695,8 @@ Notes on DB column types + constraints that the init migration COMMENTs and/or f
 | --- | --- | --- |
 | `device_installations.installation_id` | UUID (was TEXT) | `20260418000022_tighten_column_constraints.sql` |
 | `app_users.current_install_id` | UUID (was TEXT) | same migration |
+| `ops_flagged_outputs.request_id` | TEXT (was UUID) | `20260424000002_request_id_text_consolidation.sql` — matches `ai_request_log.request_id` + accepts `'voice:<session>:<turn>'` shape |
+| `audit_log.request_id` | TEXT (was UUID) | same migration — matches `requestIdFrom()` accepted charset |
 
 Relevance: any `COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'` against UUID columns raises `22P02 invalid input syntax for type uuid` because `''` isn't a valid UUID. Cast with `::TEXT` before COALESCE or concatenation. Bit step-8 Phase 1 once; documented so it doesn't bite again.
 

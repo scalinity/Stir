@@ -15,26 +15,30 @@
 // Response:
 //   200 { "ok": true, "flagged_output_id": "<uuid>", "dedup": false }
 //   200 { "ok": true, "flagged_output_id": "<uuid>", "dedup": true }   // same
-//        user flagged same request_id within 24h — return existing id
+//        user already flagged this request_id — return existing id
 //   400 VAL-01 on bad shape; 401 AUTH-01 on session; 403 voice/entitlement
 //       errors never fire here (session JWT alone is enough)
 //
-// Dedup: same (canonical_user_key_hash, request_id) within 24h → return
-// the existing ops_flagged_outputs.id. iOS UX: "thanks" confirmation either
-// way; we don't want to leak whether this was their first report or not.
+// Dedup: atomic via UNIQUE (canonical_user_key_hash, request_id) + ON
+// CONFLICT DO NOTHING (migration 20260424000002). First submission wins;
+// concurrent duplicates collapse to a single row with no race window.
+// Semantic is "forever" dedup — re-flagging the same AI call after the
+// original flag is resolved carries no new information.
 //
 // Raw input/output snapshot: on insert, we copy ai_request_log cost metadata
 // (non-sensitive) + ai_response_cache.response_body (the bad AI output).
-// Both are bounded by Postgres row size limits. If either lookup fails we
-// still create the flag with NULL raw columns — partial is better than none
-// for admin review.
+// Both are owner-scoped (canonical_user_key) so a leaked request_id can't
+// be used to pull another user's metadata into this user's flag record.
+// If either lookup fails we still create the flag with NULL raw columns —
+// partial is better than none for admin review.
 
 import { ZodError, z } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
-import { ErrorCode, jsonError, jsonOk, type FieldError } from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { zodToFieldErrors } from '../_shared/validation.ts';
 
 const FlagOutputRequest = z.object({
   feature_key: z.enum([
@@ -114,27 +118,15 @@ Deno.serve(async (req) => {
   const userHash = await hashCanonicalKey(claims.canonical_user_key);
   const client = createServiceClient();
 
-  // 3. Dedup — same user + same request_id within 24h.
-  const { data: existing } = await client
-    .from('ops_flagged_outputs')
-    .select('id')
-    .eq('canonical_user_key_hash', userHash)
-    .eq('request_id', parsed.request_id)
-    .gte('created_at', new Date(Date.now() - 86400_000).toISOString())
-    .maybeSingle();
-
-  if (existing) {
-    log.info('flag_dedup_hit', { existing_id: existing.id });
-    return jsonOk({ ok: true, flagged_output_id: existing.id, dedup: true }, requestId);
-  }
-
-  // 4. Snapshot raw input/output from ai_request_log + ai_response_cache.
-  // Neither is required for the flag to land — best-effort.
+  // 3. Snapshot raw input/output from ai_request_log + ai_response_cache.
+  // Both owner-scoped (SA2 W3): a leaked request_id can't pull another
+  // user's metadata. Neither is required for the flag to land — best-effort.
   const [{ data: reqRow }, { data: cacheRow }] = await Promise.all([
     client
       .from('ai_request_log')
       .select('feature_key, model, input_tokens, output_tokens, cost_usd, latency_ms, retry_count, created_at')
       .eq('request_id', parsed.request_id)
+      .eq('canonical_user_key', claims.canonical_user_key)
       .maybeSingle(),
     client
       .from('ai_response_cache')
@@ -144,7 +136,9 @@ Deno.serve(async (req) => {
       .maybeSingle(),
   ]);
 
-  // 5. Insert.
+  // 4. Atomic INSERT. UNIQUE(canonical_user_key_hash, request_id) from
+  // migration 20260424000002 makes concurrent submissions safe. On
+  // conflict, fetch the existing row's id and return dedup=true.
   const { data: inserted, error: insertErr } = await client
     .from('ops_flagged_outputs')
     .insert({
@@ -159,6 +153,28 @@ Deno.serve(async (req) => {
     })
     .select('id')
     .single();
+
+  if (insertErr?.code === '23505') {
+    const { data: existing, error: selectErr } = await client
+      .from('ops_flagged_outputs')
+      .select('id')
+      .eq('canonical_user_key_hash', userHash)
+      .eq('request_id', parsed.request_id)
+      .single();
+
+    if (selectErr || !existing) {
+      log.error('flag_dedup_lookup_failed', selectErr);
+      return jsonError(
+        ErrorCode.NET_01,
+        500,
+        { message: 'dedup conflict but existing row unreadable' },
+        requestId,
+      );
+    }
+
+    log.info('flag_dedup_hit', { existing_id: existing.id });
+    return jsonOk({ ok: true, flagged_output_id: existing.id, dedup: true }, requestId);
+  }
 
   if (insertErr || !inserted) {
     log.error('flag_insert_failed', insertErr);
@@ -178,10 +194,3 @@ Deno.serve(async (req) => {
 
   return jsonOk({ ok: true, flagged_output_id: inserted.id, dedup: false }, requestId);
 });
-
-function zodToFieldErrors(err: ZodError): FieldError[] {
-  return err.errors.map((e) => ({
-    field: e.path.join('.') || '<root>',
-    issue: e.message,
-  }));
-}

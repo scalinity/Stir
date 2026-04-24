@@ -122,7 +122,7 @@ Deno.test('ops-flag-output: happy path inserts ops_flagged_outputs row', async (
   assertNotEquals(row?.context_snapshot_json, null);
 });
 
-Deno.test('ops-flag-output: same user + request_id within 24h → dedup=true returns same id', async () => {
+Deno.test('ops-flag-output: same user + request_id → dedup=true returns same id (forever)', async () => {
   const session = await quickBootstrap();
   const reqId = crypto.randomUUID();
 
@@ -185,4 +185,57 @@ Deno.test('ops-flag-output: missing cache row → flag still created with raw_ou
   assertEquals(row?.raw_input_json, null);
   assertEquals(row?.raw_output_json, null);
   assertEquals(row?.flag_reason, 'orphan');
+});
+
+Deno.test('ops-flag-output: voice-format request_id (voice:<session>:<turn>) accepted', async () => {
+  // Pre-migration 20260424000002 this failed SQLSTATE 22P02 because
+  // ops_flagged_outputs.request_id was UUID. TEXT column now accepts the
+  // voice shape from ai_request_log.
+  const session = await quickBootstrap();
+  const svc = serviceClient();
+  const sessionId = crypto.randomUUID();
+  const reqId = `voice:${sessionId}:7`;
+
+  const { status, body } = await postFlag(
+    { feature_key: 'cook_mode_realtime', request_id: reqId, flag_reason: 'voice path' },
+    session.session_jwt,
+  );
+  assertEquals(status, 200);
+  assertEquals(body.ok, true);
+  assertEquals(body.dedup, false);
+
+  const { data: row } = await svc
+    .from('ops_flagged_outputs')
+    .select('request_id, feature_key')
+    .eq('id', body.flagged_output_id as string)
+    .single();
+  assertEquals(row?.request_id, reqId);
+  assertEquals(row?.feature_key, 'cook_mode_realtime');
+});
+
+Deno.test('ops-flag-output: concurrent duplicate submissions → single row via UNIQUE + dedup response', async () => {
+  // Concurrent submissions race at the pre-migration SELECT-then-INSERT
+  // path. UNIQUE (canonical_user_key_hash, request_id) + ON CONFLICT
+  // collapse them to one row; second submission reports dedup=true.
+  const session = await quickBootstrap();
+  const reqId = crypto.randomUUID();
+
+  const [first, second] = await Promise.all([
+    postFlag(
+      { feature_key: 'dinner_solve', request_id: reqId, flag_reason: 'first submission' },
+      session.session_jwt,
+    ),
+    postFlag(
+      { feature_key: 'dinner_solve', request_id: reqId, flag_reason: 'second submission' },
+      session.session_jwt,
+    ),
+  ]);
+
+  assertEquals(first.status, 200);
+  assertEquals(second.status, 200);
+  // Exactly one must report dedup=false (the winner); the other dedup=true.
+  const dedups = [first.body.dedup, second.body.dedup].sort();
+  assertEquals(dedups, [false, true]);
+  // Both must return the SAME flagged_output_id (only one row exists).
+  assertEquals(first.body.flagged_output_id, second.body.flagged_output_id);
 });
