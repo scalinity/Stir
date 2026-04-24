@@ -121,6 +121,97 @@ final class SpeechFallbackServiceSpeakTests: XCTestCase {
         )
     }
 
+    // MARK: - P1-Q.2 — timeout-fires-first
+
+    /// Timeout path: the AVSpeechSynthesizerDelegate never fires
+    /// (simulating a silently-no-oping synthesizer from a corrupt
+    /// voice install or interrupted audio session — the P0-H bug
+    /// this code defends against). The timeout Task wins the latch
+    /// after `speakTimeoutSec` elapses, resumes the continuation,
+    /// advances state `.modelSpeaking → .ready`, and `speak()`
+    /// returns without hanging.
+    ///
+    /// Late-delegate no-op: after the timeout has resumed the
+    /// continuation, firing `didFinish` on the delegate — simulating
+    /// a delayed callback from the synthesizer that eventually
+    /// catches up — must NOT trigger a second state advance or a
+    /// second continuation resume. The latch's `tryResume` returning
+    /// false is the production mechanism; this test verifies the
+    /// observable consequence (currentState unchanged, no crash
+    /// from double-resume).
+    ///
+    /// Timeout calibration: 100 ms is tight enough to keep the test
+    /// fast, loose enough to avoid CI flake. The exact value doesn't
+    /// matter for the invariant under test — only that the timeout
+    /// Task gets scheduled and fires before any delegate event.
+    func test_speak_timeoutFiresFirst_resumesViaTimeoutAndIgnoresLateDelegate() async throws {
+        let mock = MockSpeechSynthesizer()
+        let service = makeService(synthesizer: mock)
+
+        // Compress the timeout from 10 s to 100 ms so the test
+        // completes in sub-second time. Must be set BEFORE `speak()`
+        // is called — the timeout Task captures the value
+        // synchronously when `speak()` kicks off the race.
+        service._testSetSpeakTimeoutSec(0.1)
+
+        _ = service._testAdvanceState(to: .ready)
+        _ = service._testAdvanceState(to: .modelSpeaking)
+        XCTAssertEqual(service.currentState, .modelSpeaking, "precondition")
+
+        // Kick off speak(). Mock's `speak()` stores the delegate +
+        // yields on speakCalls, but the test never fires `didFinish`
+        // — the delegate stays unresponsive, simulating the hang the
+        // timeout defends against.
+        let speakTask = Task { await service.speak("hello") }
+
+        // Wait for the mock to observe the speak call — proves the
+        // service reached synthesizer.speak() through the protocol
+        // seam. Without this, a "delegate never set" failure could
+        // masquerade as a timeout-fires-first success.
+        var iterator = mock.speakCalls.makeAsyncIterator()
+        let observedUtterance = await iterator.next()
+        let utterance = try XCTUnwrap(
+            observedUtterance,
+            "service must reach synthesizer.speak() before suspending",
+        )
+
+        // Await speak() — the timeout branch resumes after ~100 ms.
+        // If this hangs beyond the XCTest default timeout, the
+        // timeout Task isn't firing, and the test fails loud rather
+        // than silently pretending the latch contract holds.
+        await speakTask.value
+
+        // Pin (1): state advanced via the timeout path.
+        XCTAssertEqual(
+            service.currentState,
+            .ready,
+            "timeout branch must advance state .modelSpeaking → .ready",
+        )
+
+        // Pin (2): a late delegate callback is a no-op. The latch's
+        // tryResume returns false, so the delegate's continuation-
+        // resume and state-advance branches don't run. Observable
+        // consequence: currentState stays `.ready` (not re-advanced,
+        // no crash).
+        let dummySynth = AVSpeechSynthesizer()
+        let delegate = try XCTUnwrap(
+            mock.delegate,
+            "delegate should still be stored on mock — speak() only nils `synthesisDelegate`, not `synthesizer.delegate`",
+        )
+        delegate.speechSynthesizer?(dummySynth, didFinish: utterance)
+
+        // Yield so the delegate's Task { @MainActor ... } closure
+        // runs if it's going to (it shouldn't, per the latch). If
+        // the latch is broken and the closure runs anyway, the
+        // Task-hopped state advance would surface here.
+        await Task.yield()
+        XCTAssertEqual(
+            service.currentState,
+            .ready,
+            "late delegate must not re-advance state (latch blocks re-entry)",
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeService(synthesizer: any SpeechSynthesizing) -> SpeechFallbackService {
