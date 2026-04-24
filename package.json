@@ -4,7 +4,13 @@
   "description": "Stir — eval harness launchers. iOS + backend sources live at Stir/ and Backend/ respectively; this package.json exists only to host eval scripts per CLAUDE.md §Verification flows.",
   "version": "0.0.0",
   "scripts": {
-    "eval:substitutions": "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/substitutions/run.ts"
+    "eval:pantry-scan":   "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/pantry_scan/run.ts",
+    "eval:dinner-solve":  "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/dinner_solve/run.ts",
+    "eval:cook-turns":    "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/cook_turns/run.ts",
+    "eval:substitutions": "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/substitutions/run.ts",
+    "eval:recipe-import": "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/recipe_import/run.ts",
+    "eval:grocery":       "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys Backend/evals/grocery/run.ts",
+    "eval:all":           "deno run --config Backend/supabase/functions/deno.json --allow-env --allow-net --allow-read --allow-sys --allow-write Backend/evals/run_all.ts"
   },
   "engines": {
     "node": ">=20"

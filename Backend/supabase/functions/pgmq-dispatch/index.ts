@@ -30,6 +30,7 @@ import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
+import { type APNsCategory, type APNsEnvironment, sendAPNsPush } from '../_shared/apns.ts';
 
 const CLAIM_LIMIT = 10;      // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
@@ -194,9 +195,8 @@ Deno.serve(async (req) => {
         await processRecipeImportAsync(client, job, log);
         results.push({ job_id: job.id, kind: job.kind, status: 'completed' });
       } else if (job.kind === 'push_send') {
-        // Step 8 placeholder.
-        await markJobFailed(client, job.id, 'push_send not yet implemented (step 8)');
-        results.push({ job_id: job.id, kind: job.kind, status: 'failed' });
+        await processPushSend(client, job, log);
+        results.push({ job_id: job.id, kind: job.kind, status: 'completed' });
       } else {
         await markJobFailed(client, job.id, `unknown kind: ${String(job.kind)}`);
         results.push({ job_id: job.id, kind: job.kind, status: 'failed' });
@@ -453,4 +453,104 @@ async function scheduleJobRetry(
       error_message: errorMessage,
     })
     .eq('id', jobId);
+}
+
+// -----------------------------------------------------------------------------
+// push_send processor (step 8 — reactivation + import_completion pushes)
+// -----------------------------------------------------------------------------
+//
+// Payload shape (written by stir_ops_reactivation_enqueue + recipe-import
+// follow-on insert):
+//   {
+//     template:     'reactivation' | 'import_completion' | 'trial_reminder'
+//                   | 'cook_reminder',
+//     title:        string,
+//     body:         string,
+//     deep_link:    'stir://...' (optional),
+//     apns_token:   string,
+//     environment:  'production' | 'sandbox',
+//   }
+//
+// Failure classification:
+//   - bad_device_token / unregistered → mark job COMPLETED (token is dead,
+//     not our bug); null out the token on device_installations so future
+//     enqueues skip it.
+//   - rate_limited / server_error    → THROW, lets the outer try/catch
+//     schedule a retry with backoff.
+//   - config_invalid / missing_secret → THROW and page; means our APNs
+//     signing config is wrong, not a per-device issue.
+
+interface PushSendPayload {
+  template: APNsCategory;
+  title: string;
+  body: string;
+  deep_link?: string;
+  apns_token: string;
+  environment: APNsEnvironment;
+}
+
+async function processPushSend(
+  client: ReturnType<typeof createServiceClient>,
+  job: ClaimedJob,
+  log: Awaited<ReturnType<typeof createLogger>>,
+): Promise<void> {
+  const payload = job.payload_json as PushSendPayload;
+  if (!payload?.apns_token || !payload?.environment || !payload?.template) {
+    throw new Error('invalid push_send payload: apns_token/environment/template required');
+  }
+
+  const result = await sendAPNsPush({
+    token: payload.apns_token,
+    environment: payload.environment,
+    category: payload.template,
+    alert: { title: payload.title, body: payload.body },
+    data: payload.deep_link ? { deep_link: payload.deep_link } : undefined,
+  });
+
+  if (result.ok) {
+    log.info('push_sent', {
+      job_id: job.id,
+      template: payload.template,
+      apns_id: result.apnsId,
+    });
+    await client
+      .from('notification_jobs')
+      .update({
+        state: 'completed',
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', job.id);
+    return;
+  }
+
+  // Failure path.
+  if (result.reason === 'bad_device_token') {
+    // Dead token — complete the job and null out device_installations.push_token
+    // so future reactivation/import-completion enqueues skip this device.
+    log.info('push_token_dead', {
+      job_id: job.id,
+      status: result.status,
+      apns_reason: result.apnsReason,
+    });
+    await client
+      .from('notification_jobs')
+      .update({
+        state: 'completed',
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        error_message: `apns rejected token: ${result.apnsReason ?? 'BadDeviceToken'}`,
+      })
+      .eq('id', job.id);
+    await client
+      .from('device_installations')
+      .update({ push_token: null, notifications_enabled: false })
+      .eq('push_token', payload.apns_token);
+    return;
+  }
+
+  // Other failures re-throw; outer loop schedules retry with backoff.
+  throw new Error(
+    `APNs push failed (reason=${result.reason}, status=${result.status}, apns=${result.apnsReason ?? 'n/a'})`,
+  );
 }
