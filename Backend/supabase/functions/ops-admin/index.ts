@@ -32,6 +32,8 @@ import {
   checkAndIncrement,
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
+import { capturePosthogEvent } from '../_shared/posthog.ts';
+import { hashCanonicalKey } from '../_shared/hashing.ts';
 
 // Typed, recoverable handler failure. Throw this from a handler when the
 // error class is a user-input problem (not found / already resolved /
@@ -332,6 +334,12 @@ async function handleUsersList(
   if (error) {
     throw new Error(`stir_ops_list_users failed: ${error.message}`);
   }
+  await emitOpsEvent(ctx, 'ops_admin.users.list_queried', {
+    tier_filter: params.tier ?? null,
+    has_search: Boolean(params.search),
+    limit: params.limit ?? 50,
+    offset: params.offset ?? 0,
+  });
   return { ok: true, ...(data as Record<string, unknown>) };
 }
 
@@ -374,6 +382,11 @@ async function handleUsersForceReauth(
     request_id: ctx.requestId,
   });
 
+  await emitOpsEvent(ctx, 'ops_admin.users.force_reauth', {
+    canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    audit_id: auditId,
+  });
+
   return {
     ok: true,
     canonical_user_key: params.canonical_user_key,
@@ -409,6 +422,10 @@ async function handleUsersDetail(
     after: null,
     request_id: ctx.requestId,
   });
+  await emitOpsEvent(ctx, 'ops_admin.users.detail_viewed', {
+    canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    audit_id: auditId,
+  });
   return { ok: true, detail: data, audit_id: auditId };
 }
 
@@ -438,6 +455,13 @@ async function handleUsersResetQuota(
     request_id: ctx.requestId,
   });
 
+  await emitOpsEvent(ctx, 'ops_admin.users.quota_reset', {
+    canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    feature_key: params.feature_key,
+    noop: result.noop ?? false,
+    audit_id: auditId,
+  });
+
   return { ...result, audit_id: auditId };
 }
 
@@ -465,6 +489,12 @@ async function handleUsersStatus(
     before: result.before,
     after: result.after,
     request_id: ctx.requestId,
+  });
+
+  await emitOpsEvent(ctx, 'ops_admin.users.status_changed', {
+    canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    to_status: params.status,
+    audit_id: auditId,
   });
 
   return { ...result, audit_id: auditId };
@@ -615,6 +645,13 @@ async function handleFlaggedOutputsResolve(
     request_id: ctx.requestId,
   });
 
+  await emitOpsEvent(ctx, 'ops_admin.flagged_outputs.resolved', {
+    feature_key: flagged.feature_key,
+    resolution_action: params.action,
+    target_id: params.id,
+    audit_id: auditId,
+  });
+
   return { ok: true, flagged_output: updated, audit_id: auditId };
 }
 
@@ -715,6 +752,15 @@ async function handlePromptVersionsRollout(
     request_id: ctx.requestId,
   });
 
+  await emitOpsEvent(ctx, 'ops_admin.prompt_versions.rollout', {
+    feature_key: params.feature_key,
+    version: params.version,
+    rollout_pct: params.rollout_pct,
+    is_default: params.is_default ?? null,
+    target_id: `${params.feature_key}@${params.version}`,
+    audit_id: auditId,
+  });
+
   return { ok: true, before, after, audit_id: auditId };
 }
 
@@ -741,6 +787,12 @@ async function handleFeatureFlagsUpdate(
   if (params.rollout_pct !== undefined) updates.rollout_pct = params.rollout_pct;
 
   if (Object.keys(updates).length === 0) {
+    await emitOpsEvent(ctx, 'ops_admin.feature_flags.updated', {
+      flag_key: params.key,
+      target_id: params.key,
+      noop: true,
+      audit_id: null,
+    });
     return { ok: true, before, after: before, audit_id: null, noop: true };
   }
 
@@ -763,7 +815,57 @@ async function handleFeatureFlagsUpdate(
     request_id: ctx.requestId,
   });
 
+  await emitOpsEvent(ctx, 'ops_admin.feature_flags.updated', {
+    flag_key: params.key,
+    target_id: params.key,
+    is_enabled: params.is_enabled ?? null,
+    rollout_pct: params.rollout_pct ?? null,
+    noop: false,
+    audit_id: auditId,
+  });
+
   return { ok: true, before, after, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// PostHog ops event emit helper (Phase C — telemetry wiring bundle 2026-04-24)
+//
+// One emit per admin action. Per ADR 0027 + canonical-properties.md:
+//   distinct_id  = hash('admin:' + admin.authUserId)  — admin's own hash, not
+//                                                       the acted-on user's
+//   request_id   = ctx.requestId                       — cross-system join key
+//   actor_id     = admin.authUserId                    — UUID of admin
+// Caller-supplied properties merge over the mandatory three.
+//
+// capturePosthogEvent itself is non-throwing (fire-and-forget via
+// EdgeRuntime.waitUntil with internal try/catch). The outer try/catch here
+// is defense-in-depth so any synchronous surprise (hash failure, bad shape)
+// can't unwind the user-visible mutation. Matches the writeAudit failure
+// posture: log.warn, swallow, never re-throw.
+// ---------------------------------------------------------------------------
+
+async function emitOpsEvent(
+  ctx: HandlerCtx,
+  event: string,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const distinctId = await hashCanonicalKey(`admin:${ctx.admin.authUserId}`);
+    capturePosthogEvent(ctx.log, {
+      event,
+      distinctId,
+      properties: {
+        request_id: ctx.requestId,
+        actor_id: ctx.admin.authUserId,
+        ...properties,
+      },
+    });
+  } catch (err) {
+    ctx.log.warn('posthog_emit_failed', {
+      event,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
