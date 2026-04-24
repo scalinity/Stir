@@ -90,7 +90,7 @@ struct HouseholdPreferencesView: View {
                         Spacer()
                         if selection.wrappedValue.contains(option) {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(.tint)
+                                .foregroundStyle(Color.Stir.ember600)
                         }
                     }
                 }
@@ -101,7 +101,7 @@ struct HouseholdPreferencesView: View {
         } label: {
             LabeledContent(label) {
                 Text(selection.wrappedValue.isEmpty ? "None" : "\(selection.wrappedValue.count) selected")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.Stir.ink500)
             }
         }
     }
@@ -123,7 +123,7 @@ struct HouseholdPreferencesView: View {
                             Text(code.displayName)
                             Spacer()
                             if bindable.selectedEquipment.contains(code) {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
+                                Image(systemName: "checkmark").foregroundStyle(Color.Stir.ember600)
                             }
                         }
                     }
@@ -136,7 +136,7 @@ struct HouseholdPreferencesView: View {
                     Text(bindable.selectedEquipment.isEmpty
                          ? "None"
                          : "\(bindable.selectedEquipment.count) selected")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.Stir.ink500)
                 }
             }
         }
