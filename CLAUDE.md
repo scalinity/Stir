@@ -700,6 +700,14 @@ Notes on DB column types + constraints that the init migration COMMENTs and/or f
 
 Relevance: any `COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'` against UUID columns raises `22P02 invalid input syntax for type uuid` because `''` isn't a valid UUID. Cast with `::TEXT` before COALESCE or concatenation. Bit step-8 Phase 1 once; documented so it doesn't bite again.
 
+### New columns / uniqueness
+
+| Column/index | Purpose | Added in |
+| --- | --- | --- |
+| `ai_request_log.session_id UUID` | voice session id; replaces `split_part(request_id,':',2)` for aggregations; partial index `idx_ai_request_log_voice_session` on `(feature_key, session_id, created_at DESC) WHERE feature_key='cook_mode_realtime'` | `20260424000003_performance_indexes_and_session_id.sql` |
+| `UNIQUE(canonical_user_key_hash, request_id)` on `ops_flagged_outputs` | atomic dedup (forever) | `20260424000002` |
+| `idx_app_users_last_seen_at` partial on `status='active'` | hot path for `stir_ops_list_users` + reactivation enqueue | `20260424000003` |
+
 ### Column-value CHECK constraints worth knowing
 
 | Column | Allowed values | Enforced by |

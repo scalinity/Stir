@@ -431,6 +431,11 @@ Deno.serve(async (req) => {
         // the field in that case). prompt_tokens_cached is optional in
         // the Zod schema, so turn.prompt_tokens_cached may be undefined.
         prompt_cached_tokens: turn.prompt_tokens_cached,
+        // session_id populated from body.session_id (already validated as
+        // UUID upstream). Indexed via idx_ai_request_log_voice_session for
+        // ops aggregations; replaces split_part parsing at the query
+        // layer. Migration 20260424000003 adds the column + index.
+        session_id: body.session_id,
       },
       {
         trace_id: body.session_id,

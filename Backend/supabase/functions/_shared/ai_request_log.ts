@@ -176,6 +176,13 @@ export interface AIRequestLogEntry {
    * `$ai_cache_read_input_tokens` standard property. Powers the spec §9
    * cap-reversal trigger. */
   prompt_cached_tokens?: number;
+  /** Voice session UUID. Populated only on cook_mode_realtime rows
+   * alongside request_id='voice:<session_id>:<turn_index>'. NULL for
+   * non-voice features. Indexed via idx_ai_request_log_voice_session
+   * (partial: feature_key='cook_mode_realtime') for ops aggregations
+   * (stir_ops_list_voice_sessions, cost anomaly voice branch). Added
+   * in migration 20260424000003. */
+  session_id?: string;
 }
 
 /**
