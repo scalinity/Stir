@@ -61,6 +61,10 @@ struct DinnerOptionsView: View {
     @ViewBuilder
     private func slotCard(_ slot: SolveViewModel.SlotState) -> some View {
         if let dish = slot.dish {
+            // DishOptionCard no longer wraps its content in a Button —
+            // that was double-button-inside-NavigationLink. The
+            // NavigationLink provides the tap, DishOptionCardStyle
+            // provides the press-feedback. Review finding W-H W33.
             NavigationLink(value: ScanFlowRoot.Route.preview(dish)) {
                 DishOptionCard(
                     rank: slot.rank,
@@ -72,12 +76,16 @@ struct DinnerOptionsView: View {
                         for: dish.fitLabelPrimary,
                         missingCount: dish.missingIngredientCount,
                     ),
-                    onTap: {},
                 )
             }
-            .buttonStyle(.plain)
-        } else if let code = slot.errorCode {
-            errorSlot(rank: slot.rank, code: code)
+            .buttonStyle(DishOptionCardStyle())
+        } else if slot.errorCode != nil {
+            // Error code is intentionally not surfaced in the slot's
+            // copy — users don't need the VAL-01 / AI-02 string. The
+            // slot keeps the error code on the slot-model itself for
+            // Sentry / telemetry; the UI just shows the canned
+            // "didn't pass your rules" copy. Review finding W-H W32.
+            errorSlot(rank: slot.rank)
         } else {
             skeletonSlot(rank: slot.rank)
         }
@@ -89,6 +97,10 @@ struct DinnerOptionsView: View {
     /// (same voice tint) for now; if a future mockup introduces a
     /// distinct visual variant, extend FitLabelKind.
     private func fitLabelKind(for raw: String, missingCount: Int) -> FitLabelKind {
+        // Clamp defensively — a malformed server response with a
+        // negative missing-count could render "-2 missing" otherwise.
+        // Review finding W-H W36 (CA1).
+        let safeCount = max(0, missingCount)
         switch raw {
         case "fastest":       return .fastest
         case "least_waste":   return .leastWaste
@@ -96,7 +108,7 @@ struct DinnerOptionsView: View {
              "uses_what_you_have",
              "new_to_you":    return .bestFit
         default:
-            return missingCount > 0 ? .missing(count: missingCount) : .bestFit
+            return safeCount > 0 ? .missing(count: safeCount) : .bestFit
         }
     }
 
@@ -159,9 +171,8 @@ struct DinnerOptionsView: View {
         // elements. Review finding C3 (FD1).
     }
 
-    private func errorSlot(rank: Int, code: ErrorCode) -> some View {
-        let _ = code
-        return HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+    private func errorSlot(rank: Int) -> some View {
+        HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
             Image.Stir.softError
                 .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
                 .foregroundStyle(Color.Stir.amber600)

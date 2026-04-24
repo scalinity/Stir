@@ -46,6 +46,14 @@ struct TonightHomeView: View {
     @State private var resumableSession: CookingSession?
     @State private var recentCompleted: [RecentMealEntry] = []
     @State private var activeModal: ActiveModal?
+    /// Debounce flag for the Recent meals "Cook again" button. A
+    /// rapid double-tap used to create two fresh CookingSession rows
+    /// (one per tap), leaving an orphan row that shows up in Saved
+    /// as "never cooked". The second tap is silently dropped while
+    /// the first is in flight — coordinator.resumeCookMode advances
+    /// to Cook Mode synchronously, so the flag naturally resolves at
+    /// the end of the run loop. Review finding W-H W35 (CA1).
+    @State private var isCreatingRecentSession = false
 
     enum ActiveModal: String, Identifiable {
         case scan
@@ -509,7 +517,11 @@ struct TonightHomeView: View {
         Button {
             // Access the CookingSession only on tap — body eval never
             // touches it, which keeps the NSManagedObject relationship
-            // walk out of the hot render path. W-E W22.
+            // walk out of the hot render path (W-E W22). Also debounced
+            // to prevent the double-tap orphan-session bug (W-H W35).
+            guard !isCreatingRecentSession else { return }
+            isCreatingRecentSession = true
+            defer { isCreatingRecentSession = false }
             if let fresh = makeFreshSessionIfPossible(from: entry.session) {
                 coordinator.resumeCookMode(fresh)
             } else {

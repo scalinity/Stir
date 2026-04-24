@@ -217,8 +217,15 @@ final class OnboardingViewModel {
     /// soft preference like an allergen (spec §4.2 orthogonal
     /// hard/soft enforcement axis).
     func savePreferences() throws {
+        // Snapshot active rules before mutating. `profile.dietaryRuleArray`
+        // is NSManagedObject-backed; `deactivate()` mutates the underlying
+        // relationship set, which during iteration is undefined behavior
+        // and can miss rows or crash. The `Array(...)` + filter captures
+        // a stable list we can safely drive mutations from. Review
+        // finding W-H W38 (CA1).
+        let activeRules = Array(profile.dietaryRuleArray.filter { $0.isActive })
         // Deactivate any existing rules that are no longer selected.
-        for rule in profile.dietaryRuleArray where rule.isActive {
+        for rule in activeRules {
             let stillSelected: Bool
             switch rule.typedKind {
             case .allergy:

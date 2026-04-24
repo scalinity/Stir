@@ -28,57 +28,72 @@ struct DishOptionCard: View {
     let whyItFits: String
     let missingIngredientCount: Int
     let fitKind: FitLabelKind
-    let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-                HStack(alignment: .top) {
-                    Text("\(rank)")
-                        .stirFont(.displayMd)
-                        .foregroundStyle(Color.Stir.ink300)
-                        .accessibilityHidden(true) // a11y label includes rank
+        // No internal Button wrapper — callers wrap the card in the
+        // navigation affordance that suits their route type
+        // (NavigationLink, Button, etc) and apply
+        // `DishOptionCardStyle` via `.buttonStyle(...)`. Doing this
+        // internally when the caller is already a NavigationLink
+        // produces `Button(NavigationLink(Button(...)))`, which
+        // VoiceOver reads as nested buttons and which `.buttonStyle(
+        // .plain)` on the outer NavigationLink strips the press
+        // feedback off of. Review finding W-H W33 (CR1+FD1).
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            HStack(alignment: .top) {
+                Text("\(rank)")
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink300)
+                    .accessibilityHidden(true) // a11y label includes rank
 
-                    Spacer(minLength: CGFloat.Stir.space3)
+                Spacer(minLength: CGFloat.Stir.space3)
 
-                    FitLabel(kind: fitKind)
-                }
-
-                VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                    Text(title)
-                        .stirFont(.displayMd)
-                        .foregroundStyle(Color.Stir.ink900)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-
-                    Text(whyItFits)
-                        .stirFont(.bodyMd)
-                        .foregroundStyle(Color.Stir.ink700)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
-                }
-
-                metadataRow
+                FitLabel(kind: fitKind)
             }
-            .padding(CGFloat.Stir.space4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
-            .contentShape(Rectangle())
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                Text(title)
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink900)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+
+                Text(whyItFits)
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink700)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+            }
+
+            metadataRow
         }
-        .buttonStyle(DishOptionCardStyle())
+        .padding(CGFloat.Stir.space4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                .fill(Color.Stir.paper100),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
+                .strokeBorder(Color.Stir.divider, lineWidth: 1),
+        )
+        .contentShape(Rectangle())
+        // Collapse the card's inner Text + FitLabel + metadata subtree
+        // and substitute the single card-level label. Without `.ignore`,
+        // SwiftUI appends the accessibilityLabel to the auto-generated
+        // subtree label ("rank, title, fit label, 32 min, …") producing
+        // a garbled double-read. Review finding W-H W34 (CR1).
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
     }
 
     private var metadataRow: some View {
-        HStack(spacing: CGFloat.Stir.space4) {
+        // Clamp defensively — a malformed upstream response with a
+        // negative `missingIngredientCount` would render "-2 to grab"
+        // otherwise. Review finding W-H W36 (CA1).
+        let safeCount = max(0, missingIngredientCount)
+        return HStack(spacing: CGFloat.Stir.space4) {
             HStack(spacing: CGFloat.Stir.space1) {
                 Image.Stir.clock
                     .font(.system(size: CGFloat.Stir.iconSm))
@@ -88,14 +103,14 @@ struct DishOptionCard: View {
                     .foregroundStyle(Color.Stir.ink500)
             }
 
-            if missingIngredientCount > 0 {
+            if safeCount > 0 {
                 HStack(spacing: CGFloat.Stir.space1) {
                     Image.Stir.cart
                         .font(.system(size: CGFloat.Stir.iconSm))
                         .foregroundStyle(Color.Stir.ink500)
-                    Text(missingIngredientCount == 1
+                    Text(safeCount == 1
                          ? "1 to grab"
-                         : "\(missingIngredientCount) to grab")
+                         : "\(safeCount) to grab")
                         .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.ink500)
                 }
@@ -113,11 +128,13 @@ struct DishOptionCard: View {
     }
 
     private var accessibilityLabel: String {
+        // Same clamp as metadataRow — W-H W36.
+        let safeCount = max(0, missingIngredientCount)
         var parts = ["Option \(rank): \(title)"]
         parts.append("\(totalTimeMinutes) minutes")
-        parts.append(missingIngredientCount == 0
+        parts.append(safeCount == 0
                      ? "has every ingredient"
-                     : "\(missingIngredientCount) ingredients to grab")
+                     : "\(safeCount) ingredients to grab")
         parts.append("why it fits: \(whyItFits)")
         return parts.joined(separator: ", ")
     }
@@ -127,8 +144,10 @@ struct DishOptionCard: View {
 
 /// 98% scale + ember border ring on press, per Spec §8.3. Reduce Motion
 /// collapses the scale animation to instant (border still flips for the
-/// press signal).
-private struct DishOptionCardStyle: ButtonStyle {
+/// press signal). Public so callers (NavigationLink, Button) can apply
+/// it with `.buttonStyle(DishOptionCardStyle())`; internal use only —
+/// not re-exported beyond the module.
+struct DishOptionCardStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
@@ -168,7 +187,6 @@ private var dishOptionGallery: some View {
                 whyItFits: "Uses the shrimp and spinach before they turn. Leans on pantry staples you already have.",
                 missingIngredientCount: 0,
                 fitKind: .leastWaste,
-                onTap: {},
             )
             DishOptionCard(
                 rank: 2,
@@ -177,7 +195,6 @@ private var dishOptionGallery: some View {
                 whyItFits: "Higher protein to hit your goal tonight. Skip if you're not up for a hotter dish.",
                 missingIngredientCount: 1,
                 fitKind: .bestFit,
-                onTap: {},
             )
             DishOptionCard(
                 rank: 3,
@@ -186,7 +203,6 @@ private var dishOptionGallery: some View {
                 whyItFits: "Fastest tonight — 18 minutes including oven preheat.",
                 missingIngredientCount: 2,
                 fitKind: .fastest,
-                onTap: {},
             )
         }
         .padding(CGFloat.Stir.space4)

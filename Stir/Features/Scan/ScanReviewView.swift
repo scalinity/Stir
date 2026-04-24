@@ -237,13 +237,3 @@ struct ScanReviewView: View {
         )
     }
 }
-
-private extension PantryParseResponse.PantryItemConfidence {
-    var accessibilityDescription: String {
-        switch self {
-        case .confirmed:    return "confirmed"
-        case .needsReview:  return "needs review"
-        case .likelyStaple: return "likely staple"
-        }
-    }
-}

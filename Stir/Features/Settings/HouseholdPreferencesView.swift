@@ -5,6 +5,7 @@
 // by a fresh OnboardingViewModel instance so writes share the repository
 // layer's idempotency + uniqueness guards.
 
+import OSLog
 import SwiftUI
 
 struct HouseholdPreferencesView: View {
@@ -12,6 +13,7 @@ struct HouseholdPreferencesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var viewModel: OnboardingViewModel?
+    @State private var initError: String?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -40,13 +42,37 @@ struct HouseholdPreferencesView: View {
                         .fontWeight(.semibold)
                     }
                 }
+            } else if let initError {
+                // Profile wasn't available when the view appeared —
+                // surfaces a Close affordance rather than a perpetual
+                // spinner. Root coordinator is expected to bootstrap
+                // a profile before this screen is navigable, but the
+                // user-visible copy covers the unlikely race where
+                // Settings opens pre-bootstrap (e.g. deeplink launch).
+                // Review finding W-H W37 (CA2).
+                ConfigurationErrorView(
+                    message: initError,
+                    onRetry: { dismiss() },
+                )
             } else {
                 ProgressView()
             }
         }
         .task {
-            guard viewModel == nil, let profile = householdStore.profile else { return }
-            viewModel = OnboardingViewModel(profile: profile)
+            guard viewModel == nil else { return }
+            if let profile = householdStore.profile {
+                viewModel = OnboardingViewModel(profile: profile)
+            } else {
+                initError = "Couldn't load your preferences. Please try again."
+                Logger.ui.error("HouseholdPreferencesView: householdStore.profile unexpectedly nil")
+                SentryReporter.shared.captureError(
+                    StirError.validation(
+                        fieldErrors: [FieldError(field: "household_profile", issue: "nil at HouseholdPreferencesView task")],
+                        message: "HouseholdPreferencesView profile nil",
+                    ),
+                    context: ["screen": "household_preferences"],
+                )
+            }
         }
         .alert("Couldn't save", isPresented: Binding(
             get: { errorMessage != nil },
