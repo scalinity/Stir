@@ -402,13 +402,13 @@ struct TonightHomeView: View {
 
             VStack(spacing: CGFloat.Stir.space3) {
                 scanKitchenButton
-                actionRow(
+                ActionRow(
                     icon: Image.Stir.imported,
                     title: "Import Recipe",
                     subtitle: "Paste a URL, pick a screenshot, or paste recipe text.",
                     action: { activeModal = .import },
                 )
-                actionRow(
+                ActionRow(
                     icon: Image.Stir.bookmark,
                     title: "Cook Saved",
                     subtitle: "One-tap replay for your favorites.",
@@ -420,13 +420,13 @@ struct TonightHomeView: View {
 
     private var scanKitchenButton: some View {
         let killed = scanIsKillSwitched
-        return actionRow(
+        return ActionRow(
             icon: Image.Stir.scan,
             title: killed ? "Kitchen scan temporarily unavailable" : "Scan Kitchen",
             subtitle: killed
                 ? "We've paused scans while we investigate an issue."
                 : "Point at ingredients to get three dinner options.",
-            enabled: !killed,
+            isEnabled: !killed,
             action: {
                 if killed {
                     toastMessage = "Kitchen scan is temporarily unavailable. Try a saved meal instead."
@@ -443,57 +443,6 @@ struct TonightHomeView: View {
         } else {
             activeModal = .scan
         }
-    }
-
-    private func actionRow(
-        icon: Image,
-        title: String,
-        subtitle: String,
-        enabled: Bool = true,
-        action: @escaping () -> Void,
-    ) -> some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: CGFloat.Stir.space3 + 2) { // 14pt
-                ZStack {
-                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                        .fill(enabled ? Color.Stir.ember100 : Color.Stir.paper200)
-                    icon
-                        .font(.system(size: CGFloat.Stir.iconMd + 4, weight: .semibold)) // justification: 24pt action-row icon — slightly larger than icon.md (20pt) so the primary-action tile reads at arm's length
-                        .foregroundStyle(enabled ? Color.Stir.ember600 : Color.Stir.ink500)
-                }
-                .frame(width: 44, height: 44)
-
-                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
-                    Text(title)
-                        .stirFont(.labelLg)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(enabled ? Color.Stir.ink900 : Color.Stir.ink500)
-                    Text(subtitle)
-                        .stirFont(.bodySm)
-                        .foregroundStyle(Color.Stir.ink500)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer(minLength: CGFloat.Stir.space2)
-
-                Image.Stir.disclosure
-                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
-                    .foregroundStyle(Color.Stir.ink300)
-            }
-            .padding(CGFloat.Stir.space3 + 2) // 14pt
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityHint(subtitle)
     }
 
     @ViewBuilder
