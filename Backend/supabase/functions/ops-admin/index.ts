@@ -25,7 +25,29 @@ import {
 } from '../_shared/admin_auth.ts';
 import { writeAudit } from '../_shared/audit.ts';
 import { createLogger, requestIdFrom, type Logger } from '../_shared/logger.ts';
-import { ErrorCode, jsonError, jsonOk, type FieldError } from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
+import { zodToFieldErrors } from '../_shared/validation.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
+
+// Typed, recoverable handler failure. Throw this from a handler when the
+// error class is a user-input problem (not found / already resolved /
+// bad combo) or a known infra signal — the top-level catch translates
+// into a shaped jsonError with the correct status and code.
+// Unknown errors fall through to a generic NET_01 500.
+class DispatchError extends Error {
+  readonly code: ErrorCode;
+  readonly status: number;
+  constructor(code: ErrorCode, status: number, message: string) {
+    super(message);
+    this.name = 'DispatchError';
+    this.code = code;
+    this.status = status;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Action schemas (discriminated union). 11 actions total per spec §14.
@@ -67,12 +89,28 @@ const FlaggedOutputsListParams = z.object({
   offset: z.number().int().min(0).optional(),
 }).strict();
 
+// Review W23 (SA1 W2): canned_fallback_json was z.unknown() — anything
+// goes. The admin-supplied payload lands in ai_response_cache.response_body
+// and is decoded by iOS on the next cache hit. A malformed paste or a
+// payload that doesn't match iOS's feature-specific shape causes silent
+// decode failures or wrong-content rendering. Minimum defense: require an
+// object (not a bare primitive / string / array) and cap serialized size
+// at 64 KiB. Per-feature schema-registry validation is a step-9 follow-up
+// (CLAUDE.md §Deferred).
+const CANNED_FALLBACK_MAX_BYTES = 65_536;
+
 const FlaggedOutputsResolveParams = z.object({
   id: z.string().uuid(),
   action: z.enum(['dismissed', 'withdrawn', 'canned_fallback_pinned']),
   resolution_notes: z.string().max(2000).optional(),
-  // Required iff action === 'canned_fallback_pinned'.
-  canned_fallback_json: z.unknown().optional(),
+  // Required iff action === 'canned_fallback_pinned'. Must be a JSON object
+  // within 64 KiB serialized (matches SQL CHECK in migration 20260424000005).
+  canned_fallback_json: z
+    .record(z.unknown())
+    .refine((v) => JSON.stringify(v).length <= CANNED_FALLBACK_MAX_BYTES, {
+      message: `canned_fallback_json exceeds ${CANNED_FALLBACK_MAX_BYTES}-byte serialized cap`,
+    })
+    .optional(),
 }).strict();
 
 const CostAnomaliesListParams = z.object({
@@ -160,7 +198,30 @@ Deno.serve(async (req) => {
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
   }
 
-  log.info('admin_authenticated', { actor_email: admin.email });
+  // W26 (SA3 W2): log actor_id (UUID), not actor_email. Function logs
+  // have broader read visibility than audit_log; audit_log still carries
+  // actor_email for support-time identity lookup.
+  log.info('admin_authenticated', { actor_id: admin.authUserId });
+
+  // 1b. IP rate limit (SA2 W2): 30/min per source IP. Legit active triage
+  // rarely exceeds ~10/min; this caps a compromised-token enumeration
+  // attack to 30/min, cutting thousands-per-second worst case.
+  const sourceIP = extractSourceIP(req);
+  try {
+    const rl = await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
+    if (!rl.allowed) {
+      log.warn('rate_limited', { scope: 'ip:ops_admin_hourly', source_ip: sourceIP });
+      return buildRate01Response(
+        'ip:ops_admin_hourly',
+        rl.retry_after_seconds,
+        rl.reset_at,
+        requestId,
+      );
+    }
+  } catch (err) {
+    // Fail open — a rate_limit_buckets glitch must not lock the console.
+    log.warn('rate_limiter_failed', { err: String(err) });
+  }
 
   // 2. Body validation.
   let body: unknown;
@@ -195,8 +256,26 @@ Deno.serve(async (req) => {
     const payload = await dispatch(parsed, { client, admin, log, requestId });
     return jsonOk(payload, requestId);
   } catch (err) {
+    // Typed handler failures get the intended status + code. Unknown
+    // errors fall through to NET-01 500 — the raw message is logged at
+    // error level (internal detail only) and replaced with a sanitized
+    // string in the response body. Review W1/W17 fix.
+    if (err instanceof DispatchError) {
+      log.warn('action_rejected', {
+        action: parsed.action,
+        code: err.code,
+        status: err.status,
+        message: err.message,
+      });
+      return jsonError(err.code, err.status, { message: err.message }, requestId);
+    }
     log.error('action_failed', err, { action: parsed.action });
-    return jsonError(ErrorCode.NET_01, 500, { message: (err as Error).message }, requestId);
+    return jsonError(
+      ErrorCode.NET_01,
+      500,
+      { message: 'Internal error; see Supabase function logs.' },
+      requestId,
+    );
   }
 });
 
@@ -224,6 +303,15 @@ async function dispatch(parsed: AdminAction, ctx: HandlerCtx): Promise<Record<st
     case 'voice_sessions.list':      return await handleVoiceSessionsList(parsed.params, ctx);
     case 'prompt_versions.rollout':  return await handlePromptVersionsRollout(parsed.params, ctx);
     case 'feature_flags.update':     return await handleFeatureFlagsUpdate(parsed.params, ctx);
+    default: {
+      // Exhaustiveness guard (review W45). TS can't narrow z.infer<any>
+      // through discriminated-switch at the Zod seam, so we fall through
+      // to an explicit runtime rejection rather than the pre-fix implicit
+      // `undefined` return → jsonOk(undefined) → 200 with empty body.
+      throw new Error(
+        `unhandled admin action: ${String((parsed as { action?: string }).action ?? '<unknown>')}`,
+      );
+    }
   }
 }
 
@@ -259,8 +347,14 @@ async function handleUsersForceReauth(
     p_canonical_user_key: params.canonical_user_key,
   });
   if (error) {
-    // User-not-found raises PGRST or 22023; surface as VAL-01 up the stack.
-    throw new Error(`stir_ops_force_reauth failed: ${error.message}`);
+    // W17 + W19 fix: classify SQLSTATE 22023 'user not found' as VAL-01/404
+    // rather than leaking through the top-level catch as NET-01/500 with
+    // raw SQL text. Any other PGRST failure is genuine infra → NET-01 500.
+    const msg = String(error.message ?? '');
+    if (msg.includes('user not found')) {
+      throw new DispatchError(ErrorCode.VAL_01, 404, `user not found: ${params.canonical_user_key}`);
+    }
+    throw new Error(`stir_ops_force_reauth failed: ${msg}`);
   }
 
   const result = data as {
@@ -300,7 +394,22 @@ async function handleUsersDetail(
     p_canonical_user_key: params.canonical_user_key,
   });
   if (error) throw new Error(`stir_ops_user_detail failed: ${error.message}`);
-  return { ok: true, detail: data };
+
+  // W8 (SA2 W4): read-audit trail for per-user lookups. Targeted user.detail
+  // queries are high-signal — a compromised admin enumerating a specific
+  // user leaves a trail scoped to that user. List/search endpoints stay
+  // unaudited to keep audit_log write volume bounded.
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'users.detail.viewed',
+    target_table: 'app_users',
+    target_id: params.canonical_user_key,
+    before: null,
+    after: null,
+    request_id: ctx.requestId,
+  });
+  return { ok: true, detail: data, audit_id: auditId };
 }
 
 // ---------------------------------------------------------------------------
@@ -404,10 +513,10 @@ async function handleFlaggedOutputsResolve(
 ): Promise<Record<string, unknown>> {
   // Require canned_fallback_json iff action is canned_fallback_pinned.
   if (params.action === 'canned_fallback_pinned' && params.canned_fallback_json === undefined) {
-    throw new Error('canned_fallback_json required for canned_fallback_pinned action');
+    throw new DispatchError(ErrorCode.VAL_01, 400, 'canned_fallback_json required for canned_fallback_pinned action');
   }
   if (params.action !== 'canned_fallback_pinned' && params.canned_fallback_json !== undefined) {
-    throw new Error('canned_fallback_json only allowed for canned_fallback_pinned action');
+    throw new DispatchError(ErrorCode.VAL_01, 400, 'canned_fallback_json only allowed for canned_fallback_pinned action');
   }
 
   // Fetch the flagged row to get the request_id + canonical_user_key_hash for
@@ -418,26 +527,63 @@ async function handleFlaggedOutputsResolve(
     .eq('id', params.id)
     .single();
   if (fetchErr || !flagged) {
-    throw new Error(`flagged_output ${params.id} not found: ${fetchErr?.message ?? 'missing'}`);
+    throw new DispatchError(ErrorCode.VAL_01, 404, `flagged_output ${params.id} not found`);
   }
   if (flagged.resolved_at) {
-    throw new Error(`flagged_output ${params.id} already resolved`);
+    throw new DispatchError(ErrorCode.VAL_01, 409, `flagged_output ${params.id} already resolved`);
   }
 
   // Cache side-effects BEFORE the resolve write so failures surface loudly.
-  if (params.action === 'withdrawn') {
-    // Delete the cached response so retries hit fresh generation instead of
-    // replaying the bad body.
-    await ctx.client
-      .from('ai_response_cache')
-      .delete()
-      .eq('request_id', flagged.request_id);
-  } else if (params.action === 'canned_fallback_pinned') {
-    // Replace the cached response body with the admin-supplied safe fallback.
-    await ctx.client
-      .from('ai_response_cache')
-      .update({ response_body: params.canned_fallback_json })
-      .eq('request_id', flagged.request_id);
+  //
+  // User-scope the mutation (review C2 + SA3 W3): ai_response_cache's PK is
+  // (canonical_user_key, request_id) per migration 20260418000024. Filtering
+  // only by request_id would delete/overwrite cache rows for every user
+  // who happens to share that request_id, breaking the per-user scoping
+  // invariant that migration introduced.
+  //
+  // The flagged row carries only canonical_user_key_hash (irreversible),
+  // so we join through ai_request_log — that table stores the raw
+  // canonical_user_key alongside request_id. Fail closed if the owner
+  // can't be resolved (orphan flag from deleted ai_request_log row) to
+  // avoid the wildcard-delete fallthrough.
+  if (params.action === 'withdrawn' || params.action === 'canned_fallback_pinned') {
+    const { data: ownerRow, error: ownerErr } = await ctx.client
+      .from('ai_request_log')
+      .select('canonical_user_key')
+      .eq('request_id', flagged.request_id)
+      .maybeSingle<{ canonical_user_key: string }>();
+
+    if (ownerErr) {
+      throw new Error(`resolve owner lookup failed: ${ownerErr.message}`);
+    }
+    if (!ownerRow) {
+      throw new Error(
+        `resolve owner lookup: no ai_request_log row for request_id ${flagged.request_id} — cannot scope cache mutation safely`,
+      );
+    }
+
+    if (params.action === 'withdrawn') {
+      const { error: deleteErr } = await ctx.client
+        .from('ai_response_cache')
+        .delete()
+        .eq('canonical_user_key', ownerRow.canonical_user_key)
+        .eq('request_id', flagged.request_id);
+      // W38 (DB1 #4): surface cache mutation errors before the resolve
+      // write so admins can retry.
+      if (deleteErr) {
+        throw new Error(`ai_response_cache delete failed: ${deleteErr.message}`);
+      }
+    } else {
+      // canned_fallback_pinned — replace with admin-supplied safe fallback.
+      const { error: updateCacheErr } = await ctx.client
+        .from('ai_response_cache')
+        .update({ response_body: params.canned_fallback_json })
+        .eq('canonical_user_key', ownerRow.canonical_user_key)
+        .eq('request_id', flagged.request_id);
+      if (updateCacheErr) {
+        throw new Error(`ai_response_cache update failed: ${updateCacheErr.message}`);
+      }
+    }
   }
 
   // Update the flagged row itself.
@@ -530,8 +676,10 @@ async function handlePromptVersionsRollout(
     .eq('version', params.version)
     .single();
   if (preErr || !before) {
-    throw new Error(
-      `prompt_version ${params.feature_key}@${params.version} not found: ${preErr?.message ?? 'missing'}`,
+    throw new DispatchError(
+      ErrorCode.VAL_01,
+      404,
+      `prompt_version ${params.feature_key}@${params.version} not found`,
     );
   }
 
@@ -584,7 +732,7 @@ async function handleFeatureFlagsUpdate(
     .eq('key', params.key)
     .single();
   if (preErr || !before) {
-    throw new Error(`feature_flag ${params.key} not found: ${preErr?.message ?? 'missing'}`);
+    throw new DispatchError(ErrorCode.VAL_01, 404, `feature_flag ${params.key} not found`);
   }
 
   const updates: Record<string, unknown> = {};
@@ -619,12 +767,4 @@ async function handleFeatureFlagsUpdate(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function zodToFieldErrors(err: ZodError): FieldError[] {
-  return err.errors.map((e) => ({
-    field: e.path.join('.') || '<root>',
-    issue: e.message,
-  }));
-}
+// (Helpers: zodToFieldErrors imported from _shared/validation.ts since W18 fix.)

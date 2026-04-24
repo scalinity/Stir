@@ -31,6 +31,7 @@ export type RateLimitPolicyKey =
   | 'ip:push_register_hourly'
   | 'ip:voice_turn_usage_daily'
   | 'ip:realtime_session_daily'
+  | 'ip:ops_admin_hourly'
   | 'user:dinner_solve_hourly'
   | 'user:voice_turn_usage_hourly'
   | 'user:cook_turn_hourly'
@@ -100,6 +101,12 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   // 40/hour protects a single account from a 1000-mints/hour script.
   'ip:realtime_session_daily':    { windowSeconds: 86400, maxCount: 200 },
   'user:realtime_session_hourly': { windowSeconds: 3600,  maxCount: 40 },
+  // ops_admin (SA2 W2): admin-token compromise → unbounded enumeration via
+  // users.list / flagged_outputs.list. 30/min = 1800/hour per IP caps an
+  // attacker at 30 rpm — enough headroom for legit active triage (rarely
+  // exceeds 5-10 rpm) while cutting enumeration from thousands/sec to
+  // 30/min. Per-admin bucket is a step-9 follow-up per CLAUDE.md §Deferred.
+  'ip:ops_admin_hourly':          { windowSeconds: 3600,  maxCount: 1800 },
 };
 
 export interface RateLimitResult {

@@ -172,7 +172,7 @@ Deno.test('ops-admin: users.force_reauth sets reauth_required_at + writes audit'
   assertEquals(audit?.target_id, session.canonical_user_key);
 });
 
-Deno.test('ops-admin: users.force_reauth on non-existent user → handler surfaces error', async () => {
+Deno.test('ops-admin: users.force_reauth on non-existent user → VAL-01 404 (review W17)', async () => {
   const admin = await seedAdmin();
   const { status, body } = await callOpsAdmin(
     {
@@ -181,8 +181,7 @@ Deno.test('ops-admin: users.force_reauth on non-existent user → handler surfac
     },
     `Bearer ${admin.jwt}`,
   );
-  assertEquals(status, 500);
-  assertEquals(body.error, 'NET-01');
-  // Error message bubbles up — contains the RPC's "user not found" text.
+  assertEquals(status, 404);
+  assertEquals(body.error, 'VAL-01');
   assertEquals(String(body.message).includes('user not found'), true);
 });

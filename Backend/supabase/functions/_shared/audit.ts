@@ -93,16 +93,3 @@ export async function writeAudit(
   }
 }
 
-/**
- * Write audit + surface the inserted id on caller's result object.
- * Convenience wrapper when the caller wants the row id in their response
- * body (e.g., to return an "undo" token — though v1 doesn't implement
- * undo). Never throws; returns null on failure.
- */
-export async function writeAuditAndReturnId(
-  client: SupabaseClient,
-  log: Logger,
-  entry: AuditEntry,
-): Promise<string | null> {
-  return writeAudit(client, log, entry);
-}
