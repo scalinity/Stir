@@ -67,7 +67,11 @@ struct EmptyState: View {
         }
         .padding(.horizontal, CGFloat.Stir.space6) // 32pt — leaves breathing room
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .accessibilityElement(children: .combine)
+        // NOTE: no `.combine` — when the optional PrimaryButton CTA
+        // is present, `.combine` flattens the Button into the composed
+        // static label and VoiceOver users can't activate it. Letting
+        // SwiftUI emit separate a11y elements keeps the CTA reachable.
+        // Review finding C3 (FD1).
     }
 }
 

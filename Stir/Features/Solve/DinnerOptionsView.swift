@@ -152,8 +152,11 @@ struct DinnerOptionsView: View {
             RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
                 .strokeBorder(Color.Stir.amber600.opacity(0.3), lineWidth: 1),
         )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(message). Error code \(code).")
+        // NOTE: no `.combine` — the Try again TextButton is an
+        // interactive child. Combining would flatten it into the
+        // static label and VoiceOver users couldn't retry. Let SwiftUI
+        // emit banner text + code + Try again as separate a11y
+        // elements. Review finding C3 (FD1).
     }
 
     private func errorSlot(rank: Int, code: ErrorCode) -> some View {

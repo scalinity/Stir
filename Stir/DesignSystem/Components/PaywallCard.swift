@@ -79,8 +79,14 @@ struct PaywallCard: View {
                 .accessibilityLabel(accessibilityLabel)
                 .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         } else {
+            // Non-interactive variant: no `.combine` because that
+            // would flatten any future interactive child (e.g. a
+            // "Learn more" affordance) into the static label. Use
+            // `.contain` instead so SwiftUI still groups the card as
+            // a single VoiceOver container without erasing children.
+            // Review finding C3 (FD1).
             content
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel(accessibilityLabel)
         }
     }
@@ -158,11 +164,17 @@ struct PaywallCard: View {
     }
 
     private var accessibilityLabel: String {
+        // Include full feature content, not just count — VoiceOver
+        // users need to hear what the plan offers to make a purchase
+        // decision. "Includes 5 features" tells them nothing about
+        // Premium vs Pro. Review finding C3 (FD1).
         var parts = [tierName, priceDisplay, cadenceDisplay]
         if let trialCopy { parts.append(trialCopy) }
         if isCurrentTier { parts.append("current plan") }
         if isSelected { parts.append("selected") }
-        parts.append("includes \(features.count) features")
+        if !features.isEmpty {
+            parts.append("Features: " + features.joined(separator: "; "))
+        }
         return parts.joined(separator: ", ")
     }
 }

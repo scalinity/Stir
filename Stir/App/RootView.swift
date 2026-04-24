@@ -186,8 +186,11 @@ private struct OfflineBanner: View {
                 .fill(Color.Stir.divider)
                 .frame(height: 1)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isStaticText)
+        // NOTE: no `.combine` here — the Retry button is an interactive
+        // child. Combining flattened it into the static text label and
+        // VoiceOver users couldn't activate retry. Let SwiftUI emit
+        // the banner text + Retry as separate a11y elements.
+        // Review finding C3 (FD1).
     }
 
     private var splitText: some View {
