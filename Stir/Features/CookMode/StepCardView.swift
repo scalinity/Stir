@@ -55,8 +55,8 @@ struct StepCardView: View {
                 viewModel.requestExitConfirm()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .stirFont(.bodyMd).fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink900)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -65,7 +65,7 @@ struct StepCardView: View {
             Spacer()
 
             Text(viewModel.recipePlan.title ?? "Cook Mode")
-                .font(.subheadline.weight(.semibold))
+                .stirFont(.labelLg).fontWeight(.semibold)
                 .lineLimit(1)
 
             Spacer()
@@ -82,12 +82,12 @@ struct StepCardView: View {
     private var stepHeader: some View {
         HStack {
             Text("Step \(viewModel.currentStepIndex + 1) of \(viewModel.totalSteps)")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+                .stirFont(.labelMd).fontWeight(.medium)
+                .foregroundStyle(Color.Stir.ink500)
             Spacer()
             if let step = viewModel.currentStep, let title = step.title, !title.isEmpty {
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .stirFont(.labelMd).fontWeight(.medium)
                     .lineLimit(1)
             }
         }
@@ -95,7 +95,7 @@ struct StepCardView: View {
 
     private var instructionBody: some View {
         Text(viewModel.currentStep?.instructionText ?? "")
-            .font(.title2)
+            .stirFont(.displayMd)
             .lineSpacing(6)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -107,7 +107,7 @@ struct StepCardView: View {
         if let step = viewModel.currentStep, step.timerSeconds > 0 {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Timer")
-                    .font(.headline)
+                    .stirFont(.labelLg).fontWeight(.semibold)
                     .accessibilityAddTraits(.isHeader)
                 // Only treat running / paused / pending timers as "the
                 // step's current timer" for UI routing. Cancelled and
@@ -143,7 +143,7 @@ struct StepCardView: View {
                         Task { await viewModel.startTimerForCurrentStep() }
                     } label: {
                         Label("Start \(Int(step.timerSeconds) / 60) min timer", systemImage: "timer")
-                            .font(.headline)
+                            .stirFont(.labelLg).fontWeight(.semibold)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                     }
@@ -152,7 +152,7 @@ struct StepCardView: View {
                 }
             }
             .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.Stir.paper100, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -189,7 +189,7 @@ struct StepCardView: View {
             }
             .buttonStyle(.bordered)
         }
-        .font(.subheadline.weight(.medium))
+        .stirFont(.labelMd).fontWeight(.medium)
     }
 
     // MARK: - Bottom bar
@@ -204,9 +204,9 @@ struct StepCardView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "questionmark.bubble")
                     Text("Something missing?")
-                        .font(.subheadline.weight(.medium))
+                        .stirFont(.labelMd).fontWeight(.medium)
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.Stir.ink900)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -219,7 +219,7 @@ struct StepCardView: View {
                     viewModel.previousStep()
                 } label: {
                     HStack { Image(systemName: "arrow.left"); Text("Previous") }
-                        .font(.headline)
+                        .stirFont(.labelLg).fontWeight(.semibold)
                         .frame(maxWidth: .infinity, minHeight: 52)
                         .contentShape(Rectangle())
                 }
@@ -238,7 +238,7 @@ struct StepCardView: View {
                         Text(viewModel.isLastStep ? "Finish" : "Next")
                         Image(systemName: viewModel.isLastStep ? "checkmark" : "arrow.right")
                     }
-                    .font(.headline)
+                    .stirFont(.labelLg).fontWeight(.semibold)
                     .frame(maxWidth: .infinity, minHeight: 52)
                     .contentShape(Rectangle())
                 }
@@ -270,10 +270,10 @@ struct StepCardView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: micIconName)
-                    .font(.headline)
+                    .stirFont(.labelLg).fontWeight(.semibold)
                     .accessibilityHidden(true)
                 Text(micLabel)
-                    .font(.subheadline.weight(.semibold))
+                    .stirFont(.labelLg).fontWeight(.semibold)
                 if viewModel.micButtonRole == .busy {
                     ProgressView()
                         .progressViewStyle(.circular)

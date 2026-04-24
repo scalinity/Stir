@@ -490,27 +490,28 @@ private struct VoiceToastView: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: CGFloat.Stir.space3 - 2) { // 10pt
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color.Stir.amber600)
                 .accessibilityHidden(true)
             Text(message)
-                .font(.subheadline)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink900)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+            Spacer(minLength: CGFloat.Stir.space2)
             Button {
                 onDismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .foregroundStyle(.secondary)
-                    .padding(8)
+                    .foregroundStyle(Color.Stir.ink500)
+                    .padding(CGFloat.Stir.space2)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Dismiss")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, CGFloat.Stir.space4)
+        .padding(.vertical, CGFloat.Stir.space3 - 2) // 10pt
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
     }
