@@ -21,7 +21,7 @@ struct ScanReviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                 if case .parsing = viewModel.phase {
                     skeleton
                 } else if case .error(let message, _) = viewModel.phase {
@@ -32,8 +32,10 @@ struct ScanReviewView: View {
                     addButton
                 }
             }
-            .padding()
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.vertical, CGFloat.Stir.space4)
         }
+        .background(Color.Stir.paper50)
         .navigationTitle("Review ingredients")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -46,8 +48,8 @@ struct ScanReviewView: View {
             switch viewModel.phase {
             case .review, .confirmed:
                 confirmBar
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, CGFloat.Stir.screenMargin)
+                    .padding(.vertical, CGFloat.Stir.space3)
                     .background(.bar)
             default:
                 EmptyView()
@@ -85,63 +87,67 @@ struct ScanReviewView: View {
         let count = viewModel.ingredients.count
         let needsReview = viewModel.ingredients.filter { $0.confidence == .needsReview }.count
 
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("\(count) ingredients spotted")
-                .font(.headline)
-            if needsReview > 0 {
-                Text("\(needsReview) need a quick confirm before we solve.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Tap a chip to tweak, long-press to delete.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: CGFloat.Stir.space1 + 2) { // 6pt
+            HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space2) {
+                Text("Found \(count) things")
+                    .stirFont(.displayLg)
+                    .foregroundStyle(Color.Stir.ink900)
+                    .accessibilityAddTraits(.isHeader)
+
+                HStack(spacing: CGFloat.Stir.space1) {
+                    Image.Stir.sparkles
+                        .font(.system(size: 12, weight: .semibold)) // justification: 12pt AI micro-tag per mockup 04 chip-scale adornment
+                    Text("AI")
+                        .stirFont(.labelEyebrow)
+                }
+                .foregroundStyle(Color.Stir.sage600)
             }
+
+            Text(needsReview > 0
+                 ? "\(needsReview) need a quick confirm before we solve."
+                 : "Tap a chip to tweak, long-press to delete.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
         }
     }
 
     private var chipsGrid: some View {
-        let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
-        return LazyVGrid(columns: columns, spacing: 8) {
+        // Uses Phase 2 Chip component — confidence-band state maps
+        // directly to ChipState variants (confirmed→.confidenceConfirmed,
+        // needsReview→.confidenceReview, likelyStaple→.likelyStaple).
+        // Grouping by protein/produce/pantry per mockup 04 §Review is
+        // deferred: ScanViewModel.Ingredient has no category metadata,
+        // and Pantry Parse response doesn't emit a category field yet.
+        // Flat chip grid preserves current behavior + visual drift only
+        // in group structure, not chip styling.
+        let columns = [GridItem(.adaptive(minimum: 110), spacing: CGFloat.Stir.space2)]
+        return LazyVGrid(columns: columns, spacing: CGFloat.Stir.space2) {
             ForEach(viewModel.ingredients) { ingredient in
-                chip(for: ingredient)
+                Chip(
+                    title: ingredient.displayName,
+                    state: chipState(for: ingredient.confidence),
+                    action: {
+                        editTarget = ingredient
+                        editBuffer = ingredient.displayName
+                    },
+                )
+                .contextMenu {
+                    Button(role: .destructive) {
+                        viewModel.deleteIngredient(id: ingredient.id)
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                }
             }
         }
     }
 
-    private func chip(for ingredient: ScanViewModel.Ingredient) -> some View {
-        let palette = palette(for: ingredient.confidence)
-        return Button {
-            editTarget = ingredient
-            editBuffer = ingredient.displayName
-        } label: {
-            HStack(spacing: 6) {
-                chipIcon(for: palette)
-                Text(ingredient.displayName)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            // Enforce the spec §6 44pt minimum hit target — the chip
-            // visual stays compact; the tap region extends via the
-            // frame + contentShape combo.
-            .frame(minHeight: 44)
-            .background(palette.bg, in: RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(palette.fg)
-            .contentShape(Rectangle())
+    private func chipState(for confidence: PantryParseResponse.PantryItemConfidence) -> ChipState {
+        switch confidence {
+        case .confirmed:    return .confidenceConfirmed
+        case .needsReview:  return .confidenceReview
+        case .likelyStaple: return .likelyStaple
         }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button(role: .destructive) {
-                viewModel.deleteIngredient(id: ingredient.id)
-            } label: {
-                Label("Remove", systemImage: "trash")
-            }
-        }
-        .accessibilityLabel("\(ingredient.displayName), \(ingredient.confidence.accessibilityDescription)")
-        .accessibilityAddTraits(.isButton)
     }
 
     private var addButton: some View {
@@ -149,34 +155,51 @@ struct ScanReviewView: View {
             addBuffer = ""
             showAddAlert = true
         } label: {
-            Label("Add an ingredient", systemImage: "plus.circle")
-                .font(.subheadline.weight(.medium))
+            HStack(spacing: CGFloat.Stir.space1 + 2) { // 6pt
+                Image.Stir.plus
+                    .font(.system(size: 12, weight: .semibold)) // justification: inline-plus sized to match Chip pill scale
+                Text("Add an ingredient")
+                    .stirFont(.labelMd)
+            }
+            .foregroundStyle(Color.Stir.ink500)
+            .padding(.horizontal, CGFloat.Stir.space3)
+            .padding(.vertical, CGFloat.Stir.space2)
+            .frame(minHeight: 44)
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        Color.Stir.ink300,
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3]),
+                    ),
+            )
+            .contentShape(Capsule())
         }
-        .padding(.top, 4)
+        .buttonStyle(.plain)
+        .padding(.top, CGFloat.Stir.space1)
     }
 
     private var confirmBar: some View {
-        Button {
-            onConfirm()
-        } label: {
-            Text("Looks right — find dinners")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.orange, in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(.white)
-        }
-        .disabled(viewModel.ingredients.isEmpty)
+        PrimaryButton(
+            title: "Find me dinner",
+            isDisabled: viewModel.ingredients.isEmpty,
+            action: onConfirm,
+        )
     }
 
     private var skeleton: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ProgressView("Looking at your kitchen…")
-                .progressViewStyle(.circular)
-            HStack(spacing: 8) {
-                ForEach(0..<3, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.tertiarySystemFill))
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
+            HStack(spacing: CGFloat.Stir.space2) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(Color.Stir.ember600)
+                Text("Looking at your kitchen…")
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.ink700)
+            }
+            HStack(spacing: CGFloat.Stir.space2) {
+                ForEach(0 ..< 3, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusSm, style: .continuous)
+                        .fill(Color.Stir.paper200)
                         .frame(width: 80, height: 32)
                 }
             }
@@ -184,48 +207,28 @@ struct ScanReviewView: View {
     }
 
     private func errorCard(message: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(.orange)
+        VStack(spacing: CGFloat.Stir.space3 - 2) { // 10pt
+            Image.Stir.softError
+                .font(.system(size: CGFloat.Stir.iconLg, weight: .regular))
+                .foregroundStyle(Color.Stir.rust600)
             Text(message)
-                .font(.callout)
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.ink700)
                 .multilineTextAlignment(.center)
         }
-        .padding()
+        .padding(CGFloat.Stir.space4)
         .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .fill(Color.Stir.paper100),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard, style: .continuous)
+                .strokeBorder(Color.Stir.divider, lineWidth: 1),
+        )
     }
 
     // MARK: - Helpers
-
-    private struct Palette {
-        var bg: Color
-        var fg: Color
-        var iconName: String
-        var iconColor: Color
-    }
-
-    private func palette(for confidence: PantryParseResponse.PantryItemConfidence) -> Palette {
-        switch confidence {
-        case .confirmed:
-            return Palette(bg: Color(.tertiarySystemBackground), fg: .primary,
-                           iconName: "checkmark", iconColor: .green)
-        case .needsReview:
-            return Palette(bg: Color.yellow.opacity(0.2), fg: .primary,
-                           iconName: "questionmark", iconColor: .orange)
-        case .likelyStaple:
-            return Palette(bg: Color(.secondarySystemBackground), fg: .secondary,
-                           iconName: "sparkles", iconColor: .secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func chipIcon(for palette: Palette) -> some View {
-        Image(systemName: palette.iconName)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(palette.iconColor)
-    }
 
     private func bindingIsPresented(forEdit: Bool) -> Binding<Bool> {
         Binding(

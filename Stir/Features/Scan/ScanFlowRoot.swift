@@ -118,43 +118,39 @@ private struct ScanPrimerBody: View {
     @ScaledMetric(relativeTo: .largeTitle) private var heroIconSize: CGFloat = 64
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: CGFloat.Stir.space5) {
             Spacer()
             heroIcon
                 .accessibilityHidden(true)
 
-            VStack(spacing: 12) {
+            VStack(spacing: CGFloat.Stir.space3) {
                 Text("Point at what you've got.")
-                    .font(.title2.weight(.semibold))
+                    .stirFont(.displayMd)
+                    .foregroundStyle(Color.Stir.ink900)
                     .multilineTextAlignment(.center)
                 Text("Stir turns one photo of your fridge, pantry, or counter into three dinner options you can actually cook tonight.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink500)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, CGFloat.Stir.space5)
 
             Spacer()
 
-            VStack(spacing: 12) {
-                Button {
-                    Task { await grantAndContinue() }
-                } label: {
-                    Text(cameraService.currentPermission == .authorized ? "Start scanning" : "Allow camera access")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.orange, in: RoundedRectangle(cornerRadius: 12))
-                        .foregroundStyle(.white)
-                }
-                Button("Not now", action: onCancel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            VStack(spacing: CGFloat.Stir.space3) {
+                PrimaryButton(
+                    title: cameraService.currentPermission == .authorized
+                        ? "Start scanning"
+                        : "Allow camera access",
+                    action: { Task { await grantAndContinue() } },
+                )
+                TextButton(title: "Not now", action: onCancel)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+            .padding(.horizontal, CGFloat.Stir.screenMarginHero)
+            .padding(.bottom, CGFloat.Stir.space5)
         }
+        .background(Color.Stir.paper50)
         .navigationTitle("Scan kitchen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -169,9 +165,9 @@ private struct ScanPrimerBody: View {
         // Respect Reduce Motion — no pulse for users who've opted out.
         // Use @ScaledMetric so the hero scales with Dynamic Type rather
         // than clipping at XXXL or looking tiny at XS.
-        let base = Image(systemName: "camera.viewfinder")
-            .font(.system(size: heroIconSize, weight: .semibold))
-            .foregroundStyle(.orange)
+        let base = Image.Stir.scan
+            .font(.system(size: heroIconSize, weight: .semibold)) // justification: dynamic-scaled hero icon size via @ScaledMetric, not a static literal
+            .foregroundStyle(Color.Stir.ember600)
         if reduceMotion {
             base
         } else {
