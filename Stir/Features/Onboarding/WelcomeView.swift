@@ -142,21 +142,24 @@ private struct WelcomeBowl: View {
             }
 
             // Bowl body (below the rim) — paper200 fill, ember outline
-            var body = Path()
-            body.move(to: CGPoint(x: 16 * scale, y: 36 * scale))
-            body.addQuadCurve(
+            // Renamed from `body` → `bowlBody` so it doesn't shadow the
+            // outer `WelcomeBowl.body` computed property. Review
+            // finding S9 (DB1).
+            var bowlBody = Path()
+            bowlBody.move(to: CGPoint(x: 16 * scale, y: 36 * scale))
+            bowlBody.addQuadCurve(
                 to: CGPoint(x: 124 * scale, y: 36 * scale),
                 control: CGPoint(x: 70 * scale, y: 90 * scale),
             )
-            body.addLine(to: CGPoint(x: 118 * scale, y: 62 * scale))
-            body.addQuadCurve(
+            bowlBody.addLine(to: CGPoint(x: 118 * scale, y: 62 * scale))
+            bowlBody.addQuadCurve(
                 to: CGPoint(x: 22 * scale, y: 62 * scale),
                 control: CGPoint(x: 70 * scale, y: 92 * scale),
             )
-            body.closeSubpath()
-            context.fill(body, with: .color(Color.Stir.paper200))
+            bowlBody.closeSubpath()
+            context.fill(bowlBody, with: .color(Color.Stir.paper200))
             context.stroke(
-                body,
+                bowlBody,
                 with: .color(Color.Stir.ember600),
                 style: StrokeStyle(lineWidth: 1.5 * scale, lineJoin: .round),
             )

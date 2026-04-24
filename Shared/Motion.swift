@@ -63,12 +63,16 @@ extension Animation.Stir {
 // Exposed for call sites that need the TimeInterval directly (Timeline
 // refresh cadences, debounce windows, etc). Prefer the `Animation.Stir.*`
 // tokens for SwiftUI animations.
+//
+// Renamed from `TimeInterval.StirMotion` to `TimeInterval.Stir` to match
+// the single-word namespace used by `Color.Stir`, `CGFloat.Stir`, and
+// `Font.Stir`. Review finding S6 (CR2).
 
 extension TimeInterval {
-    enum StirMotion {}
+    enum Stir {}
 }
 
-extension TimeInterval.StirMotion {
+extension TimeInterval.Stir {
     /// 0.15s — exit transitions.
     static let fast: TimeInterval = 0.15
     /// 0.20s — default state-change transitions.

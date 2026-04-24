@@ -46,14 +46,22 @@ struct ConfigurationErrorView: View {
                     .padding(.horizontal, CGFloat.Stir.space5)
             }
 
-            Link(
-                destination: URL(string: "mailto:scalinity.ai@gmail.com?subject=Stir%20Startup%20Issue")!,
+            // `URL(string:)` force-unwrap replaced with a conditional
+            // render — a typo in the mailto: scheme used to crash the
+            // app at the one moment a user already hit an error. The
+            // string is a known-good literal today but a compile-time
+            // guarantee costs more than a `guard` to avoid the edge.
+            // Review finding S10 (DB1).
+            if let supportURL = URL(
+                string: "mailto:scalinity.ai@gmail.com?subject=Stir%20Startup%20Issue",
             ) {
-                Text("Contact support")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.ember600)
+                Link(destination: supportURL) {
+                    Text("Contact support")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ember600)
+                }
+                .padding(.bottom, CGFloat.Stir.space6)
             }
-            .padding(.bottom, CGFloat.Stir.space6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
