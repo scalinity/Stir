@@ -97,12 +97,18 @@ export interface FieldError {
 //   signature_invalid  JWT structure OK, signature doesn't verify (iOS: error + alert)
 //   user_stale         JWT valid but its canonical_user_key no longer resolves
 //                      (merged forward, missing row, etc.) (iOS: info, silent retry)
+//   reauth_required    JWT valid but issued before app_users.reauth_required_at;
+//                      iOS must rotate Keychain install_id + re-run SIWA re-flow
+//                      (NOT the generic silent-retry path — different UX copy).
+//                      Set by admin users.force_reauth action. See P1.1b COMMENT,
+//                      ADR 0023.
 export type AuthReason =
   | 'missing'
   | 'expired'
   | 'malformed'
   | 'signature_invalid'
-  | 'user_stale';
+  | 'user_stale'
+  | 'reauth_required';
 
 /** Voice-session lifecycle reasons attached to ENT-VOICE-01 / AI-VOICE-01
  *  403 responses (P1-B / SA2-W4, 2026-04-23). Typed so the compiler

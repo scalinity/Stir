@@ -307,8 +307,11 @@ Deno.test('stir_ops_list_voice_sessions: aggregates by trace_id + sorts by token
     });
   }
 
+  // 500 is the RPC's max p_limit; avoids shortSession (1200 total tokens)
+  // getting crowded out by higher-token sessions from earlier tests in the
+  // shared DB.
   const { data, error } = await svc.rpc('stir_ops_list_voice_sessions', {
-    p_limit: 50,
+    p_limit: 500,
     p_min_tokens: 0,
   });
   assertEquals(error, null);

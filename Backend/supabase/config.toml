@@ -433,6 +433,17 @@ verify_jwt = false
 [functions.revenuecat-webhook]
 verify_jwt = false
 
+# Step-8 Phase 2. ops-admin verifies a Supabase Auth JWT (NOT iOS session
+# JWT) via _shared/admin_auth.ts so it can return typed AUTH-01 reasons
+# and BILL-01 for not_admin. ADR 0023.
+[functions.ops-admin]
+verify_jwt = false
+
+# Step-8 Phase 2. ops-flag-output verifies the iOS session JWT itself so
+# flag submissions carry typed AUTH-01 reasons on failure.
+[functions.ops-flag-output]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

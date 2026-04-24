@@ -14,6 +14,7 @@
 // to AUTH-01 responses with the reason field preserved for iOS.
 
 import * as jose from 'jose';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AuthReason } from './errors.ts';
 
 // Named STIR_JWT_SECRET (not SUPABASE_JWT_SECRET) because Supabase's Edge
@@ -81,8 +82,20 @@ export async function issueSessionJWT(
  * typed `reason` for missing / malformed / expired / signature_invalid.
  *
  * The handler catches AuthError and returns 401 with AUTH-01 + reason.
+ *
+ * Optional `client` parameter (Phase 2, step-8 ADR 0023): when provided,
+ * queries `app_users.reauth_required_at` after JWT verification succeeds.
+ * If `reauth_required_at > JWT.iat` the JWT is rejected with reason
+ * `reauth_required`. Set by the admin `users.force_reauth` action; iOS
+ * maps this reason to a Sign-in-with-Apple re-flow rather than the
+ * silent-retry path used for expired/missing. Callers that don't care
+ * about force-reauth (e.g., endpoints that don't touch app_users at all)
+ * can omit the client — existing call sites stay backward-compatible.
  */
-export async function verifySessionJWT(req: Request): Promise<VerifiedSessionClaims> {
+export async function verifySessionJWT(
+  req: Request,
+  client?: SupabaseClient,
+): Promise<VerifiedSessionClaims> {
   const header = req.headers.get('authorization') ?? req.headers.get('Authorization');
   if (!header) throw new AuthError('missing', 'no Authorization header');
 
@@ -138,6 +151,37 @@ export async function verifySessionJWT(req: Request): Promise<VerifiedSessionCla
   }
   if (typeof iat !== 'number' || typeof exp !== 'number') {
     throw new AuthError('malformed', 'missing iat/exp');
+  }
+
+  // Force-reauth gate (Phase 2, ADR 0023). Only runs when caller supplies a
+  // service-role client — lets endpoints that don't touch app_users skip the
+  // round-trip. Query is a single indexed PK lookup (~1-2 ms).
+  //
+  // Semantics: admin sets `reauth_required_at = now()` via users.force_reauth;
+  // any existing JWT (iat < now()) is rejected with reason=reauth_required on
+  // its next verifying call. iOS maps that reason to SIWA re-flow; fresh JWT
+  // minted after the bump passes naturally (iat > reauth_required_at).
+  if (client) {
+    const { data: row, error: rowErr } = await client
+      .from('app_users')
+      .select('reauth_required_at')
+      .eq('canonical_user_key', canonical_user_key)
+      .maybeSingle<{ reauth_required_at: string | null }>();
+    // Row-missing is handled by the caller's identity-resolution layer (not
+    // our concern here); a DB error doesn't fail closed — we don't want a
+    // transient Postgres blip to invalidate every in-flight session.
+    if (!rowErr && row && row.reauth_required_at) {
+      const reauthAtMs = Date.parse(row.reauth_required_at);
+      if (!Number.isNaN(reauthAtMs)) {
+        const reauthAtSec = Math.floor(reauthAtMs / 1000);
+        if (iat < reauthAtSec) {
+          throw new AuthError(
+            'reauth_required',
+            `JWT iat=${iat} predates reauth_required_at=${reauthAtSec}`,
+          );
+        }
+      }
+    }
   }
 
   return {

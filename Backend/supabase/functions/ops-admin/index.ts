@@ -1,0 +1,630 @@
+// POST /v1/ops/admin — single router endpoint for all admin actions.
+//
+// Auth: Supabase Auth magic-link JWT (NOT iOS session JWT). See ADR 0023.
+// Call shape (discriminated union):
+//   POST /functions/v1/ops-admin
+//   Authorization: Bearer <supabase_auth_jwt>
+//   Body: { "action": "users.list", "params": {...} }
+//
+// Response (success):
+//   { "ok": true, ...action-specific payload..., "audit_id"?: "<uuid>" }
+// Response (failure):
+//   { "error": "AUTH-01"|"VAL-01"|"NET-01", "message": "...", "reason"?: "..." }
+//
+// Every mutation action writes an audit_log row via _shared/audit.ts.
+// Per-action handlers live in this file as a closed switch; Phase-2 ships
+// 2 actions (users.list, users.force_reauth); remaining 9 ship in P2.4.
+
+import { z, ZodError } from 'zod';
+import { createServiceClient } from '../_shared/db.ts';
+import {
+  AdminAuthError,
+  adminAuthErrorHttp,
+  type AdminIdentity,
+  verifyAdminAuth,
+} from '../_shared/admin_auth.ts';
+import { writeAudit } from '../_shared/audit.ts';
+import { createLogger, requestIdFrom, type Logger } from '../_shared/logger.ts';
+import { ErrorCode, jsonError, jsonOk, type FieldError } from '../_shared/errors.ts';
+
+// ---------------------------------------------------------------------------
+// Action schemas (discriminated union). 11 actions total per spec §14.
+// ---------------------------------------------------------------------------
+
+const CanonicalUserKey = z.string().min(4).max(300);
+const FeatureKey = z.enum(['dinner_solve', 'voice_cook_session', 'recipe_import']);
+const UserStatus = z.enum(['active', 'banned']); // 'merged' forbidden at API layer
+
+const UsersListParams = z.object({
+  tier: z.enum(['free', 'premium', 'pro']).optional(),
+  search: z.string().max(256).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).optional(),
+}).strict();
+
+const UsersDetailParams = z.object({
+  canonical_user_key: CanonicalUserKey,
+}).strict();
+
+const UsersResetQuotaParams = z.object({
+  canonical_user_key: CanonicalUserKey,
+  feature_key: FeatureKey,
+}).strict();
+
+const UsersStatusParams = z.object({
+  canonical_user_key: CanonicalUserKey,
+  status: UserStatus,
+}).strict();
+
+const UsersForceReauthParams = z.object({
+  canonical_user_key: CanonicalUserKey,
+}).strict();
+
+const FlaggedOutputsListParams = z.object({
+  state: z.enum(['open', 'resolved', 'all']).optional(),
+  feature_key: z.string().max(64).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).optional(),
+}).strict();
+
+const FlaggedOutputsResolveParams = z.object({
+  id: z.string().uuid(),
+  action: z.enum(['dismissed', 'withdrawn', 'canned_fallback_pinned']),
+  resolution_notes: z.string().max(2000).optional(),
+  // Required iff action === 'canned_fallback_pinned'.
+  canned_fallback_json: z.unknown().optional(),
+}).strict();
+
+const CostAnomaliesListParams = z.object({
+  resolved: z.boolean().optional(),
+  severity: z.enum(['warn', 'critical']).optional(),
+  since_iso: z.string().datetime().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+}).strict();
+
+const VoiceSessionsListParams = z.object({
+  since_iso: z.string().datetime().optional(),
+  min_tokens: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+}).strict();
+
+const PromptVersionsRolloutParams = z.object({
+  feature_key: z.string().min(1).max(64),
+  version: z.string().min(1).max(32),
+  rollout_pct: z.number().int().min(0).max(100),
+  is_default: z.boolean().optional(),
+}).strict();
+
+const FeatureFlagsUpdateParams = z.object({
+  key: z.string().min(1).max(128),
+  value: z.unknown().optional(),
+  is_enabled: z.boolean().optional(),
+  rollout_pct: z.number().int().min(0).max(100).optional(),
+}).strict();
+
+const AdminActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('users.list'),          params: UsersListParams.default({}) }).strict(),
+  z.object({ action: z.literal('users.detail'),        params: UsersDetailParams }).strict(),
+  z.object({ action: z.literal('users.reset_quota'),   params: UsersResetQuotaParams }).strict(),
+  z.object({ action: z.literal('users.status'),        params: UsersStatusParams }).strict(),
+  z.object({ action: z.literal('users.force_reauth'),  params: UsersForceReauthParams }).strict(),
+  z.object({ action: z.literal('flagged_outputs.list'),    params: FlaggedOutputsListParams.default({}) }).strict(),
+  z.object({ action: z.literal('flagged_outputs.resolve'), params: FlaggedOutputsResolveParams }).strict(),
+  z.object({ action: z.literal('cost_anomalies.list'),     params: CostAnomaliesListParams.default({}) }).strict(),
+  z.object({ action: z.literal('voice_sessions.list'),     params: VoiceSessionsListParams.default({}) }).strict(),
+  z.object({ action: z.literal('prompt_versions.rollout'), params: PromptVersionsRolloutParams }).strict(),
+  z.object({ action: z.literal('feature_flags.update'),    params: FeatureFlagsUpdateParams }).strict(),
+]);
+
+type AdminAction = z.infer<typeof AdminActionSchema>;
+
+// ---------------------------------------------------------------------------
+// Entry
+// ---------------------------------------------------------------------------
+
+Deno.serve(async (req) => {
+  const requestId = requestIdFrom(req);
+  const endpoint = '/v1/ops/admin';
+  const log = await createLogger(requestId, endpoint);
+
+  if (req.method !== 'POST') {
+    return jsonError(
+      ErrorCode.METHOD_NOT_ALLOWED_01,
+      405,
+      { message: 'Method Not Allowed; use POST.', allowed: ['POST'] },
+      requestId,
+    );
+  }
+
+  const client = createServiceClient();
+
+  // 1. Admin auth gate — triple-check iss/aud/UUID-sub, then ops_admins lookup.
+  let admin: AdminIdentity;
+  try {
+    admin = await verifyAdminAuth(req, client);
+  } catch (err) {
+    if (err instanceof AdminAuthError) {
+      const http = adminAuthErrorHttp(err);
+      log.warn('admin_auth_reject', { reason: err.reason });
+      const code = http.reason === 'not_admin' ? ErrorCode.BILL_01 : ErrorCode.AUTH_01;
+      return jsonError(
+        code,
+        http.status,
+        code === ErrorCode.AUTH_01
+          ? { reason: http.reason as never, message: err.message }
+          : { message: err.message },
+        requestId,
+      );
+    }
+    log.error('admin_auth_unexpected', err);
+    return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+  }
+
+  log.info('admin_authenticated', { actor_email: admin.email });
+
+  // 2. Body validation.
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError(
+      ErrorCode.VAL_01,
+      400,
+      { field_errors: [{ field: 'body', issue: 'request body must be JSON' }] },
+      requestId,
+    );
+  }
+
+  let parsed: AdminAction;
+  try {
+    parsed = AdminActionSchema.parse(body);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      return jsonError(
+        ErrorCode.VAL_01,
+        400,
+        { field_errors: zodToFieldErrors(err) },
+        requestId,
+      );
+    }
+    throw err;
+  }
+
+  // 3. Dispatch.
+  try {
+    const payload = await dispatch(parsed, { client, admin, log, requestId });
+    return jsonOk(payload, requestId);
+  } catch (err) {
+    log.error('action_failed', err, { action: parsed.action });
+    return jsonError(ErrorCode.NET_01, 500, { message: (err as Error).message }, requestId);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
+interface HandlerCtx {
+  client: ReturnType<typeof createServiceClient>;
+  admin: AdminIdentity;
+  log: Logger;
+  requestId: string;
+}
+
+async function dispatch(parsed: AdminAction, ctx: HandlerCtx): Promise<Record<string, unknown>> {
+  switch (parsed.action) {
+    case 'users.list':               return await handleUsersList(parsed.params, ctx);
+    case 'users.detail':             return await handleUsersDetail(parsed.params, ctx);
+    case 'users.reset_quota':        return await handleUsersResetQuota(parsed.params, ctx);
+    case 'users.status':             return await handleUsersStatus(parsed.params, ctx);
+    case 'users.force_reauth':       return await handleUsersForceReauth(parsed.params, ctx);
+    case 'flagged_outputs.list':     return await handleFlaggedOutputsList(parsed.params, ctx);
+    case 'flagged_outputs.resolve':  return await handleFlaggedOutputsResolve(parsed.params, ctx);
+    case 'cost_anomalies.list':      return await handleCostAnomaliesList(parsed.params, ctx);
+    case 'voice_sessions.list':      return await handleVoiceSessionsList(parsed.params, ctx);
+    case 'prompt_versions.rollout':  return await handlePromptVersionsRollout(parsed.params, ctx);
+    case 'feature_flags.update':     return await handleFeatureFlagsUpdate(parsed.params, ctx);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Action: users.list
+// ---------------------------------------------------------------------------
+
+async function handleUsersList(
+  params: z.infer<typeof UsersListParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_list_users', {
+    p_tier: params.tier ?? null,
+    p_search: params.search ?? null,
+    p_limit: params.limit ?? 50,
+    p_offset: params.offset ?? 0,
+  });
+  if (error) {
+    throw new Error(`stir_ops_list_users failed: ${error.message}`);
+  }
+  return { ok: true, ...(data as Record<string, unknown>) };
+}
+
+// ---------------------------------------------------------------------------
+// Action: users.force_reauth (ADR 0023 Phase-2 contract)
+// ---------------------------------------------------------------------------
+
+async function handleUsersForceReauth(
+  params: z.infer<typeof UsersForceReauthParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_force_reauth', {
+    p_canonical_user_key: params.canonical_user_key,
+  });
+  if (error) {
+    // User-not-found raises PGRST or 22023; surface as VAL-01 up the stack.
+    throw new Error(`stir_ops_force_reauth failed: ${error.message}`);
+  }
+
+  const result = data as {
+    ok: boolean;
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+  };
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'users.force_reauth',
+    target_table: 'app_users',
+    target_id: params.canonical_user_key,
+    before: { reauth_required_at: result.before.reauth_required_at },
+    after: { reauth_required_at: result.after.reauth_required_at },
+    request_id: ctx.requestId,
+  });
+
+  return {
+    ok: true,
+    canonical_user_key: params.canonical_user_key,
+    reauth_required_at: result.after.reauth_required_at,
+    audit_id: auditId,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Action: users.detail
+// ---------------------------------------------------------------------------
+
+async function handleUsersDetail(
+  params: z.infer<typeof UsersDetailParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_user_detail', {
+    p_canonical_user_key: params.canonical_user_key,
+  });
+  if (error) throw new Error(`stir_ops_user_detail failed: ${error.message}`);
+  return { ok: true, detail: data };
+}
+
+// ---------------------------------------------------------------------------
+// Action: users.reset_quota
+// ---------------------------------------------------------------------------
+
+async function handleUsersResetQuota(
+  params: z.infer<typeof UsersResetQuotaParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_reset_quota', {
+    p_canonical_user_key: params.canonical_user_key,
+    p_feature_key: params.feature_key,
+  });
+  if (error) throw new Error(`stir_ops_reset_quota failed: ${error.message}`);
+  const result = data as { ok: boolean; before: unknown; after: unknown; noop?: boolean };
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'users.reset_quota',
+    target_table: 'usage_counters',
+    target_id: `${params.canonical_user_key}:${params.feature_key}`,
+    before: result.before,
+    after: result.after,
+    request_id: ctx.requestId,
+  });
+
+  return { ...result, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Action: users.status
+// ---------------------------------------------------------------------------
+
+async function handleUsersStatus(
+  params: z.infer<typeof UsersStatusParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_set_user_status', {
+    p_canonical_user_key: params.canonical_user_key,
+    p_status: params.status,
+  });
+  if (error) throw new Error(`stir_ops_set_user_status failed: ${error.message}`);
+  const result = data as { ok: boolean; before: unknown; after: unknown };
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'users.status.updated',
+    target_table: 'app_users',
+    target_id: params.canonical_user_key,
+    before: result.before,
+    after: result.after,
+    request_id: ctx.requestId,
+  });
+
+  return { ...result, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Action: flagged_outputs.list
+// ---------------------------------------------------------------------------
+
+async function handleFlaggedOutputsList(
+  params: z.infer<typeof FlaggedOutputsListParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const state = params.state ?? 'open';
+  const limit = params.limit ?? 50;
+  const offset = params.offset ?? 0;
+
+  let query = ctx.client
+    .from('ops_flagged_outputs')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (state === 'open') query = query.is('resolved_at', null);
+  else if (state === 'resolved') query = query.not('resolved_at', 'is', null);
+  if (params.feature_key) query = query.eq('feature_key', params.feature_key);
+
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
+  if (error) throw new Error(`flagged_outputs query failed: ${error.message}`);
+
+  return { ok: true, rows: data ?? [], total_count: count ?? 0, limit, offset };
+}
+
+// ---------------------------------------------------------------------------
+// Action: flagged_outputs.resolve
+// ---------------------------------------------------------------------------
+//
+// Per ADR 0023 §D3 three-action resolution enum:
+//   dismissed              = passive review; no cache mutation
+//   withdrawn              = active removal; DELETE the ai_response_cache row
+//   canned_fallback_pinned = replacement; UPDATE ai_response_cache with
+//                             canned_fallback_json
+
+async function handleFlaggedOutputsResolve(
+  params: z.infer<typeof FlaggedOutputsResolveParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  // Require canned_fallback_json iff action is canned_fallback_pinned.
+  if (params.action === 'canned_fallback_pinned' && params.canned_fallback_json === undefined) {
+    throw new Error('canned_fallback_json required for canned_fallback_pinned action');
+  }
+  if (params.action !== 'canned_fallback_pinned' && params.canned_fallback_json !== undefined) {
+    throw new Error('canned_fallback_json only allowed for canned_fallback_pinned action');
+  }
+
+  // Fetch the flagged row to get the request_id + canonical_user_key_hash for
+  // cache side-effects.
+  const { data: flagged, error: fetchErr } = await ctx.client
+    .from('ops_flagged_outputs')
+    .select('id, request_id, canonical_user_key_hash, feature_key, resolved_at')
+    .eq('id', params.id)
+    .single();
+  if (fetchErr || !flagged) {
+    throw new Error(`flagged_output ${params.id} not found: ${fetchErr?.message ?? 'missing'}`);
+  }
+  if (flagged.resolved_at) {
+    throw new Error(`flagged_output ${params.id} already resolved`);
+  }
+
+  // Cache side-effects BEFORE the resolve write so failures surface loudly.
+  if (params.action === 'withdrawn') {
+    // Delete the cached response so retries hit fresh generation instead of
+    // replaying the bad body.
+    await ctx.client
+      .from('ai_response_cache')
+      .delete()
+      .eq('request_id', flagged.request_id);
+  } else if (params.action === 'canned_fallback_pinned') {
+    // Replace the cached response body with the admin-supplied safe fallback.
+    await ctx.client
+      .from('ai_response_cache')
+      .update({ response_body: params.canned_fallback_json })
+      .eq('request_id', flagged.request_id);
+  }
+
+  // Update the flagged row itself.
+  const { data: updated, error: updateErr } = await ctx.client
+    .from('ops_flagged_outputs')
+    .update({
+      resolved_at: new Date().toISOString(),
+      resolved_by: ctx.admin.authUserId,
+      resolution_action: params.action,
+      resolution_notes: params.resolution_notes ?? null,
+      canned_fallback_json: params.canned_fallback_json ?? null,
+    })
+    .eq('id', params.id)
+    .select('*')
+    .single();
+  if (updateErr) throw new Error(`flagged_output resolve failed: ${updateErr.message}`);
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: `flagged_outputs.resolved.${params.action}`,
+    target_table: 'ops_flagged_outputs',
+    target_id: params.id,
+    before: { resolved_at: null, resolution_action: null },
+    after: {
+      resolved_at: updated?.resolved_at,
+      resolution_action: updated?.resolution_action,
+    },
+    request_id: ctx.requestId,
+  });
+
+  return { ok: true, flagged_output: updated, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Action: cost_anomalies.list
+// ---------------------------------------------------------------------------
+
+async function handleCostAnomaliesList(
+  params: z.infer<typeof CostAnomaliesListParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const limit = params.limit ?? 50;
+  let query = ctx.client
+    .from('cost_anomalies')
+    .select('*', { count: 'exact' })
+    .order('detected_at', { ascending: false });
+
+  if (params.resolved === true) query = query.not('resolved_at', 'is', null);
+  if (params.resolved === false) query = query.is('resolved_at', null);
+  if (params.severity) query = query.eq('severity', params.severity);
+  if (params.since_iso) query = query.gte('detected_at', params.since_iso);
+
+  const { data, error, count } = await query.limit(limit);
+  if (error) throw new Error(`cost_anomalies query failed: ${error.message}`);
+
+  return { ok: true, rows: data ?? [], total_count: count ?? 0, limit };
+}
+
+// ---------------------------------------------------------------------------
+// Action: voice_sessions.list
+// ---------------------------------------------------------------------------
+
+async function handleVoiceSessionsList(
+  params: z.infer<typeof VoiceSessionsListParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await ctx.client.rpc('stir_ops_list_voice_sessions', {
+    p_since: params.since_iso ?? null,
+    p_min_tokens: params.min_tokens ?? 0,
+    p_limit: params.limit ?? 100,
+  });
+  if (error) throw new Error(`stir_ops_list_voice_sessions failed: ${error.message}`);
+  return { ok: true, ...(data as Record<string, unknown>) };
+}
+
+// ---------------------------------------------------------------------------
+// Action: prompt_versions.rollout
+// ---------------------------------------------------------------------------
+
+async function handlePromptVersionsRollout(
+  params: z.infer<typeof PromptVersionsRolloutParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  // prompt_versions has composite PK (feature_key, version); no synthetic id.
+  const { data: before, error: preErr } = await ctx.client
+    .from('prompt_versions')
+    .select('feature_key, version, rollout_pct, is_default')
+    .eq('feature_key', params.feature_key)
+    .eq('version', params.version)
+    .single();
+  if (preErr || !before) {
+    throw new Error(
+      `prompt_version ${params.feature_key}@${params.version} not found: ${preErr?.message ?? 'missing'}`,
+    );
+  }
+
+  // Single-default-per-feature invariant: clear the flag on siblings first.
+  if (params.is_default === true) {
+    await ctx.client
+      .from('prompt_versions')
+      .update({ is_default: false })
+      .eq('feature_key', params.feature_key)
+      .neq('version', params.version);
+  }
+
+  const updates: Record<string, unknown> = { rollout_pct: params.rollout_pct };
+  if (params.is_default !== undefined) updates.is_default = params.is_default;
+
+  const { data: after, error: updateErr } = await ctx.client
+    .from('prompt_versions')
+    .update(updates)
+    .eq('feature_key', params.feature_key)
+    .eq('version', params.version)
+    .select('feature_key, version, rollout_pct, is_default')
+    .single();
+  if (updateErr) throw new Error(`prompt_versions update failed: ${updateErr.message}`);
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'prompt_versions.rollout',
+    target_table: 'prompt_versions',
+    target_id: `${params.feature_key}@${params.version}`,
+    before,
+    after,
+    request_id: ctx.requestId,
+  });
+
+  return { ok: true, before, after, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Action: feature_flags.update
+// ---------------------------------------------------------------------------
+
+async function handleFeatureFlagsUpdate(
+  params: z.infer<typeof FeatureFlagsUpdateParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data: before, error: preErr } = await ctx.client
+    .from('feature_flags')
+    .select('key, payload_json, is_enabled, rollout_pct')
+    .eq('key', params.key)
+    .single();
+  if (preErr || !before) {
+    throw new Error(`feature_flag ${params.key} not found: ${preErr?.message ?? 'missing'}`);
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (params.value !== undefined) updates.payload_json = { value: params.value };
+  if (params.is_enabled !== undefined) updates.is_enabled = params.is_enabled;
+  if (params.rollout_pct !== undefined) updates.rollout_pct = params.rollout_pct;
+
+  if (Object.keys(updates).length === 0) {
+    return { ok: true, before, after: before, audit_id: null, noop: true };
+  }
+
+  const { data: after, error: updateErr } = await ctx.client
+    .from('feature_flags')
+    .update(updates)
+    .eq('key', params.key)
+    .select('key, payload_json, is_enabled, rollout_pct')
+    .single();
+  if (updateErr) throw new Error(`feature_flags update failed: ${updateErr.message}`);
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'feature_flags.updated',
+    target_table: 'feature_flags',
+    target_id: params.key,
+    before,
+    after,
+    request_id: ctx.requestId,
+  });
+
+  return { ok: true, before, after, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function zodToFieldErrors(err: ZodError): FieldError[] {
+  return err.errors.map((e) => ({
+    field: e.path.join('.') || '<root>',
+    issue: e.message,
+  }));
+}

@@ -222,8 +222,9 @@ enum ErrorCode: String {
     case voiceSession01  = "VOICE-SESSION-01" // voice session lifecycle: missing / closed / owner_mismatch
                                          // (ADR 0017 — distinct from ENT-VOICE-01 entitlement or AI-VOICE-01 pipeline)
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
-    case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale
-                                         // iOS auto-re-bootstraps silently; invisible unless retry also fails
+    case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale/reauth_required
+                                         // iOS auto-re-bootstraps silently for the first 5; reauth_required
+                                         // triggers SIWA re-flow instead (ADR 0023)
     case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"
                                          // 405 — iOS sent the wrong HTTP verb (client bug, never user-visible)
 }
@@ -255,11 +256,11 @@ Server returns:
 {
   "error": "AUTH-01",
   "message": "Session expired or missing",
-  "reason": "expired" | "missing" | "malformed" | "signature_invalid" | "user_stale"
+  "reason": "expired" | "missing" | "malformed" | "signature_invalid" | "user_stale" | "reauth_required"
 }
 ```
 
-`reason` is a typed enum with five distinct handling paths:
+`reason` is a typed enum with six distinct handling paths:
 
 | `reason` | Cause | iOS action | Server log level |
 | --- | --- | --- | --- |
@@ -268,8 +269,13 @@ Server returns:
 | `malformed` | Header present, invalid JWT structure | Re-bootstrap + Sentry error | `error` |
 | `signature_invalid` | Structure valid, signature doesn't verify | Re-bootstrap + Sentry error + alert at threshold | `error` |
 | `user_stale` | JWT valid but `canonical_user_key` no longer resolves (alias-forwarded to another row, or row missing entirely) | Silent re-bootstrap | `info` |
+| `reauth_required` | JWT.iat predates `app_users.reauth_required_at` — admin used `users.force_reauth` to boot this session | **SIWA re-flow** (rotate Keychain install_id, clear canonical_user_key, nav to Sign-in-with-Apple) — NOT silent retry | `info` |
 
-iOS silent-refresh pattern: clear cached JWT, re-bootstrap, retry original request **once**. If retry also 401s, surface NET-01 — never retry-storm. `reason` is a typed field on the thrown error, not parsed from `message`; log aggregators and Sentry alerts key off the typed field.
+iOS silent-refresh pattern (all reasons except `reauth_required`): clear cached JWT, re-bootstrap, retry original request **once**. If retry also 401s, surface NET-01 — never retry-storm.
+
+`reauth_required` differs: silent retry would re-issue a JWT with `iat > reauth_required_at` (pass) but the SIWA rotation is the point — admin used force_reauth to force an identity-rotation ceremony, not to trigger a token swap. iOS maps this reason to `ReAuthenticationIntent.forceReauth` → SIWA screen with header copy "Please sign in again to continue".
+
+`reason` is a typed field on the thrown error, not parsed from `message`; log aggregators and Sentry alerts key off the typed field.
 
 ### Canonical user key
 
@@ -634,7 +640,7 @@ All `/v1/*` endpoints authenticate via session JWT from `/v1/session/bootstrap`.
 
 Shared behaviors across endpoints:
 - 400 on request body validation failure → `{ error: "VAL-01", message, field_errors: [...] }`
-- 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale" }`
+- 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale|reauth_required" }`
 - 403 on entitlement mismatch → `{ error: "ENT-VOICE-01" }` for voice, `{ error: "ENT-LEFTOVERS-01" }` for leftovers mode, `{ error: "ENT-MULTI-IMAGE-01" }` for multi-image scan, `{ error: "BILL-01" }` for general
 - 429 on quota exhaustion → `{ error: "RATE-01" }`
 - 502 on Gemini outage → `{ error: "AI-01" }`
