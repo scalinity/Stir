@@ -72,6 +72,25 @@ struct CookTurnResult: Sendable {
     let backendLatencyMs: Int
 }
 
+// MARK: - Synthesizer seam
+
+/// P1-Q test seam. Production uses `AVSpeechSynthesizer` directly;
+/// tests inject a mock that fires the delegate on demand so the
+/// latch + timeout interaction can be exercised without a real
+/// voice-synthesis backend.
+///
+/// Intentionally minimal — only the surface `speak()` touches. The
+/// cancel-path surface (`isSpeaking` + `stopSpeaking(at:)`) is NOT
+/// exposed; `cancelSpeaking` casts to the concrete type for those.
+/// Widen this protocol when cancel-path tests are written. See
+/// CLAUDE.md §Deferred "SpeechSynthesizing protocol widening".
+protocol SpeechSynthesizing: AnyObject {
+    var delegate: AVSpeechSynthesizerDelegate? { get set }
+    func speak(_ utterance: AVSpeechUtterance)
+}
+
+extension AVSpeechSynthesizer: SpeechSynthesizing {}
+
 // MARK: - Service
 
 @MainActor
@@ -136,7 +155,17 @@ final class SpeechFallbackService: VoiceSessionDriver {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private let audioEngine = AVAudioEngine()
-    private let synthesizer = AVSpeechSynthesizer()
+    /// See `SpeechSynthesizing` protocol for seam rationale.
+    /// Production default is `AVSpeechSynthesizer`; tests inject a mock.
+    private let synthesizer: any SpeechSynthesizing
+    /// Timeout for AVSpeechSynthesizer's `didFinish` callback (P0-H).
+    /// If the synthesizer silently no-ops (corrupt voice install, weird
+    /// audio-session state), the timeout resumes the continuation after
+    /// this budget and recovers the session. Production default 10 s
+    /// covers p95 for ~25-30 token responses at the tuned rate. Tests
+    /// override via `_testSetSpeakTimeoutSec` so the timeout-fires-first
+    /// path can run in milliseconds.
+    private var speakTimeoutSec: TimeInterval = 10.0
     private var synthesisDelegate: SynthesisDelegate?
     private var turnStartTime: Date?
     private var sttFinalTime: Date?
@@ -165,10 +194,12 @@ final class SpeechFallbackService: VoiceSessionDriver {
         aiDispatch: AIDispatch,
         voiceTurnRepository: VoiceTurnRepository,
         cookingSession: CookingSession,
+        synthesizer: any SpeechSynthesizing = AVSpeechSynthesizer(),
     ) {
         self.aiDispatch = aiDispatch
         self.voiceTurnRepository = voiceTurnRepository
         self.cookingSession = cookingSession
+        self.synthesizer = synthesizer
         // en_US locale matches CLAUDE.md's English-only v1 scope. If the
         // system doesn't support the locale at all, `SFSpeechRecognizer(
         // locale:)` returns nil and preWarm() surfaces .recognizerUnavailable.
@@ -291,8 +322,16 @@ final class SpeechFallbackService: VoiceSessionDriver {
             recognitionTask?.cancel()
             recognitionTask = nil
             recognitionRequest = nil
-            if synthesizer.isSpeaking {
-                synthesizer.stopSpeaking(at: .immediate)
+            // Concrete cast: the `SpeechSynthesizing` protocol is
+            // intentionally minimal for P1-Q scope (speak + delegate
+            // only). `isSpeaking` + `stopSpeaking(at:)` are not on the
+            // protocol; widen it when cancel-path tests are written —
+            // see CLAUDE.md §Deferred "SpeechSynthesizing protocol
+            // widening". In tests where a mock synthesizer is injected,
+            // the cast fails and the stop is a no-op — fine because
+            // mocks don't have real speech to cancel.
+            if let concrete = synthesizer as? AVSpeechSynthesizer, concrete.isSpeaking {
+                concrete.stopSpeaking(at: .immediate)
             }
             if stateMachine.state != .closed && stateMachine.state != .error {
                 stateMachine.advance(to: .error)
@@ -597,16 +636,8 @@ final class SpeechFallbackService: VoiceSessionDriver {
         // `hasResumed` box so even if both fire, the continuation
         // resumes exactly once. Preserving the prior delegate's
         // resume semantics via explicit drain before overwrite.
-        final class ResumeLatch: @unchecked Sendable {
-            private var resumed = false
-            private let lock = NSLock()
-            func tryResume() -> Bool {
-                lock.lock(); defer { lock.unlock() }
-                if resumed { return false }
-                resumed = true
-                return true
-            }
-        }
+        // ResumeLatch hoisted to file-private scope (P1-Q harness) so
+        // tests can reference its type. Same single-resume semantics.
         let latch = ResumeLatch()
 
         // `speak()` is called serially from `endTurn`'s await chain,
@@ -635,13 +666,17 @@ final class SpeechFallbackService: VoiceSessionDriver {
             self.synthesizer.delegate = delegate
             self.synthesizer.speak(utterance)
 
-            // Timeout guard. 10s ceiling; resumes the continuation once
-            // via the shared latch so both paths (delegate-fires-first
-            // vs timeout-fires-first) are race-safe.
+            // Timeout guard. `speakTimeoutSec` ceiling (default 10 s);
+            // resumes the continuation once via the shared latch so both
+            // paths (delegate-fires-first vs timeout-fires-first) are
+            // race-safe. Tests override the budget via
+            // `_testSetSpeakTimeoutSec` to exercise the timeout path in
+            // milliseconds instead of seconds.
+            let timeoutSec = self.speakTimeoutSec
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: .seconds(timeoutSec))
                 guard latch.tryResume() else { return }
-                Logger.ui.warning("voice_fallback_synthesizer_timeout — didFinish never fired after 10s")
+                Logger.ui.warning("voice_fallback_synthesizer_timeout — didFinish never fired after \(timeoutSec)s")
                 self?.synthesisDelegate = nil
                 cont.resume()
                 if self?.stateMachine.state == .modelSpeaking {
@@ -662,8 +697,16 @@ final class SpeechFallbackService: VoiceSessionDriver {
     /// the mic tap — if the cap is reached we return anyway and let
     /// `beginTurn` throw `.busy`, which the VM already handles.
     func cancelSpeaking() async {
-        guard synthesizer.isSpeaking else { return }
-        synthesizer.stopSpeaking(at: .immediate)
+        // Concrete cast: the `SpeechSynthesizing` protocol is
+        // intentionally minimal for P1-Q scope (speak + delegate only).
+        // `isSpeaking` + `stopSpeaking(at:)` are not on the protocol;
+        // widen it when cancel-path tests are written (see CLAUDE.md
+        // §Deferred "SpeechSynthesizing protocol widening"). In tests
+        // where a mock is injected, this cast fails and cancelSpeaking
+        // no-ops — acceptable until the cancel-path tests arrive.
+        guard let concrete = synthesizer as? AVSpeechSynthesizer else { return }
+        guard concrete.isSpeaking else { return }
+        concrete.stopSpeaking(at: .immediate)
         // Poll the state machine until it settles. 50 × 10ms = 500ms cap.
         // In practice the delegate fires within one runloop tick.
         for _ in 0..<50 {
@@ -700,8 +743,14 @@ final class SpeechFallbackService: VoiceSessionDriver {
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking(at: .immediate)
+        // Concrete cast: the `SpeechSynthesizing` protocol is
+        // intentionally minimal for P1-Q scope (speak + delegate only).
+        // Widen it when cancel-path tests are written — see CLAUDE.md
+        // §Deferred "SpeechSynthesizing protocol widening". Close is
+        // idempotent and the stop-if-speaking is defensive, so a failed
+        // cast (mock) being a no-op matches the intent.
+        if let concrete = synthesizer as? AVSpeechSynthesizer, concrete.isSpeaking {
+            concrete.stopSpeaking(at: .immediate)
         }
         // P0-D (2026-04-23): stop AVAudioSession observers so no late
         // notification fires callbacks into a torn-down service.
@@ -737,6 +786,33 @@ final class SpeechFallbackService: VoiceSessionDriver {
             }
         }
     }
+
+    // MARK: - Test hooks (P1-Q)
+
+    #if DEBUG
+    /// P1-Q test hook: override the speak-timeout budget so the
+    /// timeout-fires-first path can be exercised in milliseconds
+    /// instead of the production 10 s. Tests call
+    /// `_testSetSpeakTimeoutSec(0.01)` before invoking `speak()` so
+    /// the timeout races ahead of a mock synthesizer that never
+    /// fires its delegate.
+    func _testSetSpeakTimeoutSec(_ sec: TimeInterval) {
+        speakTimeoutSec = sec
+    }
+
+    /// P1-Q test hook: thin passthrough to `stateMachine.advance(to:)`.
+    /// Matches `RealtimeSession._testAdvance` in shape — tests drive
+    /// state through valid intermediates (e.g. `.idle → .ready →
+    /// .modelSpeaking`) to set up preconditions that production
+    /// reaches via preWarm+beginTurn+endTurn chains. Guard-gated:
+    /// illegal transitions hit the state machine's `assertionFailure`
+    /// in DEBUG — matching production semantics so test grammar
+    /// can't drift from production grammar.
+    @discardableResult
+    func _testAdvanceState(to next: VoiceSessionState) -> Bool {
+        stateMachine.advance(to: next)
+    }
+    #endif
 }
 
 // MARK: - Synthesis delegate
@@ -755,5 +831,29 @@ private final class SynthesisDelegate: NSObject, AVSpeechSynthesizerDelegate {
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in self.onComplete() }
+    }
+}
+
+// MARK: - ResumeLatch
+
+/// Single-resume latch shared by `speak()`'s delegate + timeout
+/// continuations. Hoisted from a nested class inside `speak()` so P1-Q
+/// tests can observe latch semantics via the `SpeechSynthesizing`
+/// protocol seam. File-private: only `SpeechFallbackService` (and
+/// tests via `@testable import`) can access it.
+///
+/// `@unchecked Sendable`: `resumed` is mutated only under `lock`.
+/// `tryResume` is the only mutator, and its read-check-write sequence
+/// runs as a single critical section — returns atomically. Safe for
+/// concurrent callers; the latch's contract IS single-resume across
+/// paths (delegate-fires-first vs timeout-fires-first).
+final class ResumeLatch: @unchecked Sendable {
+    private var resumed = false
+    private let lock = NSLock()
+    func tryResume() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if resumed { return false }
+        resumed = true
+        return true
     }
 }
