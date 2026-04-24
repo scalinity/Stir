@@ -282,33 +282,80 @@ export function extractSourceIP(req: Request): string {
 }
 
 /**
- * Non-cryptographic bucket identifier for a source IP, for use in
- * dashboard deduplication (e.g., "same peer hit rate limit N times in
- * the last hour"). Deterministic FNV-1a 32-bit hash — same IP always
- * produces the same bucket string within a deploy.
+ * Privacy-grade bucket identifier for a source IP. HMAC-SHA256 keyed on
+ * a rotated env-sourced salt (`LOG_IP_SALT`), truncated to 16 hex chars
+ * (64 bits — plenty for dashboard-dedup collision resistance at our
+ * scale). Same IP + same salt always produce the same bucket within a
+ * salt-rotation window; a new salt invalidates all prior buckets and
+ * prevents log-access-based IP reversal attacks.
  *
- * **Does NOT provide privacy against log-access threat models.** FNV-1a
- * is unsalted, non-cryptographic, and trivially reversible by
- * precomputing the bucket for every possible IPv4 address (~seconds
- * on a laptop). Anyone with log access can recover the raw IP.
+ * **Fallback:** If `LOG_IP_SALT` is absent (missing secret in prod, or
+ * test env without one), falls back to an unsalted FNV-1a bucket
+ * prefixed `unsalted:`. The prefix is deliberately observable — the
+ * prefix shows up in logs/dashboards as a misconfig signal, not silent
+ * degradation. Setting the secret AFTER deploys already have unsalted
+ * buckets in the log window is fine; new requests start producing
+ * salted buckets immediately. Dashboards that query by bucket prefix
+ * (`ip_*` vs `unsalted:*`) can filter.
  *
- * For privacy-grade hashing (HMAC-SHA256 with a rotated env-sourced
- * salt) see the §Deferred entry in /CLAUDE.md titled "Source-IP HMAC
- * with rotated salt" — filed 2026-04-23 as a dedicated security task.
- * Do NOT claim this function provides privacy in new code; it's a
- * bucketing helper only.
+ * **Threat model:** protects against an attacker with log-read access
+ * reversing buckets back to raw IPs. Does NOT protect against an
+ * attacker who can read both logs AND the salt (at that point they
+ * can re-derive by brute-forcing ~4B IPv4 candidates in O(seconds)).
+ * Rotate monthly per `docs/runbooks/ip-salt-rotation.md`.
  *
- * Name reflects the intent: this is a dashboard bucket, not a hash.
+ * Async because WebCrypto's HMAC is async. Only one caller pre-step-9
+ * (`realtime-session/index.ts:source_ip_bucket`) — caller is already
+ * inside an async handler, so adding `await` is free.
  *
- * P2-C (2026-04-23; renamed post-review from `hashSourceIP`).
+ * P2-C (2026-04-23 filed; 2026-04-24 shipped).
  */
-export function ipBucket(ip: string): string {
+export async function ipBucket(ip: string): Promise<string> {
   if (ip === 'unknown' || ip === '') return 'unknown';
-  // FNV-1a 32-bit
+
+  const salt = Deno.env.get('LOG_IP_SALT');
+  if (!salt) {
+    // FNV-1a fallback with observability-friendly prefix. Emits a one-
+    // shot stderr warning per process so misconfig is noisy but doesn't
+    // spam at request rate.
+    warnOnceLogIpSaltMissing();
+    return 'unsalted:' + fnv1aHex(ip);
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(salt),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip));
+    const bytes = new Uint8Array(sig);
+    let hex = '';
+    for (let i = 0; i < 8; i++) hex += bytes[i]!.toString(16).padStart(2, '0');
+    return 'ip_' + hex;
+  } catch (e) {
+    // WebCrypto failure (malformed salt, unsupported algorithm) falls
+    // back to the unsalted bucket rather than throwing through the
+    // rate-limit path. Observable via the same prefix.
+    console.warn('[rate_limiter] HMAC bucket fallback: ' + (e instanceof Error ? e.message : String(e)));
+    return 'unsalted:' + fnv1aHex(ip);
+  }
+}
+
+let _logIpSaltWarned = false;
+function warnOnceLogIpSaltMissing(): void {
+  if (_logIpSaltWarned) return;
+  _logIpSaltWarned = true;
+  console.warn('[rate_limiter] LOG_IP_SALT not set; using unsalted FNV-1a bucket (privacy-degraded path). Set LOG_IP_SALT via `supabase secrets set LOG_IP_SALT=$(openssl rand -hex 32)` — see docs/runbooks/ip-salt-rotation.md.');
+}
+
+function fnv1aHex(ip: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < ip.length; i++) {
     hash ^= ip.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return 'ip_' + (hash >>> 0).toString(16).padStart(8, '0');
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }

@@ -248,12 +248,14 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:realtime_session_daily', sourceIP);
     if (!ipRl.allowed) {
-      // P2-C (2026-04-23): log hashed IP. Enforcement still keys on
-      // raw IP via the rate-limit bucket; logs get the FNV-1a-hashed
-      // form so retention doesn't hold raw IP PII.
+      // P2-C (2026-04-23 filed; 2026-04-24 shipped as HMAC-SHA256):
+      // log salted+hashed IP. Enforcement still keys on raw IP via
+      // the rate-limit bucket; logs get the bucket form so retention
+      // doesn't hold raw IP PII. `ipBucket` is async because WebCrypto's
+      // HMAC is async; see _shared/rate_limiter.ts.
       userLog.warn('rate_limited', {
         scope: 'ip:realtime_session_daily',
-        source_ip_bucket: ipBucket(sourceIP),
+        source_ip_bucket: await ipBucket(sourceIP),
         is_refresh: body.is_refresh,
       });
       return jsonError(
