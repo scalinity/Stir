@@ -59,6 +59,19 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
       total_steps: 5,
       current_step_text: 'Heat a large skillet over medium heat and add 2 Tbsp olive oil.',
       current_step_timer_seconds: 120,
+      // all_steps added to `RealtimeRecipeContext` on 2026-04-22 after a
+      // production hallucination (user on step 2 asked about step 3; the
+      // model invented content). Schema is strict, so this field is
+      // required — keep the fixture realistic (not one-element) so future
+      // tests inheriting `validBody()` exercise the multi-step
+      // grounding path.
+      all_steps: [
+        { step_number: 1, text: 'Heat a large skillet over medium heat and add 2 Tbsp olive oil.', timer_seconds: 120 },
+        { step_number: 2, text: 'Add garlic and sauté until fragrant, about 1 minute.', timer_seconds: 60 },
+        { step_number: 3, text: 'Add tomato paste and cook down until deepened in color.', timer_seconds: 180 },
+        { step_number: 4, text: 'Stir in pasta and cream; toss to coat.', timer_seconds: 240 },
+        { step_number: 5, text: 'Serve immediately with fresh basil.', timer_seconds: 0 },
+      ],
       remaining_ingredients: [
         { display_name: 'pasta' },
         { display_name: 'garlic' },
