@@ -66,8 +66,9 @@ sites. See ADR 0009.
   the same user.
 - **Sentry `user.userId`** = same value. Set once per iOS session via
   `SentryReporter.setUserContext(keyHash:)`. Backend SQL Sentry
-  dispatch attaches the hash as `tags.user_hash` (legacy name, see
-  §9) — will rename at next organic touch.
+  dispatch attaches the hash as `tags.canonical_user_key_hash`
+  (renamed from legacy `user_hash` in migration `20260424000007`,
+  Phase D — see §9 Migrated names).
 - **NEVER** set raw `canonical_user_key`, email, or any derived
   PII as `distinct_id` or Sentry user fields. Spec §11 redaction
   requirement.
@@ -262,12 +263,17 @@ touching one of these? If yes, rename in the same commit."
 | Deprecated name    | Owner                                                 | Canonical name            | Migration trigger |
 |--------------------|-------------------------------------------------------|---------------------------|-------------------|
 | `canonical_key_hash` | iOS Sentry `captureError` + `breadcrumb` context dicts (3 `captureError` sites + 4 breadcrumb sites in `RootCoordinator.swift`, `SupabaseSessionClient.swift`, `CookModeViewModel.swift`) | `canonical_user_key_hash` | Next touch to any of those files for Sentry reasons |
-| `user_hash`        | Backend SQL `stir_ops_cost_anomaly_alert_dispatch` Sentry event body `tags.user_hash` (migration `20260424000004:117-120`) | `canonical_user_key_hash` | Phase D Sentry-tag standardization commit (this bundle) |
 | `keyHash` (Swift var name) | Local variable inside `RootCoordinator`, `SentryReporter`, `SupabaseSessionClient` | N/A — internal, no wire contract; keep | Never. The var is just a local; what matters is the PROPERTY name it produces. |
 | `user.userId` (Sentry SDK binding) | `SentryReporter.setUserContext` — Sentry SDK-defined field | N/A — external contract we don't control | Keep as-is; Sentry's API, not ours to rename |
 
 Once a row in this table is migrated, move it to a "Migrated"
 section at the bottom of this file (don't delete — keep the trail).
+
+### 9.1 Migrated names (trail — do not delete)
+
+| Old name | New name | Owner | Migrated in | Notes |
+|----------|----------|-------|-------------|-------|
+| `tags.user_hash` | `tags.canonical_user_key_hash` | Backend SQL `stir_ops_cost_anomaly_alert_dispatch` Sentry event body | migration `20260424000007` (Phase D, 2026-04-24) | Same migration also added `tags.actor_id = 'system:cron'` per §3 system-actor convention. Dashboards keying on user identity for cost anomalies must query BOTH `tags.user_hash` (pre-2026-04-24 events still indexed) AND `tags.canonical_user_key_hash` for the transition window. |
 
 ---
 
@@ -396,9 +402,19 @@ capturePosthogEvent(log, {
   `canonical_user_key_hash` pinned as canonical identity name;
   dual-id model for cross-system joins documented; synchronization
   discipline adopted.
+- **2026-04-24 (Phase D commit 1)** — §7.1 cron-invoked surfaces
+  carve-out added. `actor_id` namespace extended to `system:<source>`
+  for non-human actors. §8 Backend SQL Sentry row updated to
+  reference §7.1.
+- **2026-04-24 (Phase D commit 2)** — Backend SQL Sentry tag
+  rename `user_hash` → `canonical_user_key_hash` landed via migration
+  `20260424000007_cost_anomaly_dispatch_canonical_tags.sql`. Same
+  migration adds `tags.actor_id = 'system:cron'`. Row moved from §9
+  deprecation table to §9.1 Migrated names trail.
 
-Future updates: Phase D (Sentry tag standardization) will rename
-`user_hash` → `canonical_user_key_hash` on backend SQL Sentry path
-and move that row of §9 to the Migrated section. Phase F will update
-`docs/sentry/alerts.md` to include `Emit source:` citations and
-rewrite the two drifted alerts.
+Future updates: Phase F will update `docs/sentry/alerts.md` to
+include `Emit source:` citations and rewrite the two drifted alerts
+(G5/G6 from the audit). The iOS Sentry `canonical_key_hash` rename
+(remaining row in §9 deprecation table) waits for the next organic
+touch of `RootCoordinator.swift` / `SupabaseSessionClient.swift` /
+`CookModeViewModel.swift` Sentry call sites.
