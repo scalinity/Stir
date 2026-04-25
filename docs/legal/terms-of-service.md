@@ -139,11 +139,11 @@ We may update these Terms periodically. Material changes will be communicated to
 
 ## 10. Intellectual property
 
-Stir's name, logo, and the App's content (excluding user-submitted content and AI-generated outputs to the extent not modified by you) are owned by [LEGAL REVIEW REQUIRED — entity name]. You may not use them without prior written permission.
+Stir's name, logo, and the App's content (excluding user-submitted content and AI-generated outputs to the extent not modified by you) are owned by the operator of the Stir service (the "Operator", identified at https://getstir.app/about). You may not use them without prior written permission.
 
 User-submitted content (e.g., photos you upload, free-text constraints you type) remains your property. By submitting such content to Stir, you grant us a non-exclusive, royalty-free license to use it for the sole purpose of providing the Stir service to you.
 
-Recipe imports from URLs are processed in accordance with our [LEGAL REVIEW REQUIRED — recipe-import IP / copyright treatment]. We do not claim ownership of imported recipes; we extract structured cooking steps for your personal use only and do not redistribute imported content.
+When you ask Stir to import a recipe from a URL or screenshot, we process the source material to extract structured cooking steps for your personal use only and do not redistribute imported content. You are responsible for ensuring you have the right to use any URL or image you submit. Stir does not claim ownership of imported recipes and removes raw imported source material from our backend within 14 days. If you are a recipe-source owner and believe content was imported in violation of your rights, contact us at privacy@getstir.app and we will remove the matching cached entries.
 
 ## 11. Contact
 
