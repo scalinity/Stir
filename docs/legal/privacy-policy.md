@@ -113,25 +113,28 @@ We have data processing agreements with each subprocessor. We do not allow subpr
 
 ## 6. Data retention
 
-We retain different categories of data for different periods, balancing service functionality with privacy:
+We retain different categories of data for different periods, balancing service functionality with privacy. Two storage layers govern these retentions:
 
-| Data class | Retention |
-|---|---|
-| Household profile, dietary preferences | Until you delete your account or data |
-| Pantry remembered items | Until you delete or item expires + 30 days |
-| Saved recipes / favorites | Until you delete |
-| Cooking sessions | 24 months rolling |
-| Voice turn metadata | 30 days |
-| Substitution events | 12 months |
-| Outcome feedback | 24 months |
-| Raw kitchen scan images | 7 days max |
-| Imported recipe images | 14 days max |
-| Grocery export metadata | 90 days |
-| AI request logs (backend) | 30 days raw / 13 months aggregate |
-| Crash logs | 90 days |
-| Analytics events | 13 months |
+- **Your iCloud private database** (CloudKit) holds your user content (preferences, pantry items, saved recipes, cooking sessions). This data lives in your own iCloud account and is governed by Apple's iCloud terms — you control it directly via your Apple ID. Stir does not have server-side copies of these records.
+- **Stir's operational backend** (Supabase) holds quotas, subscription state, and operational metadata keyed on a pseudonymous user identifier. Data here is subject to Stir's retention policies below.
 
-Data is automatically deleted after these retention periods.
+| Data class | Storage layer | Retention |
+|---|---|---|
+| Household profile, dietary preferences | CloudKit (your iCloud) | Until you delete via the App or iCloud |
+| Pantry remembered items | CloudKit | Until you delete; expired items auto-purge after 30 days |
+| Saved recipes / favorites | CloudKit | Until you delete |
+| Cooking sessions | CloudKit | App-managed rolling 24-month window |
+| Voice turn metadata | Stir backend | Targeted 30 days; deletion on request |
+| Substitution events | Stir backend | Targeted 12 months; deletion on request |
+| Outcome feedback | Stir backend | Targeted 24 months; deletion on request |
+| Raw kitchen scan images | Stir backend (transient) | Processed and discarded per request; not durably stored |
+| Imported recipe images | Stir backend (transient) | Processed and discarded per request; not durably stored |
+| Grocery export metadata | CloudKit | Until you delete |
+| AI request logs (operational) | Stir backend | Targeted 30 days; deletion on request |
+| Crash logs | Sentry (third-party processor) | Per Sentry's standard retention (~90 days) |
+| Analytics events | PostHog (third-party processor) | Per PostHog's standard retention (~13 months) |
+
+App-managed retentions (CloudKit) execute when you take an action in the App or directly in iCloud. Backend retentions marked "Targeted" describe the maximum window we intend to keep operational data and the period within which we will execute a deletion request you submit (see §7.7); we are progressively automating these as part of v1 ops hardening. If you require confirmation that a specific backend record has been deleted, submit a deletion request as described in §7.7.
 
 ## 7. Your rights (CCPA, CPRA)
 
@@ -169,14 +172,18 @@ We do not discriminate against users who exercise their CCPA rights.
 
 ### 7.7 How to exercise these rights
 
-Contact us at privacy@getstir.app. We will respond within 30 days. We may need to verify your identity before fulfilling certain requests.
+Email **privacy@getstir.app** with the subject line "Privacy request: \<know | delete | correct\>". Include the canonical user identifier shown in **Stir > Settings > About** so we can locate your data, or include the Apple ID email associated with your subscription.
 
-For deletion specifically, you can also use the in-app option:
+We respond within 30 days. We may need to verify your identity before fulfilling certain requests.
 
-1. Open Stir > Settings > Privacy
-2. Tap "Delete my data"
-3. Confirm
-4. We process the request within 30 days; you'll receive an email confirmation when complete
+For deletion requests:
+- Operational data (Stir backend): purged within 30 days of request
+- User content (CloudKit): you delete this directly via Stir > Settings > Delete Local Data, or by signing out of iCloud / removing Stir from iCloud
+- Third-party processors (PostHog, Sentry, RevenueCat): we forward deletion requests to each subprocessor and they process per their own SLA
+
+You will receive an email confirmation when each step completes.
+
+We are working on a single-tap in-app deletion flow that consolidates these steps for v1.1; until then, the email path is the primary mechanism.
 
 ## 8. Children
 
