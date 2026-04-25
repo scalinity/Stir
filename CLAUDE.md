@@ -219,7 +219,7 @@ enum ErrorCode: String {
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
     case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
     case entLeftovers01  = "ENT-LEFTOVERS-01" // leftovers mode requires Premium+
-    case voiceSession01  = "VOICE-SESSION-01" // voice session lifecycle: missing / closed / owner_mismatch
+    case voiceSession01  = "VOICE-SESSION-01" // voice session lifecycle: session_missing / owner_mismatch / session_closed (HTTP 403) / lookup_failed (HTTP 500 — DB error during owner-row SELECT, same silent-rebuild handler path)
                                          // (ADR 0017 — distinct from ENT-VOICE-01 entitlement or AI-VOICE-01 pipeline)
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
     case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale/reauth_required

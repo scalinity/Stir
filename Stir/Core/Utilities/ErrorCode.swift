@@ -31,11 +31,14 @@ enum ErrorCode: String, Sendable, Codable, CaseIterable {
     // Voice session lifecycle failure — session_id no longer valid for this
     // user. Distinct from ENT-VOICE-01 (entitlement) and AI-VOICE-01 (AI
     // pipeline). Handler rebuilds the voice driver silently; MUST NOT
-    // paywall. `reason` field discriminates three subcases:
+    // paywall. `reason` field discriminates four subcases:
     //   session_missing  — row absent (expired past 2h owner retention)
     //   session_closed   — row present, superseded by a newer mint
     //   owner_mismatch   — row present but owned by a different user (IDOR
     //                      attempt or VM bug; log + rebuild generically)
+    //   lookup_failed    — DB error during owner-row lookup (HTTP 500;
+    //                      neither Gemini-related nor user-retryable;
+    //                      log + rebuild generically)
     // See ADR 0017, CLAUDE.md §Error code matrix.
     case voiceSession01 = "VOICE-SESSION-01"
     case val01 = "VAL-01"          // request body validation failure
@@ -73,22 +76,29 @@ enum AuthReason: String, Sendable, Equatable, Codable {
 }
 
 /// VOICE-SESSION-01 reason enum. Backend emits one of these on the 403
-/// response; iOS uses them for Sentry breadcrumb attribution and ops
-/// dashboard filtering. All three reasons share the same handler path
-/// (rebuild voice driver) — the distinction is observability, not
-/// control flow. See CLAUDE.md §Error code matrix + ADR 0017.
+/// (or 500 for lookupFailed) response; iOS uses them for Sentry breadcrumb
+/// attribution and ops dashboard filtering. All four reasons share the
+/// same handler path (rebuild voice driver) — the distinction is
+/// observability, not control flow. See CLAUDE.md §Error code matrix +
+/// ADR 0017.
 ///
 ///   sessionMissing  — owner row absent (expired past 2h retention, or
 ///                     client held a stale session_id from before the
-///                     owner table landed)
+///                     owner table landed). HTTP 403.
 ///   sessionClosed   — owner row present but superseded by a newer mint
 ///                     for this user (common: refresh swap raced with
-///                     an in-flight turn POST)
+///                     an in-flight turn POST). HTTP 403.
 ///   ownerMismatch   — owner row present but owned by a different
 ///                     canonical_user_key (IDOR attempt or VM bug —
-///                     alert ops if rate climbs)
+///                     alert ops if rate climbs). HTTP 403.
+///   lookupFailed    — DB error during voice_session_owners SELECT (e.g.,
+///                     transient connectivity, replica lag). HTTP 500.
+///                     Neither Gemini-related nor user-retryable — same
+///                     silent-rebuild path as the 403 reasons; the
+///                     distinction is server-side observability.
 enum VoiceSessionReason: String, Sendable, Equatable, Codable {
     case sessionMissing = "session_missing"
     case sessionClosed = "session_closed"
     case ownerMismatch = "owner_mismatch"
+    case lookupFailed = "lookup_failed"
 }

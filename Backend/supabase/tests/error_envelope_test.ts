@@ -62,7 +62,7 @@ Deno.test('envelope: AUTH-01 carries typed reason (spec §6 / CLAUDE.md matrix)'
 });
 
 Deno.test('envelope: VOICE-SESSION-01 carries typed reason (ADR 0017)', async () => {
-  const reasons = ['session_missing', 'owner_mismatch', 'session_closed'] as const;
+  const reasons = ['session_missing', 'owner_mismatch', 'session_closed', 'lookup_failed'] as const;
   for (const reason of reasons) {
     const res = jsonError(ErrorCode.VOICE_SESSION_01, 403, { reason });
     assertEquals(res.status, 403);
