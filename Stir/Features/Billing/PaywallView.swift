@@ -337,10 +337,9 @@ struct PaywallView: View {
     }
 
     private var legalLinks: some View {
-        // Placeholder URLs; hosted pages land before beta (step 9).
         HStack(spacing: CGFloat.Stir.space4) {
-            Link("Terms of Service", destination: URL(string: "https://stir.app/terms")!)
-            Link("Privacy Policy", destination: URL(string: "https://stir.app/privacy")!)
+            Link("Terms of Service", destination: URL(string: "https://getstir.app/terms")!)
+            Link("Privacy Policy", destination: URL(string: "https://getstir.app/privacy")!)
         }
         .stirFont(.bodySm)
         .foregroundStyle(Color.Stir.textTertiary)

@@ -340,15 +340,13 @@ struct SettingsRootView: View {
 
     private var aboutSection: some View {
         Section {
-            // Privacy + ToS are placeholder destinations; hosted URLs
-            // land before beta (step 9).
-            Link("Privacy Policy", destination: URL(string: "https://stir.app/privacy")!)
+            Link("Privacy Policy", destination: URL(string: "https://getstir.app/privacy")!)
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ember600)
-            Link("Terms of Service", destination: URL(string: "https://stir.app/terms")!)
+            Link("Terms of Service", destination: URL(string: "https://getstir.app/terms")!)
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ember600)
-            Link("Support", destination: URL(string: "mailto:scalinity.ai@gmail.com")!)
+            Link("Support", destination: URL(string: "mailto:support@getstir.app")!)
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ember600)
         } header: {

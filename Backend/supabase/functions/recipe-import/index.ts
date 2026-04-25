@@ -34,7 +34,7 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom, type Logger } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog, type Logger } from '../_shared/logger.ts';
 import { RecipeImportRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
@@ -45,7 +45,7 @@ const MODEL = GeminiModel.FlashLite;
 const DEFAULT_ASYNC_THRESHOLD_BYTES = 8192;
 const URL_FETCH_TIMEOUT_MS = 10_000;
 const URL_FETCH_MAX_BYTES = 2 * 1024 * 1024;  // 2 MB
-const URL_FETCH_USER_AGENT = 'StirBot/1.0 (+https://stir.app)';
+const URL_FETCH_USER_AGENT = 'StirBot/1.0 (+https://getstir.app)';
 
 // -----------------------------------------------------------------------------
 // Gemini output schema (must match prompt v1.0.0 recipe_import shape)
@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
       return responseFromCache(hit, requestId);
     }
   } catch (err) {
-    userLog.warn('cache_read_failed', { err: String(err) });
+    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---- 4. Rate limits (IP)
@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
-    userLog.warn('flag_read_failed', { err: String(err) });
+    userLog.warn('flag_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---- 6. User + quota (Free:2/mo, Premium/Pro:unlimited)
@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     await refundQuota(client, userLog, claims.canonical_user_key, 'recipe_import', consumedPeriodStart);
     const message = err instanceof FetchFailure ? err.message : 'Failed to fetch source content.';
-    userLog.warn('source_fetch_failed', { source_type: body.source_type, err: String(err) });
+    userLog.warn('source_fetch_failed', { source_type: body.source_type, err: sanitizeErrorForLog(err) });
     return jsonError(ErrorCode.IMPORT_01, 502, { message, source_type: body.source_type }, requestId);
   }
 
@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
   try {
     await writeCache(client, claims.canonical_user_key, body.import_id, FEATURE_KEY, 200, responseBody);
   } catch (err) {
-    userLog.warn('cache_write_failed', { err: String(err) });
+    userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
 
   userLog.info('request_complete', {

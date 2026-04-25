@@ -40,7 +40,7 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { DinnerSolveRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
@@ -254,7 +254,7 @@ Deno.serve(async (req) => {
       return streamCachedEvents(hit.response_body as CachedSolveBody, requestId);
     }
   } catch (err) {
-    userLog.warn('cache_read_failed', { err: String(err) });
+    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---------------------------------------------------------------------
@@ -293,13 +293,13 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
-    userLog.warn('flag_read_failed', { err: String(err) });
+    userLog.warn('flag_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'signature_invalid' }, requestId);
+    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'user_stale' }, requestId);
   }
   if (userRow.status === 'banned') {
     return jsonError(ErrorCode.BILL_01, 403, { message: 'Account is not eligible for Stir.', state: 'banned' }, requestId);
@@ -603,7 +603,7 @@ Deno.serve(async (req) => {
         });
       }
     } catch (err) {
-      userLog.warn('replacement_call_failed', { rank, err: String(err) });
+      userLog.warn('replacement_call_failed', { rank, err: sanitizeErrorForLog(err) });
     }
     failedRanks.push(rank);
   }
@@ -660,7 +660,7 @@ Deno.serve(async (req) => {
   try {
     await writeCache(client, claims.canonical_user_key, body.solve_request_id, FEATURE_KEY, 200, { events });
   } catch (err) {
-    userLog.warn('cache_write_failed', { err: String(err) });
+    userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
 
   userLog.info('request_complete', {
