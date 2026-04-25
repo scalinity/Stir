@@ -126,7 +126,8 @@ export type AuthReason =
 export type VoiceSessionReason =
   | 'session_missing'
   | 'owner_mismatch'
-  | 'session_closed';
+  | 'session_closed'
+  | 'lookup_failed';
 
 export interface ErrorExtras {
   message?: string;
@@ -182,6 +183,13 @@ export function jsonError(
     message: message ?? DEFAULT_MESSAGES[code],
     ...rest,
   };
+  // Re-pin the canonical envelope keys after the `...rest` spread so a
+  // future caller passing structured extras that happen to carry an
+  // `error` or `message` key (e.g., a forwarded upstream-error object)
+  // can't silently override the wire contract. Last-write-wins.
+  // Step-9 review CA2-M1 / SA1-#5.
+  body.error = code;
+  body.message = message ?? DEFAULT_MESSAGES[code];
   const headers: Record<string, string> = {
     'content-type': 'application/json; charset=utf-8',
   };

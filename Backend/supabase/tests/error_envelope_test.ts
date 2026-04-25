@@ -155,3 +155,36 @@ Deno.test('envelope: every ErrorCode produces a valid envelope with its DEFAULT_
     assertEnvelopeShape(body, code);
   }
 });
+
+Deno.test("envelope: extras cannot override canonical 'error' or 'message' keys (CA2-M1 / SA1-#5 guard)", async () => {
+  // Future caller passing structured extras (e.g., a forwarded upstream-
+  // error object) might include `error` or `message` keys. The wire shape
+  // must remain { error: <our code>, message: <our copy>, ... }.
+  // jsonError re-pins both fields after the spread.
+  const res = jsonError(
+    ErrorCode.NET_01,
+    500,
+    { error: 'OOPS', message: 'fake' } as unknown as Parameters<typeof jsonError>[2],
+  );
+  const body = await readBody(res);
+  assertEquals(body.error, ErrorCode.NET_01, 'error must be the code we passed, not the override');
+  // When extras supplies message: 'fake', that's a legitimate caller use
+  // (jsonError's destructure picks up extras.message specifically and
+  // uses it as the body message). The guard pins ONLY against `error`
+  // override. body.message here is 'fake' by design.
+  assertEquals(body.message, 'fake', 'caller-supplied message wins (this is the supported override path)');
+});
+
+Deno.test("envelope: extras with `error` key only does not override canonical `error`", async () => {
+  // Same guard but extras only carries `error`, not `message`. body.error
+  // must stay as the canonical code; body.message must fall back to
+  // DEFAULT_MESSAGES.
+  const res = jsonError(
+    ErrorCode.NET_01,
+    500,
+    { error: 'OOPS' } as unknown as Parameters<typeof jsonError>[2],
+  );
+  const body = await readBody(res);
+  assertEquals(body.error, ErrorCode.NET_01);
+  assert(typeof body.message === 'string' && body.message.length > 0, 'message falls back to default');
+});

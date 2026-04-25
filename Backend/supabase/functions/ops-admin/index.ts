@@ -852,10 +852,12 @@ async function handleFeatureFlagsUpdate(
 // Caller-supplied properties merge over the mandatory three.
 //
 // capturePosthogEvent itself is non-throwing (fire-and-forget via
-// EdgeRuntime.waitUntil with internal try/catch). The outer try/catch here
-// is defense-in-depth so any synchronous surprise (hash failure, bad shape)
-// can't unwind the user-visible mutation. Matches the writeAudit failure
-// posture: log.warn, swallow, never re-throw.
+// EdgeRuntime.waitUntil with internal try/catch). The outer try/catch
+// here is defense-in-depth: hashCanonicalKey is async (awaits
+// crypto.subtle.digest); a runtime upgrade or unexpected key-string
+// shape could in principle reject the promise, and we don't want a
+// telemetry path failure to unwind the user-visible mutation. Matches
+// the writeAudit failure posture: log.warn, swallow, never re-throw.
 // ---------------------------------------------------------------------------
 
 async function emitOpsEvent(

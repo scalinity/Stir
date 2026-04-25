@@ -44,7 +44,7 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
 import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    userLog.warn('json_parse_failed', { err: String(err) });
+    userLog.warn('json_parse_failed', { err: sanitizeErrorForLog(err) });
     return jsonError(
       ErrorCode.VAL_01,
       400,
@@ -366,11 +366,7 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.ENT_VOICE_01,
       403,
-      {
-        message: 'Cook Mode voice is a Premium feature.',
-        tier: entitlement.tier,
-        billing_state: entitlement.billing_state,
-      },
+      { message: 'Cook Mode voice is a Premium feature.' },
       requestId,
     );
   }
