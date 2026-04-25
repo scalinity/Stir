@@ -346,6 +346,12 @@ struct SettingsRootView: View {
             Link("Terms of Service", destination: URL(string: "https://getstir.app/terms")!)
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ember600)
+            // EULA points at Apple's standard licensed-application terms (no
+            // custom Stir EULA; ToS covers Stir-specific usage). Symmetric
+            // with the paywall's three-link disclosure footer.
+            Link("End User License Agreement", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ember600)
             Link("Support", destination: URL(string: "mailto:support@getstir.app")!)
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.ember600)
