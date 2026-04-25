@@ -182,8 +182,8 @@ struct SavedMealsView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.up.arrow.down")
-                        .frame(minWidth: 32, minHeight: 32)
                         .foregroundStyle(Color.Stir.ink700)
+                        .minTapTarget()
                 }
                 .accessibilityLabel("Sort — \(sortOption.rawValue)")
             }
@@ -200,12 +200,12 @@ struct SavedMealsView: View {
                     Button { searchQuery = "" } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(Color.Stir.ink300)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
+                            .minTapTarget()
                     }
                     .accessibilityLabel("Clear search")
                 }
             }
+            .frame(minHeight: 44)
             .padding(.horizontal, CGFloat.Stir.space3)
             .padding(.vertical, CGFloat.Stir.space2)
             .stirCard(
@@ -259,11 +259,7 @@ struct SavedMealsView: View {
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
                 .foregroundStyle(isFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
-                // HIG-minimum 44×44 hit target — previous inline padding
-                // left the effective tap region ~28pt wide, easy to miss
-                // next to the larger Cook-Again button.
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+                .minTapTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")

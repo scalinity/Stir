@@ -237,6 +237,7 @@
 		D7C43B85C04D4A6386DB2189 /* StirGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF8D946132AFBD4013A90040 /* StirGlyph.swift */; };
 		D827F0A18F8117BF95FA0210 /* TonightSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D85C83C67E1CA51774FE07 /* TonightSnapshot.swift */; };
 		D8B040764AED517E1B242AE7 /* VoiceTurnRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4300A920E84A19CD8F8AC1B3 /* VoiceTurnRepositoryTests.swift */; };
+		D91A6096979DB72F717E1AFF /* MinTapTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23D9B2A3ED43E7F8A407F40E /* MinTapTarget.swift */; };
 		DA640C9AC4FC78866FE1C27A /* StirWidgets.appex in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 84D14723130AB19DBCDEADB9 /* StirWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DCA61E2D1E63CBBF42E1D623 /* StepCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE134A139A7012C16D913543 /* StepCardView.swift */; };
 		DD3646C76FA5349E8F12FF5D /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE699B170519127799279F /* SharedStorage.swift */; };
@@ -349,6 +350,7 @@
 		1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KitchenEquipment+Extensions.swift"; sourceTree = "<group>"; };
 		1EF11728D8ED6F68DAFF296E /* CoreDataRoundtripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataRoundtripTests.swift; sourceTree = "<group>"; };
 		212DCA793F0B530B0FB3990B /* SetupPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPreferencesView.swift; sourceTree = "<group>"; };
+		23D9B2A3ED43E7F8A407F40E /* MinTapTarget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MinTapTarget.swift; sourceTree = "<group>"; };
 		2434E80AC9763FDEBBF0EE82 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirCardModifier.swift; sourceTree = "<group>"; };
 		25542F9CFA67245AA2778979 /* ScanCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureView.swift; sourceTree = "<group>"; };
@@ -1183,6 +1185,7 @@
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
+				23D9B2A3ED43E7F8A407F40E /* MinTapTarget.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -1634,6 +1637,7 @@
 				DE76C4B2F34B0ACF847D5161 /* VoiceTurnRepository.swift in Sources */,
 				F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */,
 				5E8F656515AC048F68C62633 /* WidgetReloadCoordinator.swift in Sources */,
+				D91A6096979DB72F717E1AFF /* MinTapTarget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -69,8 +69,19 @@ struct PaywallView: View {
     }
 
     private func handleSuccess() {
-        withAnimation(reduceMotion ? nil : .spring(duration: 0.4)) {
-            successIconBounce = true
+        // Gate the bounce trigger itself, not just `withAnimation`.
+        // `.symbolEffect(.bounce, value: successIconBounce)` (line 356) plays
+        // the bounce on every successIconBounce toggle regardless of the
+        // surrounding withAnimation — iOS 17 .symbolEffect doesn't honor
+        // accessibilityReduceMotion automatically (the disableSymbolEffect
+        // / symbolEffectsRemoved APIs ship in iOS 18, and this app deploys
+        // iOS 17). Leaving successIconBounce at false when reduceMotion is
+        // on is the only way to suppress the bounce on iOS 17.
+        // CR2-W1 / CR3-W2 / step-9 review.
+        if !reduceMotion {
+            withAnimation(.spring(duration: 0.4)) {
+                successIconBounce = true
+            }
         }
         // Asymmetric with `handleRestoreTap`'s race guard by design: toast
         // presentation can be overridden by a newer tap (so the tap needs a

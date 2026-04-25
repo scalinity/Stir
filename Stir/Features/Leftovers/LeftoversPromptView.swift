@@ -202,8 +202,7 @@ private struct ItemRow: View {
                             .foregroundStyle(.white)
                     }
                 }
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+                .minTapTarget()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(entry.displayName)
@@ -300,8 +299,7 @@ private struct AddCustomRow: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(Color.Stir.paper100),
                     )
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+                    .minTapTarget()
             }
             .accessibilityLabel("Add leftover item")
             .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)

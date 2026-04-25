@@ -205,8 +205,7 @@ private struct AisleRow: View {
                     }
                 }
                 .frame(width: 22, height: 22)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+                .minTapTarget()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(title(for: item))
@@ -342,11 +341,11 @@ private struct RemindersDeniedToast: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Color.Stir.ink500)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+                    .minTapTarget()
             }
             .accessibilityLabel("Dismiss")
         }
+        .frame(minHeight: 44)
         .padding(.horizontal, CGFloat.Stir.space3Half)
         .padding(.vertical, CGFloat.Stir.space2Half)
         .stirCard(
