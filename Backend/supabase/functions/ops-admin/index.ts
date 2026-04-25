@@ -334,11 +334,16 @@ async function handleUsersList(
   if (error) {
     throw new Error(`stir_ops_list_users failed: ${error.message}`);
   }
+  // result_count = size of the returned page (NOT total_count, which is the
+  // filtered-across-pages total). Dashboard chart "did the query return
+  // anything" wants the page-size count.
+  const userRows = (data as { users?: unknown[] })?.users;
   await emitOpsEvent(ctx, 'ops_admin.users.list_queried', {
     tier_filter: params.tier ?? null,
     has_search: Boolean(params.search),
     limit: params.limit ?? 50,
     offset: params.offset ?? 0,
+    result_count: Array.isArray(userRows) ? userRows.length : 0,
   });
   return { ok: true, ...(data as Record<string, unknown>) };
 }
@@ -369,6 +374,7 @@ async function handleUsersForceReauth(
     ok: boolean;
     before: Record<string, unknown>;
     after: Record<string, unknown>;
+    merged_siblings_bumped?: number;
   };
 
   const auditId = await writeAudit(ctx.client, ctx.log, {
@@ -384,6 +390,7 @@ async function handleUsersForceReauth(
 
   await emitOpsEvent(ctx, 'ops_admin.users.force_reauth', {
     canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    merged_siblings_bumped: result.merged_siblings_bumped ?? 0,
     audit_id: auditId,
   });
 
@@ -491,8 +498,14 @@ async function handleUsersStatus(
     request_id: ctx.requestId,
   });
 
+  // from_status reads the prior status off result.before (the to_jsonb
+  // snapshot the RPC returns); falls back to null if the shape ever drifts
+  // so the emit doesn't error out.
+  const fromStatus = (result.before as { status?: string } | null)?.status ?? null;
+
   await emitOpsEvent(ctx, 'ops_admin.users.status_changed', {
     canonical_user_key_hash: await hashCanonicalKey(params.canonical_user_key),
+    from_status: fromStatus,
     to_status: params.status,
     audit_id: auditId,
   });
