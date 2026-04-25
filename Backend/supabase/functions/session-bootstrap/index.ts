@@ -24,7 +24,7 @@
 //   7. Read entitlements + quotas + flags.
 //   8. issueSessionJWT and return 200.
 
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import {
   ErrorCode,
   jsonError,
@@ -52,6 +52,7 @@ import {
   buildRate01Response,
   checkAndIncrement,
   extractSourceIP,
+  ipBucket,
 } from '../_shared/rate_limiter.ts';
 import { ZodError } from 'zod';
 
@@ -132,7 +133,7 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:bootstrap_hourly', sourceIP);
     if (!rl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:bootstrap_hourly', source_ip: sourceIP });
+      userLog.warn('rate_limited', { scope: 'ip:bootstrap_hourly', source_ip_bucket: await ipBucket(sourceIP) });
       return buildRate01Response(
         'ip:bootstrap_hourly',
         rl.retry_after_seconds,
@@ -143,7 +144,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     // Fail open — rate limiter DB glitch shouldn't block a legitimate
     // first-install from ever reaching the app. Log + continue.
-    userLog.warn('rate_limiter_failed', { err: String(err) });
+    userLog.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
   }
 
   try {

@@ -339,7 +339,15 @@ export async function ipBucket(ip: string): Promise<string> {
     // WebCrypto failure (malformed salt, unsupported algorithm) falls
     // back to the unsalted bucket rather than throwing through the
     // rate-limit path. Observable via the same prefix.
-    console.warn('[rate_limiter] HMAC bucket fallback: ' + (e instanceof Error ? e.message : String(e)));
+    //
+    // Log only the error CLASS (e.name), never e.message: a malformed
+    // LOG_IP_SALT (non-UTF-8 byte from a botched `supabase secrets set`)
+    // can produce a TextEncoder error whose message contains the
+    // offending salt substring. Logging that would defeat the entire
+    // HMAC threat model — an attacker with log-read access could
+    // re-derive every prior bucket. SA1 step-9 review.
+    const errName = e instanceof Error ? e.name : 'unknown';
+    console.warn(`[rate_limiter] HMAC bucket fallback: ${errName}`);
     return 'unsalted:' + fnv1aHex(ip);
   }
 }

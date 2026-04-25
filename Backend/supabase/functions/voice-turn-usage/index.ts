@@ -32,7 +32,7 @@ import { ErrorCode, jsonError } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { computeCostUSD, MODEL_PRICING } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
 import {
   VoiceTurnUsageRequest,
@@ -42,7 +42,7 @@ import {
   effectiveVoiceEnabled,
   readEntitlement,
 } from '../_shared/entitlements.ts';
-import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 
 const VOICE_FEATURE_KEY = 'cook_mode_realtime';
 const MODEL = GeminiModel.FlashLivePreview;
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    userLog.warn('json_parse_failed', { err: String(err) });
+    userLog.warn('json_parse_failed', { err: sanitizeErrorForLog(err) });
     return jsonError(
       ErrorCode.VAL_01,
       400,
@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:voice_turn_usage_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:voice_turn_usage_daily', source_ip: sourceIP });
+      userLog.warn('rate_limited', { scope: 'ip:voice_turn_usage_daily', source_ip_bucket: await ipBucket(sourceIP) });
       return jsonError(
         ErrorCode.RATE_01,
         429,
@@ -248,10 +248,14 @@ Deno.serve(async (req) => {
     // Fail CLOSED on lookup error — the alternative (admit the post)
     // re-opens the IDOR class we're closing. Tiny blast radius:
     // observability rows for this turn are lost, not user-visible.
+    // Use VOICE_SESSION_01 with `reason: lookup_failed` (not AI_01)
+    // per SA2-W6 — AI_01 is "Gemini upstream temporarily unavailable"
+    // and iOS maps it to user-facing retry copy. A DB outage here is
+    // neither Gemini-related nor user-retryable.
     return jsonError(
-      ErrorCode.AI_01,
+      ErrorCode.VOICE_SESSION_01,
       500,
-      { message: 'Could not verify session ownership.' },
+      { message: 'Could not verify session ownership.', reason: 'lookup_failed' },
       requestId,
     );
   }
@@ -270,23 +274,44 @@ Deno.serve(async (req) => {
     );
   }
   if (ownerRow.canonical_user_key !== claims.canonical_user_key) {
-    // Authenticated user is posting turns under someone else's session
-    // id. Attempted IDOR (or a VM bug writing a stale session_id —
-    // either way, reject). This is the signal ops dashboards should
-    // alert on if it ever fires at non-zero rate.
-    userLog.error(
-      'voice_session_owner_mismatch',
-      new Error('authenticated user does not own posted session_id'),
-    );
-    return jsonError(
-      ErrorCode.VOICE_SESSION_01,
-      403,
-      {
-        message: 'Session does not belong to this user.',
-        reason: 'owner_mismatch',
-      },
-      requestId,
-    );
+    // SA2-W5 (2026-04-24): the session may have been minted under an
+    // install:<uuid> key that's since been alias-forwarded to the
+    // ck:<record> the caller is now authenticated as. Do a single
+    // merged_into lookup before rejecting — accept if the authenticated
+    // user IS the legitimate post-merge owner of the session's original
+    // key. Nested merges are a bug (one hop only).
+    const { data: originalUser } = await client
+      .from('app_users')
+      .select('merged_into')
+      .eq('canonical_user_key', ownerRow.canonical_user_key)
+      .maybeSingle();
+    const isAliasForwarded =
+      originalUser?.merged_into === claims.canonical_user_key;
+    if (!isAliasForwarded) {
+      // Authenticated user is posting turns under someone else's session
+      // id. Attempted IDOR (or a VM bug writing a stale session_id —
+      // either way, reject). This is the signal ops dashboards should
+      // alert on if it ever fires at non-zero rate.
+      userLog.error(
+        'voice_session_owner_mismatch',
+        new Error('authenticated user does not own posted session_id'),
+      );
+      return jsonError(
+        ErrorCode.VOICE_SESSION_01,
+        403,
+        {
+          message: 'Session does not belong to this user.',
+          reason: 'owner_mismatch',
+        },
+        requestId,
+      );
+    }
+    // Log the alias-forward acceptance so ops can audit "how often
+    // does mid-session identity migration happen" — should be rare.
+    userLog.info('voice_session_owner_alias_forwarded', {
+      session_id: body.session_id,
+      original_key: ownerRow.canonical_user_key,
+    });
   }
   if (ownerRow.closed_at !== null) {
     // P1-B lifecycle check: session was superseded by a newer mint.

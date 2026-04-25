@@ -42,7 +42,7 @@ import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { DinnerSolveRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import {
   incrementQuotaAtomic,
@@ -264,7 +264,7 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:dinner_solve_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:dinner_solve_daily', source_ip: sourceIP });
+      userLog.warn('rate_limited', { scope: 'ip:dinner_solve_daily', source_ip_bucket: await ipBucket(sourceIP) });
       return rate01Response(requestId, 'ip:dinner_solve_daily', ipRl.retry_after_seconds, ipRl.reset_at);
     }
     const userRl = await checkAndIncrement(client, 'user:dinner_solve_hourly', claims.canonical_user_key);

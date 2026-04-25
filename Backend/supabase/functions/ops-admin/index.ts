@@ -24,13 +24,14 @@ import {
   verifyAdminAuth,
 } from '../_shared/admin_auth.ts';
 import { writeAudit } from '../_shared/audit.ts';
-import { createLogger, requestIdFrom, type Logger } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog, type Logger } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
 import {
   buildRate01Response,
   checkAndIncrement,
   extractSourceIP,
+  ipBucket,
 } from '../_shared/rate_limiter.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
@@ -212,7 +213,7 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
     if (!rl.allowed) {
-      log.warn('rate_limited', { scope: 'ip:ops_admin_hourly', source_ip: sourceIP });
+      log.warn('rate_limited', { scope: 'ip:ops_admin_hourly', source_ip_bucket: await ipBucket(sourceIP) });
       return buildRate01Response(
         'ip:ops_admin_hourly',
         rl.retry_after_seconds,
@@ -222,7 +223,7 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     // Fail open — a rate_limit_buckets glitch must not lock the console.
-    log.warn('rate_limiter_failed', { err: String(err) });
+    log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // 2. Body validation.

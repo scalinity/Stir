@@ -36,7 +36,7 @@ import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog, type Logger } from '../_shared/logger.ts';
 import { RecipeImportRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { buildRate01Response, checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 
@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:recipe_import_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:recipe_import_daily', source_ip: sourceIP });
+      userLog.warn('rate_limited', { scope: 'ip:recipe_import_daily', source_ip_bucket: await ipBucket(sourceIP) });
       return buildRate01Response('ip:recipe_import_daily', ipRl.retry_after_seconds, ipRl.reset_at, requestId);
     }
   } catch (err) {

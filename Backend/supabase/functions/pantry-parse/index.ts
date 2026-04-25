@@ -30,9 +30,9 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { PantryParseRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import { buildRate01Response, checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import { decodeAndValidateImage } from '../_shared/image_validation.ts';
 
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    userLog.warn('json_parse_failed', { err: String(err) });
+    userLog.warn('json_parse_failed', { err: sanitizeErrorForLog(err) });
     return jsonError(
       ErrorCode.VAL_01,
       400,
@@ -186,7 +186,7 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     // Cache miss-path shouldn't block primary flow.
-    userLog.warn('cache_read_failed', { err: String(err) });
+    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---------------------------------------------------------------------
@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:pantry_parse_daily', sourceIP);
     if (!rl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:pantry_parse_daily', source_ip: sourceIP });
+      userLog.warn('rate_limited', { scope: 'ip:pantry_parse_daily', source_ip_bucket: await ipBucket(sourceIP) });
       return buildRate01Response(
         'ip:pantry_parse_daily',
         rl.retry_after_seconds,
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
-    userLog.warn('flag_read_failed', { err: String(err) });
+    userLog.warn('flag_read_failed', { err: sanitizeErrorForLog(err) });
     // Fail open — if flags unreadable, default to enabled.
   }
 
@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
   try {
     await writeCache(client, claims.canonical_user_key, body.client_request_id, FEATURE_KEY, 200, wire);
   } catch (err) {
-    userLog.warn('cache_write_failed', { err: String(err) });
+    userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
 
   userLog.info('request_complete', {

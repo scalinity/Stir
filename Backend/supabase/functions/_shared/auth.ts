@@ -142,7 +142,12 @@ export async function verifySessionJWT(
     if (err instanceof jose.errors.JWSInvalid) throw new AuthError('malformed', msg);
     if (err instanceof jose.errors.JWTInvalid) throw new AuthError('malformed', msg);
     if (err instanceof jose.errors.JWTClaimValidationFailed) {
-      throw new AuthError('signature_invalid', msg);
+      // Issuer/audience/etc. mismatch on a JWT whose signature verifies
+      // cleanly. This is config drift (mint and verify disagree on issuer
+      // or audience strings), NOT signature forgery. Map to 'malformed'
+      // so iOS treats it as info-severity silent re-bootstrap rather than
+      // tripping the signature_invalid alert path. SA2-H2 step-9 review.
+      throw new AuthError('malformed', msg);
     }
     // Unknown jose failure. Treat as malformed to avoid leaking internals.
     throw new AuthError('malformed', msg);
