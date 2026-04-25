@@ -35,7 +35,7 @@ Values are structured (token counts, costs, durations, enum states)
 |--------------------------------|------------------------------------------|---------------------------------------------------------|-------|
 | `canonical_user_key_hash`      | string, 16-char SHA-256 prefix (hex)     | PostHog distinct_id + user-scoped events · Sentry tag · DB columns | See §3 identity |
 | `request_id`                   | TEXT — UUID or `voice:<session>:<turn>`  | Sentry captures on request-scoped surfaces · PostHog on request-scoped surfaces | See §7 join model |
-| `actor_id`                     | UUID (Supabase Auth user_id)             | PostHog + Sentry on admin-surface emits (`ops_admin.*`) | Source of truth for admin action attribution |
+| `actor_id`                     | string — UUID (Supabase Auth user_id) for human admins · `system:<source>` for system actors (`system:cron`, future `system:webhook` etc.) | PostHog + Sentry on admin-surface emits (`ops_admin.*`) · Sentry on cron-invoked surfaces (cost-anomaly dispatch) | Source of truth for action attribution. `system:` prefix reserves namespace for non-human actors so omitting reads as "we don't know" rather than "no human actor." |
 | `feature_key`                  | enum — `dinner_solve | voice_cook_turn | recipe_import | pantry_parse | substitution | grocery_generate | cook_mode_realtime | cook_turn` | PostHog on AI events (`feature` in event property; `feature_key` in DB + request-scope) | Match spec §3 |
 | `tier`                         | enum — `free | premium | pro`            | PostHog on billing-relevant events · Sentry when billing state matters to the capture | Match `app_users.tier` |
 | `billing_state`                | enum — `none | active | trial | grace | cancelled_active | expired` | PostHog on `entitlement_state_changed` and billing webhook emits when those ship | Match `entitlement_snapshots.billing_state` |
@@ -79,6 +79,15 @@ distinct_id on that surface. Rationale: admins acting on users
 produce events that belong to the ADMIN's timeline (distinct_id =
 admin's hash, derived from the Supabase Auth user id) but carry
 the acted-on user's hash as a property.
+
+For **cron-invoked or other system-driven surfaces** (no human
+actor, no HTTP request scope), `actor_id` is set to `system:<source>`
+where `<source>` identifies the originating subsystem
+(`system:cron`, future `system:webhook`, `system:worker`). This is
+strictly preferred over omitting the field — omission reads as "we
+don't know who acted" while `system:cron` reads as "no human acted,
+the scheduler did." Cross-system joins on `actor_id` then
+distinguish admin-driven events from automated ones cleanly.
 
 ---
 
@@ -182,13 +191,46 @@ Rule of thumb for reviewers:
   `request_id` alongside the feature id for this reason; the
   two-id pattern is intentional.
 
+### 7.1 Cron-invoked surfaces — `request_id` carve-out
+
+Some emit surfaces have **no HTTP request scope at all** — pg_cron
+jobs, Postgres triggers, scheduled background workers. There is no
+`x-request-id` to carry on these surfaces; forcing a synthetic
+`request_id` would be cargo-cult (the dashboard query "find the
+PostHog/Sentry event for this Supabase function log line" makes no
+sense when there's no function log line).
+
+**Rule:** cron-invoked or otherwise stateless surfaces OMIT
+`request_id`. In its place, the surface's **row primary key**
+becomes the canonical cross-system join key for that surface. The
+omission MUST be documented:
+
+1. In the surface's row in the §8 applicability matrix below (set
+   `request_id: omitted (cron carve-out — see §7.1)`).
+2. In any alert rule querying that surface (`docs/sentry/alerts.md`
+   should cite the row-primary-key field as the join key, not
+   `request_id`).
+3. Implicitly via `actor_id: system:<source>` — the presence of a
+   `system:*` actor reads as "this isn't a request-scoped event."
+
+**Surfaces this applies to today:**
+
+| Surface | Row primary key (= cross-system join) | actor_id |
+|---|---|---|
+| Backend SQL Sentry — cost-anomaly dispatch (`stir_ops_cost_anomaly_alert_dispatch`) | `event_id` (= `cost_anomalies.id` UUID) | `system:cron` |
+
+Future cron-invoked surfaces (e.g., `stir_ops_reactivation_enqueue`
+notifications, retention sweeps) inherit this rule.
+
+### 7.2 Per-surface applicability
+
 Applicability on each emit surface:
 
 | Surface                                  | `request_id` required? | `$ai_span_id` / feature id required? |
 |------------------------------------------|------------------------|---------------------------------------|
 | Backend `$ai_generation` (AI calls)      | should include (not current)  | yes (that's the contract) |
 | Backend `ops_admin.*` emits (Phase C)    | **yes**                | N/A |
-| Backend SQL Sentry (cost anomaly)        | N/A (anomaly id is the row key; request_id has no natural value) | N/A |
+| Backend SQL Sentry (cost anomaly)        | omitted — see §7.1 cron carve-out (`event_id` = `cost_anomalies.id` UUID is the surface-specific join key) | N/A (no AI generation) |
 | Backend handler error captures (Phase D) | **yes**                | N/A |
 | iOS Sentry `captureError`                | **yes** (when request context available — all 5 current sites have it) | N/A |
 | iOS Sentry `breadcrumb`                  | should include when possible | N/A |
@@ -203,7 +245,7 @@ Applicability on each emit surface:
 |-----------------------------------|---------------------------------------------------------------------|---------------------------------------------------------|
 | Backend `$ai_generation` (AI)     | `distinct_id` (via helper) · `$ai_span_id` · `$ai_span_name` · `$ai_model` · `$ai_provider='gemini'` · `$ai_input_tokens` · `$ai_output_tokens` · `$ai_total_cost_usd` · `$ai_latency` · `$ai_is_error` · `feature` | `$ai_cache_read_input_tokens` (when >0) · `prompt_version` · `thinking_level` · `retry_count` · `$ai_error`/`error_code` (on failure) · `path` (voice) |
 | Backend `ops_admin.*` (Phase C)   | `distinct_id=<admin hash>` · `request_id` · `actor_id` (admin UUID) · `action` (the audit action string) | `canonical_user_key_hash` (when action is user-scoped) · `target_id` (feature-specific) · `result` (`ok`, `noop`, `dedup`) |
-| Backend SQL Sentry (cost anomaly) | `event_id` · `level` · `logger` · `tags.anomaly_type` · `tags.severity` · `tags.canonical_user_key_hash` (rename from `user_hash` during Phase D) | `extra` (per anomaly type) |
+| Backend SQL Sentry (cost anomaly) | `event_id` (= `cost_anomalies.id`, the surface-specific join key — see §7.1 cron carve-out) · `level` · `logger` · `tags.anomaly_type` · `tags.severity` · `tags.canonical_user_key_hash` (renamed from `user_hash` in Phase D — migration `20260424000007`) · `tags.actor_id = 'system:cron'` | `extra` (per anomaly type) · `request_id`: **omitted** per §7.1 cron carve-out |
 | Backend handler `captureError` (future Phase D work if we add SDK-Sentry) | Not applicable today — no SDK-Sentry in backend | — |
 | iOS Sentry `captureError`         | `canonical_user_key_hash` (rename from `canonical_key_hash` during organic touches) · `request_id` (new; follow-up task, iOS-scope) · `endpoint` (already present on 2 sites) | `code` / `error_code` · `phase` · `auth_reason` · `field_errors` |
 | iOS Sentry `breadcrumb`           | `canonical_user_key_hash` (rename pending) · `category` (Sentry native) | `screen` · `code` · `error` (string-summary) |
