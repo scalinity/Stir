@@ -348,12 +348,23 @@ struct PaywallView: View {
     }
 
     private var legalLinks: some View {
-        HStack(spacing: CGFloat.Stir.space4) {
-            Link("Terms of Service", destination: URL(string: "https://getstir.app/terms")!)
-            Link("Privacy Policy", destination: URL(string: "https://getstir.app/privacy")!)
+        // Three small-text links at the bottom of the paywall — Apple's
+        // App Store guidelines require both Terms (or EULA) and Privacy
+        // Policy disclosures before subscription confirmation. Stir's ToS
+        // covers app usage; the EULA points at Apple's standard licensed-
+        // application terms (no custom EULA today, so the standard URL
+        // is the right link per Apple's App Store Connect guidance).
+        HStack(spacing: CGFloat.Stir.space2) {
+            Link("Terms", destination: URL(string: "https://getstir.app/terms")!)
+            Text("·").foregroundStyle(Color.Stir.textTertiary).accessibilityHidden(true)
+            Link("EULA", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+            Text("·").foregroundStyle(Color.Stir.textTertiary).accessibilityHidden(true)
+            Link("Privacy", destination: URL(string: "https://getstir.app/privacy")!)
         }
         .stirFont(.bodySm)
         .foregroundStyle(Color.Stir.textTertiary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
     }
 
     private var successContent: some View {
