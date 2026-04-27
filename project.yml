@@ -312,6 +312,12 @@ schemes:
       askForAppToLaunch: false
       language: en
       region: US
+      # Local StoreKit Configuration so the Simulator can resolve the
+      # 4 SKUs without an App Store Connect roundtrip. RevenueCat reads
+      # these via StoreKit2; the test_ key in Config.xcconfig pairs with
+      # this file for end-to-end paywall testing in DEBUG builds. Real
+      # device / TestFlight uses the App Store Connect products instead.
+      storeKitConfiguration: Stir/Stir.storekit
     test:
       config: Debug
       targets:
