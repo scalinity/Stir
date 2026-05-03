@@ -1,6 +1,6 @@
 # CLAUDE.md — Stir
 
-This file is your orientation pack for the Stir codebase. It exists so you don't have to rediscover the same facts every session. If a fact is in this file, trust it — the full spec (`Specs/Stir-Full-Spec.md`) and the Cook Mode research (`Specs/Stir-Cook-Mode-Architecture.md`) are the authoritative source, but this file is your working cache.
+This file is your orientation pack. Trust it as a working cache; the full spec (`Specs/Stir-Full-Spec.md`) and Cook Mode research (`Specs/Stir-Cook-Mode-Architecture.md`) are authoritative.
 
 Daniel is the solo builder. He reads generated code at peer level. Don't simplify unless asked.
 
@@ -13,39 +13,37 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 ## Spec pointers
 
 - **Full spec** (product truth): `Specs/Stir-Full-Spec.md`
-- **Cook Mode research** (voice implementation reference): `Specs/Stir-Cook-Mode-Architecture.md`
-- **Design system tokens + rules** (palette, typography, radius, iconography, principles): `Specs/Design-System.md`
-- **Design mockups** (visual source of truth — every v1 screen as an HTML prototype): `stir-app-design/project/DesignMockups/`. 17 files (`01_shell_and_launch.html` → `17_errors_permissions.html`) indexed by `INDEX.md`. **Before coding any screen that isn't implemented yet, read the matching mockup first** — it's pixel-truth for layout, typography, spacing, and states. Shared CSS tokens live in `_shared/colors_and_type.css`. Provenance + mockup-to-Swift token mapping in `EXTRACTED_TOKENS.md`. Product content (copy, pricing, tier structure) is NOT authoritative here — mockups are illustrative on that axis; spec + this file win for anything billing/tier/copy-related.
-- **Architecture Decision Records** (load-bearing choices + their reasoning): `docs/decisions/`
-- **Ops runbooks** (secret rotation, prod incidents, release procedures): `docs/runbooks/`
-- If this file disagrees with the spec, the spec wins. If this file or the spec disagrees with an ADR, the ADR wins for reasoning / history but any spec or this-file update required by the ADR must land in the same commit as the ADR. If the mockups disagree with `Specs/Design-System.md` on a token, mockups win and §3/§4/§5/§6/§12 must be updated to match (principles in §1/§2/§7/§11/§13 stay). Flag discrepancies.
+- **Cook Mode research**: `Specs/Stir-Cook-Mode-Architecture.md`
+- **Design system tokens**: `Specs/Design-System.md`
+- **Design mockups** (visual source of truth — 17 HTML prototypes for v1 screens): `stir-app-design/project/DesignMockups/` (see `INDEX.md`). **Read the matching mockup before coding any unimplemented screen** — pixel-truth for layout/typography/spacing/states. Shared CSS tokens in `_shared/colors_and_type.css`; Swift-token provenance in `EXTRACTED_TOKENS.md`. Mockups are NOT authoritative for product content (copy/pricing/tier) — spec wins there.
+- **ADRs**: `docs/decisions/`
+- **Ops runbooks**: `docs/runbooks/`
+- **Deferred work / triggered refactors**: `docs/deferred-work.md`
+- Precedence: ADR > spec > this file > mockups (for tokens, mockups override). If mockups disagree with `Design-System.md` on a token, mockups win and §3/§4/§5/§6/§12 of Design-System.md must be updated. Flag discrepancies.
 
 ## Decisions system
 
-`docs/decisions/` holds the architectural record. Read `docs/decisions/README.md` for the full rules; the TL;DR:
+`docs/decisions/` holds the architectural record. Read `docs/decisions/README.md` for full rules. TL;DR:
 
-- **Create an ADR** when: a load-bearing choice is made, a reasonable alternative is rejected, a rule is added to / retired from this file or the spec, or work is explicitly deferred with a trigger to revisit.
-- **Don't create an ADR** for day-to-day implementation choices, bug fixes, or anything fully captured by code shape.
-- **ADR naming**: `NNNN-kebab-short-name.md`, sequentially numbered, never recycled, never renumbered.
-- **Statuses**: `Proposed | Accepted | Deferred | Superseded by NNNN | Rejected`. Superseded ADRs stay in place with a forward link; rejected ADRs stay so the same idea doesn't cycle back unexamined.
-- **Template**: copy `docs/decisions/TEMPLATE.md` (Context, Decision, Alternatives considered, Consequences, Trigger to revisit, Notes). Keep each ADR readable in under 5 minutes.
-- **Claude's responsibility**:
-  - Before making a load-bearing choice, check `docs/decisions/` for a prior ADR on the topic.
-  - If the current work represents a new material decision, create the ADR BEFORE or ALONGSIDE the code change — never land one silently.
-  - If code drifts from an Accepted ADR, either amend the ADR or revert the code; silent divergence is banned.
-  - Update the index table in `docs/decisions/README.md` when adding a new ADR.
-- **Relationship to "What NOT to reopen"**: the list at the bottom of this file is the quick-reference TL;DR. Each item links to (or should link to) its ADR for the reasoning and alternatives.
+- **Create an ADR** when a load-bearing choice is made, a reasonable alternative is rejected, a rule is added/retired, or work is explicitly deferred with a trigger to revisit.
+- **Don't create** for day-to-day implementation choices, bug fixes, or anything captured by code shape.
+- **Naming**: `NNNN-kebab-short-name.md`, sequential, never recycled/renumbered.
+- **Statuses**: `Proposed | Accepted | Deferred | Superseded by NNNN | Rejected`. Superseded ADRs stay with a forward link; rejected ADRs stay so the same idea doesn't cycle back.
+- **Template**: `docs/decisions/TEMPLATE.md`. Keep each ADR readable in <5 minutes.
+- **Claude's responsibility**: check for prior ADR before load-bearing choices; create ADR BEFORE/ALONGSIDE code (never silently); revert or amend on drift; update the index in `docs/decisions/README.md`.
+
+---
 
 ## North-star constraints (invariants — never violate)
 
-1. **Single AI vendor: Google Gemini.** No OpenAI, no Anthropic, no cross-vendor LLM fallback. The only models that touch production are `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, and `gemini-3.1-flash-live-preview`.
-2. **No provider API keys in the iOS bundle, ever.** Cook Mode voice uses ephemeral session tokens minted server-side. The main Gemini API key lives in Supabase Edge Function secrets only.
-3. **User content lives in CloudKit, not Supabase.** Supabase Postgres holds operational metadata only (quotas, entitlements, prompt versions, AI request logs). Pantry items, recipes, and cooking sessions sync via CloudKit private database. Don't mirror user content in Postgres.
-4. **RLS on every ops table in Supabase.** All rows keyed on `canonical_user_key`. No exceptions, no "temporary" bypasses.
-5. **Hard-rule validator runs on every substitution output,** regardless of invocation path (Substitution Sheet or Live session function call).
-6. **Voice is Premium+ only.** Free tier gets unlimited tap-based Cook Mode, but the voice affordance triggers a hard paywall with `ENT-VOICE-01`. Caps are `free: 0`, `premium: 13`, `pro: 27` voice Cook Sessions / month (ADR 0015, applied 2026-04-23). ADR-0008's testing override (Free 0→20 + `ENTITLEMENT_OVERRIDE_VOICE_FREE` env opening voice to all tiers) is **superseded** by ADR 0015; `effectiveVoiceEnabled()`'s env-based escape hatch is retained for future dev/staging runs only — production must keep `ENTITLEMENT_OVERRIDE_VOICE_FREE` unset (runbook: `supabase secrets list --project-ref ktqajarcomzplnpbczfo` before any cap-related deploy). See `docs/decisions/0015-voice-cap-reduction-and-live-caching-finding.md` and `docs/decisions/0008-voice-temporarily-free-for-testing.md` (Superseded).
-7. **Live sessions cannot be pruned mid-session — `refreshSession()` IS the pruning mechanism.** Gemini Live's protocol has four client-to-server message types (Setup, ClientContent, RealtimeInput, ToolResponse) and none support mid-session history truncation. Cost is bounded by silently minting a NEW ephemeral token with a compact recap appended to systemInstruction and swapping the WebSocket. Triggers: `turnCount - lastRefreshedAtTurn >= 10` OR `accum_prompt_tokens > 15_000` on a single turn. Earlier drafts called out `session.update` with audio-item truncation; that semantic was carried over from OpenAI Realtime and doesn't exist here. See ADR 0014.
-8. **Voice session `max_output_tokens: 400`** (bumped from 150 → 300 → 400 on 2026-04-22, ADR 0010). Baked into the ephemeral-token mint config, not just client-side. The invariant is "bounded cap exists" — specific value is tunable based on observed p95 response length. 400 tokens ≈ 16 s of audio at 25 tok/s.
+1. **Single AI vendor: Google Gemini.** No OpenAI, no Anthropic, no cross-vendor LLM fallback. Production models: `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3.1-flash-live-preview`.
+2. **No provider API keys in the iOS bundle, ever.** Cook Mode voice uses ephemeral session tokens minted server-side. The Gemini API key lives in Supabase Edge Function secrets only.
+3. **User content lives in CloudKit, not Supabase.** Postgres holds operational metadata only (quotas, entitlements, prompt versions, AI request logs). Pantry/recipes/sessions sync via CloudKit private DB. Don't mirror user content in Postgres.
+4. **RLS on every ops table in Supabase.** All rows keyed on `canonical_user_key`. No exceptions, no temporary bypasses.
+5. **Hard-rule validator runs on every substitution output,** regardless of invocation path.
+6. **Voice is Premium+ only.** Free tier gets unlimited tap-based Cook Mode; voice affordance triggers `ENT-VOICE-01` paywall. Caps: `free: 0`, `premium: 13`, `pro: 27` voice sessions/month (ADR 0015). `effectiveVoiceEnabled()`'s `ENTITLEMENT_OVERRIDE_VOICE_FREE` env hatch is dev/staging only — production must keep it unset (verify via `supabase secrets list --project-ref ktqajarcomzplnpbczfo` before any cap-related deploy). ADR 0008 is Superseded.
+7. **Live sessions cannot be pruned mid-session — `refreshSession()` IS pruning.** Gemini Live's protocol has no mid-session truncation frame. Cost is bounded by silently minting a NEW ephemeral token with a compact recap appended to systemInstruction and swapping the WebSocket. Triggers: `turnCount - lastRefreshedAtTurn >= 10` OR `accum_prompt_tokens > 15_000` on a single turn. See ADR 0014.
+8. **Voice session `max_output_tokens: 400`** (ADR 0010). Baked into the ephemeral-token mint config, not just client-side. The invariant is "bounded cap exists" — value is tunable. 400 tokens ≈ 16s of audio at 25 tok/s.
 
 ---
 
@@ -54,7 +52,7 @@ Stir is an iPhone app for the exact weeknight moment: stand in the kitchen with 
 | Layer | Choice |
 | --- | --- |
 | iOS minimum | 17.0 |
-| Build tooling | Xcode 26+, iOS 26 SDK (Apple App Store rule as of April 28, 2026) |
+| Build tooling | Xcode 26+, iOS 26 SDK (Apple App Store rule as of 2026-04-28) |
 | UI | SwiftUI, `@Observable` view models |
 | Concurrency | Swift Concurrency (async/await, actors) |
 | Persistence | Core Data + `NSPersistentCloudKitContainer` |
@@ -83,7 +81,7 @@ enum GeminiModel: String {
 }
 ```
 
-Paid tier, per 1M tokens, April 2026:
+Paid tier, per 1M tokens (April 2026):
 
 | Model | Text in | Audio in | Image in | Text out | Audio out | Cache |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -93,21 +91,21 @@ Paid tier, per 1M tokens, April 2026:
 
 Audio tokens on Live: **25 tokens/second** both directions.
 
-### Cost model (device-measured April 2026 post-step-6; supersedes spike projections)
+### Cost model (device-measured April 2026, post-step-6)
 
-Measured from 9+ turn device sessions with cadence N=4 refresh + pre-mint, 22% tool-call rate. Earlier spike projections (~$0.006/turn, ~$0.090/15-turn-session) under-modeled the baked-in-per-turn context (~3,800 token baseline: system prompt + recipe + pantry + household + AUDIO-mode overhead) by ~3x. ADR 0014 cost-correction amendment has the full breakdown.
+Measured from 9+ turn device sessions, cadence N=4 refresh + pre-mint, 22% tool-call rate. ADR 0014 has the breakdown.
 
-- Voice Cook turn (non-tool, steady-state): **~$0.008** (4,527 prompt tokens blended text+audio + 124 audio out)
+- Voice Cook turn (non-tool, steady-state): **~$0.008** (4,527 prompt tokens + 124 audio out)
 - Voice Cook turn (tool-call, double-pass): **~$0.014** (8,822 prompt tokens + 150 audio out)
-- Voice Cook session (15 turns, ~22% tool calls): **~$0.13-0.16**
-- Voice Cook session (30 turns): **~$0.27-0.32**
-- Premium user AI / mo: target **$1.89** (22.27% of $8.49 net ARPU); at **13-session × 15-turn cap (ADR 0015): ~$1.69-$2.08** — the 13 cap lands inside the guardrail without assuming caching savings.
-- Pro user AI / mo: target **$3.69**; at **27-session cap (ADR 0015): ~$3.51-$4.32**.
-- Free user AI / mo: target **$0.075** (unchanged; no voice quota — ADR 0008 Free 20 revert lands in the same release as ADR 0015).
+- Voice session (15 turns, ~22% tool calls): **~$0.13–0.16**
+- Voice session (30 turns): **~$0.27–0.32**
+- Premium AI / mo target: **$1.89** (22.27% of $8.49 net ARPU); at **13-session × 15-turn cap: ~$1.69–$2.08**.
+- Pro AI / mo target: **$3.69**; at **27-session cap: ~$3.51–$4.32**.
+- Free AI / mo target: **$0.075** (no voice quota).
 
-**Text:audio prompt-split uncertainty:** backend `ai_request_log.prompt_audio_tokens` vs `prompt_text_tokens` is captured but not yet aggregated into a single dashboard. Cost ranges above assume 75/25 (low) to 60/40 (high) text:audio split. PostHog LLM Observability has the per-request breakdown when exact costs are needed.
+Cost ranges assume 75/25–60/40 text:audio split; PostHog LLM Observability has the per-request breakdown.
 
-**No caching on Live API** — permanent cost-model assumption per ADR 0015. Every voice-turn cost number above is computed against `usageMetadata.cachedContentTokenCount = 0`, which is what 50+ measured device turns have consistently returned. The Gemini 2.5/3 Flash implicit-caching behavior that `generateContent` callers get **does not fire** on `BidiGenerateContent` / Live API workloads; this is consistent with the published "cache — not supported" pricing row for `gemini-3.1-flash-live-preview`. Do NOT build cost-model scenarios, paywall economics, or margin projections that assume non-zero caching savings on voice turns. Observability for this signal is live (`ai_request_log.prompt_cached_tokens` column, PostHog `$ai_cache_read_input_tokens` property, migration `20260422000009` partial index); the cap-reversal trigger query sits in ADR 0015 for when the assumption needs re-checking.
+**No caching on Live API** — permanent cost-model assumption per ADR 0015. `usageMetadata.cachedContentTokenCount = 0` consistently across 50+ measured device turns. The Gemini 2.5/3 Flash implicit-caching that `generateContent` callers get **does not fire** on `BidiGenerateContent` workloads. **Do NOT build cost-model scenarios, paywall economics, or margin projections that assume non-zero caching savings on voice turns.** Observability is live (`ai_request_log.prompt_cached_tokens`, PostHog `$ai_cache_read_input_tokens`); cap-reversal trigger query in ADR 0015.
 
 ### StoreKit SKUs
 
@@ -118,8 +116,7 @@ stir.pro.monthly              $14.99/mo    no trial
 stir.pro.annual               $139.99/yr   no trial
 ```
 
-Subscription group: `stir.subscriptions`
-Family Sharing: **off** on all SKUs.
+Subscription group: `stir.subscriptions`. Family Sharing: **off** on all SKUs.
 
 ### Apple fee rates
 
@@ -154,22 +151,21 @@ enum LiveSessionLimits {
     static let idleDisconnectSec           = 15 * 60   // Gemini hard limit
     static let contextWindowTokens         = 131_072   // effectively non-binding with refresh cadence
     static let refreshAtElapsedSec         = 10 * 60   // Stir policy
-    static let refreshAtTurnCount          = 4         // Stir policy (15→10 AM, 10→7→2→4 PM on 2026-04-22; ADR 0014)
-    static let refreshAtPromptTokenCount   = 10_000    // Stir policy (burst trigger; 15k→10k PM on 2026-04-22; ADR 0014)
+    static let refreshAtTurnCount          = 4         // Stir policy (ADR 0014)
+    static let refreshAtPromptTokenCount   = 10_000    // Stir policy (burst trigger; ADR 0014)
     static let maxOutputTokens             = 400       // Stir policy, baked into token mint (ADR 0010)
     static let tokenSoftCapPerSession      = 40_000    // alert threshold
     static let tokenHardCapPerSession      = 80_000    // force session reset
     static let tokenMintOpenWindowSec      = 60        // new_session_expire_time offset
     static let tokenMintHardDeadlineSec    = 35 * 60   // expire_time offset
     static let tokenMintUses               = 1         // one session per token
-    // Removed: pruneKeepLastNTurns — Gemini Live has no mid-session
-    // truncation frame. Session refresh (above) IS pruning. ADR 0014.
+    // Removed: pruneKeepLastNTurns — Live has no mid-session truncation; refresh IS pruning. ADR 0014.
 }
 ```
 
 ### Endpoints
 
-Supabase (all prefixed with `$SUPABASE_URL/functions/v1`):
+Supabase (prefix `$SUPABASE_URL/functions/v1`):
 
 ```
 POST /v1/session/bootstrap
@@ -187,18 +183,18 @@ POST /v1/ops/flag-output
 *    /v1/ops/admin/*              # Supabase Auth admin role + RLS
 ```
 
-Google Gemini (Edge Functions call these; iOS client never does directly except for the Live WebSocket):
+Google Gemini (Edge Functions only; iOS never calls directly except the Live WebSocket):
 
 ```
 POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent
 POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent
-POST https://generativelanguage.googleapis.com/v1alpha/authTokens                 # Live session mint (v1alpha, not v1beta)
+POST https://generativelanguage.googleapis.com/v1alpha/authTokens   # Live mint (v1alpha)
 WSS  wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent
 ```
 
 ### Error code matrix
 
-Keep error copy in sync with spec §6. User-visible messages live in the spec; codes live here.
+User-visible messages live in spec §6; codes here.
 
 ```swift
 enum ErrorCode: String {
@@ -217,22 +213,20 @@ enum ErrorCode: String {
     case bill01      = "BILL-01"        // entitlement uncertain
     case pay01       = "PAY-01"         // purchase failed
     case entVoice01  = "ENT-VOICE-01"   // voice requires Premium+
-    case entMultiImage01 = "ENT-MULTI-IMAGE-01" // multi-image scan requires Pro
-    case entLeftovers01  = "ENT-LEFTOVERS-01" // leftovers mode requires Premium+
-    case voiceSession01  = "VOICE-SESSION-01" // voice session lifecycle: session_missing / owner_mismatch / session_closed (HTTP 403) / lookup_failed (HTTP 500 — DB error during owner-row SELECT, same silent-rebuild handler path)
-                                         // (ADR 0017 — distinct from ENT-VOICE-01 entitlement or AI-VOICE-01 pipeline)
+    case entMultiImage01 = "ENT-MULTI-IMAGE-01"  // multi-image scan requires Pro
+    case entLeftovers01  = "ENT-LEFTOVERS-01"    // leftovers requires Premium+
+    case voiceSession01  = "VOICE-SESSION-01"
+        // session lifecycle: session_missing / owner_mismatch / session_closed (HTTP 403) /
+        // lookup_failed (HTTP 500). ADR 0017. Distinct from ENT-VOICE-01 / AI-VOICE-01.
     case val01       = "VAL-01"         // request body failed Zod validation (client bug)
-    case auth01      = "AUTH-01"        // session missing/expired/malformed/signature_invalid/user_stale/reauth_required
-                                         // iOS auto-re-bootstraps silently for the first 5; reauth_required
-                                         // triggers SIWA re-flow instead (ADR 0023)
-    case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"
-                                         // 405 — iOS sent the wrong HTTP verb (client bug, never user-visible)
+    case auth01      = "AUTH-01"
+        // missing/expired/malformed/signature_invalid/user_stale/reauth_required.
+        // First 5 → silent re-bootstrap; reauth_required → SIWA re-flow (ADR 0023).
+    case methodNotAllowed01 = "METHOD-NOT-ALLOWED-01"  // 405, client bug, never user-visible
 }
 ```
 
 ### VAL-01 response shape (400)
-
-Server returns:
 
 ```json
 {
@@ -244,13 +238,9 @@ Server returns:
 }
 ```
 
-`message` is dev/Sentry-facing; `field_errors` is structured for iOS dashboards and tests. User-visible copy lives in iOS `ErrorPresenter`, not in the server response. Server logs VAL-01 at `warn` (not `error`) — every one is an iOS bug worth investigating, but error severity would drown the dashboard in client bugs.
-
-iOS behavior: log to Sentry at `error` severity with full `field_errors`; show generic user copy; **do not retry** (same request will fail the same way); do not cache.
+`message` is dev/Sentry-facing; `field_errors` is structured for iOS dashboards/tests. User-visible copy lives in iOS `ErrorPresenter`. Server logs at `warn` (every one is a client bug worth investigating). iOS: log to Sentry at `error` with full `field_errors`; show generic copy; **do not retry**; do not cache.
 
 ### AUTH-01 response shape (401)
-
-Server returns:
 
 ```json
 {
@@ -260,22 +250,16 @@ Server returns:
 }
 ```
 
-`reason` is a typed enum with six distinct handling paths:
-
-| `reason` | Cause | iOS action | Server log level |
+| `reason` | Cause | iOS action | Server log |
 | --- | --- | --- | --- |
 | `missing` | No `Authorization` header | Silent re-bootstrap | `info` |
-| `expired` | JWT valid but past `exp` | Silent re-bootstrap | `info` |
-| `malformed` | Header present, invalid JWT structure | Re-bootstrap + Sentry error | `error` |
-| `signature_invalid` | Structure valid, signature doesn't verify | Re-bootstrap + Sentry error + alert at threshold | `error` |
-| `user_stale` | JWT valid but `canonical_user_key` no longer resolves (alias-forwarded to another row, or row missing entirely) | Silent re-bootstrap | `info` |
-| `reauth_required` | JWT.iat predates `app_users.reauth_required_at` — admin used `users.force_reauth` to boot this session | **SIWA re-flow** (rotate Keychain install_id, clear canonical_user_key, nav to Sign-in-with-Apple) — NOT silent retry | `info` |
+| `expired` | JWT past `exp` | Silent re-bootstrap | `info` |
+| `malformed` | Invalid JWT structure | Re-bootstrap + Sentry error | `error` |
+| `signature_invalid` | Signature doesn't verify | Re-bootstrap + Sentry error + alert at threshold | `error` |
+| `user_stale` | `canonical_user_key` no longer resolves | Silent re-bootstrap | `info` |
+| `reauth_required` | JWT.iat predates `app_users.reauth_required_at` | **SIWA re-flow** (rotate Keychain install_id, clear canonical key) — NOT silent retry | `info` |
 
-iOS silent-refresh pattern (all reasons except `reauth_required`): clear cached JWT, re-bootstrap, retry original request **once**. If retry also 401s, surface NET-01 — never retry-storm.
-
-`reauth_required` differs: silent retry would re-issue a JWT with `iat > reauth_required_at` (pass) but the SIWA rotation is the point — admin used force_reauth to force an identity-rotation ceremony, not to trigger a token swap. iOS maps this reason to `ReAuthenticationIntent.forceReauth` → SIWA screen with header copy "Please sign in again to continue".
-
-`reason` is a typed field on the thrown error, not parsed from `message`; log aggregators and Sentry alerts key off the typed field.
+iOS silent-refresh pattern (all reasons except `reauth_required`): clear cached JWT, re-bootstrap, retry **once**. If retry also 401s, surface NET-01 — never retry-storm. `reauth_required` maps to `ReAuthenticationIntent.forceReauth` → SIWA screen. `reason` is a typed field, not parsed from `message`.
 
 ### Canonical user key
 
@@ -284,53 +268,45 @@ canonical_user_key = "ck:<userRecordName>"           // if CloudKit account avai
                    | "install:<keychainInstallId>"   // fallback
 ```
 
-When an `install:`-keyed user later gains CloudKit availability, **alias forward** in RevenueCat and `app_users.merged_into`. Never back-fill user content; always alias forward via the identity table.
+When an `install:`-keyed user later gains CloudKit, **alias forward** in RevenueCat and `app_users.merged_into`. Never back-fill user content; always alias forward via the identity table.
 
 ### Aliasing when install:<id> gains CloudKit AND ck:<record> already has rows
 
-Reinstall + same iCloud, or sign-out/sign-in mid-session, produces an install row and a ck row that both have data. Merge inside a single Postgres transaction with these rules per table:
+Reinstall + same iCloud, or sign-out/sign-in mid-session, produces two rows with data. Merge inside one Postgres transaction:
 
 | Table | Merge rule | Why |
 | --- | --- | --- |
-| `usage_counters` | **SUM** `used_count` per `(period_start, feature_key)` onto ck row; delete install rows | Blocks quota-reset abuse (sign in/out to refresh Dinner Solves) |
-| `entitlement_snapshots` | **ck wins** (keep ck row, discard install row) | RevenueCat webhook is keyed on ck and is source of truth |
-| `ai_request_log` | **UPDATE** `canonical_user_key` install→ck (don't delete) | Preserves cost-attribution history for the user |
-| `device_installations` | **UPDATE** `canonical_user_key` install→ck | Device stays; just belongs to ck user now |
-| `app_users` (install row) | SET `merged_into = ck`, `status = 'merged'`; **never hard-delete** | Audit trail for support |
+| `usage_counters` | **SUM** `used_count` per `(period_start, feature_key)` onto ck row; delete install rows | Blocks quota-reset abuse |
+| `entitlement_snapshots` | **ck wins** | RevenueCat webhook keyed on ck |
+| `ai_request_log` | **UPDATE** `canonical_user_key` install→ck | Preserves cost attribution |
+| `device_installations` | **UPDATE** install→ck | Device belongs to ck user now |
+| `app_users` (install row) | SET `merged_into = ck`, `status = 'merged'`; **never hard-delete** | Audit trail |
 | `app_users` (ck row) | Winning row; update `last_seen_at` | The survivor |
 
-Three further rules:
+1. **Don't clamp summed quotas to cap.** install=5/6 + ck=4/6 → 9. Quota check `used_count >= cap_count` correctly locks out. Clamping = abuse vector.
+2. **RevenueCat re-alias runs AFTER DB transaction commits.** External call's failure shouldn't roll back the merge. Retry via background job.
+3. **Merge runs synchronously in `/v1/session/bootstrap`,** not async. 100ms latency acceptable; async risks phantom quota.
 
-1. **Don't clamp summed quotas to cap.** If install=5/6 and ck=4/6, sum to 9. Quota check `used_count >= cap_count` correctly locks out. Clamping would hand abusers a reset.
-2. **RevenueCat re-alias runs AFTER the DB transaction commits,** not inside it. `Purchases.logIn(ck:<record>)` is an external call; its failure shouldn't roll back the DB merge. Retry via background job if the RC call fails.
-3. **Merge runs synchronously in `/v1/session/bootstrap`,** not async. Bootstrap is rare (install + iCloud state change); 100ms latency is acceptable. Async risks a Dinner Solve request hitting un-merged counters and granting phantom quota.
-
-Transaction failure twice in a row → return `VAL-01` with specific merge-failure detail in `message`, log to Sentry at `error`. Real bug, not user-retryable.
+Transaction failure twice → return `VAL-01` with merge-failure detail in `message`, log Sentry `error`.
 
 ### `app_users.status` enum
 
-Values: `active | merged | banned`. Implemented as native Postgres ENUM with a partial index on rows where status != 'active' (the vast majority are 'active'; partial index keeps the index tiny and fast).
-
-State transitions (enforced in application code):
+Values: `active | merged | banned`. Native Postgres ENUM, partial index where status != 'active'.
 
 | From | To | Trigger |
 | --- | --- | --- |
 | `active` | `merged` | Identity alias-forward in `/v1/session/bootstrap` |
-| `active` | `banned` | Admin action via `/v1/ops/admin/*` (step 8) |
-| `merged` | — | **Terminal.** Un-merging isn't supported (can't un-sum counters cleanly) |
-| `banned` | `active` | Manual admin unban via `/v1/ops/admin/*` |
+| `active` | `banned` | Admin action via `/v1/ops/admin/*` |
+| `merged` | — | **Terminal.** Un-merging not supported (can't un-sum counters cleanly) |
+| `banned` | `active` | Manual admin unban |
 
-Bootstrap behavior:
-- `merged` row hit during lookup → follow `merged_into` chain one hop to the winning row. Nested merges are a bug.
-- `banned` row → return 403 with `BILL-01` and halt.
-
-Never soft-delete. Deletion is hard-delete per CCPA (spec §11).
+Bootstrap: `merged` row → follow `merged_into` one hop (nested merges are a bug); `banned` → 403 + `BILL-01`. Never soft-delete; deletion is hard-delete per CCPA (spec §11).
 
 ### `entitlement_snapshots.billing_state` enum
 
-Values: `none | active | trial | grace | cancelled_active | expired`. Native Postgres ENUM, partial index on rows where billing_state != 'none' (Free users are the hot path).
+Values: `none | active | trial | grace | cancelled_active | expired`. Native Postgres ENUM, partial index where state != 'none'.
 
-**Orthogonal to `tier`:** `tier` (free|premium|pro) tells you *what* they're entitled to; `billing_state` tells you *why* and what the app should show.
+**Orthogonal to `tier`:** `tier` says *what* they're entitled to; `billing_state` says *why* and what to show.
 
 | Value | Meaning |
 | --- | --- |
@@ -338,42 +314,41 @@ Values: `none | active | trial | grace | cancelled_active | expired`. Native Pos
 | `active` | Paid and current |
 | `trial` | Intro offer in progress (Premium annual only) |
 | `grace` | Apple billing retry in progress; user retains paid access; iOS shows BILL-01 banner |
-| `cancelled_active` | User cancelled; access continues until period_end |
-| `expired` | Paid access ended (distinct from `none` — eligible for win-back offers) |
+| `cancelled_active` | Cancelled; access continues until period_end |
+| `expired` | Paid access ended (eligible for win-back, distinct from `none`) |
 
-RevenueCat webhook event → state mapping (implemented in step 5):
+RevenueCat webhook → state mapping:
 
 | Event | Transition |
 | --- | --- |
-| `INITIAL_PURCHASE` with intro offer | `none|expired` → `trial` |
-| `INITIAL_PURCHASE` no intro offer | `none|expired` → `active` |
+| `INITIAL_PURCHASE` w/ intro | `none|expired` → `trial` |
+| `INITIAL_PURCHASE` no intro | `none|expired` → `active` |
 | `RENEWAL` | `trial|active|cancelled_active` → `active` |
 | `CANCELLATION` | `active|trial` → `cancelled_active` |
 | `UNCANCELLATION` | `cancelled_active` → `active` |
 | `BILLING_ISSUE` | `active` → `grace` |
 | `EXPIRATION` | `cancelled_active|grace|trial` → `expired` |
-| `PRODUCT_CHANGE` | `active` → `active` (tier changes separately) |
+| `PRODUCT_CHANGE` | `active` → `active` (tier separately) |
 
-Bootstrap entitlement resolution: `none|expired` → Free; `active|trial|grace|cancelled_active` → paid per `tier` column; `grace` additionally returns `billing_retry_banner: true`.
+Bootstrap resolution: `none|expired` → Free; `active|trial|grace|cancelled_active` → paid per `tier`; `grace` adds `billing_retry_banner: true`.
 
-### `usage_counters` feature keys and period semantics
+### `usage_counters` feature keys + period semantics
 
-Metered keys (this table): `dinner_solve | voice_cook_session | recipe_import`. Native Postgres ENUM.
+Metered keys: `dinner_solve | voice_cook_session | recipe_import` (native ENUM).
 
-**Not in this table:**
+**Not metered here:**
 - `remembered_pantry_items`: standing cap, not monthly. Enforced client-side against CloudKit count.
-- `scan_parse`, `substitution`, `grocery_generate`, `cook_turn`: unmetered across tiers. Cost tracked in `ai_request_log`; this table is for quota enforcement only.
+- `scan_parse`, `substitution`, `grocery_generate`, `cook_turn`: unmetered. Cost in `ai_request_log` only.
 
-**`cap_count` is SNAPSHOTTED at row-creation** from the tier active at that moment. Mid-month tier upgrade does **not** refresh `cap_count` on existing period rows. Non-metered Premium entitlements (voice access, saved favorites, widgets) unlock immediately on tier change; metered quotas catch up next period. iOS paywall copy sets this expectation: "You'll get your full Premium Dinner Solves at your next monthly reset on <date>."
+**`cap_count` is SNAPSHOTTED at row-creation** from the active tier. Mid-month upgrade does **not** refresh `cap_count` on existing period rows. Non-metered Premium entitlements (voice access, favorites, widgets) unlock immediately; metered quotas catch up next period. Paywall copy: "You'll get full Premium Dinner Solves at your next monthly reset on <date>."
 
-**Why snapshot, not refresh:** refresh-on-upgrade creates an abuse vector (upgrade mid-month to reset quota, downgrade after) and a race condition (webhook fan-out vs concurrent increments). Snapshot is atomic, predictable, and cleanly enforces a monthly boundary.
+**Why snapshot:** refresh-on-upgrade creates an abuse vector (upgrade mid-month to reset, downgrade after) and a race (webhook fan-out vs concurrent increments). Snapshot is atomic and predictable.
 
 **Atomic quota check** (the reason cap_count lives in this table, not derived via JOIN):
 
 ```sql
 UPDATE usage_counters
-   SET used_count = used_count + 1,
-       updated_at = now()
+   SET used_count = used_count + 1, updated_at = now()
  WHERE canonical_user_key = $1
    AND period_start = $2
    AND feature_key = $3
@@ -383,7 +358,7 @@ RETURNING used_count, cap_count;
 
 One round trip, no race, no join. Empty return = capped.
 
-**`period_start` semantics:** uses the user's `app_users.created_at` month-day as the anchor. A user who joined on the 17th has monthly periods that start on the 17th. Simpler than calendar-month alignment (no mid-month cliff for new signups) and matches Apple's subscription renewal pattern.
+**`period_start` semantics:** uses `app_users.created_at` month-day as anchor. Joined on the 17th → monthly periods start on the 17th. No mid-month cliff for new signups; matches Apple's renewal pattern.
 
 ### `/v1/session/bootstrap` response shape
 
@@ -400,39 +375,33 @@ One round trip, no race, no join. Empty return = capped.
     "voice_enabled": true | false,
     "billing_retry_banner": true | false,
     "quotas": [
-      {
-        "feature_key": "dinner_solve",
-        "used": 3,
-        "cap": 6,
-        "period_end": "2026-05-17"
-      }
+      { "feature_key": "dinner_solve", "used": 3, "cap": 6, "period_end": "2026-05-17" }
     ]
   },
   "feature_flags": [
-    { "key": "disable_cook_realtime", "value": false, "is_enabled": true, "rollout_pct": 100 },
-    ...
+    { "key": "disable_cook_realtime", "value": false, "is_enabled": true, "rollout_pct": 100 }
   ]
 }
 ```
 
-**Bootstrap does NOT return `prompt_versions`.** Prompt metadata is carried by `/v1/config/bootstrap` only, which iOS calls on foreground-after-TTL or entitlement change.
+**Bootstrap does NOT return `prompt_versions`** — that's `/v1/config/bootstrap` only.
 
-Key shape rules:
+Shape rules:
 
-- `voice_enabled` is **SERVER-COMPUTED** (`tier IN ('premium','pro') AND billing_state IN ('active','trial','grace','cancelled_active')`), never derived on iOS. Single source of truth.
-- `quotas` is an **array** (iterable, uniform rendering), not a keyed object. Fields are `used` / `cap` / `period_end` — not `used_count` / `cap_count` / `period_start`.
-- `period_end` is **always included**, never client-computed (mid-month transitions + anchor-day semantics make it non-trivial). `period_start` is a backend-only detail.
-- `feature_flags` is an **array of metadata objects** (`key`, `value`, `is_enabled`, `rollout_pct`) — not a flat map. Preserves `is_enabled` kill-switch visibility and `rollout_pct` in a single wire shape for every flag.
-- Single `expires_at` field covers both trial and subscription end dates; `is_trial` disambiguates which period this is.
-- Nested `entitlements` object (not flattened) so iOS can destructure cleanly as the bootstrap response grows.
-- Trial/subscription timestamps are absolute UTC; iOS localizes for display.
+- `voice_enabled` is **SERVER-COMPUTED** (`tier IN ('premium','pro') AND billing_state IN ('active','trial','grace','cancelled_active')`), never derived on iOS.
+- `quotas` is an **array** (iterable), not a keyed object. Fields are `used`/`cap`/`period_end` — not `used_count`/`cap_count`/`period_start`.
+- `period_end` is **always included**, never client-computed.
+- `feature_flags` is an **array of metadata objects** (`key`, `value`, `is_enabled`, `rollout_pct`) — not a flat map.
+- Single `expires_at` covers trial + subscription end; `is_trial` disambiguates.
+- Nested `entitlements` (not flattened).
+- Timestamps absolute UTC; iOS localizes.
 
 ### `/v1/config/bootstrap` response shape
 
 ```json
 {
   "entitlements": { ... same shape as bootstrap.entitlements ... },
-  "feature_flags": [ ... same shape as bootstrap.feature_flags ... ],
+  "feature_flags": [ ... same shape ... ],
   "prompts": [
     {
       "feature_key": "dinner_solve",
@@ -446,65 +415,52 @@ Key shape rules:
 }
 ```
 
-`prompts` is rich-object (not simple map) so iOS can emit `prompt_version` telemetry on every AI call in step 3+ without an extra lookup.
-
-iOS consumption: `EntitlementService` stores the entitlements + quotas in memory + Keychain (24h offline fallback). Every feature gate reads from `EntitlementService`, never directly from the response body.
+`prompts` is rich-object so iOS emits `prompt_version` telemetry without an extra lookup. iOS: `EntitlementService` stores entitlements + quotas in memory + Keychain (24h offline fallback). Every feature gate reads from `EntitlementService`.
 
 ### Feature flags
 
-Client (PostHog):
-- `paywall_variant`
-- `widget_nudge_enabled`
-- `leftovers_mode_enabled`
+Client (PostHog): `paywall_variant`, `widget_nudge_enabled`, `leftovers_mode_enabled`.
 
 Server (Supabase `feature_flags`):
 - `prompt_version_override`
 - `recipe_import_async_threshold`
 - `priority_queue_pro_enabled`
 - `cook_voice_thinking_level` ∈ {`minimal`, `low`}
-- `cook_voice_default_on` — auto-engage first voice turn on Cook Mode entry; read by `CookModeRoot` via `entitlements.flagBool`
-- `voice_turn_detection_mode` ∈ {`semantic_vad`, `server_vad`} — VAD profile; consumed by `_shared/live_mint.ts` at mint time
+- `cook_voice_default_on` — auto-engage first voice turn on Cook Mode entry
+- `voice_turn_detection_mode` ∈ {`semantic_vad`, `server_vad`} — VAD profile, consumed at mint
 - `disable_scan_parse`
 - `disable_cook_voice` / `disable_cook_realtime` (alias)
 - `disable_imports`
 - `force_saved_meals_only`
-
-Earlier drafts classified `cook_voice_default_on` and `voice_turn_detection_mode` as PostHog client flags; implementation consolidated both in Supabase because (a) `voice_turn_detection_mode` is consumed server-side at mint, (b) PostHog client-flag plumbing wasn't wired in iOS at step 5/6, and (c) mixing sources would mean two bootstrap paths for one decision surface.
 
 ### Expected environment variables
 
 Backend (Supabase Edge Function secrets):
 
 ```
-GEMINI_API_KEY                  # single key for all Gemini features, including Live mint. MUST be a legacy-format key (AIzaSy..., 39 chars) — AQ.xxx new-format keys fail on auth_tokens (sharp-edge #18). The project owning the key MUST be on paid tier (sharp-edge #17).
-STIR_JWT_SECRET                 # HS256 signer for session JWTs. Renamed from SUPABASE_JWT_SECRET — Supabase reserves the SUPABASE_* prefix and filters those secrets from `.env`, so SUPABASE_JWT_SECRET would silently never reach the function runtime.
+GEMINI_API_KEY     # legacy-format key (AIzaSy..., 39 chars). AQ.xxx fails on auth_tokens (sharp-edge #18). Project MUST be on paid tier (sharp-edge #17).
+STIR_JWT_SECRET    # HS256 signer. Renamed from SUPABASE_JWT_SECRET — Supabase reserves SUPABASE_* and filters those secrets from .env.
 REVENUECAT_WEBHOOK_SECRET
 APNS_AUTH_KEY_ID
-APNS_AUTH_KEY_P8                # base64-encoded
+APNS_AUTH_KEY_P8   # base64-encoded
 APNS_TEAM_ID
 APNS_BUNDLE_ID
 POSTHOG_API_KEY
 SENTRY_DSN
-LOG_IP_SALT                     # 32-byte hex secret keyed into HMAC-SHA256 for `_shared/rate_limiter.ts` `ipBucket`. Rotated monthly per `docs/runbooks/ip-salt-rotation.md`. If unset in prod, `ipBucket` falls back to FNV-1a + emits a once-per-isolate stderr warning ("LOG_IP_SALT not set; using unsalted FNV-1a bucket"). MUST be set before the first beta-tester invite — privacy-grade hashing depends on it.
+LOG_IP_SALT        # 32-byte hex, HMAC-SHA256 input for ipBucket(). Rotated monthly (docs/runbooks/ip-salt-rotation.md). If unset: falls back to FNV-1a + once-per-isolate stderr warning. MUST be set before first beta invite.
 ```
 
-iOS (via `Config.xcconfig`, gitignored; `Config.xcconfig.example` documents shape):
+iOS (`Config.xcconfig`, gitignored; `Config.xcconfig.example` documents shape):
 
 ```
-SUPABASE_URL                    # public project API URL
-SUPABASE_ANON_KEY               # public anon key, used only for /v1/session/bootstrap (RLS-enforced)
-REVENUECAT_PUBLIC_API_KEY       # RevenueCat public SDK key
-POSTHOG_PUBLIC_API_KEY          # PostHog public project key
-SENTRY_DSN_PUBLIC               # Sentry public DSN
+SUPABASE_URL
+SUPABASE_ANON_KEY              # used only for /v1/session/bootstrap (RLS-enforced)
+REVENUECAT_PUBLIC_API_KEY
+POSTHOG_PUBLIC_API_KEY
+SENTRY_DSN_PUBLIC
 ```
 
-Never present anywhere:
-
-```
-OPENAI_API_KEY                  # not used
-ANTHROPIC_API_KEY               # not used
-GEMINI_API_KEY on iOS           # server-only
-```
+Never present anywhere: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY on iOS`.
 
 ---
 
@@ -513,74 +469,26 @@ GEMINI_API_KEY on iOS           # server-only
 ```
 Stir/                            # iOS app target
   App/                           # StirApp, RootCoordinator
-  DesignSystem/                  # colors, typography, spacing, shared views
-  Core/
-    Models/                      # domain types (HouseholdProfile, PantryItem, ...)
-    Repositories/                # Core Data access, sync wiring
-    Services/                    # cross-feature logic (EntitlementService, QuotaService, AIDispatch)
-    Utilities/
-  Features/                      # one folder per screen cluster
-    Onboarding/ Tonight/ Scan/ Solve/ CookMode/ Import/ Saved/ Settings/ Billing/
-  Integrations/
-    Camera/ Speech/ Vision/ Reminders/ CloudKit/ RevenueCat/ PostHog/ Sentry/
-    GeminiLive/                  # WebSocket transport, audio pipeline, session state machine
-  Extensions/
-    ShareExtension/ Widgets/ AppIntents/
-  Tests/
-    Unit/ Integration/ UITests/
+  DesignSystem/                  # tokens + shared views
+  Core/Models/                   # domain types
+  Core/Repositories/             # Core Data + sync
+  Core/Services/                 # cross-feature (EntitlementService, QuotaService, AIDispatch)
+  Features/                      # Onboarding/ Tonight/ Scan/ Solve/ CookMode/ Import/ Saved/ Settings/ Billing/
+  Integrations/                  # Camera/ Speech/ Vision/ Reminders/ CloudKit/ RevenueCat/ PostHog/ Sentry/ GeminiLive/
+  Extensions/                    # ShareExtension/ Widgets/ AppIntents/
+  Tests/                         # Unit/ Integration/ UITests/
 
 Backend/supabase/
-  migrations/                    # SQL schema + RLS policies (canonical_user_key-keyed)
-  functions/
-    _shared/                     # auth verify, gemini client, hard-rule engine, validators
-    session-bootstrap/
-    config-bootstrap/
-    ai-pantry-parse/
-    ai-dinner-solve/
-    ai-realtime-session/         # mints Gemini Live ephemeral token
-    ai-cook-turn/                # text fallback for voice
-    ai-substitution/             # also called from Live function-call round-trips
-    ai-recipe-import/
-    ai-grocery-generate/
-    push-register/
-    revenuecat-webhook/
-    ops-flag-output/
-    ops-admin/
+  migrations/                    # SQL schema + RLS (canonical_user_key-keyed)
+  functions/_shared/             # auth verify, gemini client, hard-rule engine, validators
+  functions/<endpoint>/          # one folder per /v1/... endpoint
   seed/                          # prompt_versions defaults, feature flag defaults
 
-Specs/                           # product spec + research docs
-  Stir-Full-Spec.md
-  Stir-Cook-Mode-Architecture.md
-  Design-System.md               # palette/type/spacing/radius/icons + principles
-
-stir-app-design/                 # Claude Design handoff bundle — VISUAL SOURCE OF TRUTH
-  project/DesignMockups/
-    INDEX.md                     # the 17-screen table of contents
-    01_shell_and_launch.html     # launch, welcome, offline fallback
-    02_onboarding.html           # Setup 1 prefs, Setup 2 kitchen, completion
-    03_tonight_home.html         # default, first-use empty, offline, Use Soon
-    04_scan_flow.html             # camera primer, capture, review, sample fallback
-    05_solve_flow.html            # constraints sheet, dinner options, dish preview
-    06_cook_mode_tap.html         # tap-only Cook Mode (Free) + timer + sub sheet
-    07_cook_mode_voice.html       # voice Cook Mode (Premium+) + fallback banner
-    08_substitution.html          # sheet + safe result + allergen result
-    09_post_cook.html             # outcome feedback, leftovers prompt, leftover solve
-    10_saved.html                 # library, free-tier locked, recipe detail
-    11_import.html                # entry, share ext, review, async processing
-    12_grocery.html               # list, Reminders export, in-app fallback
-    13_widgets_liveactivity.html  # home widgets + Dynamic Island + Live Activity
-    14_settings.html              # root, prefs, notifications, privacy, sync
-    15_plan_billing.html          # all 7 billing states
-    16_paywall.html               # 3 paywall surfaces (soft / feature / inline)
-    17_errors_permissions.html    # permission recovery, NET/AI/RATE/PAY errors
-    _shared/                      # tokens inlined as CSS custom properties
-      colors_and_type.css
-      mock-page.css
-      StirFrame.jsx
-    EXTRACTED_TOKENS.md           # audit trail — mockup ↔ Swift token provenance
-
-docs/
-  decisions/                     # ADRs for material architecture choices (includes rejected OpenAI path)
+Specs/                           # product spec + research + design system
+stir-app-design/                 # design handoff bundle (visual source of truth — see INDEX.md)
+docs/decisions/                  # ADRs (includes rejected paths)
+docs/runbooks/                   # operational procedures
+docs/deferred-work.md            # tracked tech debt + triggered refactors
 ```
 
 ---
@@ -591,8 +499,8 @@ docs/
 | --- | --- | --- | --- | --- |
 | Pantry scan parse | `/v1/ai/pantry-parse` | gemini-3-flash-preview | no | schema + confidence threshold |
 | Dinner solve | `/v1/ai/dinner-solve` | gemini-3-flash-preview | yes (card-by-card) | hard-rule validator, retry on violation |
-| Cook Mode voice turn | Live WS via `/v1/ai/realtime-session` token | gemini-3.1-flash-live-preview (minimal) | native bidi audio | system-prompt preamble, max_output_tokens, pruning |
-| Cook Mode substitution (voice path) | Live function call → `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator (same engine as sheet) |
+| Cook Mode voice turn | Live WS via `/v1/ai/realtime-session` token | gemini-3.1-flash-live-preview (minimal) | native bidi audio | system prompt, max_output_tokens, refresh-bounded growth |
+| Cook Mode substitution (voice path) | Live function call → `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator (same engine) |
 | Cook Mode Q&A fallback | `/v1/ai/cook-turn` | gemini-3-flash-preview (text) | no | schema |
 | Substitution (sheet) | `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator |
 | Recipe import | `/v1/ai/recipe-import` | gemini-3.1-flash-lite-preview | no | sanitize HTML, treat content as untrusted |
@@ -602,61 +510,52 @@ docs/
 
 ## Gemini Live — the sharp-edges section
 
-Everything here is where Gemini Live differs from OpenAI Realtime. Assume OpenAI-Realtime intuition until this section tells you otherwise.
+Where Gemini Live differs from OpenAI Realtime. Assume OpenAI-Realtime intuition until this section says otherwise.
 
-1. **No caching.** Full stop. Every turn re-sends context at full audio-input rate. Pruning to last 3 turns after every step advance is mandatory. Skipping pruning means linear cost blowup that won't show up until a user has a long session.
-2. **No first-class WebRTC.** WebSocket only, via `URLSessionWebSocketTask`. Cellular networks will occasionally stall due to TCP head-of-line blocking. Do not "just switch to WebRTC" — not supported.
-3. **Preambles are NOT spontaneous, and our adherence-via-prompt assumption is UNVALIDATED.** Unlike `gpt-realtime`, Gemini doesn't naturally say "let me check" before tool calls. The system prompt asks the model to do so, but adherence under MINIMAL has not been benchmarked. **Mandatory belt-and-suspenders:** the iOS client plays a pre-recorded filler audio clip the instant a `toolCall` frame arrives, covering the ~2s backend round-trip deterministically. Do not rely on model-emitted preambles alone. Week-one spike must measure preamble-present rate — if <90%, disable model preambles via system prompt and rely solely on the client clip to avoid double-speak. Monitor `preamble_present_rate` telemetry only to validate model behavior over time, not as the UX-correctness metric.
-4. **Preview status.** The Live API is preview-labeled. If Google changes the API shape or pricing, `disable_cook_realtime` is the kill switch — all Premium+ voice routes to the text-path fallback with `AI-VOICE-01` banner.
-5. **Ephemeral tokens have two expiries.** `new_session_expire_time` = window to open the session (~60s). `expire_time` = hard deadline for the session itself (~35 min from mint). `uses: 1` = one session per token.
-6. **Session refresh is silent by design.** 10 min or 15 turns, whichever first. Mint new token, open new WebSocket, close old one after new one's first response lands. If refresh fails → text fallback.
-7. **Semantic VAD is the starting choice, server VAD the fallback.** Semantic VAD chunks on utterance completion and avoids false-triggering on ambient kitchen noise. If testing shows misfires, flip `voice_turn_detection_mode` to `server_vad`.
-8. **`max_output_tokens: 400`** (ADR 0010, bumped from 150 → 300 → 400 on 2026-04-22) for cost safety. Baked into the token mint's `generation_config`, not just client-side. The invariant is "bounded cap exists" — value is tunable based on observed p95 response length. Trigger to revisit: see ADR 0010.
-9. **Function response flow differs.** Gemini auto-continues after a `BidiGenerateContentToolResponse` frame. No explicit `response.create` needed (unlike OpenAI Realtime). Function responses are sent as `toolResponse` — not `clientContent` — carrying the matching `functionResponse.id`. If you find yourself writing `response.create` or wrapping a function result in `clientContent`, stop.
-10. **Audio format.** PCM16 at 16kHz for input; base64-encoded in `realtimeInput.audio` frames. Server returns base64-encoded audio in `serverContent.modelTurn.parts[].inlineData`.
-11. **`clientContent` is history-only on 3.1 Flash Live.** For in-session text injection (typed events like step advance, timer completion, substitution context), use `realtimeInput.text`. `clientContent` only seeds initial conversation history and requires `initial_history_in_client_content: true` in setup — Stir doesn't seed history, so Stir should not use `clientContent` at all.
-12. **Tool calls are synchronous.** 3.1 Flash Live does not support async/parallel function calls. One tool call in flight at a time. Do not design flows that assume multiple substitutions or a substitution+timer concurrent invocation.
-13. **Auth header is `Authorization: Token <value>`,** not `Bearer`. Easy to get wrong because the rest of the Google API ecosystem uses `Bearer`. Double-check before debugging 401s.
-14. **Token mint endpoint is `POST /v1alpha/auth_tokens`** (snake_case underscore, NOT `authTokens` camelCase — original CLAUDE.md drafts had the wrong casing). The WebSocket endpoint for ephemeral tokens is `/v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=<name>` — **NOT** `/v1beta`. The API-key path uses `/v1beta.GenerativeService.BidiGenerateContent?key=<KEY>`; the ephemeral-token path uses `/v1alpha` + Constrained method. Earlier CLAUDE.md drafts had this wrong. Official docs: https://ai.google.dev/gemini-api/docs/live-api/get-started-websocket#authentication-with-ephemeral-tokens. **Request body is flat camelCase** (not snake_case, not wrapped in `{ authToken: {...} }`): `{ expireTime, newSessionExpireTime, uses, bidiGenerateContentSetup: { model, generationConfig: { responseModalities, speechConfig, maxOutputTokens, thinkingConfig }, systemInstruction, tools, realtimeInputConfig: { automaticActivityDetection, turnCoverage } } }`. Verified 2026-04-19 against the official `@google/genai` SDK + empirical probes. Source: `googleapis/js-genai` `src/tokens.ts` + `src/converters/_tokens_converters.ts`.
-15. **Undocumented ~200-token AUDIO-mode overhead per turn.** The April 2026 spike found that every Live turn with `response_modalities: [AUDIO]` charges ~200 extra audio-input tokens beyond the literal audio content — even on text-only input. This is not in the pricing docs but is reliably observed in `usageMetadata.prompt_tokens_details`. The cost model accounts for it. Don't be surprised; don't design flows assuming you can game it with text-only turns.
-16. **Mint uses API-key auth** — the same `GEMINI_API_KEY` that serves `generateContent`. No OAuth / service account needed. The April 17 2026 spike's opaque `400 INVALID_ARGUMENT` traced to two orthogonal gating factors that superseded actual auth: see sharp-edges #17 and #18. Once both are satisfied, API-key auth via `x-goog-api-key` header (same pattern as every other Gemini call) works and returns an ephemeral token resource. Mint header: `x-goog-api-key: <GEMINI_API_KEY>`. WebSocket auth from iOS: the returned ephemeral token's `.name` (e.g. `auth_tokens/<id>`) goes into the WebSocket URL as `?access_token=<name>` — no `Authorization` header needed in that form. ADR 0006 (OAuth service-account path) is Rejected; kept as a historical record of the misdiagnosis.
-
-17. **Mint requires paid-tier billing on the GCP project that owns `GEMINI_API_KEY`.** A free-tier project returns `400 INVALID_ARGUMENT` with no billing-specific error detail — indistinguishable from a malformed-body error. `generateContent` and `models.list` both work on free tier and will mislead you into thinking the key is fine. Before assuming wire-shape drift: (a) check the key's project in https://aistudio.google.com/app/apikey, (b) verify that project has a billing account attached AND is explicitly on the paid tier (the two are separate — just attaching billing is not enough). Live API ephemeral tokens require paid tier.
-
-18. **Mint rejects new-format API keys** (`AQ.xxx…`, ~53 chars). Use legacy-format keys (`AIzaSy…`, 39 chars) for ephemeral token minting. `generateContent` accepts both formats, which makes this a hidden failure — the key-works-everywhere-except-mint asymmetry mimics a wire-shape bug. Google is aware ([forum thread 141133](https://discuss.ai.google.dev/t/authtokens-create-fails-with-invalid-argument-for-new-format-api-keys-aq-xxx-but-works-with-legacy-keys-aizasy/141133)); fix timeline unknown. As of 2026-04-19 the workaround is to generate a legacy-format key (newer AI Studio sessions may default to AQ-format; legacy is still available via older projects or certain account states).
-
-19. **Ephemeral-token sessions still require a client-sent `{"setup": {...}}` frame** as the first WebSocket message after `open`. The `bidiGenerateContentSetup` baked into the token acts as an authorization *ceiling* for what the session is allowed to do; it does **NOT** cause the server to auto-emit `setupComplete`. The server waits for the client's setup frame regardless. Symptom of missing the frame: `setupComplete` never arrives, any `awaitSetupComplete`-style timeout fires (Stir hit this 2026-04-20, 5-second budget exhausted on mint that was otherwise healthy). Verified against the official `google-gemini/gemini-live-api-examples/gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js → sendInitialSetupMessages()` reference, which sends the full setup after ephemeral-token WS open. Stir's mitigation: backend pre-serializes the exact setup frame at mint time and returns it as `setup_frame_json` on the `/v1/ai/realtime-session` response; iOS forwards it verbatim after `ws.open` via `LiveOutboundFrame.setup(payload:)`.
-
-20. **Gemini Live is preview-labeled and has stateful protocol bugs — assume every state transition is defensible, not guaranteed.** `gemini-3.1-flash-live-preview` is on the preview API surface and can drop load-bearing frames without warning. Two observed cases as of 2026-04-23:
-    - **Missing `turnComplete` after multi-pass tool-call turns.** Device test: after `start_timer`, Gemini ran three generation passes (post-tool narration, re-narration, second re-narration), emitted `generationComplete` after each pass, but never sent `turnComplete`. The iOS state machine stayed pinned in `.modelSpeaking` for 35+s until the user manually closed the session. Every subsequent user utterance was rejected as "already modelSpeaking." Stir mitigation: `turnStuckWatchdog` in `RealtimeSession.swift` (8-second threshold, armed on entry to `.modelSpeaking`, rearmed on every inbound audio chunk, cancelled on transition out). On fire, synthesizes a `turnComplete` transition, persists a VoiceTurn row with `resultType='error' + errorCode='turnComplete_timeout'`, and emits the `voice_turn_stuck_watchdog_fired` PostHog event. ADR 0015 trigger threshold: >5% of tool-call turns in a 7-day rolling window = revisit spec §18 vendor contingency.
-    - **`setupComplete` not auto-emitted on ephemeral-token sessions** (already documented as #19 above) — same class of bug: the server expects a client-authored state transition but doesn't telegraph that expectation.
-
-    **Defensive-by-default posture for Live path iOS code:** every `await` on a Gemini-initiated state transition (setupComplete, turnComplete, first audio chunk, pre-mint swap complete) MUST have a client-side timeout with a graceful recovery path. "The frame will arrive" is not a safe assumption on preview API. Keep the watchdog scope pinned to RealtimeSession.swift only — SpeechFallbackService talks to a different backend (`/v1/ai/cook-turn` HTTP, AVSpeechSynthesizer-local playback) and has zero exposure to this class of bug. Revisit all iOS-side Live-path timeouts when `gemini-3.1-flash-live-preview` moves to GA (Google has given no public timeline as of 2026-04-23).
+1. **No caching.** Every turn re-sends context at full audio-input rate. Pruning to last 3 turns after every step advance is mandatory. Skipping = linear cost blowup.
+2. **No first-class WebRTC.** WebSocket only, via `URLSessionWebSocketTask`. Cellular networks occasionally stall on TCP head-of-line blocking. Don't "switch to WebRTC" — not supported.
+3. **Preambles are NOT spontaneous, and adherence is UNVALIDATED.** Unlike `gpt-realtime`, Gemini doesn't naturally say "let me check" before tool calls. The system prompt asks for it but adherence under MINIMAL is unbenchmarked. **Belt-and-suspenders required:** iOS plays a pre-recorded filler clip the instant a `toolCall` frame arrives, covering the ~2s round-trip deterministically. If `preamble_present_rate` <90%, disable model preambles via system prompt and rely on the client clip alone.
+4. **Preview status.** If Google changes API shape or pricing, `disable_cook_realtime` routes all Premium+ voice to text fallback with `AI-VOICE-01` banner.
+5. **Ephemeral tokens have two expiries.** `new_session_expire_time` = window to open (~60s). `expire_time` = hard deadline (~35 min from mint). `uses: 1`.
+6. **Session refresh is silent by design.** 10 min or 15 turns, whichever first. Mint new token, open new WebSocket, close old after new one's first response lands. Refresh failure → text fallback.
+7. **Semantic VAD is the starting choice, server VAD the fallback.** Semantic chunks on utterance completion; avoids ambient kitchen noise misfires. Flip `voice_turn_detection_mode` if testing shows misfires.
+8. **`max_output_tokens: 400`** (ADR 0010). Baked into the mint's `generation_config`. Invariant is "bounded cap exists" — value tunable.
+9. **Function response flow differs.** Gemini auto-continues after `BidiGenerateContentToolResponse`. No `response.create` (unlike OpenAI Realtime). Function responses go via `toolResponse` carrying matching `functionResponse.id` — NOT `clientContent`.
+10. **Audio format.** PCM16 at 16kHz input; base64-encoded in `realtimeInput.audio`. Server returns base64 in `serverContent.modelTurn.parts[].inlineData`.
+11. **`clientContent` is history-only on 3.1 Flash Live.** For in-session text injection (step advance, timer completion, substitution context), use `realtimeInput.text`. `clientContent` only seeds initial history (requires `initial_history_in_client_content: true`); Stir doesn't seed history, so don't use `clientContent`.
+12. **Tool calls are synchronous.** No async/parallel function calls. One in flight at a time. Don't design flows assuming concurrent substitution+timer.
+13. **Auth header is `Authorization: Token <value>`,** not `Bearer`. Easy to get wrong because the rest of Google's API ecosystem uses `Bearer`.
+14. **Token mint endpoint is `POST /v1alpha/auth_tokens`** (snake_case). WebSocket for ephemeral tokens is `/v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=<name>` (NOT `/v1beta`). API-key path uses `/v1beta.GenerativeService.BidiGenerateContent?key=<KEY>`. Official docs: https://ai.google.dev/gemini-api/docs/live-api/get-started-websocket#authentication-with-ephemeral-tokens. **Request body is flat camelCase** (not snake_case, not wrapped in `{ authToken: {...} }`): `{ expireTime, newSessionExpireTime, uses, bidiGenerateContentSetup: { model, generationConfig: { responseModalities, speechConfig, maxOutputTokens, thinkingConfig }, systemInstruction, tools, realtimeInputConfig: { automaticActivityDetection, turnCoverage } } }`. Verified against `googleapis/js-genai`.
+15. **Undocumented ~200-token AUDIO-mode overhead per turn.** Every Live turn with `response_modalities: [AUDIO]` charges ~200 extra audio-input tokens beyond literal audio — even on text-only input. Reliably observed in `usageMetadata.prompt_tokens_details`. Cost model accounts for it.
+16. **Mint uses API-key auth** — same `GEMINI_API_KEY` that serves `generateContent`. No OAuth needed once #17 + #18 are satisfied. Mint header: `x-goog-api-key: <GEMINI_API_KEY>`. WebSocket auth from iOS: returned `.name` (e.g. `auth_tokens/<id>`) goes in URL as `?access_token=<name>` — no `Authorization` header. ADR 0006 (OAuth path) is Rejected.
+17. **Mint requires paid-tier billing on the GCP project that owns the key.** Free-tier returns `400 INVALID_ARGUMENT` with no billing-specific detail — indistinguishable from a malformed body. `generateContent` and `models.list` work on free tier and mislead. Verify in https://aistudio.google.com/app/apikey: billing account attached AND explicitly on paid tier (separate things).
+18. **Mint rejects new-format API keys** (`AQ.xxx`, ~53 chars). Use legacy-format (`AIzaSy...`, 39 chars). `generateContent` accepts both — hidden failure mode. Google forum thread 141133; fix timeline unknown.
+19. **Ephemeral-token sessions still require a client-sent `{"setup": {...}}` frame** as the first WS message after `open`. The mint-baked `bidiGenerateContentSetup` is an authorization *ceiling*; server does NOT auto-emit `setupComplete`. Symptom of missing the frame: `setupComplete` never arrives, `awaitSetupComplete` timeout fires. Stir backend pre-serializes the exact setup frame at mint time and returns it as `setup_frame_json`; iOS forwards verbatim via `LiveOutboundFrame.setup(payload:)`.
+20. **Preview API drops load-bearing frames.** `gemini-3.1-flash-live-preview` can omit `turnComplete` or `setupComplete` without warning. Observed (2026-04-23): after `start_timer`, three generation passes emitted `generationComplete` each but no `turnComplete`; iOS state machine pinned in `.modelSpeaking` 35+s. **Defensive-by-default:** every `await` on a Gemini-initiated state transition (setupComplete, turnComplete, first audio chunk, pre-mint swap) MUST have a client-side timeout + graceful recovery. `turnStuckWatchdog` in `RealtimeSession.swift` (8s threshold, armed on `.modelSpeaking`, rearmed on inbound audio, cancelled on transition out). On fire: synthesize `turnComplete`, persist VoiceTurn `resultType='error'/errorCode='turnComplete_timeout'`, emit `voice_turn_stuck_watchdog_fired`. Threshold: >5% of tool-call turns in 7-day window = revisit spec §18 vendor contingency. SpeechFallbackService (HTTP + AVSpeechSynthesizer) has zero exposure to this class. Revisit Live-path timeouts when the model moves to GA.
 
 ---
 
 ## Backend contracts
 
-All `/v1/*` endpoints authenticate via session JWT from `/v1/session/bootstrap`. Admin `/v1/ops/*` uses Supabase Auth with admin role + RLS.
+All `/v1/*` authenticate via session JWT from `/v1/session/bootstrap`. Admin `/v1/ops/*` uses Supabase Auth admin role + RLS.
 
-Shared behaviors across endpoints:
-- 400 on request body validation failure → `{ error: "VAL-01", message, field_errors: [...] }`
-- 401 on missing/expired/invalid session JWT → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale|reauth_required" }`
-- 403 on entitlement mismatch → `{ error: "ENT-VOICE-01" }` for voice, `{ error: "ENT-LEFTOVERS-01" }` for leftovers mode, `{ error: "ENT-MULTI-IMAGE-01" }` for multi-image scan, `{ error: "BILL-01" }` for general
-- 429 on quota exhaustion → `{ error: "RATE-01" }`
-- 502 on Gemini outage → `{ error: "AI-01" }`
-- Every response body carries `{ error: CODE, message: string, ...structured_details }`. Never return a string-only error. Never return 4xx/5xx with no body.
-- Idempotency via explicit request IDs (see spec §3 API table for which endpoints require which IDs)
+Shared behaviors:
+- 400 → `{ error: "VAL-01", message, field_errors }`
+- 401 → `{ error: "AUTH-01", message, reason: "missing|expired|malformed|signature_invalid|user_stale|reauth_required" }`
+- 403 entitlement → `ENT-VOICE-01` / `ENT-LEFTOVERS-01` / `ENT-MULTI-IMAGE-01` / `BILL-01`
+- 429 quota → `RATE-01`
+- 502 Gemini outage → `AI-01`
+- Every body: `{ error: CODE, message: string, ...structured }`. Never string-only error. Never empty 4xx/5xx body.
+- Idempotency via explicit request IDs (spec §3 API table)
 - Every AI call logs to `ai_request_log` with `{ provider, model, input_tokens, output_tokens, cost_usd, latency_ms, thinking_level, prompt_version }`
 
 Edge Function conventions:
-- Deno runtime
-- One function per `/v1/…` endpoint
-- Shared helpers in `_shared/` (import via relative paths; no npm deps unless unavoidable)
+- Deno runtime, one function per `/v1/...` endpoint
+- Shared helpers in `_shared/` (relative imports; no npm deps unless unavoidable)
 - Secrets via `Deno.env.get(...)` — never hardcoded
-- Validate session JWT first thing in every handler using the shared helper
-- Zod schema validation at the boundary of every handler (before any DB access)
-- **Every new `/v1/ai/*` (or any JWT-verifying) function MUST have `[functions.<name>] verify_jwt = false` added to `Backend/supabase/config.toml`.** Without it, Kong rejects every authenticated POST at the platform layer with an opaque 401 before the handler runs — the typed AUTH-01 reason never makes it to the client. Landed in the SAME PR as the new function; easy to forget and silent to debug (observed 2026-04-22 with voice-turn-usage: 100+ opaque 401s before the missing entry was noticed).
+- Validate session JWT first via shared helper
+- Zod schema validation at handler boundary (before any DB access)
+- **Every new `/v1/ai/*` (or any JWT-verifying) function MUST have `[functions.<name>] verify_jwt = false` in `Backend/supabase/config.toml`.** Without it, Kong rejects every authenticated POST at the platform layer with an opaque 401 before the handler runs — typed AUTH-01 reason never reaches the client. Land in the SAME PR as the function.
 
 ---
 
@@ -664,13 +563,13 @@ Edge Function conventions:
 
 Per-test unique IDs, no cleanup between tests. `supabase db reset` between CI runs.
 
-- Test helpers generate fresh UUIDs for `installation_id` and CloudKit record names
-- Test-scoped keys prefixed with `test:` (e.g., `install:test:<uuid>`) for local identification and quick cleanup via `DELETE ... WHERE canonical_user_key LIKE 'install:test:%' OR canonical_user_key LIKE 'ck:test:%'`
-- Aggregate-style assertions (COUNT, SUM without WHERE) are **banned** in tests — always filter by test-scoped keys. Tests that need aggregates are probably testing the wrong layer.
-- Service-role client is used **only** in test seed helpers; never in production code paths. Clearly labeled in helper files.
-- RLS tests assert **empty result sets** (`length === 0`), **never** 403 status. RLS is a row filter, not an access check. A query with no matching rows returns `[]`, not an error.
-- Don't use TRUNCATE-in-beforeEach: slower, and creates a class of "tests pass until someone adds a new table" bugs.
-- Don't wrap tests in transaction rollbacks: RLS goes through PostgREST which doesn't expose transaction handles; splitting the test toolchain is worse than the isolation benefit.
+- Test helpers generate fresh UUIDs for `installation_id` and CK record names
+- Test-scoped keys prefixed `test:` (e.g., `install:test:<uuid>`); cleanup via `DELETE ... WHERE canonical_user_key LIKE 'install:test:%' OR canonical_user_key LIKE 'ck:test:%'`
+- Aggregate-style assertions (COUNT, SUM without WHERE) are **banned** — always filter by test-scoped keys
+- Service-role client is used **only** in test seed helpers; never in production code paths
+- RLS tests assert **empty result sets** (`length === 0`), **never** 403. RLS is a row filter, not an access check
+- Don't use `beforeEach` TRUNCATE: slow, and creates "tests pass until someone adds a new table" bugs
+- Don't wrap tests in transaction rollbacks: PostgREST doesn't expose transaction handles
 
 ---
 
@@ -682,13 +581,13 @@ Per-test unique IDs, no cleanup between tests. `supabase db reset` between CI ru
 | Supabase Postgres | app_users, device_installations, entitlement_snapshots, usage_counters, ai_request_log, prompt_versions, feature_flags, ops_flagged_outputs, audit_log, notification_jobs | any user-generated content |
 | Bundled asset (JSON/SQLite) | IngredientCanonical (global ontology) | anything user-editable |
 
-If you're about to write user content to Postgres: stop. That's always a bug unless it's an operational counter keyed on `canonical_user_key`.
+About to write user content to Postgres? Stop — that's always a bug unless it's an operational counter keyed on `canonical_user_key`.
 
 ---
 
 ## Schema truth
 
-Notes on DB column types + constraints that the init migration COMMENTs and/or first-glance schema reading get wrong. Future schema-drift catches land here. Rule: **for column types, check the DB (`\d <table>`) or the latest `ALTER` — not the init migration.**
+Notes on DB column types/constraints that init migration COMMENTs and first-glance schema reading get wrong. Rule: **for column types, check the DB (`\d <table>`) or the latest `ALTER` — not the init migration.**
 
 ### Retconned column types
 
@@ -697,48 +596,48 @@ Notes on DB column types + constraints that the init migration COMMENTs and/or f
 | `device_installations.installation_id` | UUID (was TEXT) | `20260418000022_tighten_column_constraints.sql` |
 | `app_users.current_install_id` | UUID (was TEXT) | same migration |
 | `ops_flagged_outputs.request_id` | TEXT (was UUID) | `20260424000002_request_id_text_consolidation.sql` — matches `ai_request_log.request_id` + accepts `'voice:<session>:<turn>'` shape |
-| `audit_log.request_id` | TEXT (was UUID) | same migration — matches `requestIdFrom()` accepted charset |
+| `audit_log.request_id` | TEXT (was UUID) | same migration |
 
-Relevance: any `COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'` against UUID columns raises `22P02 invalid input syntax for type uuid` because `''` isn't a valid UUID. Cast with `::TEXT` before COALESCE or concatenation. Bit step-8 Phase 1 once; documented so it doesn't bite again.
+`COALESCE(current_install_id, '')` or `... ILIKE '%' || v || '%'` against UUID raises `22P02 invalid input syntax for type uuid`. Cast `::TEXT` before COALESCE/concatenation.
 
 ### New columns / uniqueness
 
 | Column/index | Purpose | Added in |
 | --- | --- | --- |
-| `ai_request_log.session_id UUID` | voice session id; replaces `split_part(request_id,':',2)` for aggregations; partial index `idx_ai_request_log_voice_session` on `(feature_key, session_id, created_at DESC) WHERE feature_key='cook_mode_realtime'` | `20260424000003_performance_indexes_and_session_id.sql` |
-| `UNIQUE(canonical_user_key_hash, request_id)` on `ops_flagged_outputs` | atomic dedup (forever) | `20260424000002` |
-| `idx_app_users_last_seen_at` partial on `status='active'` | hot path for `stir_ops_list_users` + reactivation enqueue | `20260424000003` |
-| `cost_anomalies` two-phase dispatch columns: `dispatched_at`, `sentry_request_id`, `confirmed_at`, `confirm_attempts` | Sentry outage no longer silently loses alerts | `20260424000004_cost_anomaly_two_phase_dispatch.sql` |
+| `ai_request_log.session_id UUID` | voice session id; replaces `split_part(request_id,':',2)`; partial index `idx_ai_request_log_voice_session` on `(feature_key, session_id, created_at DESC) WHERE feature_key='cook_mode_realtime'` | `20260424000003_performance_indexes_and_session_id.sql` |
+| `UNIQUE(canonical_user_key_hash, request_id)` on `ops_flagged_outputs` | atomic dedup | `20260424000002` |
+| `idx_app_users_last_seen_at` partial on `status='active'` | hot path for `stir_ops_list_users` + reactivation | `20260424000003` |
+| `cost_anomalies` two-phase dispatch: `dispatched_at`, `sentry_request_id`, `confirmed_at`, `confirm_attempts` | Sentry outage no longer silently loses alerts | `20260424000004` |
 
 ### Column-value CHECK constraints worth knowing
 
 | Column | Allowed values | Enforced by |
 | --- | --- | --- |
 | `device_installations.apns_environment` | `'production'` OR `'sandbox'` | `device_installations_apns_environment_check` |
-| `ops_flagged_outputs.flag_reason` | `length(...) <= 500` | `ops_flagged_outputs_flag_reason_check` (tightened from 2000 in `20260424000005`) |
+| `ops_flagged_outputs.flag_reason` | `length(...) <= 500` | `ops_flagged_outputs_flag_reason_check` |
 | `ops_flagged_outputs.context_snapshot_json` | `pg_column_size(...) <= 4096` | `ops_flagged_outputs_context_snapshot_size_check` |
 | `ops_flagged_outputs.canned_fallback_json` | `pg_column_size(...) <= 65536` | `ops_flagged_outputs_canned_fallback_size_check` |
 
-iOS `/v1/push/register` must send exactly one of those two values — `'development'` isn't a real APNs gateway and is rejected with VAL-01 at the Zod layer (ideally) or the DB CHECK (last line of defense).
+iOS `/v1/push/register` must send exactly `'production'` or `'sandbox'` — `'development'` is rejected with VAL-01 (Zod ideally, DB CHECK as last line).
 
 ---
 
 ## Billing model
 
-- **RevenueCat is the entitlement source of truth.** Webhook fires → `entitlement_snapshots` updates → app pulls via `/v1/config/bootstrap` on next foreground.
-- **Grace period:** 24h local cache of entitlements if RevenueCat is unreachable.
-- **Trial state:** RevenueCat carries `is_trial` flag. Show trial-days-remaining in Settings and Plan & Billing. Push at 2 days remaining (opt-in, single send).
-- **Intro offer eligibility:** Apple platform enforces one per Apple ID per subscription group. Not our enforcement problem.
-- **Cohort math:** see spec §9. Pro annual year-1 margin is ~$4.13/mo after the April 2026 pricing bump and spike-validated cost model — flag before raising the voice cap or reducing Pro annual price below $139.99.
-- **Paywall trigger moments:** `voice_affordance_tapped` on Free tier is the highest-intent trigger. Lead the paywall with `stir.premium.annual.trial7`, always.
-- **Pro voice cap is 27 sessions/mo** (ADR 0015; was 40, was 60). The 60 cap yielded $0.01/mo year-1 Pro annual margin — fragile to any usage variance. The 40 cap held before the 2026-04-23 device-measured caching finding (implicit caching does not fire on Live API) invalidated the cost model. 27 is the new Pro cap; paired with Premium's 13 cap it keeps Premium AI spend under the 22.27% ARPU guardrail without a price raise. Pro annual is priced at $139.99/yr (not $89.99 or the $119.99 intermediate) specifically because Pro users skew toward the cap and the realized average cost drifts toward the ceiling; the extra headroom also leaves room for founder-discount offer codes during beta without regressing below safe margin.
-- **Premium voice cap is 13 sessions/mo** (ADR 0015; was 20). See Pro-cap note above for the shared caching-finding context.
+- **RevenueCat is entitlement source of truth.** Webhook → `entitlement_snapshots` updates → app pulls via `/v1/config/bootstrap` on next foreground.
+- **Grace period:** 24h local cache if RevenueCat is unreachable.
+- **Trial state:** RevenueCat carries `is_trial`. Show days-remaining in Settings + Plan & Billing. Push at 2 days remaining (opt-in, single send).
+- **Intro offer eligibility:** Apple platform enforces one per Apple ID per subscription group. Not our problem.
+- **Cohort math:** spec §9. Pro annual year-1 margin is ~$4.13/mo after April 2026 pricing — flag before raising the voice cap or reducing Pro annual below $139.99.
+- **Paywall trigger:** `voice_affordance_tapped` on Free is the highest-intent moment. Lead with `stir.premium.annual.trial7`, always.
+- **Pro voice cap = 27/mo** (ADR 0015; was 40, was 60). Pro annual $139.99 specifically because Pro users skew toward the cap; the headroom also leaves room for founder-discount offer codes during beta.
+- **Premium voice cap = 13/mo** (ADR 0015; was 20).
 
 ---
 
 ## Telemetry events
 
-Canonical list. Do not invent new names without adding here **and** to spec §15.
+Canonical list. Don't invent new names without updating spec §15 AND this file.
 
 ```
 app_opened, onboarding_started, onboarding_completed,
@@ -761,7 +660,7 @@ ai_request_completed, ai_request_failed,
 screen_error_shown, sync_state_changed
 ```
 
-**Ops surface events** (dotted form per ADR 0027 — new event surfaces use `<surface>.<noun>.<verb_or_state>`; existing spec §15 events grandfathered flat):
+**Ops surface events** (dotted form per ADR 0027 — new surfaces use `<surface>.<noun>.<verb_or_state>`; spec §15 events grandfathered flat):
 
 ```
 ops_admin.users.list_queried, ops_admin.users.detail_viewed,
@@ -772,19 +671,17 @@ ops_admin.prompt_versions.rollout,
 ops_admin.feature_flags.updated
 ```
 
-Wired in `Backend/supabase/functions/ops-admin/index.ts` (commit `8635c61`, telemetry wiring bundle 2026-04-24). Property contract enforced via `emitOpsEvent` helper at the bottom of that file. Schema reference: `docs/telemetry/canonical-properties.md` + ADR 0027.
+Wired in `Backend/supabase/functions/ops-admin/index.ts`. Property contract via `emitOpsEvent` helper. Schema: `docs/telemetry/canonical-properties.md` + ADR 0027.
 
 Anchors:
 - `core_success_event`: scan → select → cook within 3 min → rate ≥4
 - `voice_conversion_event`: voice_affordance_tapped(free) → paywall_viewed → trial_started → purchase_completed
 
-PostHog LLM Observability events (`$ai_generation`, `$ai_trace`) are a SEPARATE class from the product-event list above — they feed PostHog's LLM Analytics dashboards natively. Every AI call emits both an `ai_request_log` row AND a `$ai_generation` event; the link is `$ai_span_id = ai_request_log.request_id`. See spec §15 "PostHog LLM Observability events" for property tables and the dashboard-join contract. Privacy posture: no `$ai_input` / `$ai_output_choices`, no user content, ever. ADR 0009.
+PostHog LLM Observability events (`$ai_generation`, `$ai_trace`) are SEPARATE from product events — they feed PostHog's LLM Analytics dashboards. Every AI call emits both an `ai_request_log` row AND a `$ai_generation` event; link is `$ai_span_id = ai_request_log.request_id`. Spec §15 has property tables. Privacy: no `$ai_input` / `$ai_output_choices`, no user content, ever (ADR 0009).
 
 ---
 
 ## Verification flows
-
-Commands will be wired up as the repo materializes. Expected shapes:
 
 ```bash
 # iOS
@@ -806,200 +703,162 @@ pnpm run eval:recipe-import
 pnpm run eval:grocery
 ```
 
-**Rule of thumb:** when changing an AI feature, run its eval before committing. When changing a prompt, bump `prompt_versions.version` semver and set `rollout_pct` conservatively (start at 5%).
+When changing an AI feature, run its eval before committing. When changing a prompt, bump `prompt_versions.version` semver and set `rollout_pct` conservatively (start at 5%).
+
+---
+
+## Git workflow
+
+**Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Force-push to `main`/`master` still requires explicit confirmation per the user-level rule.
 
 ---
 
 ## Deploy workflow — local and prod in lockstep
 
-**Rule:** every change that lands locally must also land on the Stir prod Supabase project, in the same session, without asking. Pre-authorized.
+**Rule:** every change that lands locally must also land on Stir prod Supabase, in the same session, without asking. Pre-authorized.
 
-**Prod project:** `ktqajarcomzplnpbczfo` ("Stir", West US Oregon). The shell exports `SUPABASE_URL=https://zfaucivtzfwnrijsbfug.supabase.co` — that's **MindFriend**, a separate project. Always pin via `supabase link --project-ref ktqajarcomzplnpbczfo` before pushing. Confirm via `supabase migration list` that local+remote histories align before any push.
-
-**Cadence:**
+**Prod project:** `ktqajarcomzplnpbczfo` ("Stir", West US Oregon). The shell exports `SUPABASE_URL=https://zfaucivtzfwnrijsbfug.supabase.co` — that's **MindFriend**, a separate project. Always pin via `supabase link --project-ref ktqajarcomzplnpbczfo` before pushing. Confirm `supabase migration list` aligns local+remote before any push.
 
 | Local action | Prod follow-up (same session) |
 | --- | --- |
-| New migration written → applies cleanly via `supabase db reset` | `supabase db push` |
+| New migration applies cleanly via `supabase db reset` | `supabase db push` |
 | `supabase functions serve --env-file .env` passes smoke tests | `supabase functions deploy <name>` for each changed function |
 | New secret referenced via `Deno.env.get` | `supabase secrets set <KEY>=<VALUE>` on prod **before** deploying the function that reads it |
 | Prod DDL lands | `get_advisors` (security + performance) — fix WARN+ in a follow-up migration same session; INFO-level `rls_enabled_no_policy` on `app_users`/`feature_flags`/`prompt_versions` is by-design deny-all, leave it |
 
 **Auto-injected in deployed Edge Functions** (never set manually): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`. Supabase reserves the `SUPABASE_` prefix and filters it from `.env`.
 
-**Must be set manually on prod** before the first function deploy that needs them:
-- `STIR_JWT_SECRET` — equals the prod project's legacy `jwt_secret` (dashboard → Settings → API → JWT Settings). Must match so PostgREST accepts our JWTs for RLS.
-- `GEMINI_API_KEY` — real paid-tier Gemini key. Step 3+ activates.
+**Must be set manually on prod** before first function deploy: `STIR_JWT_SECRET` (= prod project's `jwt_secret`); `GEMINI_API_KEY` (paid-tier).
 
-**Never push to prod:** commits that touch only docs or iOS code. Only schema + function changes trigger the lockstep rule.
+**Never push to prod:** docs-only or iOS-only commits. Only schema + function changes trigger lockstep.
 
 ---
 
 ## Voice validation plan
 
-The Gemini Live spike is split into a cheap half (API-shape drift check, immediately pre-step-6) and an expensive half (UX validation, in-app at step 6). The April 2026 full spike ran the expensive half already and produced `FINDINGS.md` outside this repo — the cheap half is still pending and runs **at step 6 start**, not at step 1 start.
+The Gemini Live spike has two halves. The April 2026 full spike ran the **expensive half** (UX validation) and produced `FINDINGS.md` outside this repo. The **cheap half** (API drift check) still runs at step 6 start.
 
-### Cheap half — immediately pre-step-6, ~1 hour, terminal only
+### Cheap half — pre-step-6, ~1 hour, terminal only
 
-Goals: confirm nothing has drifted between the April 2026 spike findings and the Gemini API surface on the day step 6 begins.
+Confirm nothing has drifted between April 2026 spike findings and the API surface on step-6 day:
 
-1. `curl POST https://generativelanguage.googleapis.com/v1alpha/authTokens` with `model: "models/gemini-3.1-flash-live-preview"` and a minimal `liveConnectConstraints` block (the SDK-named field; verify the raw-REST equivalent against current docs before executing). Confirm 200 response with a `token` field. If the model string has been renamed or the endpoint path has moved, find out now.
-2. Open a WebSocket to `wss://...BidiGenerateContent` with the returned token sent as `Authorization: Token <value>` (Gemini Live uses the `Token` scheme, not `Bearer`). Confirm the connection opens and the server sends a setup-complete frame.
-3. Send a single PCM16 test audio frame via `realtimeInput.audio`. Confirm the server acknowledges without a protocol error.
-4. Inspect the `usageMetadata` frame to confirm audio token metering is still 25 tokens/second both directions.
-5. Verify pricing on [ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing) matches the numbers in this file ($0.75 text in, $3.00 audio in, $4.50 text out, $12.00 audio out per 1M tokens).
-6. Re-test the mint endpoint with API-key auth from the Supabase Edge Function environment specifically (the April 2026 spike got `400 INVALID_ARGUMENT` against raw REST; the Edge Function environment may behave differently, or may need OAuth).
-7. If any drift is found, update `Specs/Stir-Full-Spec.md` §12 and this file before proceeding to write Cook Mode code.
+1. `curl POST .../v1alpha/authTokens` — confirm 200 + `token` field.
+2. Open WS to `wss://...BidiGenerateContent`, token via `Authorization: Token <value>`. Confirm setup-complete arrives.
+3. Send PCM16 test audio frame via `realtimeInput.audio`. Confirm no protocol error.
+4. Verify `usageMetadata` audio metering still 25 tok/sec both directions.
+5. Verify pricing on https://ai.google.dev/gemini-api/docs/pricing matches CLAUDE.md.
+6. Re-test mint with API-key auth from the actual Edge Function environment (April spike got `400 INVALID_ARGUMENT` against raw REST).
+7. If drift found, update `Specs/Stir-Full-Spec.md` §12 + this file before writing Cook Mode code.
 
-### Expensive half — in-app validation gate, start of build-step 6
+### Expensive half — in-app validation gate, start of step 6
 
-Goals: validate that Gemini Live MINIMAL's real-world behavior on iOS matches the product assumptions before investing in Cook Mode voice polish.
+Before step 6 moves from "wire audio pipeline" to "productionize UX", all must measure within spec:
 
-Before step 6 moves from "wire up the audio pipeline" to "productionize the UX", the following must all measure within spec:
+1. **TTFA on Wi-Fi — split gate** on `cook_turn_resolved.result_type` (ADR 0012): TTFA(`normal`) p95 < **500 ms** AND TTFA(`tool_call`) p95 < **1500 ms** across 20 turns. Anchor: last pre-audio `inputTranscription` → first `modelTurn.parts[].inlineData` chunk. Provisional thresholds — revisit after 2 weeks of beta if either at ≥80% of gate.
+2. **Preamble-present rate at MINIMAL ≥ 70%** across 50 tool-call invocations. If lower, disable model preambles entirely; rely on client-side clip alone.
+3. **Client-side filler fires within 150ms of `toolCall` frame arrival** and masks the 2s round-trip cleanly in 95%+ of substitutions.
+4. **Refresh-bounded growth holds.** 30-turn scripted device session: `refreshSession()` fires at turns 10/20/30 (`live_session_refresh_complete`). Per-turn prompt tokens grow linearly within each window (~6-7k fresh → ~13-15k at turn 10) and RESET to baseline immediately after each refresh. If tokens keep growing past turn 10 without a refresh event, trigger is broken. If refreshes fire but tokens don't drop to baseline, recap path or setupComplete handshake is misbehaving.
+5. **Session refresh is silent.** Mic mute window ≤ 5s. User speech during refresh is dropped until mic forwarding restarts.
 
-1. **TTFA on Wi-Fi — split gate on `cook_turn_resolved.result_type` (amended by ADR 0012 on 2026-04-22 PM):** TTFA(`normal`) p95 < **500 ms** AND TTFA(`tool_call`) p95 < **1500 ms** across 20 representative turns. Anchor: last pre-audio `inputTranscription` frame → first `modelTurn.parts[].inlineData` chunk, driver-level precision. Original spec said "p95 < 1.0 s" against the merged distribution; that lumped model-latency (normal turns, ~1–3 ms observed) and tool-dispatch structural latency (~1000 ms observed) into one number. Split-gate thresholds are provisional — revisit after 2 weeks of beta if either distribution sits at ≥ 80 % of its gate.
-2. **Preamble-present rate at MINIMAL ≥ 70%** across 50 tool-call invocations. If lower, disable model-emitted preambles entirely and rely on the client-side pre-recorded clip as the sole dead-air cover.
-3. **Client-side pre-recorded filler fires within 150ms of `toolCall` frame arrival** and masks the 2s backend round-trip cleanly in 95%+ of substitution invocations.
-4. **Refresh-bounded growth holds.** Run a scripted 30-turn session on a physical device. Verify `refreshSession()` fires at turns 10, 20, and 30 (logged as `live_session_refresh_complete`). Per-turn prompt tokens should grow linearly within each 10-turn window (baseline ~6-7k fresh → ~13-15k at turn 10) and RESET to the ~6-7k baseline immediately after each refresh. If tokens keep growing past turn 10 without a refresh event, the trigger is broken. If refreshes fire but per-turn tokens don't drop to baseline after swap, the recap path or setupComplete handshake is misbehaving. Superseded the original "pruning holds" criterion — Gemini Live has no mid-session truncation frame (ADR 0014).
-5. **Session refresh is silent.** At each 10-turn / 15k-prompt-token trigger, the handoff completes without user-perceptible gap. Mic mute window ≤ 5s. User speaking during a refresh is dropped until mic forwarding restarts (rare at turn boundaries).
-
-If 1 or 4 fail materially, stop and escalate — those are architectural problems, not tuning problems. 2, 3, 5 can be tuned.
+If 1 or 4 fail materially, stop and escalate — architectural problems, not tuning. 2/3/5 are tunable.
 
 ## Build order
 
 1. Supabase project + migrations + `/v1/session/bootstrap` + `/v1/config/bootstrap`.
-2. Core Data model + CloudKit container + HouseholdProfile + onboarding flow. No AI yet.
-3. Scan + Solve with `gemini-3-flash-preview`. Aha-moment slice. **Spec §13 IP-based rate limiting lands here, not earlier** — bootstrap rate limiting alone protects nothing until `/v1/ai/*` endpoints exist.
+2. Core Data + CloudKit container + HouseholdProfile + onboarding. No AI yet.
+3. Scan + Solve with `gemini-3-flash-preview`. Aha-moment slice. **Spec §13 IP-based rate limiting lands here, not earlier.**
 4. Saved meals + tap-based Cook Mode. Full Free-tier product.
-5. RevenueCat wiring + paywall + entitlements (annual trial primary CTA).
-6. Cook Mode voice (Premium+). **Cheap-half Gemini Live drift check runs first**, then in-app validation gate, before any UX polish. Productionize only after both clear.
+5. RevenueCat + paywall + entitlements (annual trial primary CTA).
+6. Cook Mode voice (Premium+). **Cheap-half drift check first**, then in-app validation gate, before any UX polish.
 7. Imports, widgets, shortcuts, leftovers.
 8. Telemetry dashboards, ops console, Sentry.
 9. Beta.
 
-Each step should end in something demoable. Don't interleave.
+Each step ends in something demoable. Don't interleave.
 
-**Risk inherent in this ordering:** steps 1–5 build toward Premium-tier economics that assume voice works. If the step-6 validation gate uncovers a fundamental Gemini Live problem (unlikely but possible), Free tier is unaffected but Premium's core promise needs a rework.
+**Risk:** steps 1–5 build toward Premium-tier economics that assume voice works. If step-6 validation uncovers a fundamental Gemini Live problem, Free tier is unaffected but Premium's core promise needs rework.
 
 ---
 
-## Deferred
+## Deferred work
 
-Tracked explicitly so nothing gets lost. Each item has an owner-step.
+Tracked tech debt + triggered refactors live in `docs/deferred-work.md`. Read that file before assuming nothing is owed.
 
-- **Sentry tag `user_hash` → `canonical_user_key_hash` deprecation has no commit-deadline** (step-9 review CR1 W2). Migration `20260424000007_cost_anomaly_dispatch_canonical_tags.sql` rewrote the cost-anomaly dispatcher to emit `tags.canonical_user_key_hash` (per ADR 0027) but old Sentry-indexed events remain under `tags.user_hash`. The migration's commit-time documentation acknowledges dashboards must query both indefinitely; ADR 0027 §Consequences lists this as a "Negative" with no retirement date. Risk: dashboard authors carry the dual-key rule indefinitely, drift into dashboards that only query the new tag, lose attribution on old events. Fix: 14 days post-deploy, after Sentry's index has cycled past the rollout, run a one-shot dashboard rewrite that drops the `user_hash` query branch from all dashboards. OR add an explicit "Sentry tag deprecation" table to `docs/telemetry/canonical-properties.md` with rotation/retirement timestamps so the dual-query period is bounded. Trigger: 2026-05-08 (14 days after migration deploy) OR next dashboard creation/edit, whichever first. Owner-step: as triggered.
-- **CFBundleShortVersionString hard-coded `1.0.0` in 3 Info.plist files will drift from `MARKETING_VERSION` on next bump** (step-9 review CA2-L3 / DB1-B5). `Stir/App/Info.plist:19-20`, `Extensions/StirShareExtension/Info.plist:19-20`, `Extensions/StirWidgets/Info.plist:19-20` all hard-code `1.0.0` / `1`. `pbxproj` declares `MARKETING_VERSION = 1.0.0` / `CURRENT_PROJECT_VERSION = 1` in 4 build configs. Today they match; on next bump (e.g. `MARKETING_VERSION = 1.0.1`), pbxproj updates but plists don't — TestFlight rejects the upload as "duplicate build" or warns silently in CI. Fix: replace plist literals with `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)` AND set `INFOPLIST_PREPROCESS = YES` across all 4 build configs (currently `GENERATE_INFOPLIST_FILE = NO` for extensions, `YES` for main app Release; preprocessor needs to be on for `$(VAR)` substitution to fire). Earlier step-9 attempt at this without flipping `INFOPLIST_PREPROCESS` left the literal `$(MARKETING_VERSION)` string in CFBundleVersion (build warned "parent app (null)") — verified now-reverted. Trigger: at next `MARKETING_VERSION` bump (any version > 1.0.0). Owner-step: as triggered (likely v1.0.1 hotfix or v1.1).
-- **Backend retention crons for `ai_request_log` + `voice_turn_usage` + `substitution_events` + `outcome_feedback`** (step-9 review SA1+SA3). Privacy Policy §6 (`docs/legal/privacy-policy.md`) was rewritten 2026-04-24 to acknowledge these are "targeted" retention windows enforced on deletion request rather than automated cron-purges, because no purge job actually exists today. Comparable subsystems (`webhook_log`, `notification_jobs`, `voice_session_owners`, `audit_log`) all have explicit `pg_cron` retention. Implement parallel jobs: `ai_request_log` 30d (matches public commitment), `voice_turn_usage` 30d, `substitution_events` 12mo, `outcome_feedback` 24mo. Once shipped, update Privacy Policy §6 to drop the "Targeted" language and re-state automatic-deletion. Trigger: before public-launch crash-rate ramp OR at first auditor / privacy-request inquiry, whichever first. Owner-step: v1.1.
-- **In-app CCPA deletion UI + endpoint + table** (step-9 review SA3). Privacy Policy §7.7 was rewritten 2026-04-24 to direct users to email-only at `privacy@getstir.app` because no in-app flow ships in v1. Build: (a) Settings > Privacy > Delete my data SwiftUI view, (b) `POST /v1/users/delete-request` Edge Function authenticated via session JWT, (c) `deletion_requests` Postgres table with status enum (`pending | approved | processing | completed | failed`), (d) ops-admin SPA Deletion Requests tab, (e) deletion-fulfillment job that fans out across Supabase + PostHog + Sentry + RevenueCat per `docs/runbooks/ccpa-deletion-workflow.md`. Once shipped, update Privacy Policy §7.7 to restore the in-app flow as primary. Trigger: any user submits an email-path deletion request that reveals friction OR pre-public-launch (whichever first). Owner-step: v1.1.
-- **TanStack Query migration for ops SPA** (step-8 review FD1 #6) — **accepted technical debt**. Step-8 kickoff brief deprioritized SPA React-discipline to keep the ops console minimal, but the landed code knowingly violates the global `~/.claude/CLAUDE.md` "Never use `useEffect` directly" rule across `DashboardPage` / `UsersPage` / `FlaggedOutputsPage` / `CostAnomaliesPage` with `/* eslint-disable-next-line */` escape hatches at each fetch site. Not a future enhancement — a scoped policy exception with a named migration path. Resolve by migrating to TanStack Query (retry + stale-while-revalidate + request deduplication come for free). Trigger: when the ops SPA grows beyond the 4 current pages, OR when step 9 polish lands, whichever comes first. Owner-step: step 9.
-- **ops SPA runtime test harness** (step-8 review 4a/4b observation). No Vitest, no React Testing Library, no Playwright in `ops/`. Current coverage: TypeScript strict-mode compile (`tsc -b`) + Vite bundle (`npm run build`). Regressions in user-facing flows (dialog-confirm-then-API-call, page transitions, error states, loading states) are caught at runtime only via manual smoke testing before beta. Minimum viable v1: Vitest + React Testing Library + one smoke test per page that renders without error + one end-to-end test for the most-used flow (typically `users.list` → detail → `force_reauth`). Triggers to reconsider: (a) ops SPA grows beyond 6 pages, (b) user-reported regression traces to uncaught-by-build logic, (c) multi-page refactor would benefit from regression tests. Owner-step: step 9.
-- **W16 — `processPushSend` integration coverage** (step-8 review). Scaffold (`pgmq_dispatch_push_send_test.ts`) was reverted because the test gate `STIR_RUN_APNS_INTEGRATION=1 && STIR_APNS_MOCK_URL` silently skipped every assertion, producing a trap-shaped file that LOOKED like coverage while exercising nothing. Real coverage requires: (a) a Deno-based mock APNs HTTP/2 server, (b) an `APNS_HOST_OVERRIDE` env path in `apns.ts` OR an equivalent reachability seam — **may be cleaner to inject an HTTP client rather than override host** (the host-override approach was rejected here because it's production config that exists only for one test; dependency-injection at the fetch seam is the less-invasive alternative), (c) test setup that starts the mock server, points the dispatcher at it, and exercises 200 / 410 / 503 branches. Trigger: when step-9 APNs compliance-test infrastructure lands — that workstream will need the same mock server + seam; W16 folds into it naturally instead of being an orphan refactor. Owner-step: step 9.
-- **Per-admin rate-limit bucket** (step-8 review W6 follow-up). The global `ip:ops_admin_hourly` cap (30/min = 1800/hour per IP) landed in `rate_limiter.ts` (commit 1d). A per-admin bucket keyed on `admin.authUserId` would tighten the defense against a single-admin-account compromise that rotates IPs. Ship when admin count > 5 OR ops_admin call volume makes the global cap noisy. Owner-step: step 9.
-- **SupabaseSessionClient HTTPErrorHandler.map refactor** (step-8 review CR2 W6). `perform` / `performNoContent` / `performStream` each carry a ~100-LOC error-mapping block (401/403/429/5xx/VOICE-SESSION-01/VAL-01) with the `reauthRequired` branch duplicated across all three (`SupabaseSessionClient.swift` lines 197, 389, 484). Extract a shared `HTTPErrorHandler.map(status, data, request)` helper; the three perform-variants become thin shells around a shared status-translation function. Trigger: any new AUTH-01 reason or a 4th perform variant. Owner-step: step 9.
-- **`stir_ops_cost_anomaly_scan` session_id rewrite + runaway_session detector emit** (step-8 review W33, post-bundle). Migration 20260424000003 added `ai_request_log.session_id UUID` + partial index; `voice-turn-usage` populates it on new rows and the migration backfilled existing voice rows. But the scan function's voice branch still uses `request_id LIKE 'voice:%:%'` + `split_part(request_id, ':', 2)` rather than `session_id` directly. Also: the `runaway_session` anomaly ENUM value is declared (migration 20260423000008) but no detector emits it. Rewrite `stir_ops_cost_anomaly_scan` to use `session_id` (fast, index-backed) and emit `runaway_session` for sessions with >10-min span AND >20 turns. Trigger: 7+ days after backfill stabilizes (so all voice rows older than the analysis window have `session_id` populated). Owner-step: step 9 before beta scale ramp.
-- **Per-feature `canned_fallback_json` schema registry** (step-8 review W23 / SA1 W2). Current Zod accepts any JSON object within a 64 KiB size cap (`ops-admin/index.ts` `FlaggedOutputsResolveParams`). Full safety requires validating against a per-feature response schema keyed off the flagged row's `feature_key` (`cook_mode_realtime` vs `substitution` vs `recipe_import` etc.) before the cache UPDATE. Discriminated-union registry. Trigger: step 9 before beta opens the ops console to non-Daniel admins (pre-beta canned-fallback payloads need structural correctness guarantee to prevent iOS decode failures on the next cache hit). Owner-step: step 9.
-- **APNs untested changes — W10 / W11 / W44** (step-8 review commit 2 carry-forward). Commit 2 added three hardening changes to `_shared/apns.ts` that lack direct test coverage: **W10 timeout** (`AbortSignal.timeout(10_000)` — requires slow-TCP simulation infra to test the abort path); **W11 mint coalescing** (`mintingPromise` serializing concurrent mints — requires concurrent-request test harness); **W44 PKCS#8 parse error wrap** (improved error message on malformed p8 — deploy-time-only path, not request-time). These land as defense-in-depth behind existing fetch-mocking tests. Trigger: when step-9 APNs compliance-test infrastructure lands — shares the mock APNs HTTP/2 server work with W16, all three changes become testable. Owner-step: step 9.
-- **pgmq-dispatch reclaim sweep as SQL stored proc** (step-8 review commit 3b carry-forward). The two-part reclaim sweep (Part A reclaim to pending, Part B dead-letter to failed at attempt_count=MAX) is implemented in TypeScript within `pgmq-dispatch/index.ts`. This makes sweep tests edge-runtime-dependent (tests POST to `/functions/v1/pgmq-dispatch` to invoke the sweep), which complicates isolated-worktree verification under the Path A hybrid protocol. Alternative: extract into a SQL stored proc `stir_pgmq_reclaim_sweep()` callable via `svc.rpc(...)`; the TypeScript handler invokes the proc. Tests become direct-DB, which is cleaner isolation. Current TypeScript implementation is functionally correct; the refactor is test-harness ergonomics. Trigger: next sweep-logic change, OR when a multi-commit bundle work re-introduces the Path A contamination pain for pgmq tests. Owner-step: step 9.
-- **Zod/CHECK synchronization invariant** (step-8 review 1c follow-up). Size caps on `ops_flagged_outputs.context_snapshot_json`, `canned_fallback_json`, and `flag_reason` are enforced at two layers: Zod `.refine()` in edge handlers (`ops-flag-output/index.ts`, `ops-admin/index.ts`) + SQL CHECK constraints in migration 000005. Defense-in-depth is intentional; the cost is synchronization discipline — a future tighten or loosen of any cap requires updating BOTH layers together. A handler-side loosen without a DB loosen produces 500s where the API accepted a payload the DB rejects; a DB-side tighten without a handler tighten produces invisible tech debt. Trigger: any change to `CONTEXT_SNAPSHOT_MAX_BYTES`, `CANNED_FALLBACK_MAX_BYTES`, or the `flag_reason` 500-char cap; OR any migration adjusting the matching CHECK constraints. A test that asserts cap values match between layers would pin this; absent one, manual review discipline. Owner-step: as triggered.
-- **Isolated-worktree verification limitation — shared Supabase edge runtime** (step-8 review 1b verify observation). `supabase start`'s edge-runtime Docker container mounts from the directory where the stack was started (main tree), not from the verify worktree. Tests POSTing to edge functions hit the mount-point handler code, not the verify-SHA handler code. Workarounds: (a) **Path A hybrid** — run only tests whose target handlers haven't diverged between main and verify, document skips; (b) **Path B full** — `supabase stop && cd <worktree> && supabase start` per verify, 60-90s ceremony cost per commit. Path A is default; Path B is explicit override for correctness-critical verifies. Ideal fix: isolated Supabase stack per worktree (docker networking work, not currently trivial). Trigger: when a multi-commit bundle has ≥3 commits and the Path A skip list exceeds 30% of the relevant tests. Owner-step: as triggered.
-- **IP-based rate limiting on `/v1/session/bootstrap`** (spec §13): deferred from step 1 to step 3. Rationale: bootstrap rate limiting alone protects nothing until `/v1/ai/*` endpoints exist. Lands with `/v1/ai/dinner-solve` and shares infrastructure with `ai_request_log` for cost observability. Implementation sketch: Postgres `rate_limit_buckets` table, sliding window, 30 solves/day per IP across canonical keys. Supabase platform-layer rate limiting is the backstop in the meantime.
-- **Gemini Live API drift re-check** (cheap-half spike): scheduled for start of step 6. Purpose is to catch API drift between the April 2026 full spike (already complete) and step-6 kickoff. Step 6 cannot start without it.
-- **Mint endpoint auth unknown from April 2026 spike**: `POST /v1alpha/authTokens` returned `400 INVALID_ARGUMENT` on API-key auth in the spike environment. Re-test from the actual Supabase Edge Function at step 6. Fallbacks if it still fails: OAuth service-account auth, or backend-proxied WebSocket (both keep the Gemini key server-side).
-- **Server-side CloudKit identity verification** (known trust boundary): `cloudkit_user_record_name` in `/v1/session/bootstrap` is currently taken on trust from the iOS client. A modified client can claim any canonical_user_key by submitting another user's CK record name. Step-1 mitigation: Zod regex `^_[a-f0-9]{32}$` rejects malformed names at the boundary. Full mitigation (deferred to step 6+): server-to-server verification via CloudKit Web Services, or a short-lived CK-signed challenge token iOS must include in bootstrap. Risk acceptable at v1 because CK record names are opaque 32-hex strings not easily enumerable, and the attacker gains only this-user-scoped operational data (user content is CloudKit-private-DB-scoped and unreachable from Supabase).
-- **ActivityKit Live Activity for Cook Mode timers** (deferred from step 4 to step 7). Step 4 ships `TimerService` with in-app `TimelineView` countdown + `UNUserNotification` scheduling on fire date, which covers the critical-path UX. Live Activity on Lock Screen + Dynamic Island requires a Widget Extension target (new bundle ID, `NSSupportsLiveActivities` entitlement, Widget Extension plumbing). Step 7 adds the Widget Extension for Home Screen widgets; Live Activity piggybacks on that same target. Correlation between already-scheduled `UNNotificationRequest`s and Live Activity content is handled via `CookingSession.localNotificationIdsJSON` (already persisted in step 4).
-- **Persisted pause timestamp for `CookTimer`** (`pausedAt`/`pausedForSec` columns). Decision: **not adding**. State machine + in-memory pause tracking covers active-session pause/resume; cross-session paused timers lose pause context and resume with zero paused-duration (TimerService.swift flags this explicitly). Revisit only if user reports of "paused timer shows wrong time" cross a threshold in beta.
-- **`RealtimeSession` three-part split** (step-6 review CR1-W1 / CR2-W1). Extract `LiveTurnLifecycle` (per-turn accumulator + flag resets via defer), `LiveToolDispatcher` (8-tool switch + substitution round-trip + VM-callback wiring), `LiveSessionRefreshCoordinator` (pre-mint + swap + goAway handling) from the monolith. **Current LOC (2026-04-23): 3622** — well past the 3200 review trigger. **Trigger already tripped as of d56330e** (step-6 P0 iOS bundle is the commit that pushed LOC past the trigger line). Next substantive touch to `RealtimeSession.swift` owns the split — no option to patch through. If a patch without the split lands, that's a §Deferred violation and must be caught in review. "Substantive" means: adding a new method or state field, changing the transport/mint lifecycle, adding a new tool dispatch case, or any change > 20 LOC. Does NOT mean: typo fixes, comment additions, log-string renames, test-hook additions, or ADR back-references. Secondary trigger: a 4th race-sensitive flag added alongside the existing `finalizeWasWatchdogFire` / `finalizeWasTransportError` / `isRefreshing` triplet would also make the refactor overdue. **Production transport seam linkage:** this split is the natural place to introduce a production-grade transport protocol (today the step-6 test harness uses an internal test-only protocol — see `LiveWebSocketTransportProtocol` in `LiveWebSocketTransport.swift`). The split's `LiveSessionRefreshCoordinator` should own the transport seam, not `RealtimeSession`. Don't design the split without considering the seam. Owner-step: step 7 (required before any further RealtimeSession changes land).
-- **`CookModeViewModel` voice-telemetry extraction** (step-6 review CR1-W2 / CR2-W1). Extract `VoiceSessionTelemetry` covering `seedVoiceSessionTrace`, `recordLiveTurnSummary`, `recordVoiceSessionRefresh`, `recordVoiceTurnStuckWatchdogFired`, `recordVoiceSubstitutionRequested/Resolved`, `fireVoiceSessionCloseTrace` — currently ~220 lines of PostHog aggregation inline in a SwiftUI view model. **Current LOC (2026-04-23): 1915** (step-6 bundle pushed it from 1869 past the 2000 trigger line by ~85 LOC). Trigger: next substantive change to any of those methods OR a confirmed 2000+ LOC threshold crossing. Owner-step: step 7 (concurrent with the RealtimeSession split since both are voice-layer architecture).
-- **`VoiceSessionDriver` delegate collapse** (step-6 review CR1-W3). Collapse the five+ individual `on{Event}` closures on `RealtimeSession` into a `VoiceSessionDriverDelegate` struct of optional closures set on the protocol; `CookModeRoot.wireVoiceDriver` then doesn't need runtime `as? RealtimeSession` downcasts and the compiler catches missing callback wiring when new events are added. Trigger: next time a new Live-only callback is added to `RealtimeSession`. Owner-step: as triggered.
-- **`VoiceSessionState` path split** (step-6 review CR1-W4). Current `canTransition` grammar has been relaxed enough that it rejects only a handful of edges; real value lives in the phase-boundary checks, not individual edges. Split into `LivePathState` (connecting / toolCalling / refreshing) and `FallbackPathState` (transcribing), each with a tight grammar; the VM exposes a coarser union for UI. Trigger: next time a new state gets added to cover a preview-API quirk OR when the `canTransition` body exceeds 80 lines. Owner-step: step 9.
-- **Source-IP HMAC with rotated salt** (step-6 review P2-C). Current `ipBucket()` (`_shared/rate_limiter.ts`) uses unsalted FNV-1a — deterministic, reversible in seconds against the IPv4 space. Suitable for dashboard deduplication, NOT for privacy. Replace with HMAC-SHA256 keyed on an env-sourced `LOG_IP_SALT` (32 random bytes stored in Supabase secrets), rotated monthly via a scheduled task that mints a new salt, retains the prior for a 24h overlap window, then discards. Fallback: if `LOG_IP_SALT` is missing, log `source_ip_bucket: "unsalted"` so misconfig is observable. Trigger: before step 9 beta OR when log-retention policy tightens to require privacy-grade hashing. Owner-step: step 8 (ops hardening) or step 9.
-- **Voice-path architectural test harness** (step-6 review P1-S extension). `RealtimeSessionRecoveryTests` covers the `.skipped` path of `RefreshOutcome` via direct calls; `.success` / `.preCommitFailure` / `.postCommitFailure` require a mock WebSocket transport + scriptable mint response. Build once as shared `MockLiveTransport` + `MockMintResponse` factories; unlocks P1-S full coverage and future refactor-driven tests. (P1-P was completed via direct task injection per its own harness design — didn't need MockLiveTransport.) Owner-step: step 8.
-- **Pre-commit check — exhaustive-switch verification.** When a commit adds a new enum case to a type consumed by exhaustive `switch` statements, verify all consumers updated in the same commit. Trigger: any diff touching `enum` in a file under `Core/` or `Shared/`. Check: `grep -rn "switch.*\(EnumName\)" --include="*.swift"` — every hit must be in the same commit or the build breaks. Self-observed: commit 251401b landed `ErrorCode.voiceSession01` without the `ErrorPresenter` arm; fixup required. Owner-step: any agent, any commit.
-- **Post-commit build verification on main.** No commit lands on main without a green `xcodebuild build` in an isolated worktree. Applies to all agents. Red-main window observed 2026-04-23: step-8 agent's source commits `ed07a26..9f8d131` (inclusive) landed without pbxproj sync, breaking main build for multiple commits in a row; caught only by the step-6 review sweep at commit 79c8701. Same sweep caught exhaustive-switch omission in 251401b. Owner-step: any agent, any commit.
-- **Pre-push hook for green-build enforcement.** Add a git pre-push hook (or CI equivalent) running `xcodebuild build -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` before allowing push to main. No such hook exists today. Trigger: next time an agent lands a red commit on main. Owner-step: ops hardening (step 8 or later).
-- **Spec §6 sync gap — `METHOD-NOT-ALLOWED-01`.** Exists in CLAUDE.md's error matrix but missing from Spec §6. Predates step-6 remediation; observed during the VOICE-SESSION-01 sync. Resolve via a future spec sync; do not fold into unrelated commits. Owner-step: as triggered.
-- **Error envelope drift protection.** Server error response shape (`{ error, message, reason }` top-level) is specified in Spec §6 paragraph text but not enforced by code. Future refactors to the envelope shape will silently drift from spec. Consider a shared TypeScript type re-exported from `_shared/errors.ts` and a test that asserts the wire shape matches the spec example. Trigger: next time the envelope shape changes, OR before step 9 beta (whichever comes first). Owner-step: step 8 (ops hardening) or as triggered.
-- **`SpeechSynthesizing` protocol widening.** Current two-method protocol (P1-Q harness, introduced in `05787c3`) exposes `delegate` + `speak(_:)` only. `cancelSpeaking`, the audio-interruption handler, and `close()` teardown each use an inline `synthesizer as? AVSpeechSynthesizer` cast for `isSpeaking` / `stopSpeaking(at:)` — filed at all three call sites. Widen the protocol when cancel-path tests land. Trigger: next test that exercises the cancel path, OR next refactor that adds a second fallback synthesizer implementation. Owner-step: as triggered.
-- **Clock injection across voice-path time-dependent code.** `SpeechFallbackService.speak` uses a property-injected timeout + `_testSetSpeakTimeoutSec` hook (P1-Q, `05787c3`). `RealtimeSession` uses `Date()` for pre-mint staleness + turnStuckWatchdog age + pre-warm timing — each test-instrumented via private-state test hooks. `refreshSession` uses `Task.sleep` for backoff. A shared `any Clock` injection pattern would unify these, enable exact-boundary time-sensitive tests, and remove the ad-hoc hooks. Trigger: when the third such test-hook is added, OR when a time-dependent bug requires property-based testing. Owner-step: step 8 (ops hardening) or as triggered.
-- **`close()` invokes `cancelAndClearPreMintSlot()` unit assertion.** P1-P test 2 (commit `aef8758`) pins the close-wiring via a direct `session.close()` call on an unopened `makeDriver()` session. The assertion depends on `close()` being safe to call pre-open (every field it touches is nil/safe). If a future refactor adds a non-optional field to close's teardown path, this test crashes rather than failing cleanly. Replace with a focused harness that isolates the pre-mint teardown seam from the rest of close's 200+ lines. Trigger: next time `close()` gains a non-optional dereference. Owner-step: as triggered.
-- **Pre-mint staleness exact-boundary test.** P1-P tests 4a + 4b (commit `06cde46`) pin both sides of the 45 s staleness boundary with a 1 s margin. They do NOT distinguish `<` vs `<=` at age == `preMintStalenessSec` exactly. Pinning requires time-injection on `consumePreMintedTaskIfFresh`. Trigger: next touch to the pre-mint consumer, OR when `LiveSessionBudget.preMintStalenessSec` changes and the boundary semantic needs re-pinning. Owner-step: as triggered (Clock-injection §Deferred entry unblocks this work).
-- **`is_refresh=false` quota-increment direct pin.** P1-N test 1 (commit `aa51e7f`) verifies net `used_count` invariance on `is_refresh=true` (implicitly pinning both refund guards). The `is_refresh=false` increment-then-refund path on mint failure can't be distinguished from never-incremented on the placeholder-key CI path — post-call state is identical. Requires either integration tests against a real mint (`STIR_RUN_AI_INTEGRATION_TESTS`) OR refund-audit observability to disambiguate. Trigger: when real-mint integration tests are enabled, OR when refund observability lands. Owner-step: as triggered.
-- **`voice_turn_usage_test.ts` owner-binding tier-2 migration.** `no-owner-row` and `IDOR` tests assert on `ENT-VOICE-01` and pass via entitlement-gate-short-circuit rather than exercising the `VOICE-SESSION-01` owner-binding path per ADR 0017. Not active-red (the session_closed test was migrated in `fd32f29` and the audit commit `e117af4` landed with 328/328 green), but these two tests pin the wrong behavior. Restore correctness by promoting to Premium + migrating assertions to `VOICE-SESSION-01` with `reason` discriminator. Trigger: next ADR-0017 adjacent work, OR as a standalone test-correctness commit. Owner-step: step 8.
-- **Step-8 `ops_admin_rpcs_test.ts` — one test red in isolation (observed passing at step-8 review close-out; cause unattributed, flake suspected).** `stir_ops_list_voice_sessions: aggregates by trace_id + sorts by token use` was failing when running `ops_admin_rpcs_test.ts` alone (21/22 in 430ms) at the step-6 review sweep. Passes both in isolation and in the full suite at commit `cde2bd5` (step-8 review bundle close-out). No bundle commit touched the test file (`git log --follow` confirms last modification was step-8 phase 2 `80c2ccc`, pre-bundle) or the `stir_ops_list_voice_sessions` RPC body. Root cause unattributed — flake in the pre-bundle isolation conditions suspected; repeated `supabase db reset` cycles through bundle verification may have produced a cleaner baseline DB state. Entry retained (not deleted) so future re-recurrence is diagnosed against known history. Owner-step: revisit if recurrence observed.
-- **Pre-work test-file smoke rule.** Before adding a new test to an existing test file, run the existing tests in that file first. Surfaces any pre-existing red tests before new work compounds the diagnostic load. Caught in the P1-N session: 4 pre-existing `realtime_session_test.ts` tests had been red due to `all_steps` schema drift; in the P1-O session: 7 pre-existing `voice_turn_usage_test.ts` tests had been red due to missing Premium promote + session_closed assertion drift. Adding a new test in either case before running existing tests would have masked a subset of findings. Applies to every agent every time they touch a test file. Owner-step: any agent, any commit.
-- **Extend pre-push hook §Deferred to cover backend tests.** The existing "Pre-push hook for green-build enforcement" entry proposes a git hook running `xcodebuild build` before allowing push to main. This session discovered the same discipline is needed for backend Deno tests — two files (`realtime_session_test.ts`, `voice_turn_usage_test.ts`) had silent drift that went undetected because no regular run of `deno test Backend/supabase/tests/` existed. Extend the proposed hook to run both `xcodebuild build` AND `deno test Backend/supabase/tests/`. Owner-step: ops hardening (step 8 or later).
-- **Shared validation schema drift risk.** `RealtimeRecipeContext` in `_shared/validation.ts` is used by multiple handlers (realtime-session, cook-turn), each with its own test file + `validBody()` fixture. When the shared schema tightened on 2026-04-22 (added required `all_steps`), both test fixtures drifted silently and independently — `realtime_session_test.ts` fixed in `5348383`, `cook_turn_test.ts` fixed in `e117af4`. Shared schemas + separate per-handler fixtures = coupled drift risk. Consider (a) a shared fixture factory in `tests/_helpers/` that test files consume, so a schema change forces one fixture update instead of N, OR (b) a compile-time check that fixtures satisfy the schema via the schema's own type inference. Trigger: next shared-schema tighten that affects 2+ test files. Owner-step: as triggered.
-- **`PostHogClient.swift` `$ai_trace` doc-comment drift — iOS follow-up** (telemetry audit G4, 2026-04-24). The doc comment at `Stir/Integrations/PostHog/PostHogClient.swift:64–72` describes a mint-at-backend + close-at-iOS `$ai_trace` pair; actual shipped behavior (and the backend-side comment at `_shared/ai_observability.ts:168–171`) is close-at-iOS only. Single emit at `CookModeViewModel.swift:1461` populates both `$ai_input_state` + `$ai_output_state` in one event. Rename / simplify the doc comment to match runtime when next touching `PostHogClient.swift`. Owner-step: any iOS session.
-- **Three backend handlers emit zero PostHog — observability gap** (telemetry audit G8, 2026-04-24). `session-bootstrap/index.ts`, `revenuecat-webhook/index.ts`, `ops-flag-output/index.ts` perform meaningful state transitions (new-user creation + alias-forward; entitlement-state changes; user-flagged-output submission) but emit zero PostHog events. The user-side iOS `entitlement_state_changed` is the only signal for billing transitions and runs on next foreground (delayed). Brief's "no new event categories beyond spec §9" rule kept these out of the telemetry-wiring bundle. Trigger: **before the unified observability dashboard ships, these three handlers must emit** — the dashboard's billing / identity / flag-rate tiles depend on them. Owner-step: pre-dashboard-launch.
-- **Migration `20260424000001` weak DSN log redaction** (telemetry audit G12, 2026-04-24). `RAISE WARNING 'SENTRY_DSN malformed: %', v_dsn` at `20260424000001:75` emits the FULL DSN (including public key) on malformed parse. Superseded by `20260424000004:92–93` which truncates to `length + left(v_dsn, 20)` per W25; in practice only `000004`'s function definition runs because `CREATE OR REPLACE` made it the live version. But `000001` is still on disk — if anyone re-applies it (e.g., a rebuild run hits it before `000004`), the old log-redaction behavior re-activates and the public key leaks to the function log. Trigger: next migration that touches Sentry config; convert `000001`'s WARNING to the truncated form, or strike the function body and replace with a comment pointing at `000004`. Owner-step: as triggered.
-- **Backend test environment consolidation.** Two related findings cost ~20 messages of debugging in the P1-N session: (1) `cp Backend/supabase/.env Backend/supabase/functions/.env` required before `supabase start` or edge runtime crashes on `STIR_JWT_SECRET missing` (edge runtime loads secrets independently of the Deno test runner's env), (2) stray `supabase/` directory at repo root shadows `Backend/supabase/` for some tools. Consolidate via: delete the repo-root `supabase/`, document the env-file split in `Backend/supabase/README.md`, OR use `config.toml` `[edge_runtime.secrets]` block to reference a single env source. Trigger: next new-developer setup, OR next time an agent hits the same debugging loop. Owner-step: step 8 (ops hardening).
-- **`SpeechFallbackService` LOC growth — observation only.** P1-Q harness (commit `05787c3`) added ~82 LOC (759 → 841). No prior watch threshold was set for this file; 841 LOC is noted for trend-tracking, not as a hit against a predefined threshold (RealtimeSession's 3200 / CookModeViewModel's 2000 remain the only calibrated triggers). If the file crosses the 2000-LOC threshold (matching CookModeViewModel's trigger shape), revisit extraction patterns analogous to the `RealtimeSession` three-part split. Trigger: file crosses 2000 LOC, OR a refactor-worthy cluster emerges. Owner-step: as triggered.
-- **`cost_anomaly_sentry_dispatch_test.ts` flake — `dispatch: valid DSN + unsent rows` failing in isolation, passing on retry** (telemetry bundle Phase E observation, 2026-04-24). First run of the test file failed at `assertNotEquals(after?.dispatched_at, null)` (line 64); immediate re-run passed 3/3. Suspected cause: residual cost_anomaly rows from prior test runs filling the dispatch function's LIMIT-50 window before the test row got picked up. Same shape as the `stir_ops_list_voice_sessions` flake from step-8 review (orthogonal to bundle scope, retained for re-recurrence diagnosis rather than fixed). Owner-step: revisit if recurrence is observed (frequency, environmental correlation).
+Active categories:
+
+- **Pre-launch chrome polish** — Cook Mode top-bar mockup divergence, Tonight `Other options` placeholder, Settings dead-code (TrialReminderScheduler).
+- **v1.1 / pre-public-launch backend** — retention crons, in-app CCPA deletion flow, Sentry tag deprecation rotation.
+- **Step 9 / ops hardening** — TanStack Query for ops SPA, ops SPA test harness, per-admin rate limit, HTTPErrorHandler refactor, SQL session_id rewrite, runaway_session detector, canned_fallback schema registry, APNs test mock, source-IP HMAC, voice-path mock transport.
+- **Triggered-by-next-touch** — RealtimeSession 3-part split (LOC trigger tripped at 3622), CookModeViewModel telemetry extraction (>1915 LOC), VoiceSessionDriver delegate collapse, VoiceSessionState path split, Clock injection.
+- **Build/CI hygiene** — exhaustive-switch precommit check, post-commit build verification, pre-push xcodebuild + deno test hook, CFBundleShortVersionString MARKETING_VERSION drift.
+- **Hard-pinned earlier deferrals** — IP rate limiting (step 3), Gemini Live API drift re-check (step 6 cheap-half), Mint endpoint auth re-test (step 6), CloudKit identity verification (step 6+), ActivityKit Live Activity (step 7).
+- **Test-correctness debt** — voice_turn_usage_test ENT-VOICE-01→VOICE-SESSION-01 migration, pre-mint exact-boundary, is_refresh=false direct pin, suspected flakes retained for re-recurrence.
+- **Documentation drift** — PostHogClient $ai_trace doc-comment, Spec §6 sync gap (METHOD-NOT-ALLOWED-01), error envelope drift protection.
 
 ---
 
 ## Working-with-Daniel rules
 
-- Daniel is ex-MindFriend (747-file Swift codebase shipped in 30 days). Assume expert familiarity with iOS, Swift Concurrency, Core Data, CloudKit, Supabase, and AI infra.
-- **Default to comprehensive.** Build the full thing — error handling, edge cases, typed Swift models, production-minded from step 1. Don't ask "MVP or comprehensive?" unless Daniel says "quick", "prototype", "sketch", or equivalent.
+- Daniel is ex-MindFriend (747-file Swift codebase shipped in 30 days). Assume expert familiarity with iOS, Swift Concurrency, Core Data, CloudKit, Supabase, AI infra.
+- **Default to comprehensive.** Build the full thing — error handling, edge cases, typed Swift models, production-minded from step 1. Don't ask "MVP or comprehensive?" unless he says "quick", "prototype", "sketch", or equivalent.
 - **Log assumptions inline.** `// Assuming X because Y. Flag if wrong.` — not in a summary at the end.
 - **Root-cause before patching.** When a fix isn't improving the diagnosis, stop and reframe from first principles. Don't iterate politely into a dead end.
-- **Audit prior artifacts with the same rigor as new work.** If past-Claude got something wrong in the spec, or in generated code, say so directly. Prior outputs aren't ground truth.
-- **Challenge bad calls.** One direct sentence beats three diplomatic paragraphs. If Daniel is wrong, explain why without softening.
-- **Don't silently drop features.** If a planned feature turns out to be infeasible mid-build, stop and tell Daniel. Never make compilation pass by dropping scope.
-- Daniel likes tables for comparisons, diagrams for systems, and prose only when it genuinely earns its place.
+- **Audit prior artifacts with the same rigor as new work.** If past-Claude got something wrong in the spec or generated code, say so directly. Prior outputs aren't ground truth.
+- **Challenge bad calls.** One direct sentence beats three diplomatic paragraphs.
+- **Don't silently drop features.** If a planned feature turns out infeasible mid-build, stop and tell Daniel. Never make compilation pass by dropping scope.
+- Tables for comparisons, diagrams for systems, prose only when it earns its place.
 
 ---
 
 ## What NOT to reopen
 
-These are settled. Don't re-argue them unless Daniel explicitly asks.
+Settled. Don't re-argue unless Daniel explicitly asks.
 
 - Single AI vendor (Google only; no OpenAI/Anthropic fallback).
 - Supabase backend (not Cloudflare Workers, not Firebase, not custom Node).
 - Core Data + CloudKit (not SwiftData).
 - iOS 17 minimum (not 15, not 16, not 18).
 - Voice = Premium+ (not free with quota, not lifetime free sessions).
-- Annual trial is the primary paywall CTA (not monthly, not "upgrade to see Premium").
+- Annual trial is the primary paywall CTA (not monthly).
 - `thinkingLevel: minimal` for voice (escalate to LOW only if eval fails).
 - RevenueCat (not pure StoreKit 2).
 - No mandatory login (not Sign in with Apple required).
 - English / US-only launch (no i18n in v1).
 - No desktop/web companion app.
-- Zod for Edge Function request-body validation (not Valibot — Zod is the default unless a specific reason emerges).
+- Zod for Edge Function request-body validation (not Valibot).
 - `usage_counters.cap_count` snapshot-at-creation, not refresh-on-tier-change.
 - `app_users.status` and `entitlement_snapshots.billing_state` as native Postgres ENUMs with partial indexes.
 
-If Daniel asks "should we switch to X?", engage with it. If you're independently considering a switch, don't — surface the question first.
+If Daniel asks "should we switch to X?", engage. If you're independently considering a switch, surface the question first.
 
 ## What NOT to do by default
 
-These aren't restrictions on creativity — they're specific wrong paths that look right until they bite.
+Specific wrong paths that look right until they bite.
 
-- Don't put any provider API key in the iOS bundle. Under any framing. Ephemeral tokens, server-side secrets, or manual entry — never bundled.
+- Don't put any provider API key in the iOS bundle. Under any framing.
 - Don't add cached-input pricing math to Gemini Live cost estimates. Not supported.
-- Don't write user content to Supabase Postgres. User content is CloudKit-only.
-- Don't use `response.create` or similar OpenAI-Realtime patterns in Gemini Live code — Gemini auto-continues after function responses.
-- Don't send in-session text via `BidiGenerateContentClientContent` on 3.1 Flash Live. Use `realtimeInput.text`. `clientContent` is history-seeding only on this model.
-- Don't send function responses via `clientContent`. Use `BidiGenerateContentToolResponse` carrying the matching `functionResponse.id`.
+- Don't write user content to Supabase Postgres. CloudKit-only.
+- Don't use `response.create` or OpenAI-Realtime patterns in Gemini Live code — Gemini auto-continues after function responses.
+- Don't send in-session text via `BidiGenerateContentClientContent` on 3.1 Flash Live. Use `realtimeInput.text`.
+- Don't send function responses via `clientContent`. Use `BidiGenerateContentToolResponse` carrying matching `functionResponse.id`.
 - Don't assume Gemini Live's `Authorization` uses `Bearer`. It's `Token`.
 - Don't reference `gpt-realtime`, `GPT-5.4`, or OpenAI outside `docs/decisions/` as rejected-alternative context.
-- Don't use `@FetchRequest` in new code — it doesn't play well with `@Observable`. Use a repository + observed view model.
-- Don't hardcode entitlement checks against tier strings in view code. Always go through `EntitlementService`.
-- Don't derive `voice_enabled` on iOS. It's server-computed in the bootstrap response.
-- Don't use object-keyed `quotas` in API responses. Always an iterable array.
-- Don't add new telemetry event names **or new property values on existing events** without updating spec §15 and this file. A new `result=busy` on `voice_affordance_tapped` is a wire-contract change just like adding a new event.
-- Don't invent new error codes. Use the matrix (NET-01, AI-01..03, AI-VOICE-01, IMPORT-01, PERM-*, SYNC-01, RATE-01, BILL-01, PAY-01, ENT-VOICE-01, ENT-MULTI-IMAGE-01, ENT-LEFTOVERS-01, VOICE-SESSION-01, VAL-01, AUTH-01, METHOD-NOT-ALLOWED-01). New codes require updating both this file and spec §6.
-- Don't return 4xx/5xx with empty body or string-only error. Always `{ error: CODE, message, ...structured_details }`.
-- Don't skip the hard-rule validator on substitution output because "the model is trustworthy on this one." Not optional.
-- Don't use UIKit unless wrapping `AVCaptureVideoPreviewLayer` via `UIViewRepresentable`. SwiftUI-first, always.
-- Don't add a second LLM provider as "insurance." The single-vendor decision is settled; revisit only if Gemini downtime exceeds 2x SLA for a quarter.
-- Don't use aggregate assertions (COUNT, SUM without WHERE) in integration tests. Always filter by test-scoped keys.
-- Don't use `beforeEach` TRUNCATE or transaction-rollback wrappers in tests. Per-test unique IDs + `supabase db reset` between CI runs.
-- Don't assert HTTP 403 in RLS isolation tests. Assert empty result sets (`length === 0`). RLS is a row filter, not an access check.
-- Don't hard-delete `app_users` rows. Mark `status = 'merged'` or `'banned'`. Deletion of user content is CCPA hard-delete; identity rows are the audit trail.
-- Don't refresh `usage_counters.cap_count` on tier upgrade. Snapshot-at-creation is the rule. Non-metered entitlements (voice access, saved favorites) flip immediately; metered quotas catch up next period.
-- **Don't use Morph for semantic-tracked files.** `CLAUDE.md`, `Specs/*.md`, `docs/decisions/*.md` (ADRs), and `docs/decisions/TEMPLATE.md` are edited via native `Edit` only — exact-string matching, verifiable per call. Morph's silent drift on these files has been observed twice during the 2026-04-24 telemetry bundle: (1) extra-asterisk formatting on a `**Title**` insertion; (2) silent dropping of two §Schema-truth subsections (New columns / uniqueness + Column-value CHECK constraints) plus two unrelated edits (line 465 `CookModeRoot` reference removed, line 630 "Stir mitigation" → "The mitigation") during a CLAUDE.md update. The cost-of-failure is silent invariant loss — these files encode rules the rest of the codebase enforces against. Native `Edit` is the only acceptable tool for them. Other code files (Backend/Stir source) continue to use Morph per the global tooling rule.
+- Don't use `@FetchRequest` in new code — doesn't play well with `@Observable`. Repository + observed view model.
+- Don't hardcode entitlement checks against tier strings in views. Always go through `EntitlementService`.
+- Don't derive `voice_enabled` on iOS. Server-computed.
+- Don't use object-keyed `quotas` in API responses. Always an array.
+- Don't add new telemetry event names **or new property values on existing events** without updating spec §15 and this file. A new `result=busy` on `voice_affordance_tapped` is a wire-contract change.
+- Don't invent new error codes. Use the matrix. New codes require updating both this file and spec §6.
+- Don't return 4xx/5xx with empty body or string-only error.
+- Don't skip the hard-rule validator on substitution output. Not optional.
+- Don't use UIKit unless wrapping `AVCaptureVideoPreviewLayer` via `UIViewRepresentable`. SwiftUI-first.
+- Don't add a second LLM provider as "insurance." Single-vendor is settled; revisit only if Gemini downtime exceeds 2x SLA for a quarter.
+- Don't use aggregate assertions (COUNT, SUM without WHERE) in integration tests.
+- Don't use `beforeEach` TRUNCATE or transaction-rollback wrappers in tests.
+- Don't assert HTTP 403 in RLS isolation tests. Assert empty result sets (`length === 0`).
+- Don't hard-delete `app_users` rows. Mark `status = 'merged'` or `'banned'`.
+- Don't refresh `usage_counters.cap_count` on tier upgrade. Snapshot-at-creation is the rule.
+- **Don't use Morph for semantic-tracked files.** `CLAUDE.md`, `Specs/*.md`, `docs/decisions/*.md` (ADRs), and `docs/decisions/TEMPLATE.md` are edited via native `Edit`/`Write` only — exact-string matching, verifiable per call. Morph has silently dropped subsections + introduced extra-asterisk drift on these files. Other code files (Backend/Stir source) continue to use Morph per the global tooling rule.
 
 ---
 
@@ -1008,5 +867,5 @@ These aren't restrictions on creativity — they're specific wrong paths that lo
 1. Check the spec (`Specs/Stir-Full-Spec.md`).
 2. Check the Cook Mode research doc for anything voice-related.
 3. If the spec and this file disagree, the spec wins. Tell Daniel about the discrepancy so one gets updated.
-4. If something is genuinely ambiguous, surface the decision to Daniel rather than picking silently.
+4. If something is genuinely ambiguous, surface the decision rather than picking silently.
 5. If you're about to write code that violates a north-star constraint, stop. They aren't negotiable.
