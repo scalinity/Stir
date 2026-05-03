@@ -428,12 +428,12 @@ struct PaywallView: View {
                 .foregroundStyle(Color.Stir.textTertiary)
                 .multilineTextAlignment(.center)
             HStack(spacing: CGFloat.Stir.space3) {
-                Button("Try Again") {
+                PrimaryButton(title: "Try Again") {
                     Task { await viewModel.purchase(productID: productID) }
                 }
-                .buttonStyle(.borderedProminent)
-                Button("Choose Another Plan") { viewModel.dismissError() }
-                    .buttonStyle(.bordered)
+                SecondaryButton(title: "Choose Another Plan") {
+                    viewModel.dismissError()
+                }
             }
         }
         .padding(CGFloat.Stir.space5)
@@ -456,10 +456,9 @@ struct PaywallView: View {
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
                 .multilineTextAlignment(.center)
-            Button("Retry") {
+            PrimaryButton(title: "Retry") {
                 Task { await viewModel.load() }
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding(CGFloat.Stir.space5)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

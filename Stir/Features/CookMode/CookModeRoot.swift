@@ -13,6 +13,15 @@ import OSLog
 import SwiftUI
 
 struct CookModeRoot: View {
+    /// Error shown when Cook Mode setup either times out (15s tripwire
+    /// in `.task`) or throws. Split into title + body so the EmptyState
+    /// surface renders a proper headline + supporting line instead of
+    /// cramming both into one paragraph.
+    private struct InitErrorMessage {
+        let title: String
+        let body: String
+    }
+
     let recipePlan: RecipePlan
     let household: HouseholdProfile
     let aiDispatch: AIDispatch
@@ -39,7 +48,7 @@ struct CookModeRoot: View {
     /// and is guaranteed-correct for whatever build replaced it.
     /// Review finding W-D W18 (CA2).
     @State private var driverTeardown: (@MainActor () -> Void)?
-    @State private var initError: String?
+    @State private var initError: InitErrorMessage?
 
     init(
         recipePlan: RecipePlan,
@@ -98,26 +107,25 @@ struct CookModeRoot: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.2), value: viewModel.voiceToastMessage)
-            } else if let message = initError {
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .accessibilityHidden(true)
-                    Text(message)
-                        .multilineTextAlignment(.center)
-                        .accessibilityAddTraits(.isHeader)
-                    Button {
+            } else if let initError {
+                VStack(spacing: 0) {
+                    EmptyState(
+                        icon: Image.Stir.softError,
+                        title: initError.title,
+                        message: initError.body,
+                    )
+                    SecondaryButton(title: "Close") {
                         onDismiss()
-                    } label: {
-                        Text("Close")
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .padding(.horizontal, 8)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal, CGFloat.Stir.space4)
+                    .padding(.bottom, CGFloat.Stir.space5)
                 }
-                .padding(40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.Stir.paper50.ignoresSafeArea())
             } else {
                 ProgressView("Getting Cook Mode ready…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.Stir.paper50.ignoresSafeArea())
             }
         }
         .task {
@@ -134,7 +142,10 @@ struct CookModeRoot: View {
             let timeoutTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(15))
                 if self.viewModel == nil, self.initError == nil {
-                    self.initError = "Cook Mode is taking longer than expected. Check your connection and try again."
+                    self.initError = InitErrorMessage(
+                        title: "Cook Mode is taking longer than expected",
+                        body: "Check your connection and try again.",
+                    )
                     Logger.ui.warning("cook_mode_init_timeout_15s")
                 }
             }
@@ -216,7 +227,10 @@ struct CookModeRoot: View {
                     await vm.handleMicTap()
                 }
             } catch {
-                initError = "Couldn't start Cook Mode. Please try again."
+                initError = InitErrorMessage(
+                    title: "Couldn't start Cook Mode",
+                    body: "Please try again.",
+                )
                 Logger.ui.error("CookModeRoot createSession failed: \(error.localizedDescription, privacy: .public)")
             }
         }
