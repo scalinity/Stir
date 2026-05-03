@@ -9,8 +9,9 @@
 //     via `.activityBackgroundTint(ember.tintDark)` with `AccessoryWidget`
 //     rendering over user wallpaper
 //   - StirGlyph badge (22pt) + "STIR · COOKING" uppercase (10pt/700/0.14em)
-//   - Recipe title at 13pt/600, allowed to wrap to 3 lines (with
-//     minimumScaleFactor 0.8 fallback for very long titles)
+//   - Recipe title at 13pt/600 — Dynamic Island wraps to 3 lines with
+//     minimumScaleFactor(0.8) fallback for very long titles; Lock
+//     Screen wraps to 2 lines (full activity width gives more room)
 //   - Big mono timer at 18-40pt, ember color in expanded state
 //   - "Step N of M" micro-eyebrow (10pt/700/0.12em) above the serif step
 //     description and progress bar in the bottom region
@@ -121,6 +122,8 @@ private struct LockScreenView: View {
                     .tracking(1.4)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.primary.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(context.attributes.recipeTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.primary)
@@ -159,30 +162,12 @@ private struct TimerNumbers: View {
         } else if let pausedSec = state.pausedRemainingSec {
             Text(Self.mmss(seconds: pausedSec))
         } else {
-            // `Text(timerInterval:)` is system-rendered and clamps to
-            // 0:00 once Date.now passes the upper bound — replaces the
-            // earlier `Text(state.fireDate, style: .timer)` form, which
-            // counted UP positive elapsed-time after fireDate (force-
-            // killed app left the activity reading "M:SS" climbing for
-            // hours, observed device-side 2026-05-03).
-            //
-            // Lower bound is shifted -86400s (24h) so any realistic cook
-            // timer — including overnight slow-roast, fermentation, or
-            // low-and-slow braise scenarios — keeps `lower < Date.now`
-            // and the displayed value stays `upper - Date.now`. With a
-            // smaller offset (e.g. the 14400s voice clamp), a tap-mode
-            // timer started from a >4h `step.timerSeconds` would hit
-            // the "Date.now < lower" branch and freeze on the full
-            // interval ("240:00") until Date.now caught up — same visual
-            // symptom as the pauseTime regression fixed earlier.
-            //
-            // No `pauseTime:` here. An earlier fix added
-            // `pauseTime: state.fireDate` thinking it would force a
-            // hard-clamp at the upper bound — but `pauseTime` is for
-            // "display as-of this clock moment" (used when surfacing a
-            // user-paused timer), and setting it equal to the upper
-            // bound produced a static 240:00 (the lower→upper interval
-            // duration) instead of a count-down.
+            // `Text(timerInterval:)` is system-rendered and clamps to 0:00
+            // once Date.now passes upper. Lower bound -86400s (24h) so any
+            // realistic cook timer keeps `lower < Date.now`; otherwise
+            // the view freezes on the full interval until Date.now catches
+            // up. No `pauseTime:` — setting it equal to upper produces a
+            // static interval reading instead of a countdown.
             Text(
                 timerInterval: state.fireDate.addingTimeInterval(-86400)...state.fireDate,
                 countsDown: true,
