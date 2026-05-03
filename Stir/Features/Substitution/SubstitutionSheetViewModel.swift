@@ -76,61 +76,42 @@ final class SubstitutionSheetViewModel {
 
     func submit() async {
         guard canSubmit else { return }
-        state = .requesting
-        subEventID = UUID()
-        persistedEvent = nil
-
-        let missingIngredient = resolveMissingIngredient()
-        let pickedIngredient = selectedIngredientID.flatMap(findIngredient)
-        let problemText = userProblem.trimmingCharacters(in: .whitespaces)
-
-        // `sub_event_id` so the requested → accepted pair can be joined
-        // in PostHog via a single join key rather than needing to match
-        // on distinct_id + timestamp heuristics. ADR 0009's
-        // dashboard-join contract pairs AI calls by `$ai_span_id`; this
-        // event is a product event, not an AI call, but the same pairing
-        // discipline applies.
-        let subEventIDString = subEventID.uuidString
-        Logger.telemetry.info(
-            "substitution_requested invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) problem_type=\(pickedIngredient == nil ? "free_text" : "picker", privacy: .public)",
-        )
-        analytics.capture(.substitutionRequested, properties: [
-            "problem_type": pickedIngredient == nil ? "free_text" : "picker",
-            "invocation": "sheet",
-            "sub_event_id": subEventIDString,
-        ])
-
-        let body = SubstitutionRequest(
-            subEventID: subEventID,
-            cookingSessionID: session.id ?? UUID(),
-            recipePlanID: recipePlan.id ?? UUID(),
-            missingIngredient: missingIngredient,
-            userProblem: problemText.isEmpty ? "Need a substitute" : problemText,
-            householdContext: buildHouseholdContext(),
-            recipeContext: buildRecipeContext(),
-        )
-
-        do {
-            let result = try await aiDispatch.substitution(request: body)
-            await applyResult(result, pickedIngredient: pickedIngredient, freeTextLabel: missingIngredient.displayName)
-        } catch {
-            Logger.aiDispatch.error("substitution dispatch failed: \(error.localizedDescription, privacy: .public)")
-            let stirError = (error as? StirError) ?? .networkUnreachable(underlying: error)
-            state = .error(message: ErrorPresenter.present(stirError).message)
-        }
+        let trimmed = userProblem.trimmingCharacters(in: .whitespaces)
+        let baseProblem = trimmed.isEmpty ? "Need a substitute" : trimmed
+        await dispatch(problemText: baseProblem)
     }
 
     // MARK: - Accept / Reject
 
     func accept() async {
-        guard case let .safe(text, _, _, _, _) = state, let event = persistedEvent else {
+        guard case let .safe(text, amountConversion, _, _, _) = state,
+              let event = persistedEvent
+        else {
             onFinished()
             return
         }
+        // Order matters: record the decision BEFORE mutating the recipe so
+        // an applyAcceptedSwap failure (Core Data save) leaves a recorded
+        // accept=true with acceptedAlternativeText for telemetry/audit even
+        // if the in-place ingredient mutation fails. The user sees the
+        // sheet close either way; downstream consumers (picker, voice
+        // context) only see the swapped name when applyAcceptedSwap also
+        // succeeded.
         do {
             try repository.recordDecision(event, accepted: true, acceptedAlternativeText: text)
         } catch {
             Logger.coreData.error("accept substitution failed: \(error.localizedDescription, privacy: .public)")
+        }
+        do {
+            try repository.applyAcceptedSwap(
+                event,
+                substitutionText: text,
+                amountConversion: amountConversion,
+            )
+        } catch {
+            Logger.coreData.error(
+                "applyAcceptedSwap failed: \(error.localizedDescription, privacy: .public)",
+            )
         }
         // `invocation` + `sub_event_id` on accepted lets the rescue-usage
         // funnel join requested → accepted pairs by sub_event_id AND
@@ -153,25 +134,49 @@ final class SubstitutionSheetViewModel {
     }
 
     func reject() async {
-        guard let event = persistedEvent else { onFinished(); return }
+        // Reject is a re-prompt, not a dismissal: the user is saying "this
+        // particular swap doesn't work, give me another one." We record the
+        // rejection on the existing event for telemetry/history, then
+        // re-invoke the dispatcher with `userProblem` augmented to instruct
+        // the model to avoid the rejected suggestion. A fresh sub_event_id
+        // is minted by `dispatch` so the server's 10-min idempotency cache
+        // doesn't replay the rejected response.
+        guard case let .safe(rejectedText, _, _, _, _) = state,
+              let event = persistedEvent
+        else {
+            onFinished()
+            return
+        }
         do {
             try repository.recordDecision(event, accepted: false, acceptedAlternativeText: nil)
         } catch {
             Logger.coreData.error("reject substitution failed: \(error.localizedDescription, privacy: .public)")
         }
-        let subEventIDString = subEventID.uuidString
-        let constraintSafe = state.isSafe
+        let priorSubEventIDString = subEventID.uuidString
         Logger.telemetry.info(
-            "substitution_accepted invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) accepted=false constraint_safe=\(constraintSafe, privacy: .public)",
+            "substitution_accepted invocation=sheet sub_event_id=\(priorSubEventIDString, privacy: .public) accepted=false constraint_safe=true",
         )
         analytics.capture(.substitutionAccepted, properties: [
             "accepted": false,
-            "constraint_safe": constraintSafe,
+            "constraint_safe": true,
             "invocation": "sheet",
-            "sub_event_id": subEventIDString,
+            "sub_event_id": priorSubEventIDString,
             "reason": "user_rejected",
         ])
-        onFinished()
+
+        // Build the avoid-hint problem text. Zod caps `user_problem` at 500
+        // chars (Backend/_shared/validation.ts SubstitutionRequest); the
+        // base problem is already user-controlled and not enforced for
+        // length on the iOS side, so we truncate the COMBINED string to
+        // stay under the wire limit. The avoid clause goes LAST so a
+        // truncation drops it (the prior rejection still helps via the
+        // user's original problem context); a truncation that drops the
+        // base would lose the user's intent.
+        let trimmed = userProblem.trimmingCharacters(in: .whitespaces)
+        let base = trimmed.isEmpty ? "Need a substitute" : trimmed
+        let augmented = "\(base); avoid \(rejectedText)"
+        let truncated = augmented.count > 500 ? String(augmented.prefix(500)) : augmented
+        await dispatch(problemText: truncated)
     }
 
     func acknowledgeUnsafe() async {
@@ -192,6 +197,57 @@ final class SubstitutionSheetViewModel {
     }
 
     // MARK: - Private
+
+    /// Drives the AI round-trip for both the initial submit and the reject
+    /// re-prompt. Mints a fresh `subEventID` (so the server idempotency
+    /// cache treats this as a new request), captures the picker selection
+    /// snapshot, fires the requested telemetry, dispatches, and routes the
+    /// result through `applyResult`. The caller owns building the
+    /// `problemText` — `submit()` passes the user's typed text, `reject()`
+    /// passes that text augmented with an "avoid <prior>" hint.
+    private func dispatch(problemText: String) async {
+        state = .requesting
+        subEventID = UUID()
+        persistedEvent = nil
+
+        let missingIngredient = resolveMissingIngredient()
+        let pickedIngredient = selectedIngredientID.flatMap(findIngredient)
+
+        // `sub_event_id` so the requested → accepted pair can be joined
+        // in PostHog via a single join key rather than needing to match
+        // on distinct_id + timestamp heuristics. ADR 0009's
+        // dashboard-join contract pairs AI calls by `$ai_span_id`; this
+        // event is a product event, not an AI call, but the same pairing
+        // discipline applies.
+        let subEventIDString = subEventID.uuidString
+        Logger.telemetry.info(
+            "substitution_requested invocation=sheet sub_event_id=\(subEventIDString, privacy: .public) problem_type=\(pickedIngredient == nil ? "free_text" : "picker", privacy: .public)",
+        )
+        analytics.capture(.substitutionRequested, properties: [
+            "problem_type": pickedIngredient == nil ? "free_text" : "picker",
+            "invocation": "sheet",
+            "sub_event_id": subEventIDString,
+        ])
+
+        let body = SubstitutionRequest(
+            subEventID: subEventID,
+            cookingSessionID: session.id ?? UUID(),
+            recipePlanID: recipePlan.id ?? UUID(),
+            missingIngredient: missingIngredient,
+            userProblem: problemText,
+            householdContext: buildHouseholdContext(),
+            recipeContext: buildRecipeContext(),
+        )
+
+        do {
+            let result = try await aiDispatch.substitution(request: body)
+            await applyResult(result, pickedIngredient: pickedIngredient, freeTextLabel: missingIngredient.displayName)
+        } catch {
+            Logger.aiDispatch.error("substitution dispatch failed: \(error.localizedDescription, privacy: .public)")
+            let stirError = (error as? StirError) ?? .networkUnreachable(underlying: error)
+            state = .error(message: ErrorPresenter.present(stirError).message)
+        }
+    }
 
     private func applyResult(
         _ result: SubstitutionResult,

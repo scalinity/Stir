@@ -77,4 +77,41 @@ final class SubstitutionRepository {
         event.acceptedAlternativeText = acceptedAlternativeText
         try controller.save()
     }
+
+    /// Apply an accepted substitution to the recipe by mutating the linked
+    /// RecipeIngredient in place. Without this, the swap is recorded as a
+    /// SubstitutionEvent for history but invisible to every downstream
+    /// consumer: the substitution picker still lists the original name, the
+    /// voice context's `remainingIngredients` still references the old
+    /// ingredient, and a re-opened sheet would offer the same swap again.
+    ///
+    ///   - displayName: replaced with `acceptedAlternativeText`
+    ///   - amountText: replaced with `amountConversion` when non-nil; the
+    ///     original amount stays when the model didn't supply a conversion
+    ///     (e.g. "use the same amount of rice noodles for dried pasta")
+    ///   - canonicalIngredientSlug: nilled — the slug encoded the original
+    ///     ingredient's identity and no longer matches the swapped name
+    ///
+    /// Free-text events (`recipeIngredient == nil`, e.g. "my blender broke")
+    /// are no-ops — there's nothing to mutate. The SubstitutionEvent itself
+    /// captures the swap for those.
+    ///
+    /// Step instruction text is intentionally untouched: it's frozen prose
+    /// referencing the original ingredient. Auto-rewriting would require an
+    /// extra AI call per accept and is out of scope.
+    func applyAcceptedSwap(
+        _ event: SubstitutionEvent,
+        substitutionText: String,
+        amountConversion: String?,
+    ) throws {
+        guard let ingredient = event.recipeIngredient else { return }
+        ingredient.displayName = substitutionText
+        if let amount = amountConversion?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !amount.isEmpty
+        {
+            ingredient.amountText = amount
+        }
+        ingredient.canonicalIngredientSlug = nil
+        try controller.save()
+    }
 }
