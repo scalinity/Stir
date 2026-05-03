@@ -9,7 +9,8 @@
 //     via `.activityBackgroundTint(ember.tintDark)` with `AccessoryWidget`
 //     rendering over user wallpaper
 //   - StirGlyph badge (22pt) + "STIR · COOKING" uppercase (10pt/700/0.14em)
-//   - Recipe title at 13pt/600, allowed to wrap to 2 lines
+//   - Recipe title at 13pt/600, allowed to wrap to 3 lines (with
+//     minimumScaleFactor 0.8 fallback for very long titles)
 //   - Big mono timer at 18-40pt, ember color in expanded state
 //   - "Step N of M" micro-eyebrow (10pt/700/0.12em) above the serif step
 //     description and progress bar in the bottom region
@@ -44,12 +45,12 @@ struct TimerLiveActivity: Widget {
                             Text(context.attributes.recipeTitle)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.white)
-                                .lineLimit(2)
+                                .lineLimit(3)
                                 .minimumScaleFactor(0.8)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .padding(.leading, 4)
+                    .padding(.leading, 12)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     TimerNumbers(state: context.state)
@@ -156,24 +157,27 @@ private struct TimerNumbers: View {
         } else if let pausedSec = state.pausedRemainingSec {
             Text(Self.mmss(seconds: pausedSec))
         } else {
-            // `Text(timerInterval:)` clamps to 0:00 once Date.now passes the
-            // upper bound; `style: .timer` keeps counting up after fireDate,
-            // which strands the activity reading "M:SS" climbing if
-            // `markCompleted` never runs (e.g. force-killed app). Lower
-            // bound is shifted -14400s to match
-            // `CookModeViewModel.startTimerFromVoice`'s 1...14400 clamp,
-            // keeping the interval non-empty for any valid timer.
+            // `Text(timerInterval:)` is system-rendered and clamps to
+            // 0:00 once Date.now passes the upper bound — replaces the
+            // earlier `Text(state.fireDate, style: .timer)` form, which
+            // counted UP positive elapsed-time after fireDate (force-
+            // killed app left the activity reading "M:SS" climbing for
+            // hours, observed device-side 2026-05-03).
             //
-            // `pauseTime: state.fireDate` (iOS 17+) explicitly freezes the
-            // displayed value at the upper bound. Without it, some iOS 17
-            // builds render past-zero values (positive or negative depending
-            // on the build) instead of clamping — that would leak the same
-            // count-up bug the `style: .timer` → `Text(timerInterval:)`
-            // swap was meant to close. Stir min is iOS 17.0; the parameter
-            // is always available.
+            // Lower bound is shifted -14400s to match the
+            // `CookModeViewModel.startTimerFromVoice` 1...14400 clamp
+            // (the cook-timer max), keeping the interval non-empty for
+            // any valid timer.
+            //
+            // No `pauseTime:` here. An earlier fix added
+            // `pauseTime: state.fireDate` thinking it would force a
+            // hard-clamp at the upper bound — but `pauseTime` is for
+            // "display as-of this clock moment" (used when surfacing a
+            // user-paused timer), and setting it equal to the upper
+            // bound produced a static 240:00 (the lower→upper interval
+            // duration) instead of a count-down.
             Text(
                 timerInterval: state.fireDate.addingTimeInterval(-14400)...state.fireDate,
-                pauseTime: state.fireDate,
                 countsDown: true,
                 showsHours: false,
             )
