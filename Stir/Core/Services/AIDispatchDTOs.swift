@@ -338,6 +338,30 @@ struct SubstitutionRequest: Encodable, Sendable {
             case canonicalSlug = "canonical_slug"
             case amountText = "amount_text"
         }
+
+        /// Skip encoding `canonical_slug` and `amount_text` when blank —
+        /// Core Data string attrs default to "" (RecipeIngredient.amountText
+        /// has `defaultValueString=""`; the dinner-solve decoder coalesces
+        /// missing slugs to nil but not "" — so a stored "" can flow
+        /// straight through). Backend Zod is `.min(1).max(128).optional()`
+        /// on both fields, so an empty pass-through trips VAL-01 and
+        /// surfaces in the sheet as "Something went wrong". Encoding the
+        /// key as absent keeps the field "optional" per the schema intent.
+        /// Same pattern as RealtimeRecipeContext.RemainingIngredient.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(displayName, forKey: .displayName)
+            if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !slug.isEmpty
+            {
+                try c.encode(slug, forKey: .canonicalSlug)
+            }
+            if let amount = amountText?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !amount.isEmpty
+            {
+                try c.encode(amount, forKey: .amountText)
+            }
+        }
     }
 
     struct HouseholdContext: Encodable, Sendable {
@@ -392,6 +416,20 @@ struct SubstitutionRequest: Encodable, Sendable {
                 case displayName = "display_name"
                 case canonicalSlug = "canonical_slug"
             }
+
+            /// See MissingIngredient.encode(to:) — same rationale.
+            /// PantryItemRepository writes `canonicalIngredientSlug = ""`
+            /// when the pantry-parse response had a nil slug, so the
+            /// substitution snapshot is a hot source of empty strings.
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(displayName, forKey: .displayName)
+                if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !slug.isEmpty
+                {
+                    try c.encode(slug, forKey: .canonicalSlug)
+                }
+            }
         }
     }
 
@@ -415,6 +453,17 @@ struct SubstitutionRequest: Encodable, Sendable {
             enum CodingKeys: String, CodingKey {
                 case displayName = "display_name"
                 case canonicalSlug = "canonical_slug"
+            }
+
+            /// See MissingIngredient.encode(to:) — same rationale.
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(displayName, forKey: .displayName)
+                if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !slug.isEmpty
+                {
+                    try c.encode(slug, forKey: .canonicalSlug)
+                }
             }
         }
     }
