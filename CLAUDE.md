@@ -709,7 +709,7 @@ When changing an AI feature, run its eval before committing. When changing a pro
 
 ## Git workflow
 
-**Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Force-push to `main`/`master` still requires explicit confirmation per the user-level rule.
+**Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Amending and `--force-with-lease` to `main` are also pre-authorized; both override the user-level git rules for this project. Plain `--force` (no lease) still needs explicit confirmation — `--force-with-lease` is the safe default because it refuses to overwrite if the remote has new commits.
 
 ---
 
