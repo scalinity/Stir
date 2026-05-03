@@ -42,6 +42,8 @@ struct TimerLiveActivity: Widget {
                                 .tracking(1.4)
                                 .textCase(.uppercase)
                                 .foregroundStyle(Color.white.opacity(0.55))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                             Text(context.attributes.recipeTitle)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.white)
@@ -164,10 +166,15 @@ private struct TimerNumbers: View {
             // killed app left the activity reading "M:SS" climbing for
             // hours, observed device-side 2026-05-03).
             //
-            // Lower bound is shifted -14400s to match the
-            // `CookModeViewModel.startTimerFromVoice` 1...14400 clamp
-            // (the cook-timer max), keeping the interval non-empty for
-            // any valid timer.
+            // Lower bound is shifted -86400s (24h) so any realistic cook
+            // timer — including overnight slow-roast, fermentation, or
+            // low-and-slow braise scenarios — keeps `lower < Date.now`
+            // and the displayed value stays `upper - Date.now`. With a
+            // smaller offset (e.g. the 14400s voice clamp), a tap-mode
+            // timer started from a >4h `step.timerSeconds` would hit
+            // the "Date.now < lower" branch and freeze on the full
+            // interval ("240:00") until Date.now caught up — same visual
+            // symptom as the pauseTime regression fixed earlier.
             //
             // No `pauseTime:` here. An earlier fix added
             // `pauseTime: state.fireDate` thinking it would force a
@@ -177,7 +184,7 @@ private struct TimerNumbers: View {
             // bound produced a static 240:00 (the lower→upper interval
             // duration) instead of a count-down.
             Text(
-                timerInterval: state.fireDate.addingTimeInterval(-14400)...state.fireDate,
+                timerInterval: state.fireDate.addingTimeInterval(-86400)...state.fireDate,
                 countsDown: true,
                 showsHours: false,
             )
