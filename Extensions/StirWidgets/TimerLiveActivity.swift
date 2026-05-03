@@ -45,9 +45,11 @@ struct TimerLiveActivity: Widget {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.white)
                                 .lineLimit(2)
+                                .minimumScaleFactor(0.8)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     TimerNumbers(state: context.state)
@@ -161,8 +163,17 @@ private struct TimerNumbers: View {
             // bound is shifted -14400s to match
             // `CookModeViewModel.startTimerFromVoice`'s 1...14400 clamp,
             // keeping the interval non-empty for any valid timer.
+            //
+            // `pauseTime: state.fireDate` (iOS 17+) explicitly freezes the
+            // displayed value at the upper bound. Without it, some iOS 17
+            // builds render past-zero values (positive or negative depending
+            // on the build) instead of clamping — that would leak the same
+            // count-up bug the `style: .timer` → `Text(timerInterval:)`
+            // swap was meant to close. Stir min is iOS 17.0; the parameter
+            // is always available.
             Text(
                 timerInterval: state.fireDate.addingTimeInterval(-14400)...state.fireDate,
+                pauseTime: state.fireDate,
                 countsDown: true,
                 showsHours: false,
             )
