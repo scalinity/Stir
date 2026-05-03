@@ -9,13 +9,15 @@
 //     via `.activityBackgroundTint(ember.tintDark)` with `AccessoryWidget`
 //     rendering over user wallpaper
 //   - StirGlyph badge (22pt) + "STIR · COOKING" uppercase (10pt/700/0.14em)
-//   - Recipe title at 13pt/600
+//   - Recipe title at 13pt/600, allowed to wrap to 2 lines
 //   - Big mono timer at 18-40pt, ember color in expanded state
-//   - Serif step description (`.bodyLg` at 16pt)
-//   - Progress bar for elapsed (optional, shown when running)
-//   - "Step 3 of 6" micro-eyebrow below progress bar
-//   - Dynamic Island: compact shows mono timer + divider + step short
-//     label; expanded has full serif instruction + Pause/Next tiles;
+//   - "Step N of M" micro-eyebrow (10pt/700/0.12em) above the serif step
+//     description and progress bar in the bottom region
+//   - Serif step description (15pt regular)
+//   - Progress bar for elapsed (shown in expanded + lock screen)
+//   - Dynamic Island: compact shows mono timer + glyph; expanded shows
+//     glyph + eyebrow + title in leading, ember timer in trailing,
+//     step eyebrow + serif instruction + progress bar in bottom;
 //     minimal shows just the StirGlyph dot
 
 import ActivityKit
@@ -31,29 +33,36 @@ struct TimerLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
                         StirGlyph(size: 22)
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("Stir · Cooking")
                                 .font(.system(size: 10, weight: .bold))
                                 .tracking(1.4)
                                 .textCase(.uppercase)
                                 .foregroundStyle(Color.white.opacity(0.55))
-                            Text(expandedHeadline(for: context))
+                            Text(context.attributes.recipeTitle)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.white)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     TimerNumbers(state: context.state)
-                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.Stir.ember600)
                         .monospacedDigit()
+                        .padding(.top, 6)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Step \(context.attributes.stepNumber) of \(context.attributes.totalSteps)")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.2)
+                            .textCase(.uppercase)
+                            .foregroundStyle(Color.white.opacity(0.55))
                         Text(context.attributes.stepDescription)
                             .font(.system(size: 15, weight: .regular, design: .serif))
                             .foregroundStyle(Color.white)
@@ -79,10 +88,6 @@ struct TimerLiveActivity: Widget {
             }
             .widgetURL(URL(string: "stir://cook/timer/\(context.attributes.timerId)"))
         }
-    }
-
-    private func expandedHeadline(for context: ActivityViewContext<TimerActivityAttributes>) -> String {
-        "\(context.attributes.recipeTitle) · Step \(context.attributes.stepNumber)/\(context.attributes.totalSteps)"
     }
 
     /// Total seconds for the progress-bar denominator. Pinned at
@@ -114,7 +119,8 @@ private struct LockScreenView: View {
                 Text(context.attributes.recipeTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("Step \(context.attributes.stepNumber) of \(context.attributes.totalSteps)")
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.2)
@@ -148,7 +154,18 @@ private struct TimerNumbers: View {
         } else if let pausedSec = state.pausedRemainingSec {
             Text(Self.mmss(seconds: pausedSec))
         } else {
-            Text(state.fireDate, style: .timer)
+            // `Text(timerInterval:)` clamps to 0:00 once Date.now passes the
+            // upper bound; `style: .timer` keeps counting up after fireDate,
+            // which strands the activity reading "M:SS" climbing if
+            // `markCompleted` never runs (e.g. force-killed app). Lower
+            // bound is shifted -14400s to match
+            // `CookModeViewModel.startTimerFromVoice`'s 1...14400 clamp,
+            // keeping the interval non-empty for any valid timer.
+            Text(
+                timerInterval: state.fireDate.addingTimeInterval(-14400)...state.fireDate,
+                countsDown: true,
+                showsHours: false,
+            )
         }
     }
 
