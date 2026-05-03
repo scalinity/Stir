@@ -89,11 +89,23 @@ struct DishPreviewView: View {
                 )
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            startCookingBar
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .background(.bar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Solid paper50 + hairline divider matches the
+            // OutcomeFeedbackView / Cook Mode action-bar grammar. The
+            // previous `.bar` material rendered translucent and let
+            // scroll content bleed through under the button, which read
+            // as the CTA "floating" mid-air instead of anchored to the
+            // bottom edge.
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.Stir.divider)
+                    .frame(height: 1)
+                startCookingBar
+                    .padding(.horizontal, CGFloat.Stir.screenMargin)
+                    .padding(.top, CGFloat.Stir.space3)
+                    .padding(.bottom, CGFloat.Stir.space3)
+            }
+            .background(Color.Stir.paper50)
         }
         .stirToast($errorToast)
         .onAppear {
