@@ -170,6 +170,7 @@ final class CookModeViewModel {
 
     private let cookingSessionRepository: CookingSessionRepository
     private let cookTimerRepository: CookTimerRepository
+    private let substitutionRepository: SubstitutionRepository
     private let timerService: TimerService
     private let liveActivityManager: LiveActivityManager
     private let analytics: PostHogClient
@@ -279,6 +280,7 @@ final class CookModeViewModel {
         source: EntrySource,
         cookingSessionRepository: CookingSessionRepository? = nil,
         cookTimerRepository: CookTimerRepository? = nil,
+        substitutionRepository: SubstitutionRepository? = nil,
         timerService: TimerService? = nil,
         liveActivityManager: LiveActivityManager? = nil,
         analytics: PostHogClient = .shared,
@@ -295,8 +297,17 @@ final class CookModeViewModel {
         self.startedAtWallClock = Date()
         self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository()
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository()
-        self.timerService = timerService ?? TimerService()
-        self.liveActivityManager = liveActivityManager ?? LiveActivityManager()
+        self.substitutionRepository = substitutionRepository ?? SubstitutionRepository()
+        // Resolve LiveActivityManager FIRST so the same instance can be
+        // injected into TimerService below. Without sharing, VM-side
+        // `startLiveActivity()` populated dict A while TimerService's
+        // pause/resume/cancel/markCompleted fanned out to dict B (empty)
+        // — every Lock Screen update/end was a silent no-op (CR1-18
+        // contract intact, instance plumbing was the bug; observed
+        // device-side 2026-05-03).
+        let resolvedLiveActivityManager = liveActivityManager ?? LiveActivityManager()
+        self.liveActivityManager = resolvedLiveActivityManager
+        self.timerService = timerService ?? TimerService(liveActivityManager: resolvedLiveActivityManager)
         self.analytics = analytics
         self.sentry = sentry ?? SentryReporter.shared
         self.entitlements = entitlements
@@ -1415,6 +1426,103 @@ final class CookModeViewModel {
             "sub_event_id": subEventID,
             "reason": reason,
         ])
+    }
+
+    /// Persists + applies a voice-driven substitution to the recipe.
+    /// Wired by `CookModeRoot` from
+    /// `RealtimeSession.onSubstitutionAppliedFromVoice`. Without this,
+    /// voice substitutions are auto-applied at the model-narration level
+    /// but invisible to every downstream consumer (substitution picker,
+    /// next voice turn's `remainingIngredients`, grocery export). Same
+    /// root cause + fix shape as the sheet's `accept()`.
+    ///
+    /// Resolution rules:
+    ///   - exact case-insensitive displayName match → picker-style FK
+    ///     event (mutates that RecipeIngredient via applyAcceptedSwap)
+    ///   - substring containment in either direction (handles
+    ///     "pasta" ↔ "dried pasta") → picker-style FK event
+    ///   - no match (e.g. user said "I'm out of cilantro" but cilantro
+    ///     isn't in the recipe) → free-text event (no FK, no recipe
+    ///     mutation; the SubstitutionEvent itself captures the swap)
+    ///
+    /// Step instruction text is intentionally NOT auto-rewritten —
+    /// matches the sheet path's deliberate scope decision; future
+    /// `StepCardView` swap-badge surfaces the change without an AI
+    /// rewrite.
+    func applyVoiceSubstitution(
+        subEventID: UUID,
+        missingIngredient: String,
+        substitutionText: String,
+        amountConversion: String?,
+    ) {
+        let trimmedMissing = missingIngredient.trimmingCharacters(in: .whitespaces)
+        guard !trimmedMissing.isEmpty, !substitutionText.isEmpty else { return }
+        let matched = matchIngredient(named: trimmedMissing)
+        let stepForEvent = recipePlan.stepArray.first { Int($0.stepNumber) == currentStepIndex + 1 }
+        do {
+            let event = try substitutionRepository.persist(SubstitutionRepository.PersistInput(
+                subEventId: subEventID,
+                session: session,
+                ingredient: matched,
+                freeTextName: matched == nil ? trimmedMissing : nil,
+                step: stepForEvent,
+                userProblemText: "Voice: out of \(trimmedMissing)",
+                modelSuggestionText: substitutionText,
+                hardConstraintCheckPassed: true,
+            ))
+            try substitutionRepository.recordDecision(
+                event,
+                accepted: true,
+                acceptedAlternativeText: substitutionText,
+            )
+            try substitutionRepository.applyAcceptedSwap(
+                event,
+                substitutionText: substitutionText,
+                amountConversion: amountConversion,
+            )
+        } catch {
+            Logger.coreData.error(
+                "voice substitution persist/apply failed: \(error.localizedDescription, privacy: .public)",
+            )
+        }
+    }
+
+    /// Case-insensitive match from a model-supplied missing-ingredient
+    /// string back to a row in the recipe. Exact-equal first, then
+    /// bidirectional substring containment so "pasta" finds
+    /// "dried pasta" and "dried pasta" finds "pasta". Returns nil for
+    /// no match (free-text path).
+    private func matchIngredient(named query: String) -> RecipeIngredient? {
+        let q = query.lowercased()
+        let candidates = recipePlan.ingredientArray
+        if let exact = candidates.first(where: {
+            ($0.displayName ?? "").caseInsensitiveCompare(query) == .orderedSame
+        }) {
+            return exact
+        }
+        return candidates.first { ing in
+            let name = (ing.displayName ?? "").lowercased()
+            guard !name.isEmpty else { return false }
+            return name.contains(q) || q.contains(name)
+        }
+    }
+
+    /// Read-only projection of accepted substitution swaps for the
+    /// current cooking session, ready for StepCardView's badge row to
+    /// render. Sourced from `session.substitutionArray` (already sorted
+    /// by createdAt). Each tuple is the original missing-ingredient
+    /// name (snapshot from persist time, not the post-mutation FK
+    /// displayName) and the accepted swap text. Free-text events with
+    /// no acceptedAlternativeText are filtered out — they don't carry
+    /// a coherent swap pair.
+    var acceptedSwaps: [(original: String, swap: String)] {
+        session.substitutionArray.compactMap { event in
+            guard event.typedAcceptance == .accepted else { return nil }
+            guard let swap = event.acceptedAlternativeText, !swap.isEmpty else { return nil }
+            let original = event.missingLabel
+            guard !original.isEmpty else { return nil }
+            return (original: original, swap: swap)
+        }
     }
 
     /// Fires the single `$ai_trace` per voice session (ADR 0009).

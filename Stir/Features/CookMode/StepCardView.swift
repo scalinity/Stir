@@ -32,12 +32,49 @@ struct StepCardView: View {
     @Bindable var viewModel: CookModeViewModel
 
     var body: some View {
+        Group {
+            if viewModel.isVoiceActive {
+                // Voice-mode chrome: replaces the entire tap-mode body
+                // while a Live or Speech-fallback session is running.
+                // Shares ALL state with this VM (no parallel state) —
+                // the only difference is layout. Reverts to tap-mode
+                // automatically when the session terminates and
+                // `isVoiceActive` flips false.
+                VoiceActiveStepView(viewModel: viewModel)
+            } else {
+                tapModeBody
+            }
+        }
+        .confirmationDialog(
+            "Leave Cook Mode?",
+            isPresented: $viewModel.exitConfirmRequested,
+            titleVisibility: .visible,
+        ) {
+            Button("Keep cooking", role: .cancel) {}
+            Button("Pause and resume later") {
+                Task { await viewModel.exit(markAbandoned: false) }
+            }
+            Button("Abandon session", role: .destructive) {
+                Task { await viewModel.exit(markAbandoned: true) }
+            }
+        } message: {
+            Text("Your progress is saved. You can resume from Tonight Home.")
+        }
+    }
+
+    /// The original Cook Mode body — full chrome with topBar, instruction
+    /// scroll, timer card, and the voice/ask/prev/next bottom rows.
+    /// Rendered when no voice session is active. The voice-mode path
+    /// uses `VoiceActiveStepView` instead, which has its own simpler
+    /// layout per the 2026-04-25 mockup.
+    private var tapModeBody: some View {
         VStack(spacing: 0) {
             topBar
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepHeader
+                    swapBadgeRow
                     instructionBody
                     timerSection
                 }
@@ -117,6 +154,47 @@ struct StepCardView: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    /// Compact horizontal row of accepted-substitution badges for the
+    /// current cooking session. Rendered between stepHeader and
+    /// instructionBody so the user reads the swap context BEFORE the
+    /// step prose — instruction text still references the original
+    /// ingredient (e.g. "Add the dried pasta") and the badge tells the
+    /// user what they're actually using ("rice noodles (was: dried
+    /// pasta)"). No-op when the session has no accepted swaps.
+    @ViewBuilder
+    private var swapBadgeRow: some View {
+        let swaps = viewModel.acceptedSwaps
+        if !swaps.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    ForEach(Array(swaps.enumerated()), id: \.offset) { _, pair in
+                        swapBadge(swap: pair.swap, original: pair.original)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Substitutions in this session: " + swaps
+                .map { "\($0.swap) instead of \($0.original)" }
+                .joined(separator: ", "))
+        }
+    }
+
+    private func swapBadge(swap: String, original: String) -> some View {
+        HStack(spacing: CGFloat.Stir.space1) {
+            Text(swap)
+                .stirFont(.labelMd).fontWeight(.semibold)
+                .foregroundStyle(Color.Stir.ember600)
+            Text("(was: \(original))")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
+        }
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space1 + 2)
+        .background(
+            Capsule().fill(Color.Stir.ember100),
+        )
     }
 
     private var instructionBody: some View {

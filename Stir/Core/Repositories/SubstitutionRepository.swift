@@ -1,16 +1,17 @@
 // SubstitutionRepository
 //
 // Persists SubstitutionEvent rows per spec §4.14 with our step-4
-// extension: `missingIngredientDisplayName` captures the free-text
-// ingredient case (user types "I don't have a blender" or "my stock
-// went bad") that isn't tied to a picker-selected RecipeIngredient.
+// extension: `missingIngredientDisplayName` captures the original
+// missing-ingredient name AT PERSIST TIME — for free-text events
+// (e.g. "my blender broke") and for picker-selected events alike.
+// Snapshotting the picker-selected case is necessary because
+// `applyAcceptedSwap` mutates the linked RecipeIngredient.displayName
+// in place after acceptance, overwriting the only other record of
+// what the user originally substituted out. Without the snapshot,
+// the StepCardView swap badge ("X (was: Y)") loses Y.
 //
-// Dual-write rule (confirmed by Daniel in scope alignment):
-//   - Picker-selected → `recipeIngredient` FK set, displayName column nil
-//   - Free-text → `recipeIngredient` nil, displayName set to user's label
-//
-// SubstitutionEvent.missingLabel computed prop hides this behind a
-// single API so the UI doesn't branch.
+// SubstitutionEvent.missingLabel computed prop reads the snapshot
+// first; the FK's live displayName is the post-swap name.
 
 import CoreData
 import Foundation
@@ -55,10 +56,18 @@ final class SubstitutionRepository {
         event.createdAt = Date()
         event.typedAcceptance = .pending
 
-        // Only set missingIngredientDisplayName when there's no FK — keeps
-        // the picker-selected read path clean (UI reads ingredient.displayName
-        // via the FK, not the denormalized copy).
-        if input.ingredient == nil, let freeText = input.freeTextName, !freeText.isEmpty {
+        // Snapshot the original missing-ingredient name for both code paths.
+        // FK path: capture ingredient.displayName BEFORE applyAcceptedSwap
+        // can mutate it, so the swap badge can render "X (was: Y)" after
+        // acceptance.
+        // Free-text path: capture the user's typed label so missingLabel
+        // has something to return.
+        if let ingredient = input.ingredient,
+           let name = ingredient.displayName,
+           !name.isEmpty
+        {
+            event.missingIngredientDisplayName = name
+        } else if let freeText = input.freeTextName, !freeText.isEmpty {
             event.missingIngredientDisplayName = freeText
         }
         try controller.save()

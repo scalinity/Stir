@@ -669,6 +669,46 @@ final class RealtimeSession: VoiceSessionDriver {
     /// joined back to the requested event.
     var onSubstitutionResolvedFromVoice: (@MainActor (_ constraintSafe: Bool, _ subEventID: String) -> Void)?
 
+    /// Fires after the backend returns a SAFE substitution on the voice
+    /// path with the data needed to persist a SubstitutionEvent and
+    /// mutate the linked RecipeIngredient. The existing
+    /// `onSubstitutionResolvedFromVoice` fires telemetry only; this
+    /// callback carries the swap payload.
+    ///
+    /// Without this, voice substitutions are auto-applied at the model-
+    /// narration level ("I'd swap the dried pasta for rice noodles") but
+    /// invisible to every downstream consumer — the substitution picker
+    /// keeps showing the original ingredient, the next voice turn's
+    /// `remainingIngredients` still references the swapped-out
+    /// ingredient, and any later grocery export lists the wrong item.
+    /// Same root cause + fix as the sheet path's accept handler.
+    ///
+    /// Payload:
+    ///   subEventID         — UUID generated at request time; same id
+    ///                        the requested/resolved telemetry events
+    ///                        already carry, so the persisted
+    ///                        SubstitutionEvent's `id` joins back to
+    ///                        the funnel cleanly.
+    ///   missingIngredient  — the ingredient name the model identified
+    ///                        as missing (free-form string from the
+    ///                        Gemini tool call, e.g. "dried pasta").
+    ///                        Host resolves to a RecipeIngredient by
+    ///                        case-insensitive displayName match; falls
+    ///                        through to a free-text SubstitutionEvent
+    ///                        when no match (e.g. user said
+    ///                        "I'm out of cilantro" but cilantro isn't
+    ///                        in the recipe).
+    ///   substitutionText   — accepted alternative ("rice noodles")
+    ///   amountConversion   — optional amount conversion ("8 oz");
+    ///                        nil when the model declined a conversion
+    ///                        (substitute at the same amount).
+    var onSubstitutionAppliedFromVoice: (@MainActor (
+        _ subEventID: UUID,
+        _ missingIngredient: String,
+        _ substitutionText: String,
+        _ amountConversion: String?
+    ) -> Void)?
+
     /// Fires when the stuck-modelSpeaking watchdog force-advances after
     /// Gemini Live drops a `turnComplete` (observed 2026-04-23 on
     /// multi-pass tool-call turns). VM emits the PostHog
@@ -3233,6 +3273,14 @@ final class RealtimeSession: VoiceSessionDriver {
                 // `substitution_accepted` so the voice rescue funnel
                 // stays symmetric with the sheet path.
                 onSubstitutionResolvedFromVoice?(true, subEventIDString)
+                // Persist + mutate the recipe so the swap is visible to
+                // every downstream consumer (substitution picker, the
+                // next voice turn's remainingIngredients, grocery
+                // export). Without this, "auto-applied" is a narration-
+                // only claim that diverges from the persisted recipe.
+                onSubstitutionAppliedFromVoice?(
+                    subEventID, missingIngredient, text, amountConversion,
+                )
                 var response: [String: Any] = [
                     "ok": true,
                     "safe_to_use": true,

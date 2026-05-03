@@ -467,6 +467,14 @@ struct CookModeRoot: View {
                     subEventID: subEventID,
                 )
             }
+            liveDriver.onSubstitutionAppliedFromVoice = { [weak vm] subEventID, missing, text, conversion in
+                vm?.applyVoiceSubstitution(
+                    subEventID: subEventID,
+                    missingIngredient: missing,
+                    substitutionText: text,
+                    amountConversion: conversion,
+                )
+            }
             liveDriver.onVoiceTurnStuckWatchdogFired = {
                 [weak vm] (sessionID: String, turnIndex: Int, toolCallType: String?, elapsedStuckMs: Int, turnLengthAtStuck: Int) in
                 vm?.recordVoiceTurnStuckWatchdogFired(

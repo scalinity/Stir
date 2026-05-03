@@ -45,10 +45,15 @@ extension SubstitutionEvent {
         }
     }
 
-    /// Human-readable label of the missing item — falls back to the
-    /// free-text column when no RecipeIngredient was picker-selected.
+    /// Human-readable label of the missing item — anchored on the
+    /// snapshot taken at persist time, not the live FK. After
+    /// `applyAcceptedSwap` mutates `recipeIngredient.displayName` to the
+    /// swap text, the snapshot is the only source of the original name.
+    /// Falls back to the FK's current name when no snapshot was taken
+    /// (older events written before the always-snapshot rule).
     var missingLabel: String {
+        if let snapshot = missingIngredientDisplayName, !snapshot.isEmpty { return snapshot }
         if let named = recipeIngredient?.displayName, !named.isEmpty { return named }
-        return missingIngredientDisplayName ?? ""
+        return ""
     }
 }

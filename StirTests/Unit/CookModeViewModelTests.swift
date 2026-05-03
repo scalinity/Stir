@@ -91,6 +91,139 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertTrue(vm.substitutionPresentationRequested)
     }
 
+    // MARK: - Voice substitution apply + acceptedSwaps projection
+
+    func test_applyVoiceSubstitution_exactMatch_mutatesIngredient() throws {
+        let pasta = try addIngredient(named: "dried pasta", amount: "12 oz")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "dried pasta",
+            substitutionText: "rice noodles",
+            amountConversion: "8 oz",
+        )
+
+        XCTAssertEqual(pasta.displayName, "rice noodles")
+        XCTAssertEqual(pasta.amountText, "8 oz")
+        XCTAssertNil(pasta.canonicalIngredientSlug)
+    }
+
+    func test_applyVoiceSubstitution_caseInsensitive_mutatesIngredient() throws {
+        let pasta = try addIngredient(named: "Dried Pasta", amount: "12 oz")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "DRIED PASTA",
+            substitutionText: "rice noodles",
+            amountConversion: nil,
+        )
+
+        XCTAssertEqual(pasta.displayName, "rice noodles")
+        XCTAssertEqual(pasta.amountText, "12 oz",
+                       "amountText must be preserved when no conversion supplied")
+    }
+
+    func test_applyVoiceSubstitution_substringMatch_mutatesIngredient() throws {
+        // Model says "pasta", recipe says "dried pasta" — substring match
+        // resolves to the recipe row.
+        let pasta = try addIngredient(named: "dried pasta", amount: "12 oz")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "pasta",
+            substitutionText: "rice noodles",
+            amountConversion: nil,
+        )
+
+        XCTAssertEqual(pasta.displayName, "rice noodles")
+    }
+
+    func test_applyVoiceSubstitution_noMatch_recipeUnchanged() throws {
+        // User said "I'm out of cilantro" but cilantro isn't in the
+        // recipe. Falls through to a free-text SubstitutionEvent — the
+        // recipe stays untouched.
+        let tomato = try addIngredient(named: "tomato", amount: "2 cups")
+        let originalName = tomato.displayName
+        let originalAmount = tomato.amountText
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "cilantro",
+            substitutionText: "parsley",
+            amountConversion: nil,
+        )
+
+        XCTAssertEqual(tomato.displayName, originalName)
+        XCTAssertEqual(tomato.amountText, originalAmount)
+        // The free-text SubstitutionEvent IS persisted on the session
+        // (audit trail) — it just has no FK to a RecipeIngredient.
+        let events = session.substitutionArray
+        XCTAssertEqual(events.count, 1)
+        XCTAssertNil(events.first?.recipeIngredient)
+        XCTAssertEqual(events.first?.missingIngredientDisplayName, "cilantro")
+    }
+
+    func test_acceptedSwaps_projectsFromSession() throws {
+        try addIngredient(named: "dried pasta", amount: "12 oz")
+        try addIngredient(named: "heavy cream", amount: "1 cup")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "dried pasta",
+            substitutionText: "rice noodles",
+            amountConversion: nil,
+        )
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "heavy cream",
+            substitutionText: "coconut cream",
+            amountConversion: nil,
+        )
+
+        let swaps = vm.acceptedSwaps
+        XCTAssertEqual(swaps.count, 2)
+        // Order is by event createdAt ascending — first applied first.
+        XCTAssertEqual(swaps[0].original, "dried pasta")
+        XCTAssertEqual(swaps[0].swap, "rice noodles")
+        XCTAssertEqual(swaps[1].original, "heavy cream")
+        XCTAssertEqual(swaps[1].swap, "coconut cream")
+    }
+
+    func test_acceptedSwaps_originalNameSurvivesIngredientMutation() throws {
+        // Regression: missingLabel must read the snapshot, not the FK's
+        // post-mutation displayName. Without the snapshot rule (added
+        // alongside applyAcceptedSwap), the badge would render
+        // "rice noodles (was: rice noodles)" — both halves drift to
+        // the swap text.
+        try addIngredient(named: "dried pasta", amount: "12 oz")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "dried pasta",
+            substitutionText: "rice noodles",
+            amountConversion: nil,
+        )
+
+        let swap = try XCTUnwrap(vm.acceptedSwaps.first)
+        XCTAssertEqual(swap.original, "dried pasta",
+                       "original must be the snapshot taken before applyAcceptedSwap mutated displayName")
+        XCTAssertEqual(swap.swap, "rice noodles")
+    }
+
+    // MARK: - Exit + finish flags
+
     func test_requestExitConfirm_skipsDialogWhenSessionFresh() async throws {
         let session = try freshSession(currentStepIndex: 0)
         let vm = makeVM(session: session)
@@ -454,6 +587,7 @@ final class CookModeViewModelTests: XCTestCase {
             source: source,
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: CookTimerRepository(controller: controller),
+            substitutionRepository: SubstitutionRepository(controller: controller),
             timerService: TimerService(
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),
@@ -495,6 +629,22 @@ final class CookModeViewModelTests: XCTestCase {
         }
         try controller.save()
         return plan
+    }
+
+    /// Adds an ingredient to the existing recipePlan. Returns the row so
+    /// the caller can assert post-mutation state (applyVoiceSubstitution
+    /// rewrites displayName + amountText).
+    @discardableResult
+    private func addIngredient(named name: String, amount: String) throws -> RecipeIngredient {
+        let ing = RecipeIngredient(context: controller.viewContext)
+        ing.id = UUID()
+        ing.recipePlan = recipePlan
+        ing.displayName = name
+        ing.amountText = amount
+        ing.sortOrder = Int16(recipePlan.ingredientArray.count)
+        ing.isOptional = false
+        try controller.save()
+        return ing
     }
 }
 
