@@ -13,6 +13,22 @@ import Foundation
 import Observation
 import OSLog
 
+/// Outcome of `PantryListViewModel.addItem`. Distinguishes cap-reached
+/// (paywall) from a transient repository failure (toast). The view
+/// previously collapsed both into a `Bool` and routed the failure
+/// case to the Premium paywall — wrong upsell for a paid user when a
+/// Core Data save flaked.
+enum PantryAddResult: Equatable {
+    /// Item was inserted (or upserted onto a name-matching row).
+    case added
+    /// Standing-pantry cap was reached. View should present the
+    /// `pantryCapReached` paywall.
+    case capReached
+    /// Repository or count check failed. View should surface
+    /// `errorMessage` as a toast — DO NOT present the paywall.
+    case failed
+}
+
 @MainActor
 @Observable
 final class PantryListViewModel {
@@ -62,15 +78,16 @@ final class PantryListViewModel {
         }
     }
 
-    /// Manual-add path. Returns `false` when the cap is hit; caller
-    /// presents the paywall via the EntitlementService.gate flow at
-    /// the view layer (this VM doesn't own paywall presentation).
+    /// Manual-add path. Returns a typed `PantryAddResult`: `.capReached`
+    /// routes to the paywall, `.failed` surfaces `errorMessage` via a
+    /// toast, `.added` is success. The VM doesn't own paywall
+    /// presentation — the view layer reads the result and dispatches.
     @discardableResult
     func addItem(
         displayName: String,
         amountText: String?,
         memoryState: PantryItem.MemoryState = .remembered,
-    ) -> Bool {
+    ) -> PantryAddResult {
         // Standing pantry items count against the cap; ephemeral
         // (today-only) items do not.
         if memoryState == .remembered {
@@ -78,7 +95,7 @@ final class PantryListViewModel {
                 let used = try repo.countRemembered(for: household)
                 let cap = entitlements.rememberedPantryCap
                 guard used < cap else {
-                    return false  // caller routes to paywall
+                    return .capReached
                 }
             } catch {
                 Logger.coreData.warning("countRemembered failed; allowing add: \(error.localizedDescription, privacy: .public)")
@@ -94,11 +111,11 @@ final class PantryListViewModel {
                 on: household,
             )
             load()
-            return true
+            return .added
         } catch {
             Logger.coreData.error("addItem failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = "Couldn't add this item. Try again."
-            return false
+            return .failed
         }
     }
 

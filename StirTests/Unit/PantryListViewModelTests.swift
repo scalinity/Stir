@@ -67,7 +67,7 @@ final class PantryListViewModelTests: XCTestCase {
         XCTAssertEqual(vm.filteredItems.count, 2)
     }
 
-    func test_addItem_returnsFalseAtCapWithoutWriting() async throws {
+    func test_addItem_returnsCapReachedAtCapWithoutWriting() async throws {
         // Seed 25 items — Free cap (default tier on EntitlementService).
         for i in 0 ..< 25 {
             try repo.insertManual(displayName: "item-\(i)", amountText: nil, on: household)
@@ -80,8 +80,8 @@ final class PantryListViewModelTests: XCTestCase {
         vm.load()
         XCTAssertEqual(vm.filteredItems.count, 25)
 
-        let ok = vm.addItem(displayName: "over-cap", amountText: nil)
-        XCTAssertFalse(ok, "add at-cap returns false")
+        let result = vm.addItem(displayName: "over-cap", amountText: nil)
+        XCTAssertEqual(result, .capReached, "add at-cap returns .capReached")
         vm.load()
         XCTAssertEqual(vm.filteredItems.count, 25, "no row was written")
     }
@@ -95,7 +95,7 @@ final class PantryListViewModelTests: XCTestCase {
             repo: repo,
             entitlements: entitlements,
         )
-        let ok = vm.addItem(displayName: "fresh basil", amountText: nil, memoryState: .ephemeral)
-        XCTAssertTrue(ok, "ephemeral items don't count against the standing cap")
+        let result = vm.addItem(displayName: "fresh basil", amountText: nil, memoryState: .ephemeral)
+        XCTAssertEqual(result, .added, "ephemeral items don't count against the standing cap")
     }
 }

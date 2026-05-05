@@ -71,11 +71,41 @@ struct PantryListView: View {
                     Image.Stir.plus
                         .foregroundStyle(Color.Stir.ember600)
                 }
+                .disabled(viewModel == nil)
                 .accessibilityLabel("Add item")
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        // Single AddSheet presentation hoisted to the outer Group so
+        // the sheet survives the empty→populated subtree swap and
+        // doesn't dead-end when the VM hasn't initialized yet.
+        // (Toolbar `+` is disabled while `viewModel == nil`, so the
+        // `if let` branch always lands in practice.)
+        .sheet(isPresented: $showingAddSheet) {
+            if let viewModel {
+                PantryAddSheet(
+                    onSave: { name, amount, state in
+                        let result = viewModel.addItem(displayName: name, amountText: amount, memoryState: state)
+                        showingAddSheet = false
+                        switch result {
+                        case .added:
+                            break  // success; vm.load() inside addItem already refreshed items
+                        case .capReached:
+                            coordinator.presentPaywall(.pantryCapReached)
+                        case .failed:
+                            // errorMessage was set by the VM; the sheet's
+                            // dismissal will expose the underlying list.
+                            // Toast binding lands in a follow-up — see
+                            // the TODO(pantry-toast) marker in
+                            // populatedList(vm:) for the deferred work.
+                            break
+                        }
+                    },
+                    onCancel: { showingAddSheet = false },
+                )
+            }
+        }
         .task {
             guard viewModel == nil else { return }
             if let profile = coordinator.household.profile {
@@ -104,6 +134,9 @@ struct PantryListView: View {
 
     private func populatedList(vm: PantryListViewModel) -> some View {
         @Bindable var bindable = vm
+        // TODO(pantry-toast): bind viewModel.errorMessage to a
+        // .stirToast at the view layer so swipe-delete / edit-save
+        // failures surface to the user. Deferred from Task 9.
         return VStack(spacing: 0) {
             // Header strip — count + cap headroom. Reads "23 of 250
             // saved" so users see remaining room before the cap kicks
@@ -151,18 +184,11 @@ struct PantryListView: View {
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
-        .sheet(isPresented: $showingAddSheet) {
-            PantryAddSheet(
-                onSave: { name, amount, state in
-                    let ok = vm.addItem(displayName: name, amountText: amount, memoryState: state)
-                    showingAddSheet = false
-                    if !ok {
-                        coordinator.presentPaywall(.pantryCapReached)
-                    }
-                },
-                onCancel: { showingAddSheet = false },
-            )
-        }
+        // AddSheet presentation lives on the outer Group in `body` so
+        // it survives empty→populated subtree swaps and is gated by
+        // toolbar disable while VM is nil. Edit sheet stays here
+        // because it's `.sheet(item:)` driven by a row tap and only
+        // exists when the populated list is on screen.
         .sheet(item: $editingItem) { item in
             PantryEditSheet(
                 item: item,
@@ -209,20 +235,8 @@ struct PantryListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, CGFloat.Stir.screenMargin)
         .background(Color.Stir.paper50)
-        .sheet(isPresented: $showingAddSheet) {
-            PantryAddSheet(
-                onSave: { name, amount, state in
-                    if let vm = viewModel {
-                        let ok = vm.addItem(displayName: name, amountText: amount, memoryState: state)
-                        if !ok {
-                            coordinator.presentPaywall(.pantryCapReached)
-                        }
-                    }
-                    showingAddSheet = false
-                },
-                onCancel: { showingAddSheet = false },
-            )
-        }
+        // AddSheet presentation lives on the outer Group in `body` —
+        // see the consolidated `.sheet(isPresented:)` there.
     }
 }
 
