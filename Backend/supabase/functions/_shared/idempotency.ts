@@ -16,6 +16,29 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const CACHE_TTL_SECONDS = 600;
+// CA3-M5: bound cache calls so an upstream Postgres slow-down can't soak
+// the function's 30s isolate slot. 2s is comfortable headroom over the
+// observed p99 cache lookup (~50-80ms locally / ~200ms cross-region).
+const CACHE_OP_TIMEOUT_MS = 2000;
+
+class CacheTimeoutError extends Error {
+  constructor(op: string, ms: number) {
+    super(`cache_${op}_timeout_${ms}ms`);
+    this.name = 'CacheTimeoutError';
+  }
+}
+
+function withCacheTimeout<T>(op: 'read' | 'write', work: PromiseLike<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new CacheTimeoutError(op, CACHE_OP_TIMEOUT_MS));
+    }, CACHE_OP_TIMEOUT_MS);
+    Promise.resolve(work).then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
 
 export interface CacheHit {
   response_body: unknown;
@@ -33,12 +56,15 @@ export async function readCache(
   canonicalUserKey: string,
   requestId: string,
 ): Promise<CacheHit | null> {
-  const { data, error } = await client
-    .from('ai_response_cache')
-    .select('response_body, status_code, created_at')
-    .eq('canonical_user_key', canonicalUserKey)
-    .eq('request_id', requestId)
-    .maybeSingle<{ response_body: unknown; status_code: number; created_at: string }>();
+  const { data, error } = await withCacheTimeout(
+    'read',
+    client
+      .from('ai_response_cache')
+      .select('response_body, status_code, created_at')
+      .eq('canonical_user_key', canonicalUserKey)
+      .eq('request_id', requestId)
+      .maybeSingle<{ response_body: unknown; status_code: number; created_at: string }>(),
+  );
   if (error) throw error;
   if (!data) return null;
 
@@ -68,18 +94,21 @@ export async function writeCache(
   statusCode: number,
   responseBody: unknown,
 ): Promise<void> {
-  const { error } = await client
-    .from('ai_response_cache')
-    .upsert(
-      {
-        canonical_user_key: canonicalUserKey,
-        request_id: requestId,
-        response_body: responseBody,
-        status_code: statusCode,
-        feature_key: featureKey,
-      },
-      { onConflict: 'canonical_user_key,request_id', ignoreDuplicates: true },
-    );
+  const { error } = await withCacheTimeout(
+    'write',
+    client
+      .from('ai_response_cache')
+      .upsert(
+        {
+          canonical_user_key: canonicalUserKey,
+          request_id: requestId,
+          response_body: responseBody,
+          status_code: statusCode,
+          feature_key: featureKey,
+        },
+        { onConflict: 'canonical_user_key,request_id', ignoreDuplicates: true },
+      ),
+  );
   if (error) {
     // Throw so the caller's try/catch can log. Don't surface to user.
     throw error;

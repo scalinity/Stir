@@ -39,7 +39,7 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { SubstitutionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    userLog.warn('json_parse_failed', { err: String(err) });
+    userLog.warn('json_parse_failed', { err: sanitizeErrorForLog(err) });
     return jsonError(
       ErrorCode.VAL_01,
       400,
@@ -182,7 +182,7 @@ Deno.serve(async (req) => {
       return responseFromCache(hit, requestId);
     }
   } catch (err) {
-    userLog.warn('cache_read_failed', { err: String(err) });
+    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---------------------------------------------------------------------
@@ -231,7 +231,12 @@ Deno.serve(async (req) => {
   // model returned malformed JSON). Schema failures after retry surface as
   // AI-02 — model drift that ops should investigate.
   let retryCount = 0;
+  // CA1-L4 / I8 split: distinguish "model returned malformed JSON" from
+  // "Gemini upstream 5xx" so PostHog dashboards can separate model-drift
+  // cost from upstream-blip cost. `totalRetries` (the wire field) stays
+  // the sum so existing consumers see the same number.
   let schemaRetryCount = 0;
+  let upstreamRetryCount = 0;
   let parsed: ParsedSubstitution | null = null;
   let lastErr: unknown;
   let totalInputTokens = 0;
@@ -272,8 +277,10 @@ Deno.serve(async (req) => {
         // used our retry. Break out so we hit the AI-02 path below. Don't
         // double-count a schema failure as a hard-rule retry.
         if (attempt === 0) {
-          // Re-run attempt 0 without amplification — this isn't a hard-rule
-          // violation, just malformed JSON.
+          // Advance to attempt 1 (the for-loop bumps `attempt`), drop the
+          // amplification note — schema failures are malformed JSON, not
+          // hard-rule violations, so the retry shouldn't carry a violation
+          // summary into the next prompt.
           amplifyNote = null;
           continue;
         }
@@ -328,7 +335,7 @@ Deno.serve(async (req) => {
     } catch (err) {
       lastErr = err;
       if (err instanceof GeminiError && err.status >= 500 && attempt === 0) {
-        schemaRetryCount++;
+        upstreamRetryCount++;
         userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
         amplifyNote = null;
         continue;
@@ -345,7 +352,7 @@ Deno.serve(async (req) => {
     textInputTokens: totalInputTokens,
     textOutputTokens: totalOutputTokens,
   });
-  const totalRetries = retryCount + schemaRetryCount;
+  const totalRetries = retryCount + schemaRetryCount + upstreamRetryCount;
 
   if (!parsed) {
     // No candidate at all — both attempts failed schema validation or
@@ -440,7 +447,7 @@ Deno.serve(async (req) => {
   try {
     await writeCache(client, claims.canonical_user_key, body.sub_event_id, FEATURE_KEY, 200, wire);
   } catch (err) {
-    userLog.warn('cache_write_failed', { err: String(err) });
+    userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
 
   userLog.info('request_complete', {

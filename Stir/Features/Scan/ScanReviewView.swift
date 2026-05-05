@@ -1,12 +1,30 @@
 // ScanReviewView
 //
-// Parsed-ingredient review screen. Chips render with confidence-band
-// styling (confirmed neutral, needs_review amber, likely_staple secondary)
-// per spec §6. Each chip can be edited (tap) or deleted (swipe/hold),
-// and users can add missing items manually.
+// Parsed-ingredient review screen, mockup-04 layout. Two buckets:
+//   - CONFIRMED merges `.confirmed` + `.likelyStaple`. Staple chips
+//     keep their lower-emphasis ink500 text inside the same paper200
+//     capsule so the spec §8.2 confidence semantic survives the
+//     visual collapse.
+//   - NEEDS REVIEW renders `.needsReview` chips with a dashed amber
+//     border to flag uncertain ingredients.
 //
-// "Looks right" CTA commits the reviewed list to PantryItem and advances
-// to the constraints + solve flow.
+// First N confirmed chips render inline; the rest fold behind a
+// "+ X more" overflow chip. Tapping the overflow chip expands the
+// section to show all confirmed items.
+//
+// Tap a chip to edit. Long-press / context menu to remove. A
+// dashed-ink "+ Add" chip (placed at the tail of whichever bucket is
+// last) opens an alert for adding missing items.
+//
+// Implementation notes:
+//   - The user-supplied target image displays a different total than
+//     its own per-section sums (42 ≠ 28 + 3). The image numbers are
+//     illustrative; this view computes counts from the live VM, so
+//     header total + section totals stay consistent at runtime.
+//   - The nav bar stays present (with an empty title) instead of
+//     `.toolbar(.hidden)`. The system back chevron is the only
+//     discoverable retake affordance and the cost of hiding it
+//     (HIG / VoiceOver focus order) outweighs strict image fidelity.
 
 import SwiftUI
 
@@ -18,44 +36,60 @@ struct ScanReviewView: View {
     @State private var editBuffer: String = ""
     @State private var showAddAlert: Bool = false
     @State private var addBuffer: String = ""
+    @State private var confirmedExpanded: Bool = false
+
+    /// First N confirmed chips render inline; the rest fold behind a
+    /// "+ X more" overflow chip until the user expands the section.
+    /// 9 keeps the section roughly three rows on iPhone 15 Pro.
+    private static let confirmedVisibleLimit = 9
+
+    /// 10pt vertical padding shared across every chip variant. Keeps
+    /// the row pitch identical so confirmed / needs-review / overflow
+    /// / add chips line-flow without baseline drift.
+    private static let chipVerticalPadding: CGFloat = 10
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
-                if case .parsing = viewModel.phase {
-                    skeleton
-                } else if case .error(let message, _) = viewModel.phase {
-                    errorCard(message: message)
-                } else {
-                    summaryBanner
-                    chipsGrid
-                    addButton
+        VStack(alignment: .leading, spacing: 0) {
+            switch viewModel.phase {
+            case .parsing:
+                skeleton
+                    .padding(.horizontal, CGFloat.Stir.screenMargin)
+                    .padding(.top, CGFloat.Stir.space5)
+                Spacer()
+            case let .error(message, _):
+                errorCard(message: message)
+                    .padding(CGFloat.Stir.screenMargin)
+                Spacer()
+            default:
+                ScrollView {
+                    // CA3-H1 fix: compute buckets ONCE per body eval and
+                    // pass to both sections. Prior code re-partitioned
+                    // viewModel.ingredients on every read of `buckets`,
+                    // and `confirmedSection` read it twice (`buckets.confirmed`
+                    // + `buckets.needsReview.count`) plus `needsReviewSection`
+                    // once = 3 full O(n) partitions per body re-eval.
+                    let bk = buckets
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                        header
+                        if viewModel.ingredients.isEmpty {
+                            emptyStateCard
+                        } else {
+                            confirmedSection(buckets: bk)
+                            needsReviewSection(buckets: bk)
+                        }
+                        solveButton
+                    }
+                    .padding(.horizontal, CGFloat.Stir.screenMargin)
+                    .padding(.top, CGFloat.Stir.space3)
+                    .padding(.bottom, CGFloat.Stir.space5)
                 }
             }
-            .padding(.horizontal, CGFloat.Stir.screenMargin)
-            .padding(.vertical, CGFloat.Stir.space4)
         }
-        .background(Color.Stir.paper50)
-        .navigationTitle("Review ingredients")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.Stir.paper50.ignoresSafeArea())
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            // Show the confirm bar whenever the user is on this
-            // screen with ingredients available — that includes
-            // `.review` (first visit) AND `.confirmed` (user went
-            // forward, then tapped back to edit). The bar is hidden
-            // only during `.parsing` (skeleton has its own layout)
-            // and `.error` (error card owns the screen).
-            switch viewModel.phase {
-            case .review, .confirmed:
-                confirmBar
-                    .padding(.horizontal, CGFloat.Stir.screenMargin)
-                    .padding(.vertical, CGFloat.Stir.space3)
-                    .background(.bar)
-            default:
-                EmptyView()
-            }
-        }
-        .alert("Edit ingredient", isPresented: bindingIsPresented(forEdit: true)) {
+        .alert("Edit ingredient", isPresented: editAlertBinding) {
             TextField("Ingredient name", text: $editBuffer)
             Button("Save") {
                 if let target = editTarget {
@@ -81,90 +115,248 @@ struct ScanReviewView: View {
         }
     }
 
+    // MARK: - Bucketing
+
+    /// Single-pass partition. Order is preserved within each bucket.
+    private var buckets: (confirmed: [ScanViewModel.Ingredient], needsReview: [ScanViewModel.Ingredient]) {
+        var confirmed: [ScanViewModel.Ingredient] = []
+        var needsReview: [ScanViewModel.Ingredient] = []
+        for ingredient in viewModel.ingredients {
+            if ingredient.confidence == .needsReview {
+                needsReview.append(ingredient)
+            } else {
+                confirmed.append(ingredient)
+            }
+        }
+        return (confirmed, needsReview)
+    }
+
     // MARK: - Sections
 
-    private var summaryBanner: some View {
-        let count = viewModel.ingredients.count
-        let needsReview = viewModel.ingredients.filter { $0.confidence == .needsReview }.count
-
-        return VStack(alignment: .leading, spacing: CGFloat.Stir.space1 + 2) { // 6pt
-            HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space2) {
-                Text("Found \(count) things")
+    private var header: some View {
+        // Thumbnail next to the title gives the user a visual anchor —
+        // "this is what we looked at" — so retake-vs-edit is an obvious
+        // call. UIImage(data:) is lazy: the JPEG is decoded once at
+        // first paint and the wrapper costs ~nothing on body re-eval.
+        HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+            if let data = viewModel.capturedImageData,
+               let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous))
+                    .accessibilityLabel("Captured kitchen photo")
+            }
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                Text("Scan review")
                     .stirFont(.displayLg)
                     .foregroundStyle(Color.Stir.ink900)
                     .accessibilityAddTraits(.isHeader)
-
-                HStack(spacing: CGFloat.Stir.space1) {
-                    Image.Stir.sparkles
-                        .font(.system(size: 12, weight: .semibold)) // justification: 12pt AI micro-tag per mockup 04 chip-scale adornment
-                    Text("AI")
-                        .stirFont(.labelEyebrow)
-                }
-                .foregroundStyle(Color.Stir.sage600)
+                Text(headerSubtitle)
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink500)
             }
-
-            Text(needsReview > 0
-                 ? "\(needsReview) need a quick confirm before we solve."
-                 : "Tap a chip to tweak, long-press to delete.")
-                .stirFont(.bodySm)
-                .foregroundStyle(Color.Stir.ink500)
         }
     }
 
-    private var chipsGrid: some View {
-        // Uses Phase 2 Chip component — confidence-band state maps
-        // directly to ChipState variants (confirmed→.confidenceConfirmed,
-        // needsReview→.confidenceReview, likelyStaple→.likelyStaple).
-        // Grouping by protein/produce/pantry per mockup 04 §Review is
-        // deferred: ScanViewModel.Ingredient has no category metadata,
-        // and Pantry Parse response doesn't emit a category field yet.
-        // Flat chip grid preserves current behavior + visual drift only
-        // in group structure, not chip styling.
-        let columns = [GridItem(.adaptive(minimum: 110), spacing: CGFloat.Stir.space2)]
-        return LazyVGrid(columns: columns, spacing: CGFloat.Stir.space2) {
-            ForEach(viewModel.ingredients) { ingredient in
-                Chip(
-                    title: ingredient.displayName,
-                    state: chipState(for: ingredient.confidence),
-                    action: {
-                        editTarget = ingredient
-                        editBuffer = ingredient.displayName
-                    },
-                )
-                .contextMenu {
-                    Button(role: .destructive) {
-                        viewModel.deleteIngredient(id: ingredient.id)
-                    } label: {
-                        Label("Remove", systemImage: "trash")
+    private var headerSubtitle: String {
+        let count = viewModel.ingredients.count
+        let noun = count == 1 ? "ingredient" : "ingredients"
+        return "\(count) \(noun) found · tap to fix any miss"
+    }
+
+    @ViewBuilder
+    private func confirmedSection(buckets bk: (confirmed: [ScanViewModel.Ingredient], needsReview: [ScanViewModel.Ingredient])) -> some View {
+        let confirmed = bk.confirmed
+        if !confirmed.isEmpty {
+            let needsReviewCount = bk.needsReview.count
+            let visibleLimit = confirmedExpanded ? confirmed.count : Self.confirmedVisibleLimit
+            // Lazy slice — no allocation per re-render. CA3-M4 fix.
+            let visible = confirmed.prefix(visibleLimit)
+            let overflow = confirmed.count - visible.count
+            // Tail "+ Add" chip lives in the last rendered section so
+            // there's only one add affordance no matter the bucket mix.
+            let isLastSection = needsReviewCount == 0
+
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                Text("CONFIRMED · \(confirmed.count)")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.sage600)
+
+                ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                    ForEach(Array(visible)) { ingredient in
+                        chipView(for: ingredient, style: chipStyle(for: ingredient.confidence))
+                    }
+                    if overflow > 0 {
+                        moreChip(count: overflow)
+                    }
+                    if isLastSection {
+                        addChip
                     }
                 }
             }
         }
     }
 
-    private func chipState(for confidence: PantryParseResponse.PantryItemConfidence) -> ChipState {
-        switch confidence {
-        case .confirmed:    return .confidenceConfirmed
-        case .needsReview:  return .confidenceReview
-        case .likelyStaple: return .likelyStaple
+    @ViewBuilder
+    private func needsReviewSection(buckets bk: (confirmed: [ScanViewModel.Ingredient], needsReview: [ScanViewModel.Ingredient])) -> some View {
+        let needsReview = bk.needsReview
+        if !needsReview.isEmpty {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                Text("NEEDS REVIEW · \(needsReview.count)")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.amber600)
+
+                ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                    ForEach(needsReview) { ingredient in
+                        chipView(for: ingredient, style: .needsReview)
+                    }
+                    addChip
+                }
+            }
         }
     }
 
-    private var addButton: some View {
+    @ViewBuilder
+    private var emptyStateCard: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            Text("Nothing to review yet")
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ink700)
+            Text("Add an ingredient or swipe back to retake the scan.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
+            ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                addChip
+            }
+        }
+    }
+
+    // MARK: - Chips
+
+    private enum ChipStyle {
+        case confirmed
+        case likelyStaple
+        case needsReview
+    }
+
+    private func chipStyle(for confidence: PantryParseResponse.PantryItemConfidence) -> ChipStyle {
+        switch confidence {
+        case .confirmed:    return .confirmed
+        case .likelyStaple: return .likelyStaple
+        case .needsReview:  return .needsReview
+        }
+    }
+
+    private func chipView(for ingredient: ScanViewModel.Ingredient, style: ChipStyle) -> some View {
+        Button {
+            editTarget = ingredient
+            editBuffer = ingredient.displayName
+        } label: {
+            chipLabel(text: ingredient.displayName, style: style)
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 44) // HIG tap-target floor (spec §8.2)
+        .contextMenu {
+            Button(role: .destructive) {
+                viewModel.deleteIngredient(id: ingredient.id)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .accessibilityLabel("\(ingredient.displayName), \(accessibilitySuffix(style))")
+        .accessibilityHint("Tap to edit")
+    }
+
+    @ViewBuilder
+    private func chipLabel(text: String, style: ChipStyle) -> some View {
+        Text(text)
+            .stirFont(.labelMd)
+            .foregroundStyle(chipForeground(style))
+            .padding(.horizontal, CGFloat.Stir.space4)
+            .padding(.vertical, Self.chipVerticalPadding)
+            .background(chipBackground(style))
+            .overlay(chipOverlay(style))
+            .contentShape(Capsule())
+    }
+
+    private func chipForeground(_ style: ChipStyle) -> Color {
+        switch style {
+        case .confirmed:     return Color.Stir.ink900
+        case .likelyStaple:  return Color.Stir.ink500 // lower emphasis — model is fairly sure but user should confirm staples
+        case .needsReview:   return Color.Stir.amber600
+        }
+    }
+
+    @ViewBuilder
+    private func chipBackground(_ style: ChipStyle) -> some View {
+        switch style {
+        case .confirmed, .likelyStaple:
+            Capsule(style: .continuous).fill(Color.Stir.paper200)
+        case .needsReview:
+            Capsule(style: .continuous).fill(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private func chipOverlay(_ style: ChipStyle) -> some View {
+        switch style {
+        case .confirmed, .likelyStaple:
+            EmptyView()
+        case .needsReview:
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    Color.Stir.amber600,
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 3]),
+                )
+        }
+    }
+
+    private func accessibilitySuffix(_ style: ChipStyle) -> String {
+        switch style {
+        case .confirmed:    return "confirmed"
+        case .likelyStaple: return "likely staple"
+        case .needsReview:  return "needs review"
+        }
+    }
+
+    private func moreChip(count: Int) -> some View {
+        Button {
+            confirmedExpanded = true
+        } label: {
+            Text("+ \(count) more")
+                .stirFont(.labelMd)
+                .foregroundStyle(Color.Stir.ink900)
+                .padding(.horizontal, CGFloat.Stir.space4)
+                .padding(.vertical, Self.chipVerticalPadding)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.Stir.paper200),
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 44)
+        .accessibilityLabel("Show \(count) more confirmed items")
+        .accessibilityHint("Tap to expand")
+    }
+
+    private var addChip: some View {
         Button {
             addBuffer = ""
             showAddAlert = true
         } label: {
-            HStack(spacing: CGFloat.Stir.space1 + 2) { // 6pt
-                Image.Stir.plus
-                    .font(.system(size: 12, weight: .semibold)) // justification: inline-plus sized to match Chip pill scale
-                Text("Add an ingredient")
+            HStack(spacing: CGFloat.Stir.space1 + 2) { // 6pt icon-to-label
+                Image(systemName: "plus")
+                    // justification: 12pt inline plus glyph sized to match labelMd cap-height; matches mockup-04 §Review chip-scale add affordance
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Add")
                     .stirFont(.labelMd)
             }
             .foregroundStyle(Color.Stir.ink500)
-            .padding(.horizontal, CGFloat.Stir.space3)
-            .padding(.vertical, CGFloat.Stir.space2)
-            .frame(minHeight: 44)
+            .padding(.horizontal, CGFloat.Stir.space4)
+            .padding(.vertical, Self.chipVerticalPadding)
             .overlay(
                 Capsule(style: .continuous)
                     .strokeBorder(
@@ -175,16 +367,24 @@ struct ScanReviewView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .padding(.top, CGFloat.Stir.space1)
+        .frame(minHeight: 44)
+        .accessibilityLabel("Add ingredient")
+        .accessibilityHint("Opens a prompt to add a missing item")
     }
 
-    private var confirmBar: some View {
+    // MARK: - CTA
+
+    private var solveButton: some View {
         PrimaryButton(
-            title: "Find me dinner",
+            title: "Solve dinner",
+            trailingIcon: Image(systemName: "arrow.right"),
             isDisabled: viewModel.ingredients.isEmpty,
             action: onConfirm,
         )
+        .padding(.top, CGFloat.Stir.space3)
     }
+
+    // MARK: - Loading & error
 
     private var skeleton: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
@@ -198,7 +398,7 @@ struct ScanReviewView: View {
             }
             HStack(spacing: CGFloat.Stir.space2) {
                 ForEach(0 ..< 3, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusSm, style: .continuous)
+                    Capsule(style: .continuous)
                         .fill(Color.Stir.paper200)
                         .frame(width: 80, height: 32)
                 }
@@ -223,7 +423,7 @@ struct ScanReviewView: View {
 
     // MARK: - Helpers
 
-    private func bindingIsPresented(forEdit: Bool) -> Binding<Bool> {
+    private var editAlertBinding: Binding<Bool> {
         Binding(
             get: { editTarget != nil },
             set: { newValue in if !newValue { editTarget = nil } },

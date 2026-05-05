@@ -17,32 +17,36 @@ final class HouseholdProfileRepository {
         self.controller = controller
     }
 
-    /// Fetch the existing profile for this canonical key, or create one with
-    /// sensible defaults. Used by RootCoordinator right after
-    /// IdentityService.resolve() so every downstream feature has a non-nil
-    /// profile to attach to.
-    @discardableResult
-    func ensureHouseholdProfile(for canonicalUserKey: String) throws -> HouseholdProfile {
-        let context = controller.viewContext
-
+    /// Read-only lookup. Returns the existing profile for this canonical key
+    /// or nil; never creates. Used by `RootCoordinator.attemptFastPathLaunch`
+    /// to decide whether warm-launch can render Tonight Home immediately
+    /// against cached state. Throws on Core Data fetch errors only — a
+    /// missing row is `nil`, not an error.
+    func findExisting(for canonicalUserKey: String) throws -> HouseholdProfile? {
         let request = NSFetchRequest<HouseholdProfile>(entityName: "HouseholdProfile")
         request.predicate = NSPredicate(
             format: "canonicalUserKey == %@ AND deletedAt == nil",
             canonicalUserKey,
         )
         request.fetchLimit = 1
-
-        let matches: [HouseholdProfile]
         do {
-            matches = try context.fetch(request)
+            return try controller.viewContext.fetch(request).first
         } catch {
             throw StirError.coreData(underlying: error)
         }
+    }
 
-        if let existing = matches.first {
+    /// Fetch the existing profile for this canonical key, or create one with
+    /// sensible defaults. Used by RootCoordinator right after
+    /// IdentityService.resolve() so every downstream feature has a non-nil
+    /// profile to attach to.
+    @discardableResult
+    func ensureHouseholdProfile(for canonicalUserKey: String) throws -> HouseholdProfile {
+        if let existing = try findExisting(for: canonicalUserKey) {
             Logger.coreData.debug("reusing HouseholdProfile for existing user")
             return existing
         }
+        let context = controller.viewContext
 
         // New row — populate required fields.
         let profile = HouseholdProfile(context: context)

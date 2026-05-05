@@ -124,15 +124,27 @@ final class SolveViewModel {
         }
         let request = buildRequest(household: household)
 
+        // Privacy posture (ADR 0009): no user content to PostHog. The
+        // `cuisineLeaning` field is a free-text TextField — we flag
+        // presence only, never the raw string. Mirrors the
+        // `has_cuisine: Bool` shape already used at
+        // ConstraintsSheet.commit() for the `constraints_set` event.
         PostHogClient.shared.capture(.dinnerSolveRequested, properties: [
             "constraints_max_time": constraints.maxTimeMinutes ?? -1,
-            "constraints_cuisine": constraints.cuisineLeaning ?? "",
+            "has_cuisine": constraints.cuisineLeaning != nil,
             "constraints_use_first_count": constraints.useFirst.count,
             "ingredient_count": ingredientsForSolve.count,
             "dietary_rule_count": request.householdContext.dietaryRules.count,
         ])
 
         phase = .solving
+        // Reset slots so re-solve flows (Tune-from-options, "Try
+        // again" from the error banner) show skeletons while the new
+        // stream is in flight rather than the previous solve's stale
+        // cards. The first-solve path arrives here with already-empty
+        // slots from `prepare()`; the redundant clear keeps a single
+        // source of truth for "starting a solve means slots are empty."
+        slots = [SlotState(rank: 1), SlotState(rank: 2), SlotState(rank: 3)]
         let started = Date()
 
         streamTask?.cancel()
@@ -196,6 +208,14 @@ final class SolveViewModel {
                 "prompt_version": promptVersion,
                 "total_latency_ms": lastLatencyMS ?? 0,
                 "any_hard_rule_violations": slots.contains { $0.errorCode != nil },
+                // Spec §15 required property — the Gemini model string
+                // that served the solve. Lets AI Ops dashboards split
+                // cost/latency by preview vs GA model version. Literal
+                // mirrors CLAUDE.md §Stack-snapshot (dinner-solve uses
+                // `gemini-3-flash-preview`); backend emits the same
+                // string on the paired `$ai_generation` event so the
+                // two dashboards reconcile.
+                "model": "gemini-3-flash-preview",
             ])
             // Persist to CloudKit now that we have the full result.
             persistCompletedSolve()
@@ -420,33 +440,7 @@ final class SolveViewModel {
     }
 }
 
-// MARK: - DishCard → FitLabelKind mapping
-//
-// Server → UI mapping lives on the wire DTO's feature-layer extension
-// rather than inside DinnerOptionsView — view layer shouldn't know the
-// server enum strings. Review finding W-C W17 (CR1). `uses_what_you_have`
-// and `new_to_you` collapse to `.bestFit` because spec §8.4 has no
-// distinct visual variants for them; extend FitLabelKind first if a
-// future mockup introduces one.
-
-extension DishCard {
-    /// Primary FitLabel variant for this card, derived from
-    /// `fit_label_primary` + `missing_ingredient_count`. Negative counts
-    /// clamp to zero (matches the defensive clamp in DishOptionCard —
-    /// W-H W36).
-    var preferredFitLabel: FitLabelKind {
-        let safeCount = max(0, missingIngredientCount)
-        switch fitLabelPrimary {
-        case "fastest":       return .fastest
-        case "least_waste":   return .leastWaste
-        case "best_fit",
-             "uses_what_you_have",
-             "new_to_you":    return .bestFit
-        default:
-            return safeCount > 0 ? .missing(count: safeCount) : .bestFit
-        }
-    }
-}
+// MARK: - Logger
 
 extension Logger {
     static let solveFeature = Logger(subsystem: "com.scalinity.stir", category: "SolveFeature")

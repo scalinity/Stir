@@ -217,9 +217,35 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
     throw mapJoseError(err);
   }
 
+  // Decode kid + iss for diagnostics (best-effort; never throws here).
+  let kid: string | undefined;
+  let issForLog: string | undefined;
+  try {
+    const header = jose.decodeProtectedHeader(token);
+    kid = typeof header.kid === 'string' ? header.kid : undefined;
+    const parts = token.split('.');
+    if (parts.length >= 2) {
+      const payloadJson = JSON.parse(
+        new TextDecoder().decode(jose.base64url.decode(parts[1]!)),
+      );
+      issForLog = typeof payloadJson?.iss === 'string' ? payloadJson.iss : undefined;
+    }
+  } catch (_) {
+    // ignore — diagnostics only
+  }
+
+  // SA3-Medium / SA2-Medium fix: diagnostics (alg/kid/iss/legacy_secret_len) go
+  // ONLY to the server-side `console.error` line below — never into the thrown
+  // AdminAuthError.message. ops-admin/index.ts echoes message back to clients
+  // on AUTH-01, which would leak STIR_JWT_SECRET byte length + JWKS kid/iss
+  // fingerprint to unauthenticated probers (CWE-209/CWE-200).
+
   // HS256 path: must use static secret.
   if (alg === 'HS256') {
     if (!LEGACY_SECRET_BYTES) {
+      console.error(
+        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} reason=no_legacy_secret legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+      );
       throw new AdminAuthError(
         'signature_invalid',
         'JWT alg=HS256 requires STIR_JWT_SECRET, which is not configured',
@@ -232,7 +258,12 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
       });
       return verified.payload;
     } catch (err) {
-      throw mapJoseError(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+      );
+      const wrapped = mapJoseError(err);
+      throw new AdminAuthError(wrapped.reason, wrapped.message);
     }
   }
 
@@ -244,7 +275,12 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
     });
     return verified.payload;
   } catch (err) {
-    throw mapJoseError(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `admin_auth_diag alg=${alg ?? '(none)'} kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+    );
+    const wrapped = mapJoseError(err);
+    throw new AdminAuthError(wrapped.reason, wrapped.message);
   }
 }
 

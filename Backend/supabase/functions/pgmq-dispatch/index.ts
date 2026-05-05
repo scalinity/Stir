@@ -6,11 +6,14 @@
 // completed|failed. Each tick handles at most CLAIM_LIMIT jobs to bound
 // per-invocation runtime within Supabase's Edge Function timeout (150s).
 //
-// Authorization: the function is marked `verify_jwt = false` so Kong doesn't
-// gate it, and it accepts unauthenticated invocations. In production pg_cron
-// is the only caller; network ACLs limit external access. For ops triggers
-// the `stir_pgmq_dispatch_trigger_once()` PG function invokes it from inside
-// the DB VPC.
+// Authorization (SA2-Medium fix, 2026-05-04): `verify_jwt = false` keeps Kong
+// out of the path, but the handler now requires an `X-Stir-Cron-Secret` header
+// matching `STIR_PGMQ_DISPATCH_SECRET` (constant-time compare). pg_cron sets
+// the header via vault-backed config (migration 20260504000001). If the env
+// var is unset on the function side (local dev / first deploy), the gate
+// degrades to a once-per-isolate warn and accepts the call — matches the
+// LOG_IP_SALT pattern. In production the secret MUST be set; the function
+// will reject every unauthenticated request once it is.
 //
 // Supported kinds in step 7:
 //   - recipe_import_async: runs gemini-3.1-flash-lite-preview against the
@@ -38,6 +41,20 @@ const RETRY_BACKOFF_SECONDS = [60, 300, 900];  // 1m, 5m, 15m
 const STUCK_JOB_TIMEOUT_MINUTES = 5;  // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
 const MODEL = GeminiModel.FlashLite;
+
+// Shared-secret gate (SA2-Medium fix). Read once at module load.
+const PGMQ_DISPATCH_SECRET = Deno.env.get('STIR_PGMQ_DISPATCH_SECRET') ?? '';
+let warnedMissingSecret = false;
+
+/** Constant-time string compare; both inputs MUST be the same byte length. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const aBytes = new TextEncoder().encode(a);
+  const bBytes = new TextEncoder().encode(b);
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) diff |= aBytes[i]! ^ bBytes[i]!;
+  return diff === 0;
+}
 
 // -----------------------------------------------------------------------------
 // Recipe-import output schema (copy of recipe-import/index.ts's ImportedRecipeSchema)
@@ -113,6 +130,19 @@ interface RecipeImportAsyncPayload {
   ocr_page_count?: number;
 }
 
+// SA1-Medium fix: defense-in-depth schema validation symmetric to push_send.
+// The recipe-import endpoint is the only writer today, but any future writer
+// (ops script, new feature) bypassing this gate would feed untyped fields
+// straight into the Gemini prompt with no signal. UUID/length/enum bounds
+// match the recipe-import insert site.
+const RecipeImportAsyncPayloadSchema = z.object({
+  import_id: z.string().uuid(),
+  source_type: z.enum(['url', 'share_sheet', 'screenshot_ocr', 'pasted_text']),
+  raw_content: z.string().min(1).max(120_000),
+  original_url: z.string().url().max(2048).optional(),
+  ocr_page_count: z.number().int().min(0).max(50).optional(),
+});
+
 interface ClaimedJob {
   id: string;
   canonical_user_key: string;
@@ -137,6 +167,28 @@ Deno.serve(async (req) => {
       405,
       { allowed: ['POST', 'GET'] },
       requestId,
+    );
+  }
+
+  // SA2-Medium gate. If the env var is configured, require a matching header.
+  // If unset, log a once-per-isolate warning and accept (dev/transition mode).
+  if (PGMQ_DISPATCH_SECRET) {
+    const provided = req.headers.get('x-stir-cron-secret') ?? '';
+    if (!timingSafeEqual(provided, PGMQ_DISPATCH_SECRET)) {
+      log.warn('pgmq_dispatch_secret_mismatch', {
+        has_header: provided.length > 0,
+      });
+      return jsonError(
+        ErrorCode.AUTH_01,
+        401,
+        { reason: 'signature_invalid' as never, message: 'Missing or invalid pgmq-dispatch shared secret.' },
+        requestId,
+      );
+    }
+  } else if (!warnedMissingSecret) {
+    warnedMissingSecret = true;
+    console.warn(
+      'pgmq-dispatch: STIR_PGMQ_DISPATCH_SECRET unset — accepting unauthenticated invocations. Set the secret before exposing this function publicly.',
     );
   }
 
@@ -256,10 +308,18 @@ async function processRecipeImportAsync(
   job: ClaimedJob,
   log: Awaited<ReturnType<typeof createLogger>>,
 ): Promise<void> {
-  const payload = job.payload_json as RecipeImportAsyncPayload;
-  if (!payload?.import_id || !payload.raw_content) {
-    throw new Error('invalid payload: import_id or raw_content missing');
+  // SA1-Medium fix: Zod-validate the payload before it reaches the Gemini
+  // prompt. Catches a malformed row inserted by a future writer; surfaces
+  // a typed error in logs instead of crashing inside renderPrompt.
+  const parsed = RecipeImportAsyncPayloadSchema.safeParse(job.payload_json);
+  if (!parsed.success) {
+    log.warn('recipe_import_async_payload_invalid', {
+      job_id: job.id,
+      issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
+    });
+    throw new Error('invalid recipe_import_async payload (see recipe_import_async_payload_invalid log)');
   }
+  const payload: RecipeImportAsyncPayload = parsed.data;
 
   const activePrompt = await readActivePrompt(client, RECIPE_IMPORT_FEATURE_KEY);
   if (!activePrompt) {
@@ -342,6 +402,11 @@ async function processRecipeImportAsync(
       trace_id: payload.import_id,
       span_name: 'recipe_import_async',
       is_error: !recipe,
+      // Matches the synchronous recipe-import handler's choice so the
+      // PostHog error-rate filter `$ai_is_error = true AND $ai_error =
+      // 'IMPORT-01'` sees both paths. Pre-2026-04-24 this field was
+      // missing and async import failures dropped out of the filter.
+      error_code: !recipe ? ErrorCode.IMPORT_01 : undefined,
     },
   );
 

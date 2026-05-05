@@ -196,6 +196,227 @@ final class SolveRepository {
         return (try? controller.viewContext.fetch(request).first)?.recipePlan
     }
 
+    // MARK: - Read
+
+    /// Value-type projection of "the dish Tonight Home should hero-card".
+    /// Strictly value-only (UUID / Date / Int / String / [String]) so the
+    /// view never carries a live `NSManagedObject` reference across
+    /// renders — that would race against Core Data soft-deletes and
+    /// CloudKit conflict resolutions, leaving SwiftUI with a faulted
+    /// or invalidated `RecipePlan`. The dish id is the stable handle;
+    /// `fetchRecipePlan(forSuggestedDishId:)` resolves to the current
+    /// plan at tap time, where a soft-delete check can still bail
+    /// gracefully. `Sendable` is honest now: every stored property is
+    /// itself Sendable.
+    struct TonightPick: Sendable, Equatable {
+        let suggestedDishId: UUID
+        let title: String
+        let solvedAt: Date
+        let confidence: Double
+        let estimatedMinutes: Int
+        let servings: Int
+        /// Display-name strings for the dish chips (e.g. ["pescatarian",
+        /// "nut-free", "quick"]). Derived from the household's dietary
+        /// rule values plus a synthetic "quick" tag when the dish is
+        /// ≤30 min. Capped at 3 entries — mockup 03 shows three chips.
+        let chips: [String]
+    }
+
+    /// Latest dish to surface as the Tonight hero card. Picks the user-
+    /// selected SuggestedDish from the most-recent completed solve when
+    /// one exists; otherwise the rank-0 (top-ranked) dish. Returns nil
+    /// when the household has no completed solves yet (first-use empty
+    /// state).
+    ///
+    /// Selection precedence matters: once the user has picked a dish,
+    /// re-rendering Tonight should keep showing THEIR pick rather than
+    /// flipping back to the AI's rank-0 — the act of selecting is a
+    /// commitment we shouldn't quietly override on the next render.
+    /// Fetch the most recent completed (non-deleted) MealSolveRequest for
+    /// `household` with relationships warmed for hero-card + chip rendering.
+    /// CA3-M2/M3 fix: factored from `latestTonightPick` /
+    /// `latestPantryIngredients` so a Tonight render + a Solve-again tap
+    /// don't issue two identical queries; `household.dietaryRules` is now
+    /// in the prefetch list so `derivedChips` doesn't lazy-fault per chip.
+    private func latestCompletedSolve(for household: HouseholdProfile) -> MealSolveRequest? {
+        let request = NSFetchRequest<MealSolveRequest>(entityName: "MealSolveRequest")
+        request.predicate = NSPredicate(
+            format: "household == %@ AND status == %@ AND deletedAt == nil",
+            household,
+            MealSolveRequest.Status.completed.rawValue,
+        )
+        request.sortDescriptors = [NSSortDescriptor(key: "completedAt", ascending: false)]
+        request.fetchLimit = 1
+        request.relationshipKeyPathsForPrefetching = [
+            "suggestedDishes",
+            "suggestedDishes.recipePlan",
+            "household.dietaryRules",
+        ]
+        return try? controller.viewContext.fetch(request).first
+    }
+
+    func latestTonightPick(for household: HouseholdProfile) -> TonightPick? {
+        guard
+            let solve = latestCompletedSolve(for: household),
+            let solvedAt = solve.completedAt
+        else { return nil }
+
+        let dishes = solve.suggestedDishArray
+        let chosen: SuggestedDish? = {
+            if let selectedId = solve.selectedSuggestedDishId,
+               let match = dishes.first(where: { $0.id == selectedId }) {
+                return match
+            }
+            return dishes.first
+        }()
+        guard
+            let dish = chosen,
+            let dishId = dish.id,
+            let plan = dish.recipePlan,
+            // Soft-deleted plan: user swipe-deleted from Saved tab.
+            // Bail to nil so Tonight returns to its empty/first-use
+            // state until a new solve runs, rather than ghosting a
+            // tombstoned recipe in the hero card.
+            plan.deletedAt == nil,
+            let title = (dish.title?.isEmpty == false ? dish.title : plan.title)
+        else { return nil }
+
+        let chips = derivedChips(for: dish, plan: plan, household: household)
+        return TonightPick(
+            suggestedDishId: dishId,
+            title: title,
+            solvedAt: solvedAt,
+            confidence: dish.confidence,
+            estimatedMinutes: Int(dish.estimatedMinutes),
+            servings: Int(plan.servings),
+            chips: chips,
+        )
+    }
+
+    /// Latest pantry snapshot, projected to the IngredientLite shape
+    /// the `/v1/ai/dinner-solve` endpoint expects. Used by Tonight's
+    /// "Solve again" tile so a re-solve from the existing pantry
+    /// doesn't require re-scanning. Returns nil when the household
+    /// has no completed solves yet (Solve again has nothing to solve
+    /// from in that case — Tonight surfaces the first-use empty state
+    /// instead).
+    ///
+    /// We read from the last `MealSolveRequest.typedPantrySnapshot`
+    /// rather than re-querying live `PantryItem` rows because (a) the
+    /// snapshot is already the exact shape the endpoint wants, and
+    /// (b) there's no `fetchAll` on `PantryItemRepository` today.
+    /// The trade-off: if the user edited pantry items between the
+    /// last solve and tapping Solve again, the edits aren't reflected.
+    /// In practice users either re-scan (full refresh) or solve again
+    /// (re-roll on the existing pantry) — manual pantry edits between
+    /// solves aren't a v1 user path. Promote to a live `PantryItem`
+    /// query if telemetry shows manual-edit-then-solve-again traffic.
+    func latestPantryIngredients(
+        for household: HouseholdProfile,
+    ) -> [DinnerSolveRequest.IngredientLite]? {
+        guard
+            let solve = latestCompletedSolve(for: household),
+            let snapshot = solve.typedPantrySnapshot
+        else { return nil }
+        let ingredients = snapshot.ingredients.map { ing in
+            DinnerSolveRequest.IngredientLite(
+                displayName: ing.displayName,
+                canonicalSlug: ing.canonicalSlug,
+                amountText: ing.amountText,
+            )
+        }
+        return ingredients.isEmpty ? nil : ingredients
+    }
+
+    /// Build the up-to-three chip labels shown under the hero title.
+    /// Pulls dietary-rule values for `.diet` rules verbatim and
+    /// reformats `.allergy` rules into "X-free" form (matches mockup-03
+    /// grammar — e.g. "peanuts" allergy → "peanut-free" chip). Other
+    /// rule kinds (`.dislike`, `.goal`) are too verbose for a hero chip
+    /// and are skipped. A synthetic "quick" tag appends when the dish
+    /// runs ≤30 min.
+    ///
+    /// Defensive scrubbing per chip via `scrubChip(_:)`: lowercase +
+    /// trim + length cap + strict `[a-z0-9 -]` allowlist. This filters
+    /// underscored enum codes, accidental punctuation, and overlong
+    /// values that would betray the data pipeline to the user. Order
+    /// is stable (rules first by createdAt, "quick" last) so consecutive
+    /// renders don't shuffle. Caps at 3 entries.
+    private func derivedChips(
+        for dish: SuggestedDish,
+        plan: RecipePlan,
+        household: HouseholdProfile,
+    ) -> [String] {
+        var chips: [String] = []
+        for rule in household.dietaryRuleArray {
+            switch rule.typedKind {
+            case .diet:
+                if let scrubbed = scrubChip(rule.value) {
+                    chips.append(scrubbed)
+                }
+            case .allergy:
+                // Trim a trailing 's' for the singular stem before
+                // suffixing "-free" — "peanuts" → "peanut-free",
+                // "nuts" → "nut-free". Re-scrub the formatted value
+                // so the resulting chip still satisfies the allowlist
+                // (a length spike from suffixing legitimately rejects).
+                if let scrubbed = scrubChip(rule.value) {
+                    let stem = scrubbed.hasSuffix("s") ? String(scrubbed.dropLast()) : scrubbed
+                    if let formatted = scrubChip("\(stem)-free") {
+                        chips.append(formatted)
+                    }
+                }
+            case .dislike, .goal, .none:
+                continue
+            }
+            if chips.count == 2 { break }
+        }
+        let totalMinutes = Int(dish.estimatedMinutes > 0 ? dish.estimatedMinutes : plan.estimatedMinutes)
+        if totalMinutes > 0 && totalMinutes <= 30 {
+            chips.append("quick")
+        }
+        return Array(chips.prefix(3))
+    }
+
+    /// Lowercase, trim, and validate a chip value against a strict allow
+    /// pattern. Returns nil for any failure so callers can `if let` a
+    /// single guard rather than re-checking each rule. The allowlist is
+    /// `[a-z0-9 -]` plus a 20-char cap; underscored enum codes
+    /// (`diet_pescatarian`), accidental punctuation, and overlong values
+    /// fail closed — the chip just doesn't render.
+    private func scrubChip(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, trimmed.count <= 20 else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789 -")
+        guard trimmed.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+        return trimmed
+    }
+
+    /// Soft-delete a RecipePlan (sets `deletedAt`, bumps `updatedAt`).
+    /// Backs swipe-to-delete on the Saved tab. Soft- not hard-delete so
+    /// CloudKit can replicate the tombstone and the related cooking-
+    /// session history isn't orphaned. Returns `false` on Core Data
+    /// save failure (rollback applied) so the caller can restore its
+    /// optimistic UI; not `@discardableResult` because the optimistic
+    /// pattern depends on observing the failure.
+    func softDelete(_ plan: RecipePlan) -> Bool {
+        let context = controller.viewContext
+        let now = Date()
+        plan.deletedAt = now
+        plan.updatedAt = now
+        do {
+            try context.save()
+            return true
+        } catch {
+            Logger.coreData.warning(
+                "softDelete plan failed: \(error.localizedDescription, privacy: .public)",
+            )
+            context.rollback()
+            return false
+        }
+    }
+
     /// Persist a change to `RecipePlan.isFavorite`. Called from DishPreviewView
     /// and SavedMealsView when the user toggles the star icon. Optimistic in
     /// the UI; this catches up storage. Bumps `updatedAt` so CloudKit sync

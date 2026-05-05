@@ -24,6 +24,26 @@
 
 import SwiftUI
 
+/// One row in the onboarding diet-rules grid. The mockup interleaves
+/// diets and allergen-free chips in a single visual list, but the VM
+/// keeps them in separate `Set`s so DietaryRule rows preserve their
+/// typed kind. This enum carries the mockup-shown label alongside the
+/// underlying typed option so the chip render + toggle can stay flat.
+/// `Hashable` is auto-synthesized; `ForEach` consumers can use
+/// `id: \.self` instead of a hand-rolled identity that ignores the
+/// label half of the case.
+private enum DietRuleEntry: Hashable {
+    case diet(DietOption, label: String)
+    case allergen(AllergenOption, label: String)
+
+    var label: String {
+        switch self {
+        case .diet(_, let label): return label
+        case .allergen(_, let label): return label
+        }
+    }
+}
+
 struct SetupPreferencesView: View {
     @Bindable var viewModel: OnboardingViewModel
     let onBack: () -> Void
@@ -120,34 +140,51 @@ struct SetupPreferencesView: View {
         }
     }
 
+    /// Curated 8-rule list rendered in mockup 02 order: 3 diets, then 3
+    /// allergen-free chips, then 2 more diets. Storage remains split
+    /// between `selectedDiets` / `selectedAllergens` in the VM so
+    /// DietaryRule rows keep their typed kind on save.
+    private static let dietRulesForOnboarding: [DietRuleEntry] = [
+        .diet(.vegetarian, label: "vegetarian"),
+        .diet(.vegan, label: "vegan"),
+        .diet(.pescatarian, label: "pescatarian"),
+        .allergen(.gluten, label: "gluten-free"),
+        .allergen(.dairy, label: "dairy-free"),
+        .allergen(.nut, label: "nut-free"),
+        .diet(.halal, label: "halal"),
+        .diet(.kosher, label: "kosher"),
+    ]
+
+    private static let dislikesForOnboarding: [DislikeOption] = [
+        .cilantro, .olives, .mushrooms, .blueCheese, .anchovies,
+    ]
+
+    /// Curated 5-goal list. Each entry pairs the GoalOption (which carries
+    /// the noun-phrase displayName used by `personalizedBody`) with the
+    /// mockup-faithful lowercase chip label. The chip label and the
+    /// body-clause label deliberately diverge for verb-phrase mockup
+    /// labels — e.g. `.moreVegetables` shows "eat more vegetables" in
+    /// the chip but composes "your more vegetables goals" in the body.
+    private static let goalsForOnboarding: [(option: GoalOption, chipLabel: String)] = [
+        (.quickWeeknights, "quicker weeknights"),
+        (.lessFoodWaste,   "less food waste"),
+        (.moreVegetables,  "eat more vegetables"),
+        (.budget,          "spend less"),
+        (.newCuisines,     "cook new cuisines"),
+    ]
+
     private var dietRulesSection: some View {
         OnboardingSection(
             title: "Diet rules",
             subtitle: "Hard rules — I'll never break these.",
         ) {
-            OnboardingChipFlow(spacing: CGFloat.Stir.space2) {
-                // Merged visual: allergens + diets render in the same
-                // grid per mockup 02. Storage remains separate in the
-                // ViewModel (selectedAllergens / selectedDiets) so
-                // downstream DietaryRule rows keep their typed kind.
-                ForEach(DietOption.allCases, id: \.self) { opt in
+            ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                ForEach(Self.dietRulesForOnboarding, id: \.self) { entry in
                     SelectableChip(
-                        label: opt.displayName,
+                        label: entry.label,
                         tone: .accent,
-                        isSelected: viewModel.selectedDiets.contains(opt),
-                        action: {
-                            toggle(opt, in: \.selectedDiets)
-                        },
-                    )
-                }
-                ForEach(AllergenOption.allCases, id: \.self) { opt in
-                    SelectableChip(
-                        label: "\(opt.displayName)-free",
-                        tone: .accent,
-                        isSelected: viewModel.selectedAllergens.contains(opt),
-                        action: {
-                            toggle(opt, in: \.selectedAllergens)
-                        },
+                        isSelected: isDietRuleSelected(entry),
+                        action: { toggleDietRule(entry) },
                     )
                 }
             }
@@ -159,10 +196,10 @@ struct SetupPreferencesView: View {
             title: "Dislikes",
             subtitle: "Strong preferences — I'll avoid unless you override.",
         ) {
-            OnboardingChipFlow(spacing: CGFloat.Stir.space2) {
-                ForEach(DislikeOption.allCases, id: \.self) { opt in
+            ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                ForEach(Self.dislikesForOnboarding, id: \.self) { opt in
                     SelectableChip(
-                        label: opt.displayName,
+                        label: opt.displayName.lowercased(),
                         tone: .danger,
                         isSelected: viewModel.selectedDislikes.contains(opt),
                         action: {
@@ -190,18 +227,32 @@ struct SetupPreferencesView: View {
             title: "Goals",
             subtitle: "I'll lean toward these when ranking options.",
         ) {
-            OnboardingChipFlow(spacing: CGFloat.Stir.space2) {
-                ForEach(GoalOption.allCases, id: \.self) { opt in
+            ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                ForEach(Self.goalsForOnboarding, id: \.option) { entry in
                     SelectableChip(
-                        label: opt.displayName,
+                        label: entry.chipLabel,
                         tone: .accent,
-                        isSelected: viewModel.selectedGoals.contains(opt),
+                        isSelected: viewModel.selectedGoals.contains(entry.option),
                         action: {
-                            toggle(opt, in: \.selectedGoals)
+                            toggle(entry.option, in: \.selectedGoals)
                         },
                     )
                 }
             }
+        }
+    }
+
+    private func isDietRuleSelected(_ entry: DietRuleEntry) -> Bool {
+        switch entry {
+        case .diet(let opt, _):     return viewModel.selectedDiets.contains(opt)
+        case .allergen(let opt, _): return viewModel.selectedAllergens.contains(opt)
+        }
+    }
+
+    private func toggleDietRule(_ entry: DietRuleEntry) {
+        switch entry {
+        case .diet(let opt, _):     toggle(opt, in: \.selectedDiets)
+        case .allergen(let opt, _): toggle(opt, in: \.selectedAllergens)
         }
     }
 
@@ -378,14 +429,16 @@ private struct AddDislikePill: View {
     }
 }
 
-// MARK: - OnboardingChipFlow
+// MARK: - ChipFlowLayout
 
 /// Lightweight flowing layout for chips — wraps onto new lines as
-/// horizontal space runs out. Step-2's OnboardingOptions.swift used a
-/// bespoke `FlowLayout` struct; this is the same algorithm rebuilt
-/// in the new file so the old inline layout + chip code can be
-/// deleted cleanly in the same commit.
-struct OnboardingChipFlow: Layout {
+/// horizontal space runs out. Originally introduced for onboarding
+/// (Step-2 OnboardingOptions.swift used a bespoke `FlowLayout`); now
+/// shared with `Stir/Features/Scan/ScanReviewView.swift`. Lives here
+/// rather than `Stir/DesignSystem/Components/` only because adding a
+/// new file would need a pbxproj edit; pull this out into the design
+/// system the next time we touch the project file for any reason.
+struct ChipFlowLayout: Layout {
     let spacing: CGFloat
 
     init(spacing: CGFloat = 8) { self.spacing = spacing }

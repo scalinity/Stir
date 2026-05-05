@@ -2,7 +2,9 @@
 //
 // Renders 3 dish cards as they stream in (mockup 05 §Dinner Options).
 // Skeleton placeholders before each arrives; progressive fill as the
-// SSE events land. Tapping a card pushes DishPreviewView.
+// SSE events land. Tapping a card pushes DishPreviewView. The trailing
+// "Tune" toolbar button re-presents the constraints sheet so the user
+// can adjust their constraints and re-solve in place.
 //
 // Uses Phase 2 DishOptionCard for the populated slot. Slot-specific
 // skeleton + error surfaces stay inline — they're one-off during-stream
@@ -12,11 +14,15 @@ import SwiftUI
 
 struct DinnerOptionsView: View {
     @Bindable var viewModel: SolveViewModel
+    /// Re-presents the constraints sheet from the parent NavigationStack
+    /// so a user already standing on the options screen can adjust their
+    /// constraints and re-solve in place. ScanFlowRoot owns the sheet
+    /// presentation state; we just signal it.
+    let onTune: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space3 + 2) { // 14pt
-                header
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
                 if case .error(let message, let code) = viewModel.phase {
                     errorBanner(message: message, code: code)
                 }
@@ -28,8 +34,14 @@ struct DinnerOptionsView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        .navigationTitle("Tonight's options")
+        .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Tune", action: onTune)
+                    .tint(Color.Stir.ember600)
+            }
+        }
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()
@@ -38,25 +50,6 @@ struct DinnerOptionsView: View {
     }
 
     // MARK: - Sections
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
-            Text("Three that fit tonight")
-                .stirFont(.displayLg)
-                .foregroundStyle(Color.Stir.ink900)
-                .accessibilityAddTraits(.isHeader)
-
-            if viewModel.phase == .solving {
-                Text("Looking at your pantry and constraints…")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.ink500)
-            } else if viewModel.slots.allSatisfy({ $0.dish == nil && $0.errorCode == nil }) {
-                Text("Preparing…")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.ink500)
-            }
-        }
-    }
 
     @ViewBuilder
     private func slotCard(_ slot: SolveViewModel.SlotState) -> some View {
@@ -72,10 +65,7 @@ struct DinnerOptionsView: View {
                     totalTimeMinutes: dish.totalTimeMinutes,
                     whyItFits: dish.whyItFits,
                     missingIngredientCount: dish.missingIngredientCount,
-                    // Server→UI mapping lives on DishCard extension in
-                    // SolveViewModel.swift — view layer shouldn't know
-                    // the server enum strings. W-C W17.
-                    fitKind: dish.preferredFitLabel,
+                    tonightPick: slot.rank == 1,
                 )
             }
             .buttonStyle(DishOptionCardStyle())
@@ -92,25 +82,36 @@ struct DinnerOptionsView: View {
     }
 
     private func skeletonSlot(rank: Int) -> some View {
-        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-            .fill(Color.Stir.paper100)
-            .frame(height: 140)
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
-            .overlay(alignment: .topLeading) {
-                Text("\(rank)")
-                    .stirFont(.displayMd)
-                    .foregroundStyle(Color.Stir.ink300)
-                    .padding(CGFloat.Stir.space4)
-            }
-            .overlay(
+        // Mirrors DishOptionCard's horizontal plate-on-left silhouette
+        // so the loading-→-loaded transition lands without a layout
+        // jump. Fixed minHeight keeps the skeleton tall enough to read
+        // as a card placeholder rather than a thin row.
+        HStack(spacing: 0) {
+            ZStack {
+                Color.Stir.paper200
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .tint(Color.Stir.ember600),
-            )
-            .accessibilityLabel("Option \(rank), loading")
+                    .tint(Color.Stir.ember600)
+            }
+            .frame(width: 104)
+            .frame(maxHeight: .infinity)
+
+            Text("Option \(rank)")
+                .stirFont(.displayMd)
+                .foregroundStyle(Color.Stir.ink300)
+                .padding(.horizontal, CGFloat.Stir.space4)
+                .padding(.vertical, CGFloat.Stir.space3Half)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 116)
+        .stirCard(radius: CGFloat.Stir.radiusLg)
+        .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusLg, style: .continuous))
+        // Collapse the inline "Option N" text + ProgressView into one
+        // VoiceOver element matching the loaded-card pattern; without
+        // `.ignore` VoiceOver double-reads the rank ("Option 1,
+        // Option 1, loading").
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Option \(rank), loading")
     }
 
     private func errorBanner(message: String, code: String) -> some View {

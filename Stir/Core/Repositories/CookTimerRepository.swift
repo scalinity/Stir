@@ -45,29 +45,40 @@ final class CookTimerRepository {
     /// TimerService's in-memory state — when the user resumes, Service
     /// calls `resume(timer:pausedDuration:)` with the adjusted start time
     /// so `startedAt + durationSec` remains the authoritative fire date.
-    func pause(_ timer: CookTimer) throws {
+    ///
+    /// `pausedRemainingSec` is also persisted (DB1-1 fix) so cold-launch
+    /// reconcile in CookModeViewModel can show the correct Lock Screen
+    /// remaining time without consulting the in-memory pauseStartedAt
+    /// map (process-scoped, gone after force-quit). Callers pass the
+    /// snapshot computed at pause time; nil means the column stays clear.
+    func pause(_ timer: CookTimer, pausedRemainingSec: Int) throws {
         timer.typedState = .paused
+        timer.pausedRemainingSec = Int32(max(0, pausedRemainingSec))
         try controller.save()
     }
 
     /// Resume a paused timer with a recomputed startedAt so the fire
     /// date moves forward by the paused duration. `newStartedAt` should
-    /// be `originalStartedAt + pausedDuration`.
+    /// be `originalStartedAt + pausedDuration`. Clears the persisted
+    /// pausedRemainingSec sentinel.
     func resume(_ timer: CookTimer, newStartedAt: Date) throws {
         timer.startedAt = newStartedAt
         timer.typedState = .running
+        timer.pausedRemainingSec = -1
         try controller.save()
     }
 
     func markCompleted(_ timer: CookTimer, at date: Date = Date()) throws {
         timer.endedAt = date
         timer.typedState = .completed
+        timer.pausedRemainingSec = -1
         try controller.save()
     }
 
     func cancel(_ timer: CookTimer, at date: Date = Date()) throws {
         timer.endedAt = date
         timer.typedState = .cancelled
+        timer.pausedRemainingSec = -1
         try controller.save()
     }
 

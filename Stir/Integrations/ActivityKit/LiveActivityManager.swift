@@ -25,6 +25,16 @@ import OSLog
 
 @MainActor
 final class LiveActivityManager {
+    /// Process-once gate for `reconcileOnLaunch`. RootCoordinator's
+    /// `bootstrap()` runs on cold launch BUT ALSO on `retry()` and on
+    /// CloudKit-account-change — without this flag, my reconcile would
+    /// end every persisted activity on every re-bootstrap, killing the
+    /// in-progress Lock Screen surface mid-cook for any user who hits
+    /// Retry on the offline banner or signs into a different iCloud
+    /// account. Set the first time `reconcileOnLaunch` runs; subsequent
+    /// calls are no-ops.
+    private static var didReconcileOnLaunch = false
+
     /// Registry of live activities keyed by CookTimer.id. Values are
     /// typed Activity handles so update/end calls don't need string
     /// lookups. Cleared on end() or cold-launch.
@@ -36,6 +46,75 @@ final class LiveActivityManager {
     var areActivitiesEnabled: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
+
+    /// Whether an activity is already tracked for this timerId. Lets
+    /// callers (CookModeViewModel.reconcileTimersOnForeground) decide
+    /// whether a resumed running timer needs a fresh `start(...)` after
+    /// cold-launch reconciliation cleared every persisted activity.
+    func hasActivity(for timerId: UUID) -> Bool {
+        activities[timerId] != nil
+    }
+
+    /// Cold-launch reconciliation. ActivityKit persists Live Activities
+    /// across app force-quit, but our in-memory `activities` dict is
+    /// per-process — it's empty on every cold launch. Without this
+    /// reconciliation, the app's subsequent end() / update() calls all
+    /// hit the empty dict and silently no-op, leaving the stale Lock
+    /// Screen activity ticking until the system's ~8h cap removes it.
+    /// Observed device-side 2026-05-03: a force-killed mid-cook session
+    /// left the activity counting up positive elapsed-since-fire for
+    /// hours.
+    ///
+    /// Strategy: end every persisted activity unconditionally. The
+    /// current Cook Mode session (if resumable) will recreate
+    /// activities for not-yet-expired running timers via
+    /// `CookModeViewModel.reconcileTimersOnForeground`. Edge case: a
+    /// brief gap between end and re-create where a backgrounded user
+    /// would see the Lock Screen empty — accepted trade-off vs the
+    /// counts-up persistence bug.
+    ///
+    /// **Process-once.** RootCoordinator's `bootstrap()` re-runs on
+    /// `retry()` (offline banner) and on CK-account-change; without a
+    /// gate, every re-bootstrap would end the user's in-progress
+    /// Live Activity. The static `didReconcileOnLaunch` flag closes
+    /// that hole.
+    ///
+    /// Static so RootCoordinator can call it before any
+    /// LiveActivityManager instance exists; iterates ActivityKit's
+    /// process-global activity list directly.
+    static func reconcileOnLaunch() async {
+        guard !didReconcileOnLaunch else { return }
+        didReconcileOnLaunch = true
+        // CA2-10 fix: parallelize end() calls + 2s outer timeout so a
+        // pathologically large persisted set or a slow ActivityKit
+        // RPC can't stall RootCoordinator's bootstrap step 0 — cold
+        // launch latency is brand-critical.
+        let activities = Activity<TimerActivityAttributes>.activities
+        guard !activities.isEmpty else { return }
+        let work = Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                for activity in activities {
+                    group.addTask { await activity.end(nil, dismissalPolicy: .immediate) }
+                }
+            }
+        }
+        let timeout = Task<Void, Never> {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            work.cancel()
+        }
+        await work.value
+        timeout.cancel()
+    }
+
+    #if DEBUG
+    /// Test seam — reset the process-once gate between test cases that
+    /// exercise reconcileOnLaunch. Without this, the static flag remains
+    /// set after the first call and every subsequent test in the suite
+    /// silently no-ops. Production callers must NOT use this.
+    static func _testResetReconcileGate() {
+        didReconcileOnLaunch = false
+    }
+    #endif
 
     /// Start a Live Activity for a timer. No-op if one already exists
     /// for this timerId or if the system has disabled activities.
@@ -118,6 +197,26 @@ final class LiveActivityManager {
             await activity.end(content, dismissalPolicy: .after(.now + 4))
         case .cancelled:
             await activity.end(content, dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Defensive sweep — end every tracked activity with the given
+    /// reason. Used by Cook Mode teardown paths (exit/finish/onDisappear)
+    /// to guarantee no Live Activity outlives the meal it belongs to,
+    /// even if the targeted per-timer cancel loop missed an entry
+    /// (e.g., paused timer intentionally skipped by a `where state ==
+    /// .running` filter, or an orphan registered before the matching
+    /// CookTimer row was lost). Idempotent: each `end(timerId:reason:)`
+    /// removes the entry from `activities`, so a follow-up call is a
+    /// no-op.
+    ///
+    /// `Array(activities.keys)` snapshots the key set before iterating
+    /// because `end(timerId:reason:)` mutates `activities` via
+    /// `removeValue(forKey:)` — iterating the live dict directly would
+    /// invalidate the iterator mid-loop.
+    func endAll(reason: EndReason) async {
+        for id in Array(activities.keys) {
+            await end(timerId: id, reason: reason)
         }
     }
 

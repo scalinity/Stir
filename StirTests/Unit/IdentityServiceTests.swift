@@ -91,4 +91,57 @@ final class IdentityServiceTests: XCTestCase {
         // The install UUID exists in Keychain (was minted on first ask).
         XCTAssertNotNil(try keychain.read(key: .installUUID))
     }
+
+    // MARK: - CanonicalUserKey.parse round-trip
+
+    func test_parse_cloudKit_roundTripsStringValue() {
+        let original: CanonicalUserKey = .cloudKit(recordName: "_abc123record")
+        let parsed = CanonicalUserKey.parse(original.stringValue)
+        XCTAssertEqual(parsed, original)
+    }
+
+    func test_parse_install_roundTripsStringValue() {
+        let original: CanonicalUserKey = .install(uuid: "550E8400-E29B-41D4-A716-446655440000")
+        let parsed = CanonicalUserKey.parse(original.stringValue)
+        XCTAssertEqual(parsed, original)
+    }
+
+    func test_parse_returnsNilForMalformedPrefix() {
+        XCTAssertNil(CanonicalUserKey.parse(""))
+        XCTAssertNil(CanonicalUserKey.parse("foo:bar"))
+        XCTAssertNil(CanonicalUserKey.parse("ck"))
+        XCTAssertNil(CanonicalUserKey.parse("install"))
+    }
+
+    func test_parse_returnsNilForEmptyValueAfterPrefix() {
+        // Defensive: an `ck:` or `install:` prefix with no content is
+        // treated as malformed (cache miss), not as a zero-length key.
+        XCTAssertNil(CanonicalUserKey.parse("ck:"))
+        XCTAssertNil(CanonicalUserKey.parse("install:"))
+    }
+
+    func test_parse_preservesIsCloudKit() {
+        XCTAssertEqual(CanonicalUserKey.parse("ck:_x")?.isCloudKit, true)
+        XCTAssertEqual(CanonicalUserKey.parse("install:abc")?.isCloudKit, false)
+    }
+
+    // MARK: - Case-sensitivity / whitespace edges (CR3-W7)
+
+    func test_parse_isCaseSensitive() {
+        // hasPrefix is case-sensitive — uppercased prefix must NOT match.
+        // Locks the contract so a future refactor that lower-cases at the
+        // write site (or trims at the read site) silently breaks the warm-
+        // launch fast path.
+        XCTAssertNil(CanonicalUserKey.parse("CK:foo"))
+        XCTAssertNil(CanonicalUserKey.parse("Install:foo"))
+        XCTAssertNil(CanonicalUserKey.parse("INSTALL:foo"))
+    }
+
+    func test_parse_doesNotTrimLeadingWhitespace() {
+        // Leading whitespace must NOT be silently trimmed — App Group
+        // UserDefaults shouldn't carry whitespace-prefixed keys, and
+        // accepting them would hide a writer-side bug.
+        XCTAssertNil(CanonicalUserKey.parse(" ck:foo"))
+        XCTAssertNil(CanonicalUserKey.parse("\tinstall:foo"))
+    }
 }

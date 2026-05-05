@@ -439,6 +439,112 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
         XCTAssertTrue(vmOn.disableCookRealtimeAtEntry)
     }
 
+    // MARK: - Subsequent-tap rebuild path (no flicker on re-engage)
+
+    /// Regression for the 2026-04-28 UX bug: first "Ask with voice" tap
+    /// shows the chrome instantly because preWarm at Cook Mode entry
+    /// left `voiceState = .ready`. After `closeVoiceSession`, voiceState
+    /// is `.closed` and voiceDriver is nil — re-tapping must NOT block
+    /// the chrome on the 2-3 s rebuild handshake. handleMicTap
+    /// synchronously sets `voiceState = .connecting` before awaiting
+    /// the rebuild, so `isVoiceActive` flips true on the same frame as
+    /// the tap and the listening pill renders its connecting affordance.
+    func test_handleMicTap_afterClose_setsVoiceStateConnecting_synchronouslyBeforeRebuild() async throws {
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.stubState(.ready)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+
+        // First tap: mirrors the "fast first-tap" path — driver was
+        // already .ready, beginTurn runs.
+        await vm.handleMicTap()
+        XCTAssertEqual(driver.beginTurnCallCount, 1)
+
+        // End voice — leaves voiceState = .closed, voiceDriver = nil.
+        await vm.endVoiceMode()
+        XCTAssertEqual(vm.voiceState, .closed)
+
+        // Capture the VM state at the exact moment the rebuild closure
+        // runs. The closure is awaited inside handleMicTap AFTER the
+        // synthetic `voiceState = .connecting` write, so these reads
+        // pin that the synchronous flip happened before the await.
+        nonisolated(unsafe) var voiceStateAtRebuildInvocation: VoiceSessionState?
+        nonisolated(unsafe) var isVoiceActiveAtRebuildInvocation: Bool?
+        vm.onRequestNewVoiceSession = { [weak vm] in
+            voiceStateAtRebuildInvocation = vm?.voiceState
+            isVoiceActiveAtRebuildInvocation = vm?.isVoiceActive
+            // Don't attach a new driver — simulate the failure path so
+            // handleMicTap's `recognizerUnavailable` arm runs and we
+            // don't leak a half-wired session into other tests.
+        }
+
+        // Second tap: routes through the rebuild path because
+        // voiceDriver is nil.
+        await vm.handleMicTap()
+
+        XCTAssertEqual(voiceStateAtRebuildInvocation, .connecting,
+                       "handleMicTap must synchronously set voiceState = .connecting before awaiting the rebuild — without this, voiceState lingers at .closed and isVoiceActive returns false for the entire 2-3 s preWarm window")
+        XCTAssertEqual(isVoiceActiveAtRebuildInvocation, true,
+                       "isVoiceActive must be true while the rebuild is in flight — voice chrome renders on the same frame as the tap")
+    }
+
+    /// Regression for the rebuild-cancellation invariant: tapping the
+    /// listening pill mid-rebuild (chrome shows because of the
+    /// .connecting flip above) must cancel the in-flight rebuild Task
+    /// so a freshly-minted ephemeral session isn't orphaned for
+    /// 35 minutes after the user has clearly disengaged.
+    func test_endVoiceMode_cancelsInflightRebuildTask() async throws {
+        let session = try freshSession()
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let driver = MockVoiceSessionDriver(path: .geminiFallback)
+        driver.stubState(.ready)
+
+        let vm = makeVM(session: session, entitlements: entitlements, voiceDriver: driver)
+
+        await vm.handleMicTap()
+        await vm.endVoiceMode()
+
+        // Two-continuation handshake makes the test timing-independent:
+        //   1. rebuildStarted: rebuild closure signals it has begun
+        //      executing (handleMicTap is now suspended on the await)
+        //   2. resume: test signals the rebuild closure to finish
+        let (rebuildStartedStream, rebuildStartedContinuation) = AsyncStream<Void>.makeStream()
+        let (resumeStream, resumeContinuation) = AsyncStream<Void>.makeStream()
+        nonisolated(unsafe) var rebuildSawCancellation = false
+
+        vm.onRequestNewVoiceSession = {
+            rebuildStartedContinuation.yield(())
+            rebuildStartedContinuation.finish()
+            // Suspend until the test resumes us — gives endVoiceMode
+            // a chance to land on a still-running task.
+            for await _ in resumeStream { break }
+            rebuildSawCancellation = Task.isCancelled
+        }
+
+        // Spawn handleMicTap so it runs concurrently with our test
+        // body (so we can call endVoiceMode while the rebuild is
+        // still suspended).
+        let tapTask = Task { await vm.handleMicTap() }
+
+        // Wait for the rebuild closure to actually start running.
+        for await _ in rebuildStartedStream { break }
+
+        // Now the rebuild Task is in flight. End voice — must cancel
+        // the rebuild Task.
+        await vm.endVoiceMode()
+
+        // Resume the rebuild closure so the Task can drain.
+        resumeContinuation.yield(())
+        resumeContinuation.finish()
+
+        await tapTask.value
+
+        XCTAssertTrue(rebuildSawCancellation,
+                      "endVoiceMode must cancel rebuildDriverTask so an in-flight mint doesn't orphan an ephemeral session after the user has disengaged")
+    }
+
     // MARK: - Helpers
 
     private func makeVM(
@@ -459,6 +565,7 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),
                 notificationCenter: FakeVoiceNotificationCenter(),
+                liveActivityManager: nil,
             ),
             analytics: telemetrySpy,
             sentry: sentrySpy,

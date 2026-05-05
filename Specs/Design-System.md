@@ -157,7 +157,7 @@ All sizes reference Dynamic Type; hard-coded point sizes are the `.default` toke
 - **Monospace for numbers that update.** Timers, servings counters, quantity scalars. Tabular figures prevent jitter on digit change. `mono.quote` is the exception — used for framing spoken hotwords as distinct tokens in body copy.
 - **Line height is generous.** 1.4× body minimum. Cooking happens at arm's length; tight leading kills scannability.
 - **Never shrink text to fit.** If content overflows, truncate with ellipsis or wrap. Shrinking is a design failure.
-- **One-off hero numerals are NOT tokenized.** Welcome and Launch use bespoke sizes (88–100pt) per mockup 01 — those are per-screen choices justified inline in the SwiftUI view, not system-wide tokens.
+- **One-off hero numerals are NOT tokenized.** Welcome and Launch use bespoke sizes (80–100pt) per mockup 01 — those are per-screen choices justified inline in the SwiftUI view, not system-wide tokens. iOS system-serif (New York) renders heavier than the mockups' Source Serif 4 reference at the same nominal weight; the Launch wordmark is implemented at 80pt `.regular` to visually match the mockup's 96pt / SS4 600. If Source Serif 4 is later bundled, restore the literal 96pt / `.semibold` from the mockup. Calibrate compensation per hero, not globally.
 
 ---
 
@@ -194,6 +194,7 @@ iPhone-only for v1. No container max-width; use full screen width minus margins.
 | `radius.card` | 14pt | **Default card surface** — Tonight inline cards, Solve option containers, Saved rows, Settings groups. Dominant card radius across the app. |
 | `radius.lg` | 16pt | Hero cards only — `DishOptionCard`, `SavedMealCard` primary variant, Pro badge gradient card |
 | `radius.accent` | 18pt | Elevated accent cards — inline paywall card, emphasized inline blocks with decorative corner glow |
+| `radius.hero` | 20pt | Tonight hero card silhouette + first-use empty-state container. Larger than `radius.lg` (16pt) to read as the screen's anchor. |
 | `radius.xl` | 22pt | Modals (centered paywall, substitution result) |
 | `radius.sheet` | 24pt | Bottom-sheet top corners (iOS default — `.medium` detent sheets) |
 | `radius.full` | 999pt | Mic button, pill controls, avatar chips |
@@ -267,6 +268,9 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Home / tonight tab | `house` | `.home` |
 | Search | `magnifyingglass` | `.search` |
 | Filter | `line.3.horizontal.decrease` | `.filter` |
+| Sort affordance | `arrow.up.arrow.down` | `.sort` |
+| Clear text-field button | `xmark.circle.fill` | `.clearField` |
+| Empty-state tray (Saved tab) | `tray` | `.savedTray` |
 | Sync — available | `icloud` | `.syncOk` |
 | Sync — unavailable (`SYNC-01`) | `icloud.slash` | `.syncOff` |
 | Network ok | `wifi` | `.networkOk` |
@@ -283,8 +287,14 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Plus / add | `plus` | `.plus` |
 | Minus / remove | `minus` | `.minus` |
 | Notifications | `bell` | `.notifications` |
+| Scheduled reminder badge (trial reminder armed) | `bell.badge` | `.reminderBadge` |
 | Privacy / shield | `shield.fill` | `.privacy` |
 | Profile / user | `person.crop.circle` | `.profile` |
+| Active tier badge — paid (Premium, Pro) | `crown.fill` | `.tierCrown` |
+| Manage subscription — Apple account deep-link | `person.crop.circle.badge.checkmark` | `.manageAccount` |
+| Update payment method — billing grace state | `creditcard` | `.creditCard` |
+| Restore purchases | `arrow.down.circle` | `.restore` |
+| Un-cancel / keep Premium | `arrow.uturn.backward.circle` | `.uncancel` |
 
 **Not in v1 — deferred to v2 custom icon set:**
 

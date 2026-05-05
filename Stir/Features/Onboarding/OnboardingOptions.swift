@@ -13,6 +13,7 @@ import Foundation
 enum AllergenOption: String, CaseIterable, Sendable, Equatable {
     case peanut
     case treeNut = "tree_nut"
+    case nut       // Coarse "nut-free" used by mockup 02 onboarding chips.
     case dairy
     case egg
     case soy
@@ -25,6 +26,7 @@ enum AllergenOption: String, CaseIterable, Sendable, Equatable {
         switch self {
         case .peanut:    return "Peanut"
         case .treeNut:   return "Tree nut"
+        case .nut:       return "Nut"
         case .dairy:     return "Dairy"
         case .egg:       return "Egg"
         case .soy:       return "Soy"
@@ -40,6 +42,8 @@ enum DietOption: String, CaseIterable, Sendable, Equatable {
     case vegetarian
     case vegan
     case pescatarian
+    case halal
+    case kosher
     case keto
     case paleo
     case mediterranean
@@ -51,6 +55,8 @@ enum DietOption: String, CaseIterable, Sendable, Equatable {
         case .vegetarian:    return "Vegetarian"
         case .vegan:         return "Vegan"
         case .pescatarian:   return "Pescatarian"
+        case .halal:         return "Halal"
+        case .kosher:        return "Kosher"
         case .keto:          return "Keto"
         case .paleo:         return "Paleo"
         case .mediterranean: return "Mediterranean"
@@ -94,6 +100,9 @@ enum DislikeOption: String, CaseIterable, Sendable, Equatable {
 
 enum GoalOption: String, CaseIterable, Sendable, Equatable {
     case quickWeeknights = "quick_weeknights"
+    case lessFoodWaste = "less_food_waste"
+    case moreVegetables = "more_vegetables"
+    case newCuisines = "new_cuisines"
     case highProtein = "high_protein"
     case lowSugar = "low_sugar"
     case useLeftovers = "use_leftovers"
@@ -101,13 +110,21 @@ enum GoalOption: String, CaseIterable, Sendable, Equatable {
     case familyFriendly = "family_friendly"
     case mealPrep = "meal_prep"
 
+    /// User-facing display name for Settings + `personalizedBody` clauses.
+    /// Kept as noun phrases so the body sentence "your <name> goals" reads
+    /// naturally; mockup-faithful verb-phrase labels for onboarding chips
+    /// (e.g. "eat more vegetables") live in `SetupPreferencesView`'s
+    /// `goalsForOnboarding` table.
     var displayName: String {
         switch self {
-        case .quickWeeknights: return "Quick weeknights"
+        case .quickWeeknights: return "Quicker weeknights"
+        case .lessFoodWaste:   return "Less food waste"
+        case .moreVegetables:  return "More vegetables"
+        case .newCuisines:     return "New cuisines"
         case .highProtein:     return "High protein"
         case .lowSugar:        return "Low sugar"
         case .useLeftovers:    return "Use leftovers"
-        case .budget:          return "Budget friendly"
+        case .budget:          return "Budget"
         case .familyFriendly:  return "Family friendly"
         case .mealPrep:        return "Meal prep"
         }

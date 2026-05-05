@@ -37,6 +37,7 @@ final class TimerServiceReconcileTests: XCTestCase {
             repository: timerRepo,
             sessionRepository: sessionRepo,
             notificationCenter: notificationCenter,
+            liveActivityManager: nil,
         )
     }
 

@@ -37,6 +37,12 @@ final class TimerService {
     /// production always injects a real manager. Every state transition
     /// below (pause/resume/cancel/markCompleted) fans out so callers
     /// don't need to pair-up VM-side (CR1-18).
+    ///
+    /// IMPORTANT: must be the SAME instance the caller (CookModeViewModel)
+    /// uses to `start(...)` activities. Otherwise pause/resume/cancel/
+    /// markCompleted/reconcile fan-outs hit an empty in-memory dict and
+    /// silently no-op, leaving the Lock Screen activity stuck on the
+    /// original countdown (observed device-side 2026-05-03).
     private let liveActivityManager: LiveActivityManager?
 
     /// In-memory map of timerId → pauseStartedAt. Populated on pause,
@@ -48,11 +54,19 @@ final class TimerService {
     /// fallback).
     private var pauseStartedAt: [UUID: Date] = [:]
 
+    /// `liveActivityManager` is REQUIRED (no default value). CA2-9 fix:
+    /// the prior default of `nil` made it possible for a caller to construct
+    /// a TimerService that silently no-ops every Live Activity fan-out
+    /// (pause/resume/cancel/markCompleted/reconcile) — visible only when a
+    /// user notices their Lock Screen timer disappeared. Production code
+    /// must pass the SAME instance the VM uses, or `nil` deliberately
+    /// (unit tests that don't exercise the activity surface). Forcing the
+    /// argument at every call site makes the intent reviewable.
     init(
         repository: CookTimerRepository? = nil,
         sessionRepository: CookingSessionRepository? = nil,
         notificationCenter: UNUserNotificationCenterClient = DefaultUNUserNotificationCenter(),
-        liveActivityManager: LiveActivityManager? = LiveActivityManager(),
+        liveActivityManager: LiveActivityManager?,
     ) {
         self.repository = repository ?? CookTimerRepository()
         self.sessionRepository = sessionRepository ?? CookingSessionRepository()
@@ -129,7 +143,7 @@ final class TimerService {
         let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer)
         pauseStartedAt[timerId] = Date()
         await cancelScheduledNotification(for: timerId)
-        try repository.pause(timer)
+        try repository.pause(timer, pausedRemainingSec: pausedRemaining)
         removeNotificationId(timerId, from: session)
         if let fire = timer.fireDate {
             await liveActivityManager?.update(
@@ -243,7 +257,7 @@ final class TimerService {
         content.body = "Tap to return to your recipe."
         content.sound = .default
         content.userInfo = [
-            "stir_kind": "timer",
+            TimerNotification.kindKey: TimerNotification.kindValue,
             "stir_timer_id": timerId.uuidString,
             "stir_session_id": session.id?.uuidString ?? "",
         ]
@@ -327,5 +341,23 @@ struct DefaultUNUserNotificationCenter: UNUserNotificationCenterClient {
 
     func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+}
+
+// MARK: - Payload classification
+
+/// Inspect a delivered notification's userInfo to decide whether it was
+/// scheduled by `TimerService` (so the foreground delegate can swap the
+/// default Tri-tone for a softer in-app chime). The `stir_kind == "timer"`
+/// marker is set in `scheduleNotification(for:)` alongside the timer +
+/// session UUIDs.
+enum TimerNotification {
+    /// `userInfo` key on `UNNotificationRequest.content`. Public so the
+    /// delegate doesn't duplicate the literal string.
+    static let kindKey = "stir_kind"
+    static let kindValue = "timer"
+
+    static func isTimer(from userInfo: [AnyHashable: Any]) -> Bool {
+        (userInfo[kindKey] as? String) == kindValue
     }
 }

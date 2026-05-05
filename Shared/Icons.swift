@@ -79,6 +79,10 @@ extension Image.Stir {
     static let back = Image(systemName: "chevron.backward")
     /// Forward disclosure indicator.
     static let disclosure = Image(systemName: "chevron.forward")
+    /// Forward arrow used as a hero-CTA trailing glyph (e.g. Tonight's
+    /// `Start cooking →`). Distinct from `.disclosure`, which is the
+    /// thin chevron used inline in list rows.
+    static let arrowRight = Image(systemName: "arrow.right")
     /// Close / dismiss.
     static let close = Image(systemName: "xmark")
 
@@ -129,6 +133,12 @@ extension Image.Stir {
     static let pro = Image(systemName: "star.fill")
     /// Alias — `.star`.
     static let star = pro
+    /// Filled star — favorite toggle "ON" (Saved tab row, Tonight hero).
+    /// Distinct alias from `.pro` for call-site clarity: favoriting is
+    /// a per-recipe user action, the Pro badge is a tier indicator.
+    static let favoriteFill = Image(systemName: "star.fill")
+    /// Outline star — favorite toggle "OFF".
+    static let favoriteOutline = Image(systemName: "star")
 
     // MARK: - State / feedback
 
@@ -171,6 +181,14 @@ extension Image.Stir {
     static let search = Image(systemName: "magnifyingglass")
     /// Filter.
     static let filter = Image(systemName: "line.3.horizontal.decrease")
+    /// Sort affordance.
+    static let sort = Image(systemName: "arrow.up.arrow.down")
+    /// Clear-text-field button (filled X inside a circle). Distinct from
+    /// `close` (bare X) — used inside text-field overlays where the
+    /// glyph competes with the rest of the chrome.
+    static let clearField = Image(systemName: "xmark.circle.fill")
+    /// Empty-state tray for the Saved tab's "no favorites" filter.
+    static let savedTray = Image(systemName: "tray")
     /// Pantry basket.
     static let pantry = Image(systemName: "basket")
     /// Cookbook / recipe source.
@@ -193,8 +211,38 @@ extension Image.Stir {
 
     /// Notifications bell.
     static let notifications = Image(systemName: "bell")
+    /// Bell with a scheduled-reminder badge dot. Distinct from
+    /// `.notifications`: the badge variant signals "a reminder is
+    /// armed for a future moment" (Settings trial-end reminder).
+    static let reminderBadge = Image(systemName: "bell.badge")
+    /// Notifications disabled / system permission off — naming
+    /// mirrors `.syncOff` / `.networkOff` for "feature unavailable".
+    static let notificationsOff = Image(systemName: "bell.slash")
     /// External link.
     static let link = Image(systemName: "link")
+
+    // MARK: - Billing & account management
+
+    /// Active-tier badge for paid subscribers (Premium, Pro). The
+    /// Plan & Billing card uses this on the right of the tier name.
+    /// Deliberately the same glyph for both paid tiers — the tier name
+    /// itself (and `Tier.displayName`) is the discriminator. Distinct
+    /// from `.premium` / `.pro`, which are the upsell-tile feature
+    /// markers used inside the paywall (Design-System.md §6 reserves
+    /// `sparkles` and `star.fill` for that context).
+    static let tierCrown = Image(systemName: "crown.fill")
+    /// "Manage subscription" affordance — deep-links to Apple's
+    /// account/subscriptions page. Distinct from `.profile`
+    /// (`person.crop.circle`) which is the generic user marker.
+    static let manageAccount = Image(systemName: "person.crop.circle.badge.checkmark")
+    /// "Update payment method" affordance — used in the grace-period
+    /// state on Plan & Billing.
+    static let creditCard = Image(systemName: "creditcard")
+    /// "Restore purchases" affordance.
+    static let restore = Image(systemName: "arrow.down.circle")
+    /// "Keep Premium" / un-cancel affordance — reverts a pending
+    /// cancellation while the sub is still in `cancelledActive`.
+    static let uncancel = Image(systemName: "arrow.uturn.backward.circle")
 }
 
 // MARK: - Icon size scale

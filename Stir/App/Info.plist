@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>0.1.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -39,8 +39,6 @@
 	<string>Stir reads recipe screenshots you pick so it can turn them into steps you can cook from.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Stir writes your missing-ingredients list to Reminders so it shows up next time you're at the store.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Stir uses on-device speech recognition in Cook Mode as a fallback when the cloud voice service is briefly unavailable, so you can keep cooking hands-free.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -63,6 +61,10 @@
 	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

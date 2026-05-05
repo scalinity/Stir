@@ -110,6 +110,62 @@ const EGG_KEYWORDS = ['egg', 'eggs'];
 
 const HONEY_KEYWORDS = ['honey'];
 
+// Allergen rawValue → ingredient-substring expansion. The bare rawValue
+// alone misses real ingredient names ("almond" doesn't contain "tree_nut",
+// "groundnut" doesn't contain "peanut"). Plain substring is preserved
+// (safety first); the expansion only widens what counts as a hit. Codes
+// without an entry here fall back to `[rule.value]` as before.
+//
+// SAFETY: prefer false positives — a "butternut squash" flagged by a "nut"
+// rule retries to a substitution; a missed almond ships an allergen.
+// CLAUDE.md: "favor false positives (extra retry) over false negatives".
+const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
+  // Coarse "nut" allergen used by mockup 02's "nut-free" onboarding chip.
+  // Covers tree-nut species + peanuts (legume) since the user-facing chip
+  // makes no botanical distinction.
+  //
+  // Bare "nut" is word-boundary-matched (CA2-1 fix — see
+  // ALLERGY_WORD_BOUNDARY_NEEDLES) so it catches "mixed nuts" but not
+  // coconut / butternut / donut / nutmeg. ALL species names that contain
+  // "nut" as a sub-word (walnut, hazelnut, chestnut, peanut) MUST be listed
+  // explicitly here — the word-boundary tightening means substring fall-
+  // through no longer covers them. Plain-substring needles still hit
+  // walnuts / hazelnuts / chestnuts / peanuts (the plurals).
+  nut: [
+    'nut',
+    'nuts',  // plain substring — catches "mixed nuts", "roasted nuts", etc. that the word-boundary "nut" misses.
+    'almond', 'cashew', 'pistachio', 'pecan', 'macadamia',
+    'walnut', 'hazelnut', 'chestnut', 'peanut', 'groundnut',
+    'brazil nut', 'pine nut', 'pignoli',
+    'marzipan', 'praline', 'nougat', 'gianduja',
+  ],
+  // tree_nut: same coverage as `nut` minus peanut (which is a legume).
+  // Keeps existing rawValue working — historic Settings selections
+  // persist to "tree_nut" and were previously near-non-functional.
+  tree_nut: [
+    'almond', 'cashew', 'pistachio', 'pecan', 'macadamia',
+    'walnut', 'hazelnut', 'chestnut',
+    'brazil nut', 'pine nut', 'pignoli',
+    'tree nut', 'marzipan', 'praline', 'nougat', 'gianduja',
+  ],
+  peanut: ['peanut', 'groundnut'],
+  // soy: covers tofu / tempeh / edamame / miso / soy sauce that don't
+  // contain "soy" as a substring on their own.
+  soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso'],
+  // shellfish: rawValue alone misses crab / lobster / shrimp etc. The
+  // existing FISH_SHELLFISH_KEYWORDS list covers the species; reuse.
+  shellfish: [
+    'shellfish', 'shrimp', 'prawn', 'lobster', 'crab', 'clam', 'mussel',
+    'oyster', 'scallop', 'squid', 'octopus', 'calamari', 'crawfish',
+    'crayfish',
+  ],
+};
+
+/** Allergen rawValue → keywords (rawValue itself if no expansion). */
+function allergyKeywordsFor(allergenValue: string): string[] {
+  return ALLERGEN_KEYWORD_EXPANSION[allergenValue] ?? [allergenValue];
+}
+
 // Equipment keyword map: equipment name → substrings that imply needing it
 // in a recipe step. Step-3 is conservative — we only flag the obvious.
 const EQUIPMENT_IMPLICATION: Record<string, string[]> = {
@@ -137,6 +193,20 @@ const WORD_BOUNDARY_KEYWORDS: ReadonlySet<string> = new Set([
   'egg', 'eggs', 'butter', 'milk', 'wheat', 'ham', 'cream',
 ]);
 
+// Allergy-side word-boundary exceptions. Almost all allergy needles are
+// safety-critical species names ("almond", "shrimp") that MUST keep plain
+// substring matching so "almonds" and "shrimp paste" still hit. The narrow
+// exception is the bare "nut" trigram from the `nut` allergen-rawValue
+// expansion — plain substring matched coconut / butternut squash / donut /
+// nutmeg, creating retry-amplification on benign foods (CA2-1 / CA1-H4 /
+// DB1-2). Word-boundary on "nut" specifically still matches plain "nut" /
+// "nuts" (mixed nuts dish) but not the compound benign foods. Species-level
+// nut names (walnut/hazelnut/chestnut/peanut) are added explicitly to the
+// `nut` expansion so the safety bar is unchanged.
+const ALLERGY_WORD_BOUNDARY_NEEDLES: ReadonlySet<string> = new Set([
+  'nut',
+]);
+
 // Exact multi-word ingredient names where a diet-keyword substring is
 // semantically wrong (mushrooms named after animals, herbs named after
 // dairy). Diet-rule matching bails out before the keyword scan if the
@@ -154,20 +224,38 @@ function matchesNeedlePlain(haystack: string, needle: string): boolean {
   return haystack.includes(needle);
 }
 
-function matchesNeedleWordBoundary(haystack: string, needle: string): boolean {
+/** Unconditional word-boundary regex match. Callers gate which needles
+ *  get this treatment (DIET path: WORD_BOUNDARY_KEYWORDS;
+ *  ALLERGY path: ALLERGY_WORD_BOUNDARY_NEEDLES). */
+function matchesNeedleBoundary(haystack: string, needle: string): boolean {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
+  return re.test(haystack);
+}
+
+/** DIET-path lookup: word-boundary only for WORD_BOUNDARY_KEYWORDS, else plain. */
+function matchesNeedleDiet(haystack: string, needle: string): boolean {
   if (WORD_BOUNDARY_KEYWORDS.has(needle)) {
-    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
-    return re.test(haystack);
+    return matchesNeedleBoundary(haystack, needle);
   }
   return haystack.includes(needle);
 }
 
-/** Allergy + dislike use plain substring (safety first). */
+/**
+ * Allergy + dislike use plain substring for almost every needle (safety first
+ * — "almond" must match "almonds" / "almond extract"). The narrow exception
+ * is needles listed in ALLERGY_WORD_BOUNDARY_NEEDLES — currently just the
+ * bare "nut" trigram, which would otherwise false-positive on coconut /
+ * butternut / donut / nutmeg. Species-level needles in the same expansion
+ * list keep plain substring matching.
+ */
 function containsAnyStrict(haystack: string, needles: string[]): string | null {
   const lower = haystack.toLowerCase();
   for (const n of needles) {
-    if (matchesNeedlePlain(lower, n)) return n;
+    const hit = ALLERGY_WORD_BOUNDARY_NEEDLES.has(n)
+      ? matchesNeedleBoundary(lower, n)
+      : matchesNeedlePlain(lower, n);
+    if (hit) return n;
   }
   return null;
 }
@@ -182,7 +270,7 @@ function containsDietKeyword(
   if (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay)) return null;
   const lower = ingredientText.toLowerCase();
   for (const n of needles) {
-    if (matchesNeedleWordBoundary(lower, n)) return n;
+    if (matchesNeedleDiet(lower, n)) return n;
   }
   return null;
 }
@@ -211,9 +299,11 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
 
       if (rule.kind === 'allergy') {
         // Runs even for is_optional — allergens are never safe.
-        // Plain substring: safety-critical, better to retry on a false
-        // positive than ship a hidden allergen.
-        const hit = containsAnyStrict(text, [value]);
+        // Plain substring on the expanded keyword set: safety-critical,
+        // better to retry on a false positive than ship a hidden
+        // allergen. `allergyKeywordsFor` widens coarse allergen rawValues
+        // (e.g. "nut", "tree_nut", "shellfish") into species-level lists.
+        const hit = containsAnyStrict(text, allergyKeywordsFor(value));
         if (hit) issues.push({ kind: 'allergen', value: rule.value, ingredient: ing.display_name });
         continue;
       }
@@ -327,7 +417,10 @@ export function validateSubstitution(
     if (!value) continue;
 
     if (rule.kind === 'allergy') {
-      const hit = containsAnyStrict(combined, [value]);
+      // Same expansion as validateDish — coarse rawValues like "nut"
+      // expand to a species list so the substitution validator can't
+      // miss what the dish validator catches.
+      const hit = containsAnyStrict(combined, allergyKeywordsFor(value));
       if (hit) {
         issues.push({ kind: 'allergen', value: rule.value, ingredient: sub.substitution_text });
       }
@@ -346,7 +439,7 @@ export function validateSubstitution(
       const keywords = dietKeywordsFor(value);
       if (keywords) {
         for (const n of keywords) {
-          if (matchesNeedleWordBoundary(combined, n)) {
+          if (matchesNeedleDiet(combined, n)) {
             issues.push({
               kind: 'diet_violation',
               diet: rule.value,

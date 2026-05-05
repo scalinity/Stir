@@ -448,6 +448,7 @@ APNS_BUNDLE_ID
 POSTHOG_API_KEY
 SENTRY_DSN
 LOG_IP_SALT        # 32-byte hex, HMAC-SHA256 input for ipBucket(). Rotated monthly (docs/runbooks/ip-salt-rotation.md). If unset: falls back to FNV-1a + once-per-isolate stderr warning. MUST be set before first beta invite.
+STIR_PGMQ_DISPATCH_SECRET  # 32-byte hex, shared with `app.stir_pgmq_dispatch_secret` Postgres setting. pgmq-dispatch rejects calls without matching `X-Stir-Cron-Secret` header. If unset: function accepts unauthenticated calls + once-per-isolate warn. MUST be set before exposing the function to a public URL (i.e., before beta).
 ```
 
 iOS (`Config.xcconfig`, gitignored; `Config.xcconfig.example` documents shape):

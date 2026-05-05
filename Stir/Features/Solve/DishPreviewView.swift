@@ -254,12 +254,11 @@ struct DishPreviewView: View {
         // persists. effectiveTier handling in EntitlementService maps
         // "expired"/"none" → "free" so a lapsed Premium subscriber also
         // sees the paywall (correct — they lost the feature).
-        switch entitlements.canAccess(.savedFavorites) {
-        case .allowed:
-            toggleFavoriteOptimistic()
-        case .blockedByTier, .blockedByQuota, .blockedByBilling:
-            coordinator.presentPaywall(.savedFavoritesGate)
-        }
+        entitlements.gate(
+            .savedFavorites,
+            paywall: { coordinator.presentPaywall(.savedFavoritesGate) },
+            allow: { toggleFavoriteOptimistic() },
+        )
     }
 
     private func toggleFavoriteOptimistic() {

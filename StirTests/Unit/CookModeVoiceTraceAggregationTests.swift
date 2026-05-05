@@ -89,8 +89,13 @@ final class CookModeVoiceTraceAggregationTests: XCTestCase {
         XCTAssertNotNil(input, "Input state must be attached to the single emission")
         XCTAssertEqual(input?["prompt_version"] as? String, "1.0.0")
         XCTAssertEqual(input?["path"] as? String, "live_api")
-        XCTAssertNotNil(input?["recipe_plan_id"])
-        XCTAssertNotNil(input?["cooking_session_id"])
+        // Typed assertion (not just XCTAssertNotNil) — the prior
+        // non-nil check would pass for `Optional("uuid")` if an
+        // accidental double-optional round-tripped into [String: Any],
+        // which renders in PostHog as the literal string `Optional("...")`
+        // and silently breaks every dashboard filter on this property.
+        XCTAssertEqual(input?["recipe_plan_id"] as? String, recipePlan.id?.uuidString)
+        XCTAssertEqual(input?["cooking_session_id"] as? String, session.id?.uuidString)
 
         // Output state aggregated over 3 turns.
         let output = capture.outputState
@@ -168,6 +173,7 @@ final class CookModeVoiceTraceAggregationTests: XCTestCase {
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),
                 notificationCenter: FakeTraceNotificationCenter(),
+                liveActivityManager: nil,
             ),
             analytics: traceSpy,
             sentry: StubSentry(),

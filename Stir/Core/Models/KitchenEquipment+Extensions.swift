@@ -27,6 +27,7 @@ extension KitchenEquipment {
         case nonstickPan = "nonstick_pan"
         case sheetPan = "sheet_pan"
         case dutchOven = "dutch_oven"
+        case skillet
 
         var displayName: String {
             switch self {
@@ -46,6 +47,7 @@ extension KitchenEquipment {
             case .nonstickPan:    return "Nonstick pan"
             case .sheetPan:       return "Sheet pan"
             case .dutchOven:      return "Dutch oven"
+            case .skillet:        return "Skillet"
             }
         }
     }

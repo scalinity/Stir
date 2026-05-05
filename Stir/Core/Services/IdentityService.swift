@@ -50,6 +50,24 @@ enum CanonicalUserKey: Equatable, Hashable, Sendable {
         if case .cloudKit = self { return true }
         return false
     }
+
+    /// Round-trip from `stringValue` back into the typed enum. Used by
+    /// `RootCoordinator.attemptFastPathLaunch` to reconstitute identity
+    /// from the App Group cached value (written by previous launches via
+    /// `SharedStorage.writeCanonicalUserKey`) without re-running the
+    /// async `IdentityService.resolve()`. Returns nil for malformed
+    /// inputs — caller treats those as cache miss.
+    static func parse(_ string: String) -> CanonicalUserKey? {
+        if string.hasPrefix("ck:") {
+            let recordName = String(string.dropFirst(3))
+            return recordName.isEmpty ? nil : .cloudKit(recordName: recordName)
+        }
+        if string.hasPrefix("install:") {
+            let uuid = String(string.dropFirst(8))
+            return uuid.isEmpty ? nil : .install(uuid: uuid)
+        }
+        return nil
+    }
 }
 
 actor IdentityService {

@@ -136,6 +136,76 @@ final class CookModeViewModel {
     /// "Listening — tap to stop").
     private(set) var hasBegunFirstTurn: Bool = false
 
+    // MARK: - Voice transcript display
+
+    /// Most recent user utterance — drives the YOU SAID side of the
+    /// voice-active transcript card. Nil pre-first-turn and after
+    /// closeVoiceSession. Set from `recordTurnTranscript` on every
+    /// `turnComplete` that produced any non-empty text on either side.
+    /// Empty strings are coerced to nil so the UI can short-circuit
+    /// the "no transcript yet" branch with a single nil check on
+    /// either field.
+    private(set) var lastUserTranscript: String?
+
+    /// Most recent Stir reply paired with `lastUserTranscript`. See
+    /// that property's docstring — same lifecycle.
+    private(set) var lastModelTranscript: String?
+
+    /// Raw peak amplitude in [0, 1] from the active voice driver — mic
+    /// while the user speaks, model output while Stir speaks. 0 when
+    /// no driver is attached.
+    ///
+    /// This is a thin pass-through, NOT a stored property: the actual
+    /// peak lives in `LiveAudioPipeline`'s `OSAllocatedUnfairLock`
+    /// storage (non-Observable). The `voiceDriver` reference IS
+    /// Observation-tracked, so swapping drivers (attach / detach)
+    /// invalidates correctly, but per-frame audio peaks deliberately
+    /// skip Observation entirely — there's no stored property here for
+    /// the macro to instrument. The voice-active waveform pulls fresh
+    /// peaks via this getter on each `TimelineView` tick (30 Hz) and
+    /// applies its own attack/decay smoothing, so no Observation
+    /// invalidation loop is even possible.
+    var currentVoiceAudioLevel: Float {
+        voiceDriver?.currentAudioLevel ?? 0
+    }
+
+    /// True when the user has explicitly engaged voice mode (tapped
+    /// "Ask with voice" or auto-engage fired) AND the underlying voice
+    /// session is connecting / established / working. Drives the
+    /// `isVoiceActive` switch so the UI:
+    ///   - flips to voice chrome IMMEDIATELY on tap, before the
+    ///     driver's preWarm + connect awaitables resolve (hence the
+    ///     synchronous-set-then-async-work pattern in handleMicTap);
+    ///   - reverts to tap chrome the instant the user taps end.
+    ///
+    /// Without this flag, `isVoiceActive` would gate solely on the
+    /// driver's `voiceState` — but `CookModeRoot.task` pre-warms the
+    /// driver at Cook Mode entry, which transitions state through
+    /// `.connecting → .ready` BEFORE the user has tapped anything. The
+    /// UI would then auto-show voice-active chrome on entry, surprising
+    /// the user (observed 2026-04-27). The flag captures intent, the
+    /// state captures liveness — both must be true to render voice UI.
+    private(set) var isVoiceUIRequested: Bool = false
+
+    /// True when a voice session is connecting, established, or working
+    /// AND the user has explicitly engaged voice mode. Used by the
+    /// view layer to switch between tap-mode chrome and voice-active
+    /// chrome. Excludes terminal states (`.idle`, `.closed`, `.error`)
+    /// so the chrome reverts the instant the session ends — even if
+    /// the user-intent flag still happened to be true.
+    var isVoiceActive: Bool {
+        guard isVoiceUIRequested else { return false }
+        guard let state = voiceState else { return false }
+        switch state {
+        case .idle, .closed, .error:
+            return false
+        case .connecting, .ready, .userSpeaking, .transcribing,
+             .thinking, .modelSpeaking, .toolCalling, .refreshing,
+             .fallingBack:
+            return true
+        }
+    }
+
     /// Flipped true when the user taps the mic while voiceState ==
     /// .modelSpeaking (barges in on the model's playback). Consumed by
     /// the NEXT `emitCookTurnResolved` so the `barge_in` property on
@@ -784,12 +854,10 @@ final class CookModeViewModel {
             Logger.ui.warning(
                 "voice_restart_timer_partial_cancel step=\(Int(step.stepNumber), privacy: .public) attempted=\(existingAll.count, privacy: .public)",
             )
-            analytics.capture(.screenErrorShown, properties: [
-                "screen": "cook_mode",
-                "error_code": "voice_restart_cancel_failed",
-                "step_number": Int(step.stepNumber),
-                "attempted_cancels": existingAll.count,
-            ])
+            // Diagnostic detail (step_number, attempted_cancels) is in
+            // the sibling `Logger.ui.warning` above — spec §15 only
+            // permits `screen_name` + `error_code` on this event.
+            emitScreenError(screen: "cook_mode", errorCode: "voice_restart_cancel_failed")
             // Return the stale snapshot but explicitly flag the restart
             // as failed so `dispatchTool`'s restart_timer case maps to
             // ok=false / error=cancel_failed rather than narrating a
@@ -816,7 +884,12 @@ final class CookModeViewModel {
 
     /// Call on foreground or Cook Mode re-entry. Natural-completion
     /// timers whose fire date passed while backgrounded get marked
-    /// completed.
+    /// completed. Then any still-running (not-yet-expired) timer that
+    /// lacks a Live Activity has one re-created so the Lock Screen
+    /// surface matches the in-app countdown after a cold launch (where
+    /// `LiveActivityManager.reconcileOnLaunch` cleared every persisted
+    /// activity to fix the "force-killed app leaves stale countdown
+    /// counting up" bug — observed device-side 2026-05-03).
     func reconcileTimersOnForeground() async {
         do {
             // TimerService.reconcileOnForeground now ends each
@@ -825,6 +898,66 @@ final class CookModeViewModel {
             _ = try await timerService.reconcileOnForeground(session: session)
             activeTimers = cookTimerRepository.timers(for: session)
             timerStateVersion &+= 1
+            // Restore Live Activities for running OR paused timers without
+            // one. After `LiveActivityManager.reconcileOnLaunch` ended every
+            // persisted activity at app start, the in-memory dict is empty
+            // for any timer carried across the cold launch — so pause/cancel/
+            // resume from this VM would otherwise no-op against a missing
+            // Lock Screen surface. Paused timers also need a fresh activity
+            // so a subsequent `resumeTimer` → `liveActivityManager.update()`
+            // has something to update.
+            //
+            // `start(...)` is itself idempotent (returns early if the
+            // timerId is already tracked), but `hasActivity(for:)` keeps
+            // the call sites explicit about intent. After re-creating, the
+            // paused branch flushes the static paused-remaining snapshot
+            // via `update(...)` so the Lock Screen shows the frozen value
+            // instead of a fresh count-down from `fireDate`.
+            // DB1-1 fix: paused-timer reconcile reads the persisted
+            // `pausedRemainingSeconds` rather than recomputing
+            // `fireDate - now`. The fireDate doesn't move while paused,
+            // so post-cold-launch the recomputation reports a smaller
+            // remaining than was actually frozen at pause time, and
+            // skips entirely once `now > fireDate`. Persisted snapshot
+            // survives the force-quit. The running branch still uses
+            // fireDate-based timing (fireDate is authoritative when the
+            // timer is counting down).
+            let now = Date()
+            for timer in activeTimers
+            where timer.typedState == .running || timer.typedState == .paused {
+                guard let id = timer.id,
+                      let step = timer.step else { continue }
+
+                if timer.typedState == .running {
+                    guard let fire = timer.fireDate, fire > now,
+                          !liveActivityManager.hasActivity(for: id) else { continue }
+                    startLiveActivity(for: timer, step: step)
+                } else {
+                    // Paused branch: reuse the persisted snapshot if any,
+                    // else fall back to the fireDate computation. We only
+                    // skip recreating the activity when one is already
+                    // tracked in-memory (typical mid-session foreground)
+                    // — cold-launch survivors will have nothing in the
+                    // dict and need a fresh activity.
+                    let pausedRemaining: Int
+                    if let snapshot = timer.pausedRemainingSeconds {
+                        pausedRemaining = snapshot
+                    } else if let fire = timer.fireDate {
+                        pausedRemaining = max(0, Int(fire.timeIntervalSince(now).rounded()))
+                    } else {
+                        pausedRemaining = 0
+                    }
+                    let fireDate = timer.fireDate ?? now.addingTimeInterval(TimeInterval(pausedRemaining))
+                    if !liveActivityManager.hasActivity(for: id) {
+                        startLiveActivity(for: timer, step: step)
+                    }
+                    await liveActivityManager.update(
+                        timerId: id,
+                        fireDate: fireDate,
+                        pausedRemainingSec: pausedRemaining,
+                    )
+                }
+            }
         } catch {
             Logger.ui.error("timer reconcile failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -876,12 +1009,34 @@ final class CookModeViewModel {
         for timer in activeTimers where timer.typedState == .running {
             do {
                 // TimerService.cancel ends the Live Activity with
-                // reason .cancelled internally (CR1-18).
+                // reason .cancelled internally (CR1-18). Filter is
+                // intentionally `.running`-only: the CA2-R1 dangling-
+                // notification rationale doesn't apply to paused
+                // timers (their notification was cancelled on pause),
+                // AND we want a paused timer to SURVIVE "Pause and
+                // resume later" in `.paused` state so the user can
+                // resume it on next Cook Mode entry. The orphan Live
+                // Activity that paused timers would leak here is
+                // handled by the `endAll` defensive sweep below; on
+                // resume, `reconcileTimersOnForeground` re-creates
+                // the Lock Screen surface for any still-paused timer.
                 try await timerService.cancel(timer, on: session)
             } catch {
                 Logger.ui.error("exit cancelTimer failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        // Defense in depth: end every Live Activity still tracked
+        // (paused-timer orphans the targeted loop intentionally
+        // skipped, plus any class of leak we haven't enumerated —
+        // dual-instance regressions, future state-machine additions,
+        // a CookTimer row deleted out from under its activity).
+        // Without this, the Lock Screen surface ticks past 00:00
+        // for hours after the user leaves the meal. Idempotent:
+        // entries the per-timer cancel above already ended are
+        // removed from the manager's dict, so this is a no-op for
+        // them. Paused-timer activities re-create on resume via
+        // `reconcileTimersOnForeground`'s `!hasActivity` branch.
+        await liveActivityManager.endAll(reason: .cancelled)
         // Voice teardown — idempotent. cancelSpeaking is now async and
         // waits for the state machine to settle; close() then tears
         // down the recognizer + synthesizer; AVAudioSession is
@@ -926,17 +1081,28 @@ final class CookModeViewModel {
     }
 
     private func performFinish() async {
-        // Cancel every running timer + end its Live Activity. Use
-        // timerService.markCompleted (not .cancel) so the Live Activity
-        // ends with reason .completed — matches the "user finished"
-        // semantic. exit(markAbandoned:) uses .cancel for "user bailed".
-        for timer in activeTimers where timer.typedState == .running {
+        // Mark running AND paused timers complete + end their Live
+        // Activities. Paused timers' Lock Screen surfaces stay alive
+        // through pause (so the static "2:14" renders) — without
+        // including .paused here, the user-paused-then-finished path
+        // leaves the Live Activity ticking on the Lock Screen for hours.
+        // Use timerService.markCompleted (not .cancel) so the Live
+        // Activity ends with reason .completed — matches the "user
+        // finished" semantic. exit(markAbandoned:) uses .cancel for
+        // "user bailed".
+        for timer in activeTimers
+        where timer.typedState == .running || timer.typedState == .paused {
             do {
                 try await timerService.markCompleted(timer, on: session)
             } catch {
                 Logger.ui.error("finish markCompleted timer failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        // Defense in depth: end any tracked Live Activity the targeted
+        // loop didn't catch. Idempotent — already-ended activities are
+        // no-ops. .completed semantic so the "Done" affordance lingers
+        // briefly under the OutcomeFeedback sheet before dismissing.
+        await liveActivityManager.endAll(reason: .completed)
         activeTimers = cookTimerRepository.timers(for: session)
 
         // Voice teardown — idempotent no-op when no driver. Mirrors
@@ -972,6 +1138,24 @@ final class CookModeViewModel {
         Task { await ReactivationScheduler.shared.scheduleAfterCook() }
         Task { await IntentDonationService().donateStartNewDinnerSolveIfEligible() }
         finishPresentationRequested = true
+    }
+
+    /// Teardown hook for `CookModeRoot.onDisappear`. Ends every Live
+    /// Activity the manager still tracks. The user-flow paths
+    /// (`exit(markAbandoned:)` and `performFinish`) already end
+    /// activities through their targeted timer-cancel loops AND the
+    /// `endAll` defense-in-depth call there, so this is a no-op in the
+    /// happy path. The guarantee is for paths that dismiss Cook Mode
+    /// WITHOUT going through exit/finish — programmatic
+    /// `coordinator.dismissCookMode()` from a deep link, the parent
+    /// view rebuilding the cover, or any future path that nils
+    /// `activeCookLaunch` directly. Without this hook, a stale Lock
+    /// Screen surface keeps ticking past 00:00 until the system's ~8h
+    /// cap removes it. Idempotent: each `end(timerId:reason:)` removes
+    /// the entry from the manager's dict, so a follow-up call after
+    /// exit/finish is a safe no-op.
+    func teardownLiveActivitiesOnDismiss() async {
+        await liveActivityManager.endAll(reason: .cancelled)
     }
 
     // MARK: - Voice session
@@ -1044,6 +1228,7 @@ final class CookModeViewModel {
             case .listening:
                 // Session is live and VAD is hot. Tap = end voice
                 // session and return to tap-only Cook Mode.
+                isVoiceUIRequested = false
                 await closeVoiceSession()
                 emitVoiceAffordance(tier: tier, result: "voice_stopped")
                 return
@@ -1065,11 +1250,21 @@ final class CookModeViewModel {
                 if voiceState == .modelSpeaking {
                     currentTurnBargedIn = true
                 }
+                isVoiceUIRequested = false
                 await closeVoiceSession()
                 emitVoiceAffordance(tier: tier, result: "voice_stopped")
                 return
             }
         }
+
+        // Engage path — user is starting (or re-starting) voice mode.
+        // Flip the UI flag SYNCHRONOUSLY before any await so SwiftUI
+        // re-renders into the voice-active chrome on the same frame
+        // as the tap, rather than after preWarm/connect resolves a
+        // few seconds later. The flag stays true through .connecting
+        // → .ready → .userSpeaking; isVoiceActive remains false only
+        // if the underlying state hits a terminal value.
+        isVoiceUIRequested = true
 
         // Idle / post-close path — user wants to (re)start voice.
         //
@@ -1089,6 +1284,25 @@ final class CookModeViewModel {
         // beginVoiceTurnInner below surfaces recognizerUnavailable
         // as the legitimate outcome.
         if voiceDriver == nil, let rebuild = onRequestNewVoiceSession {
+            // Synchronously transition voiceState to .connecting so
+            // `isVoiceActive` flips true on the same frame as the tap
+            // and the voice chrome appears immediately. Without this,
+            // voiceState lingers at `.closed` (set by the prior
+            // closeVoiceSession at line 1719) and chrome stays in
+            // tap-mode for the entire 2-3 s preWarm window. Mirrors
+            // the first-tap UX where preWarm finished at Cook Mode
+            // entry. The post-rebuild `attachVoiceDriver` overwrite
+            // goes `.connecting → .ready` (both active) on success;
+            // on dual Live+C.3 preWarm failure the new driver is
+            // returned in `.idle` (CookModeRoot.tryC3Fallback catch
+            // arm) and chrome reverts before the toast — informative,
+            // not a flicker. Synthetic write deliberately bypasses
+            // `applyDriverStateChange` (no `voice_state_transition`
+            // telemetry emitted for the synthetic .closed → .connecting
+            // jump — matches the synthetic `voiceState = .thinking`
+            // pattern at line 1110). Fixed: 2026-04-28.
+            voiceState = .connecting
+
             // Single-flight: if a rebuild is already in flight (user
             // double-tapped), await the in-progress one instead of
             // spawning a parallel rebuild that would orphan the first
@@ -1110,9 +1324,28 @@ final class CookModeViewModel {
         // beginTurn() actually starts; on failure, map the typed
         // error to copy + emit permission_denied OR forward to the
         // server-error presentation path.
+        //
+        // On ANY failure, drop `isVoiceUIRequested` so the chrome
+        // reverts to tap-mode and the user sees the "Ask with voice"
+        // button to retry. Without this clear, `voiceState` stays at
+        // its pre-tap value (typically `.ready` from preWarm) AND
+        // `isVoiceUIRequested` stays true → `isVoiceActive` stays true
+        // → voice chrome stays on screen with the listening pill
+        // showing "Tap to talk" but no working session behind it
+        // (regression observed during 2026-04-27 review). Tracked via
+        // `voiceBeginSucceeded` + `defer` so future catch arms that
+        // don't fall through this method (e.g., a new typed error)
+        // can't accidentally bypass the cleanup.
+        var voiceBeginSucceeded = false
+        defer {
+            if !voiceBeginSucceeded {
+                isVoiceUIRequested = false
+            }
+        }
         do {
             try await beginVoiceTurnInner()
             hasBegunFirstTurn = true
+            voiceBeginSucceeded = true
             emitVoiceAffordance(tier: tier, result: "voice_started")
         } catch SpeechFallbackError.permissionDenied {
             emitVoiceAffordance(tier: tier, result: "permission_denied")
@@ -1202,6 +1435,21 @@ final class CookModeViewModel {
         // tracking so the mic button correctly reverts to "Ask with
         // voice" until a fresh beginTurn lands.
         self.hasBegunFirstTurn = false
+        // And clear the transcript card content. Carrying a previous
+        // session's "YOU SAID / STIR" exchange into a fresh attach
+        // would mislead the user about what they just said — better
+        // to start the new session with an empty card.
+        self.lastUserTranscript = nil
+        self.lastModelTranscript = nil
+        // Detach with `driver == nil` → no possibility of a live voice
+        // session. Drop the UI-intent flag so the chrome reverts to
+        // tap-mode immediately. New attach after this (rebuild path)
+        // doesn't auto-flip back true — the user must tap "Ask with
+        // voice" again to re-engage, which is the intended UX for any
+        // post-close re-entry.
+        if driver == nil {
+            self.isVoiceUIRequested = false
+        }
         if let driver {
             self.voiceState = driver.currentState
             seedVoiceSessionTrace(from: driver)
@@ -1255,6 +1503,36 @@ final class CookModeViewModel {
         voiceSessionInputState = inputState
     }
 
+    /// Called by CookModeRoot's `onTurnTranscriptFinalized` wiring on
+    /// every RealtimeSession `turnComplete` that produced any non-empty
+    /// text. Updates the YOU SAID / STIR transcript card with the most
+    /// recent exchange. Either field of `snapshot` may be empty (tool-
+    /// call-only turns produce no model text; very short utterances
+    /// may produce no user transcription).
+    ///
+    /// CA1-H3 fix: keep the previous `lastModelTranscript` when only
+    /// `userText` arrives. The earlier behaviour blanked the model
+    /// text on every userText-bearing turn, defended on the assumption
+    /// "model reply lands in the same snapshot." That assumption fails
+    /// for tool-call-only turns: the post-tool model reply lands on the
+    /// FOLLOWING turnComplete (after the toolResponse round-trip), so
+    /// blanking left the user staring at "YOU SAID … STIR ‹blank›"
+    /// for the tool-call duration. Now we only overwrite the model
+    /// half when the new snapshot actually carries model text. The
+    /// `lastUserTranscript` write goes through unconditionally because
+    /// every fresh user utterance should reset the upper line — pairing
+    /// the new YOU SAID with a stale STIR reply is uncommon (the prior
+    /// reply was for the prior question) but strictly less misleading
+    /// than the prior bug.
+    func recordTurnTranscript(_ snapshot: LiveTurnTranscript) {
+        if !snapshot.userText.isEmpty {
+            lastUserTranscript = snapshot.userText
+        }
+        if !snapshot.modelText.isEmpty {
+            lastModelTranscript = snapshot.modelText
+        }
+    }
+
     /// Called by CookModeRoot's `onTurnFinalized` wiring on every
     /// RealtimeSession `turnComplete`. Accumulates tokens/latency so
     /// the close-summary $ai_trace can publish totals when the user
@@ -1297,12 +1575,29 @@ final class CookModeViewModel {
             "current_step_index": currentStepIndex,
             "path": pathLabel,
         ])
+        // result_type routing on the Live path (spec §15 note at line
+        // 1693: normal | tool_call | error). Error-ended turns
+        // (transport drop, watchdog-synthesized finalize) MUST land as
+        // "error" so ADR 0012's split-gate p95 isn't polluted by real
+        // failure latencies masquerading as normal turns. Prior to
+        // 2026-04-24 this was hardcoded off `containedToolCall` alone
+        // and error turns were silently mis-classified.
+        let resultType: String
+        let errorCode: ErrorCode?
+        switch summary.endedReason {
+        case .error:
+            resultType = "error"
+            errorCode = .aiVoice01
+        case .interrupted, .turnComplete, .toolResponse:
+            resultType = summary.containedToolCall ? "tool_call" : "normal"
+            errorCode = nil
+        }
         emitCookTurnResolved(
             submittedAt: submittedAt,
             pathLabel: pathLabel,
-            resultType: summary.containedToolCall ? "tool_call" : "normal",
+            resultType: resultType,
             latencyTtfaMs: summary.latencyTtfaMs,
-            errorCode: nil,
+            errorCode: errorCode,
         )
 
         // C.5: token snapshot every 5 turns (5, 10, 15, …). Skip when
@@ -1389,21 +1684,23 @@ final class CookModeViewModel {
     /// the value mirrors the sheet's free-text path. Dashboards split
     /// voice vs sheet via the `invocation` property, not `problem_type`,
     /// so reusing the existing vocabulary avoids a spec §15 amendment.
-    func recordVoiceSubstitutionRequested(subEventID: String? = nil) {
+    func recordVoiceSubstitutionRequested(subEventID: String) {
         // Voice path doesn't have a picker UX; problem_type mirrors the
         // sheet's free-text classification so dashboards can split by
         // `invocation` rather than needing different problem_type vocab.
         // Paired with `recordVoiceSubstitutionResolved` below — both
-        // carry `sub_event_id` so the funnel joins cleanly.
+        // MUST carry `sub_event_id` so the funnel joins cleanly.
+        // Signature tightened from `String? = nil` on 2026-04-24 — the
+        // optional default invited a future caller to emit without the
+        // id, producing an unjoinable row (spec §15 line 1697).
         Logger.telemetry.info(
-            "substitution_requested invocation=realtime_function_call sub_event_id=\(subEventID ?? "-", privacy: .public)",
+            "substitution_requested invocation=realtime_function_call sub_event_id=\(subEventID, privacy: .public)",
         )
-        var props: [String: Any] = [
+        analytics.capture(.substitutionRequested, properties: [
             "problem_type": "free_text",
             "invocation": "realtime_function_call",
-        ]
-        if let subEventID { props["sub_event_id"] = subEventID }
-        analytics.capture(.substitutionRequested, properties: props)
+            "sub_event_id": subEventID,
+        ])
     }
 
     /// Emits `substitution_accepted` on the voice path. Voice has no
@@ -1459,8 +1756,22 @@ final class CookModeViewModel {
         guard !trimmedMissing.isEmpty, !substitutionText.isEmpty else { return }
         let matched = matchIngredient(named: trimmedMissing)
         let stepForEvent = recipePlan.stepArray.first { Int($0.stepNumber) == currentStepIndex + 1 }
+
+        // CA1-C1 fix: split into 3 independent do/catch blocks matching the
+        // sheet path's two-phase contract (SubstitutionSheetViewModel.accept).
+        // The previous single do/catch let a `recordDecision` save-failure
+        // skip `applyAcceptedSwap` while leaving a persisted `.pending`
+        // SubstitutionEvent in the DB — three-way state divergence (model
+        // narrated the swap, recipe unmutated, funnel missing accepted).
+        // Order is unchanged (persist → record → apply) so partial-success
+        // states are still preserved on save failure: persist alone leaves
+        // a `.pending` event for telemetry; persist+record but no apply
+        // leaves the recorded accept=true with a recipe that didn't
+        // mutate (the StepCardView swap badge will be missing — operator
+        // can recover via the picker).
+        let event: SubstitutionEvent
         do {
-            let event = try substitutionRepository.persist(SubstitutionRepository.PersistInput(
+            event = try substitutionRepository.persist(SubstitutionRepository.PersistInput(
                 subEventId: subEventID,
                 session: session,
                 ingredient: matched,
@@ -1470,11 +1781,30 @@ final class CookModeViewModel {
                 modelSuggestionText: substitutionText,
                 hardConstraintCheckPassed: true,
             ))
+        } catch {
+            Logger.coreData.error(
+                "voice substitution persist failed: \(error.localizedDescription, privacy: .public)",
+            )
+            return
+        }
+
+        do {
             try substitutionRepository.recordDecision(
                 event,
                 accepted: true,
                 acceptedAlternativeText: substitutionText,
             )
+        } catch {
+            Logger.coreData.error(
+                "voice substitution recordDecision failed (event persisted as .pending): \(error.localizedDescription, privacy: .public)",
+            )
+            // Don't apply the swap if we couldn't record the decision —
+            // mismatch between recorded state and recipe is worse than
+            // a recipe that didn't mutate.
+            return
+        }
+
+        do {
             try substitutionRepository.applyAcceptedSwap(
                 event,
                 substitutionText: substitutionText,
@@ -1482,16 +1812,18 @@ final class CookModeViewModel {
             )
         } catch {
             Logger.coreData.error(
-                "voice substitution persist/apply failed: \(error.localizedDescription, privacy: .public)",
+                "voice substitution applyAcceptedSwap failed (decision recorded, recipe unmutated): \(error.localizedDescription, privacy: .public)",
             )
         }
     }
 
     /// Case-insensitive match from a model-supplied missing-ingredient
     /// string back to a row in the recipe. Exact-equal first, then
-    /// bidirectional substring containment so "pasta" finds
-    /// "dried pasta" and "dried pasta" finds "pasta". Returns nil for
-    /// no match (free-text path).
+    /// bidirectional substring containment with longest-match preference
+    /// (CA1-H2 fix) so "rice" against a recipe with both "white rice"
+    /// and "rice noodles" picks the candidate whose displayName length
+    /// is largest — Core-Data row order no longer decides which
+    /// ingredient gets swapped. Returns nil for no match (free-text path).
     private func matchIngredient(named query: String) -> RecipeIngredient? {
         let q = query.lowercased()
         let candidates = recipePlan.ingredientArray
@@ -1500,11 +1832,15 @@ final class CookModeViewModel {
         }) {
             return exact
         }
-        return candidates.first { ing in
+        let containmentMatches = candidates.compactMap { ing -> (RecipeIngredient, String)? in
             let name = (ing.displayName ?? "").lowercased()
-            guard !name.isEmpty else { return false }
-            return name.contains(q) || q.contains(name)
+            guard !name.isEmpty else { return nil }
+            guard name.contains(q) || q.contains(name) else { return nil }
+            return (ing, name)
         }
+        // Longest displayName wins; ties break on Core-Data order
+        // (`max(by:)` is stable on equality and keeps the first match).
+        return containmentMatches.max(by: { $0.1.count < $1.1.count })?.0
     }
 
     /// Read-only projection of accepted substitution swaps for the
@@ -1603,10 +1939,71 @@ final class CookModeViewModel {
     /// turn boundaries, so any user-initiated button tap is a
     /// session-level action, not a turn-level one.
     ///
+    /// Public end-voice entry for the voice-active UI's listening
+    /// pill. ALWAYS closes the session regardless of current state —
+    /// distinct from `handleMicTap`'s nuanced submit-turn-early /
+    /// start-session branching. The voice-active chrome's only pill
+    /// affordance is "exit voice mode"; routing it through
+    /// `handleMicTap` would surface the legacy `.submit` branch (mid-
+    /// utterance → submit turn → state goes to `.thinking`), leaving
+    /// the user trapped in the voice UI watching a "thinking" pill
+    /// instead of returning to tap-mode. Observed 2026-04-27.
+    ///
+    /// Synchronous flag flip first so the chrome reverts on the same
+    /// frame as the tap; the async close runs while tap-mode is
+    /// already on screen.
+    func endVoiceMode() async {
+        // Capture whether a real session is being torn down BEFORE
+        // we touch state, so the telemetry guard below reflects the
+        // user's tap landing on a live voice session vs a stuck
+        // chrome (no driver attached). The pill is only visible when
+        // `isVoiceActive` is true → in normal flow `voiceDriver` is
+        // populated, but defensive: don't fire `voice_stopped` for a
+        // session that never existed.
+        let hadActiveSession = voiceDriver != nil
+        let tier = entitlements?.tier ?? .free
+        // Capture barge-in for the imminent close-trace turn record:
+        // tapping during model speech is a polished interruption
+        // signal, distinct from giving up on `.thinking` / `.refreshing`.
+        if voiceState == .modelSpeaking {
+            currentTurnBargedIn = true
+        }
+        isVoiceUIRequested = false
+        // Cancel any in-flight rebuild — user no longer wants voice,
+        // so the eventual driver attach would orphan a freshly-minted
+        // ephemeral session. CookModeRoot's rebuild closure checks
+        // `Task.isCancelled` after preWarm and tears down the
+        // partially-wired driver (CookModeRoot.swift:331-334), then
+        // returns nil. The subsequent `attachVoiceDriver(nil)` writes
+        // voiceState = .closed cleanly. Pre-existing wasted-mint
+        // window before the cancellation point lands (preWarm doesn't
+        // honor cooperative cancellation through the WS handshake) is
+        // unchanged by this — but at least avoids the post-attach
+        // orphan. Added: 2026-04-28.
+        rebuildDriverTask?.cancel()
+        await closeVoiceSession()
+        if hadActiveSession {
+            emitVoiceAffordance(tier: tier, result: "voice_stopped")
+        }
+    }
+
     /// Idempotent: safe to call with no active driver (guard early).
-    /// The mic button's `handleMicTap` is the only caller for now;
-    /// CookModeRoot's `.onDisappear` uses driver.close() directly
-    /// because it doesn't care about the VM-side state cleanup.
+    /// Callers:
+    ///   - `handleMicTap`'s `.listening` / `.busy` end-branches (user
+    ///     taps mic in tap-mode while a session is live).
+    ///   - `endVoiceMode` (user taps the voice-active pill).
+    ///   - `exit(markAbandoned:)` and `finish()` (Cook Mode lifecycle
+    ///     teardown).
+    ///   - Refresh-failure paths in `RealtimeSession` callbacks.
+    /// CookModeRoot's `.onDisappear` uses `driver.close()` directly
+    /// because it doesn't need the VM-side state cleanup.
+    ///
+    /// `isVoiceUIRequested` is cleared inside this method as a
+    /// defensive net for the lifecycle paths (`exit` / `finish` /
+    /// refresh failure) that don't clear it before calling. The
+    /// explicit user-tap paths clear it synchronously beforehand so
+    /// SwiftUI re-renders into tap-mode chrome on the same frame as
+    /// the tap, before any `await` in this method suspends.
     private func closeVoiceSession() async {
         guard let driver = voiceDriver else { return }
         // Cancel any in-flight playback synchronously — gives
@@ -1619,6 +2016,18 @@ final class CookModeViewModel {
         voiceDriver = nil
         voiceState = .closed
         hasBegunFirstTurn = false
+        // Drop the visible transcript so the next "Ask with voice" tap
+        // opens to a clean card. Mirrors the `attachVoiceDriver` clear
+        // — same reasoning (carrying prior content forward misleads).
+        lastUserTranscript = nil
+        lastModelTranscript = nil
+        // Drop the UI-intent flag too. Defensive — explicit close
+        // paths (handleMicTap's `.listening`/`.busy` branches and
+        // `endVoiceMode`) clear it before they reach this
+        // method so the synchronous flip happens before any await,
+        // but cleanup paths (exit, error, refresh-failure) reach
+        // `closeVoiceSession` directly and must also revert the UI.
+        isVoiceUIRequested = false
         // Fire close-summary $ai_trace (idempotent). Cook Mode stays
         // open — user kept the session active but stopped voice; the
         // trace emission seals the PostHog trace record regardless.
@@ -1788,14 +2197,18 @@ final class CookModeViewModel {
         errorCode: ErrorCode? = nil,
     ) {
         let totalMs = Int(Date().timeIntervalSince(submittedAt) * 1000)
+        // Read and consume `currentTurnBargedIn` — set by handleMicTap
+        // when the user interrupts during `.modelSpeaking`. Reset after
+        // emission so the NEXT turn starts clean (spec §15 line 1695
+        // semantics: "this turn began by interrupting the previous
+        // turn's playback"). Prior to 2026-04-24 this was a dead write
+        // and barge_in always emitted false.
+        let bargedIn = currentTurnBargedIn
+        currentTurnBargedIn = false
         var props: [String: Any] = [
             "latency_ttfa_ms": latencyTtfaMs,
             "latency_total_ms": totalMs,
-            // Barge-in deferred per ADR 0011 (half-duplex gate in place
-            // of native barge-in); always false for v1. Reintroduce a
-            // VM-owned bool here when the driver-side barge-in telemetry
-            // lands.
-            "barge_in": false,
+            "barge_in": bargedIn,
             "path": pathLabel,
             "result_type": resultType,
         ]
@@ -1879,6 +2292,16 @@ final class CookModeViewModel {
     /// voice errors are queryable in PostHog alongside other UX errors.
     private func showVoiceError(message: String, errorCode: String, screen: String) {
         voiceToastMessage = message
+        emitScreenError(screen: screen, errorCode: errorCode)
+    }
+
+    /// Single spec §15 `screen_error_shown` emission point (properties:
+    /// `screen_name`, `error_code` — line 1688). Extracted 2026-04-24
+    /// to unify two drift-prone inline sites; the voice-restart-failure
+    /// site previously emitted `"screen"` (wrong key) plus non-spec
+    /// extras (`step_number`, `attempted_cancels`). Diagnostic detail
+    /// for that path lives in the sibling `Logger.ui.warning`.
+    private func emitScreenError(screen: String, errorCode: String) {
         analytics.capture(.screenErrorShown, properties: [
             "screen_name": screen,
             "error_code": errorCode,
@@ -2010,6 +2433,14 @@ final class CookModeViewModel {
     /// builds can't accidentally bypass the state machine.
     func _testForceVoiceState(_ state: VoiceSessionState?) {
         voiceState = state
+    }
+
+    /// Test-only hook for flipping the user-intent UI flag without
+    /// going through `handleMicTap`'s full driver setup path. Pairs
+    /// with `_testForceVoiceState` so unit tests of `isVoiceActive`
+    /// can pin both signals independently.
+    func _testForceVoiceUIRequested(_ requested: Bool) {
+        isVoiceUIRequested = requested
     }
 
     /// Test-only hook for flipping the first-turn flag. Drives the

@@ -62,6 +62,15 @@ protocol VoiceSessionDriver: AnyObject {
     /// legal transition per VoiceSessionStateMachine.
     var currentState: VoiceSessionState { get }
 
+    /// Latest audio peak amplitude in [0, 1] from whichever direction
+    /// is currently active — mic input while the user is speaking,
+    /// model output while Stir is speaking. 0 in idle / connecting /
+    /// thinking states. Read by the voice-active Cook Mode UI's
+    /// waveform on every TimelineView frame; the UI applies its own
+    /// attack/decay smoothing on read so this getter just returns the
+    /// freshest raw peak.
+    var currentAudioLevel: Float { get }
+
     /// Pre-warm. Request permissions, load recognizers, open WebSockets.
     /// Caller awaits before the first `beginTurn`. Throws on permission
     /// denial or hardware unavailability; CookModeViewModel surfaces the
@@ -106,4 +115,9 @@ protocol VoiceSessionDriver: AnyObject {
 extension VoiceSessionDriver {
     var voiceSessionID: String? { nil }
     var voiceSessionPromptVersion: String? { nil }
+    /// Default 0 for drivers that don't surface a real meter (Speech
+    /// fallback, test doubles). The UI is robust to a permanently-flat
+    /// signal — bars rest at their lowest amplitude. The Live path
+    /// overrides this with `audioPipeline`-backed peak tracking.
+    var currentAudioLevel: Float { 0 }
 }

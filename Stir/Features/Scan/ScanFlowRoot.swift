@@ -79,7 +79,10 @@ struct ScanFlowRoot: View {
                         onConfirm: { Task { await onReviewConfirmed() } },
                     )
                 case .options:
-                    DinnerOptionsView(viewModel: solveViewModel)
+                    DinnerOptionsView(
+                        viewModel: solveViewModel,
+                        onTune: { showConstraintsSheet = true },
+                    )
                 case let .preview(dish):
                     DishPreviewView(viewModel: solveViewModel, dish: dish)
                 }
@@ -88,7 +91,16 @@ struct ScanFlowRoot: View {
                 ConstraintsSheet(
                     viewModel: solveViewModel,
                     onSolve: {
-                        path.append(.options)
+                        // First solve → push the options screen onto
+                        // the stack. Re-tune from options → we're
+                        // already there; just rerun the solve in
+                        // place. Pushing again would stack a duplicate
+                        // route + show two back chevrons.
+                        if case .options = path.last {
+                            solveViewModel.startSolve()
+                        } else {
+                            path.append(.options)
+                        }
                     },
                 )
                 .interactiveDismissDisabled(false)

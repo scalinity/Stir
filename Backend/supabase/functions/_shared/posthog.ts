@@ -20,7 +20,50 @@
 import type { Logger } from './logger.ts';
 
 const POSTHOG_API_KEY = Deno.env.get('POSTHOG_PUBLIC_API_KEY');
-const POSTHOG_HOST = Deno.env.get('POSTHOG_HOST') ?? 'https://us.i.posthog.com';
+
+/// Validated PostHog ingest host. Parsed at module load so a typo'd or
+/// tampered `POSTHOG_HOST` secret can't redirect events to an attacker-
+/// controlled URL with full metadata (canonical_user_key_hash, model,
+/// cost, feature). `POSTHOG_HOST` is privileged (set via
+/// `supabase secrets set`), not user-controlled, so this is defense
+/// in depth — but we're transmitting cost + model + hashed-identity
+/// metadata, which would be a real leak if the env ever got swapped.
+/// SA1-W2 (2026-04-24).
+function resolvePostHogHost(): string {
+  const raw = Deno.env.get('POSTHOG_HOST') ?? 'https://us.i.posthog.com';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') {
+      console.warn(JSON.stringify({
+        level: 'warn',
+        msg: 'posthog_host_non_https_rejected',
+        raw_protocol: url.protocol,
+      }));
+      return 'https://us.i.posthog.com';
+    }
+    // Allowlist: PostHog Cloud (US + EU) only. Self-hosted deployments
+    // would need to extend this list in an explicit ADR.
+    const okHost = /^(us|eu)\.i\.posthog\.com$/.test(url.hostname)
+      || /^(us|eu)\.posthog\.com$/.test(url.hostname);
+    if (!okHost) {
+      console.warn(JSON.stringify({
+        level: 'warn',
+        msg: 'posthog_host_not_in_allowlist',
+        raw_hostname: url.hostname,
+      }));
+      return 'https://us.i.posthog.com';
+    }
+    // Strip trailing slash so fetch templates stay consistent.
+    return url.origin;
+  } catch {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      msg: 'posthog_host_parse_failed',
+    }));
+    return 'https://us.i.posthog.com';
+  }
+}
+const POSTHOG_HOST = resolvePostHogHost();
 
 if (!POSTHOG_API_KEY) {
   console.warn(
@@ -97,10 +140,19 @@ export function capturePosthogEvent(
 
   const task = (async () => {
     try {
+      // 3 s timeout: well above the 99th percentile PostHog ingest
+      // latency, below Deno Edge Runtime's ~30 s worker ceiling. A hung
+      // socket must not hold the isolate slot across a PostHog
+      // brown-out — EdgeRuntime.waitUntil keeps the promise alive until
+      // completion OR timeout, but without AbortSignal a hung fetch
+      // would block until platform termination. Sibling callers
+      // (`_shared/apns.ts`, `_shared/gemini.ts`, `_shared/live_mint.ts`)
+      // use the same pattern. CA2-C1 (2026-04-24).
       const res = await fetch(`${POSTHOG_HOST}/i/v0/e/`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(3000),
       });
       // PostHog's capture endpoint returns 200 on accepted; anything else
       // is a warning-level ops signal, not an error (user's request has
@@ -110,15 +162,21 @@ export function capturePosthogEvent(
         log.warn('posthog_capture_non_2xx', {
           status: res.status,
           event: body.event,
+          distinct_id: body.distinctId,
+          span_id: body.properties['$ai_span_id'],
           body_preview: text.slice(0, 200),
         });
       }
     } catch (err) {
-      // Network errors, DNS, TLS. Swallow — `log.warn` emits structured
-      // JSON via the standard logger; ops can alert on posthog_capture_threw.
+      // Network errors, DNS, TLS, timeout (AbortError). Swallow —
+      // `log.warn` emits structured JSON; ops alerts on
+      // posthog_capture_threw. Include span_id for cross-reference
+      // against ai_request_log rows (CA2-W5).
       log.warn('posthog_capture_threw', {
         event: body.event,
-        err: err instanceof Error ? err.message : String(err),
+        distinct_id: body.distinctId,
+        span_id: body.properties['$ai_span_id'],
+        err: err instanceof Error ? err.message.slice(0, 200) : 'non_error_thrown',
       });
     }
   })();

@@ -89,7 +89,17 @@ struct StepCardView: View {
         }
         .safeAreaInset(edge: .bottom) {
             bottomBar
-                .background(.bar)
+                // FD1-1 fix: paper50 + 1pt hairline divider matches the
+                // app-wide bottom-bar grammar (Settings, Saved, Tonight,
+                // RootView's StirCustomTabBar). Replaces `.background(.bar)`
+                // translucent material that left Cook Mode visually
+                // distinct from every other surface.
+                .background(Color.Stir.paper50)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.Stir.divider)
+                        .frame(height: 1)
+                }
         }
         .confirmationDialog(
             "Leave Cook Mode?",
@@ -125,10 +135,17 @@ struct StepCardView: View {
 
             Spacer()
 
+            // 2-line wrap + scale-down so titles like "Rosemary Infused
+            // Tomato Pasta" no longer truncate. The mockup
+            // (06_cook_mode_tap.html:70-85) puts the title in a separate
+            // recipe strip below the top bar, not centered inside it —
+            // refactor tracked in CLAUDE.md §Deferred. Fixed: 2026-04-28.
             Text(viewModel.recipePlan.title ?? "Cook Mode")
                 .stirFont(.labelLg).fontWeight(.semibold)
                 .foregroundStyle(Color.Stir.ink900)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.85)
 
             Spacer()
 
@@ -209,67 +226,81 @@ struct StepCardView: View {
 
     @ViewBuilder
     private var timerSection: some View {
-        if let step = viewModel.currentStep, step.timerSeconds > 0 {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-                Text("Timer")
-                    .stirFont(.labelLg).fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.ink900)
-                    .accessibilityAddTraits(.isHeader)
-                // Only treat running / paused / pending timers as "the
-                // step's current timer" for UI routing. Cancelled and
-                // completed timers stay in `activeTimers` for history
-                // + telemetry, but should NOT suppress the Start button
-                // — that was the 2026-04-22 bug where after cancelling
-                // the only visible control was another Cancel button
-                // with nothing to start.
-                //
-                // Register this view as a dependent of
-                // `timerStateVersion` so @Observable invalidation fires
-                // on every timer mutation. NSManagedObject property
-                // changes don't propagate through @Observable on their
-                // own, so without this dependency the button routing
-                // could stick on "running" even after a cancel. The
-                // binding is intentionally unused downstream — the
-                // read itself is what Observation tracks.
-                let _ = viewModel.timerStateVersion
-                let matching = viewModel.activeTimers.first {
-                    $0.step?.id == step.id
-                    && ($0.typedState == .running
-                        || $0.typedState == .paused
-                        || $0.typedState == .pending)
-                }
-                if let timer = matching {
-                    TimerCountdownView(
-                        timer: timer,
-                        pauseStartedAt: viewModel.pauseStartedAt(for: timer),
-                    )
-                    timerControlRow(for: timer)
-                } else {
-                    Button {
-                        Task { await viewModel.startTimerForCurrentStep() }
-                    } label: {
-                        HStack(spacing: CGFloat.Stir.space2) {
-                            Image.Stir.timer
-                            Text("Start \(Int(step.timerSeconds) / 60) min timer")
-                                .stirFont(.labelLg).fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.Stir.paper50)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .frame(minHeight: 44)
-                        .background(
-                            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                                .fill(Color.Stir.ember600),
-                        )
-                    }
-                    .accessibilityHint("Schedules a local notification for when the step is done.")
-                }
+        if let step = viewModel.currentStep {
+            // Register this view as a dependent of `timerStateVersion`
+            // so @Observable invalidation fires on every timer mutation.
+            // NSManagedObject property changes on CookTimer don't
+            // propagate through @Observable on their own. The binding
+            // is intentionally unused downstream — the read itself is
+            // what Observation tracks.
+            let _ = viewModel.timerStateVersion
+            // Only treat running / paused / pending timers as "the
+            // step's current timer" for UI routing. Cancelled and
+            // completed timers stay in `activeTimers` for history
+            // + telemetry, but should NOT suppress the Start button
+            // (CR1-13 regression: after cancel, the only visible
+            // control was another Cancel button with nothing to start).
+            let activeTimer = viewModel.activeTimers.first {
+                $0.step?.id == step.id
+                && ($0.typedState == .running
+                    || $0.typedState == .paused
+                    || $0.typedState == .pending)
             }
-            .padding(CGFloat.Stir.space4)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
+            // Surface the timer section EITHER when this step has a
+            // configured base duration OR when there's an active timer
+            // for it. The voice path (`startTimerFromVoice`) creates a
+            // CookTimer with arbitrary seconds without mutating
+            // `step.timerSeconds`, so a step that has no base duration
+            // can still own a live voice-created timer — gating the
+            // section purely on `step.timerSeconds > 0` left those
+            // timers invisible after the user exits voice mode
+            // (observed device-side 2026-05-03).
+            let hasBaseTimer = step.timerSeconds > 0
+            if activeTimer != nil || hasBaseTimer {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                    Text("Timer")
+                        .stirFont(.labelLg).fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .accessibilityAddTraits(.isHeader)
+                    if let timer = activeTimer {
+                        TimerCountdownView(
+                            timer: timer,
+                            pauseStartedAt: viewModel.pauseStartedAt(for: timer),
+                        )
+                        timerControlRow(for: timer)
+                    } else if hasBaseTimer {
+                        // Start button only available when the step
+                        // ships with a base duration; voice-created
+                        // timers begin via the voice tool call, not a
+                        // tap-mode button, so we don't synthesize one
+                        // here for steps that lack a configured
+                        // duration.
+                        Button {
+                            Task { await viewModel.startTimerForCurrentStep() }
+                        } label: {
+                            HStack(spacing: CGFloat.Stir.space2) {
+                                Image.Stir.timer
+                                Text("Start \(Int(step.timerSeconds) / 60) min timer")
+                                    .stirFont(.labelLg).fontWeight(.semibold)
+                            }
+                            .foregroundStyle(Color.Stir.paper50)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .frame(minHeight: 44)
+                            .background(
+                                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                                    .fill(Color.Stir.ember600),
+                            )
+                        }
+                        .accessibilityHint("Schedules a local notification for when the step is done.")
+                    }
+                }
+                .padding(CGFloat.Stir.space4)
+                .background(
+                    RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                        .fill(Color.Stir.paper100),
+                )
+            }
         }
     }
 

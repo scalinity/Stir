@@ -254,6 +254,17 @@ struct CookModeRoot: View {
             // State race. Review finding W-D W18 (CA2).
             driverTeardown?()
             AVAudioSessionConfigurator.deactivate()
+            // Same defense-in-depth principle for Live Activities:
+            // exit/finish end them through targeted cancellation, but a
+            // dismissal path that bypasses both (programmatic
+            // `coordinator.dismissCookMode`, parent rebuilding the
+            // cover) would orphan the Lock Screen surface — leaving it
+            // ticking past 00:00 for hours. Idempotent — the VM's
+            // exit/finish paths empty the manager's dict before
+            // shouldDismiss flips, so this is a no-op on the happy path.
+            if let viewModel {
+                Task { await viewModel.teardownLiveActivitiesOnDismiss() }
+            }
         }
         // Paywall presentation from inside Cook Mode.
         //
@@ -442,6 +453,9 @@ struct CookModeRoot: View {
             liveDriver.onTurnFinalized = { [weak vm] summary in
                 vm?.recordLiveTurnSummary(summary)
             }
+            liveDriver.onTurnTranscriptFinalized = { [weak vm] snapshot in
+                vm?.recordTurnTranscript(snapshot)
+            }
             liveDriver.onVoiceSessionRefreshResolved = { [weak vm] reason, turns, sessionID, success in
                 vm?.recordVoiceSessionRefresh(
                     reason: reason,
@@ -546,7 +560,7 @@ private struct VoiceToastView: View {
             Button {
                 onDismiss()
             } label: {
-                Image(systemName: "xmark")
+                Image.Stir.close
                     .foregroundStyle(Color.Stir.ink500)
                     .padding(CGFloat.Stir.space2)
                     .contentShape(Rectangle())
@@ -555,7 +569,14 @@ private struct VoiceToastView: View {
         }
         .padding(.horizontal, CGFloat.Stir.space4)
         .padding(.vertical, CGFloat.Stir.space3 - 2) // 10pt
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
+        // FD1-2 fix: tokenized surface — paper100 + Stir radiusMd matches
+        // the rest of the app's toasts (Tonight uses an ink900 capsule
+        // for its variant; this card-shape variant uses paper100). Spec
+        // §3.3 forbids translucency on text containers.
+        .background(
+            Color.Stir.paper100,
+            in: RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous),
+        )
+        .padding(.horizontal, CGFloat.Stir.space4)
     }
 }

@@ -50,17 +50,23 @@ final class LiveAudioPipeline {
     private let playerNode = AVAudioPlayerNode()
 
     /// Linear gain factor applied to Gemini Live audio output before it
-    /// hits the player node. 2.0 == +6 dB, perceptually "twice as loud".
-    /// Rationale: `AVAudioSession.mode = .voiceChat` applies voice-
-    /// processing AGC tuned for phone-to-ear distance. With the phone
-    /// sitting on a counter 0.5-1 m from the user, unity-gain output is
-    /// hard to hear over ambient kitchen noise (observed 2026-04-23).
-    /// We pre-amplify in the sample domain and hard-clamp to [-1, 1] so
-    /// any rare over-range samples get clipped rather than wrapped.
-    /// Tuning bound: 2.0 is a safe ceiling — speech rarely sustains at
-    /// peak, so clipping should be negligible. Above ~3.0 we'd hear
-    /// audible distortion on loud consonants.
-    private static let playbackGain: Float = 2.0
+    /// hits the player node. 2.8 ≈ +9 dB, perceptually nearly 2× louder
+    /// than the previous 2.0 setting. Rationale: `AVAudioSession.mode =
+    /// .voiceChat` applies voice-processing AGC tuned for phone-to-ear
+    /// distance. With the phone sitting on a counter 0.5-1 m from the
+    /// user, unity-gain output was hard to hear over kitchen noise
+    /// (observed 2026-04-23). 2.0 helped but device feedback 2026-04-25
+    /// asked for more — bumped to 2.8 to clear that bar without entering
+    /// the "audible distortion on loud consonants" zone documented at
+    /// 3.0+. We pre-amplify in the sample domain and hard-clamp to
+    /// [-1, 1] so any rare over-range samples get clipped rather than
+    /// wrapped. Tuning ceiling: 3.0 — anything above starts producing
+    /// gritty consonants on percussive phonemes ("p", "t", "k").
+    private static let playbackGain: Float = 2.8
+    /// Hard ceiling enforced in DEBUG (CR2-W6). Bumping `playbackGain`
+    /// past this point produces gritty consonants on percussive phonemes
+    /// — keep the comment ceiling and the constant in lockstep.
+    private static let playbackGainMax: Float = 3.0
 
     /// Count of scheduled-but-not-yet-rendered audio buffers. Incremented
     /// synchronously in `enqueuePlayback` before `scheduleBuffer`, and
@@ -103,6 +109,38 @@ final class LiveAudioPipeline {
     /// base gating decisions on it (use `isPlayingBack` for that).
     var pendingPlaybackBufferCount: Int {
         pendingPlaybackBuffers.withLock { $0 }
+    }
+
+    // MARK: - Level metering
+    //
+    // Live peak amplitude per direction, exposed for the voice-active
+    // Cook Mode UI's waveform visualization. Both values normalize to
+    // [0, 1] (raw |sample| in Float32 space). Updated from audio-thread
+    // callbacks (`installTap` for mic, `enqueuePlayback`'s conversion
+    // loop for output), read from MainActor in the UI's TimelineView
+    // tick. `OSAllocatedUnfairLock` is the same primitive the playback-
+    // queue depth uses — Sendable, fast, no actor-hop overhead.
+    //
+    // The UI applies its own smoothing on read (asymmetric attack/decay)
+    // so this layer just reports the latest raw peak. Reset to 0 on
+    // stopCapture / cancelPlayback / tearDown so the UI bars settle to
+    // a flat baseline whenever audio is genuinely quiet.
+
+    private let micLevelLock = OSAllocatedUnfairLock<Float>(initialState: 0)
+    private let outputLevelLock = OSAllocatedUnfairLock<Float>(initialState: 0)
+
+    /// Most recent mic input peak amplitude in [0, 1]. 0 when the mic
+    /// tap is not running. Read from any thread.
+    var currentMicLevel: Float {
+        micLevelLock.withLock { $0 }
+    }
+
+    /// Most recent model-audio playback peak amplitude in [0, 1]
+    /// (post-gain, post-clamp — what's actually scheduled on the player
+    /// node). 0 when no playback chunks have arrived since the last
+    /// reset. Read from any thread.
+    var currentOutputLevel: Float {
+        outputLevelLock.withLock { $0 }
     }
 
     /// Format native to the mic hardware — varies by device. Converted
@@ -153,6 +191,15 @@ final class LiveAudioPipeline {
     // MARK: - Init
 
     init() {
+        // CR2-W6 tripwire: keep `playbackGain` and the documented ceiling
+        // in lockstep. Future-you bumping the gain past 3.0 will hit this
+        // in development before voice mode produces gritty consonants in
+        // the field. Encoded as `precondition` so DEBUG builds fail at
+        // launch; release builds skip the check.
+        precondition(
+            Self.playbackGain <= Self.playbackGainMax,
+            "playbackGain (\(Self.playbackGain)) exceeds documented ceiling \(Self.playbackGainMax). Update the ceiling AND the rationale comment together.",
+        )
         let (stream, continuation) = AsyncStream.makeStream(of: MicFrame.self)
         self.micFrames = stream
         self.micContinuation = continuation
@@ -252,6 +299,13 @@ final class LiveAudioPipeline {
         // ever run it from a single audio thread.
         let target = self.targetInputFormat
         let continuation = self.micContinuation
+        // Hoist the level lock into a local so the audio-thread closure
+        // doesn't capture `self` (the class is @MainActor and the tap
+        // closure is non-isolated). `OSAllocatedUnfairLock` is a value-
+        // type handle to OS-managed storage — value-copy shares the
+        // same underlying lock + state, so writes from this local are
+        // visible to MainActor reads via `self.currentMicLevel`.
+        let micLevelLock = self.micLevelLock
 
         inputNode.installTap(
             onBus: 0,
@@ -282,7 +336,9 @@ final class LiveAudioPipeline {
                 return
             }
             // Sample peak amplitude — tells us whether real speech is
-            // arriving (peak > ~0.01) vs dead silence (peak ~0).
+            // arriving (peak > ~0.01) vs dead silence (peak ~0). Also
+            // surfaces this to the UI's voice-active waveform via the
+            // `micLevelLock` (read at TimelineView tick rate).
             var peak: Float = 0
             if let ch = buffer.floatChannelData?[0] {
                 let n = Int(fl)
@@ -291,6 +347,12 @@ final class LiveAudioPipeline {
                     if a > peak { peak = a }
                 }
             }
+            // Audio-thread write — `OSAllocatedUnfairLock.withLock` is
+            // safe to call from any thread. UI reads the latest value
+            // from MainActor on every TimelineView frame and applies
+            // its own attack/decay smoothing. Latest-wins is correct
+            // for visualization — no need to accumulate.
+            micLevelLock.withLock { $0 = peak }
             if counter.total == 1 || counter.total % 50 == 0 {
                 Logger.voice.info(
                     "mic_tap_fired count=\(counter.total, privacy: .public) frames=\(fl, privacy: .public) peak=\(peak, privacy: .public)",
@@ -332,6 +394,10 @@ final class LiveAudioPipeline {
         // outside startCapture can never use a stale reference.
         hardwareInputFormat = nil
         converter = nil
+        // Drop the meter so the UI's waveform settles to flat as soon
+        // as we stop capturing, instead of holding the last peak from
+        // when the mic went away.
+        micLevelLock.withLock { $0 = 0 }
     }
 
     // MARK: - Playback
@@ -375,18 +441,33 @@ final class LiveAudioPipeline {
         // matches Apple's documented normalization factor. Multiply by
         // `playbackGain` (see docstring) to overcome .voiceChat mode's
         // tightened output level; hard-clamp to [-1, 1] so any rare
-        // over-range samples clip cleanly instead of wrapping.
+        // over-range samples clip cleanly instead of wrapping. We also
+        // track the post-gain post-clamp peak in the same pass so the
+        // UI's voice-active waveform reads what actually plays — no
+        // second walk over the buffer.
+        var chunkPeak: Float = 0
         data.withUnsafeBytes { rawPtr in
             guard let int16Src = rawPtr.bindMemory(to: Int16.self).baseAddress,
                   let floatDst = pcmBuffer.floatChannelData?[0]
             else { return }
             let n = Int(frameCount)
             let gain = Self.playbackGain
+            var localPeak: Float = 0
             for i in 0..<n {
                 let gained = (Float(int16Src[i]) / 32768.0) * gain
-                floatDst[i] = max(-1.0, min(1.0, gained))
+                let clamped = max(-1.0, min(1.0, gained))
+                floatDst[i] = clamped
+                let abs_ = abs(clamped)
+                if abs_ > localPeak { localPeak = abs_ }
             }
+            chunkPeak = localPeak
         }
+        // Latest-wins update of the output meter. The chunks queue up
+        // ahead of actual playback, so this reflects "what's about to
+        // play" rather than "what's audible right now" — but at our
+        // ~320 ms chunk size and 1-2-buffer steady-state queue depth,
+        // the lag is imperceptible for visualization purposes.
+        outputLevelLock.withLock { $0 = chunkPeak }
 
         if !audioEngine.isRunning {
             // Only starts if startCapture or tearDown left it stopped.
@@ -434,14 +515,29 @@ final class LiveAudioPipeline {
         }
         // Increment already happened above. Decrement in the
         // `.dataPlayedBack` completion (fires after the output device
-        // has rendered the audio).
+        // has rendered the audio). When the queue drains to 0 (last
+        // chunk of a model utterance has finished playing), zero the
+        // output level so the UI's waveform settles to flat — without
+        // this, the meter would stay pinned at the final chunk's peak
+        // until the next model utterance or `cancelPlayback`. Both
+        // locks are value-type handles to OS-managed shared storage;
+        // capturing them by value is correct (they share state with
+        // `self.pendingPlaybackBuffers` / `self.outputLevelLock`) AND
+        // avoids `self` capture into the audio-render-thread completion
+        // callback that fires the closure.
         playerNode.scheduleBuffer(
             pcmBuffer,
             at: nil,
             options: [],
             completionCallbackType: .dataPlayedBack,
-        ) { [pendingPlaybackBuffers] _ in
-            pendingPlaybackBuffers.withLock { $0 = max(0, $0 - 1) }
+        ) { [pendingPlaybackBuffers, outputLevelLock] _ in
+            let remaining = pendingPlaybackBuffers.withLock { count -> Int in
+                count = max(0, count - 1)
+                return count
+            }
+            if remaining == 0 {
+                outputLevelLock.withLock { $0 = 0 }
+            }
         }
     }
 
@@ -460,6 +556,10 @@ final class LiveAudioPipeline {
         }
         playerNode.reset()
         pendingPlaybackBuffers.withLock { $0 = 0 }
+        // Drop the output meter so the UI's waveform settles to flat
+        // immediately on stop, instead of holding the last chunk's peak
+        // until a fresh playback starts.
+        outputLevelLock.withLock { $0 = 0 }
     }
 
     // MARK: - Teardown

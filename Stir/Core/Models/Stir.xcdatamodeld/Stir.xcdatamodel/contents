@@ -193,6 +193,7 @@
         <attribute name="endedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="label" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="pausedRemainingSec" optional="YES" attributeType="Integer 32" defaultValueString="-1" usesScalarValueType="YES"/>
         <attribute name="startedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="state" optional="YES" attributeType="String" defaultValueString="pending"/>
         <relationship name="cookingSession" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="timers" inverseEntity="CookingSession"/>

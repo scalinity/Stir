@@ -17,7 +17,7 @@ secrets.json
 secrets.plist
 Secrets.swift
 Secrets.xcconfig
-
+n8nEmail.txt
 # iOS xcconfig holding SUPABASE_URL, anon key, RevenueCat, PostHog, Sentry DSN.
 # Commit Config.xcconfig.example as the template. (Step-5 review fix: the
 # negation line previously referenced `Config.example.xcconfig` — wrong

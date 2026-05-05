@@ -90,6 +90,14 @@ final class EntitlementService {
     private(set) var featureFlags: [String: BootstrapResponse.FeatureFlag] = [:]
     private(set) var hydrationState: HydrationState = .loading
 
+    /// Timestamp of the most recent server-confirmed hydrate (`hydrate(...)`).
+    /// Cached-snapshot restores do NOT update this — only fresh bootstrap /
+    /// configBootstrap responses do. Drives the launch-path skip in
+    /// `RootCoordinator.refreshEntitlementsIfStale` so the scenePhase .active
+    /// observer doesn't re-hit `/v1/config/bootstrap` immediately after the
+    /// launch `/v1/session/bootstrap` already hydrated the same data.
+    private(set) var lastHydratedAt: Date?
+
     /// Convenience for bool-valued feature flags like `disable_scan_parse`.
     /// Respects is_enabled: a disabled flag always returns nil so callers
     /// fall back to default behavior.
@@ -136,6 +144,7 @@ final class EntitlementService {
         self.quotas = map
         self.featureFlags = Dictionary(uniqueKeysWithValues: flags.map { ($0.key, $0) })
         self.hydrationState = .hydrated(source: .bootstrap)
+        self.lastHydratedAt = Date()
 
         persistSnapshot()
         Logger.entitlement.info(
@@ -315,4 +324,31 @@ final class EntitlementService {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter
     }()
+
+    // MARK: - Gate helper (CR2-W2)
+
+    /// Run `work` if `gate` is `.allowed`; otherwise present the paywall via
+    /// `paywallTrigger`. Centralises the 4-arm `EntitlementDecision` switch
+    /// so a partial-switch regression at any single call site can't silently
+    /// fail closed without the others (the 3 favorites sites + 2 voice sites
+    /// shared the same shape verbatim before this).
+    ///
+    /// `paywallTrigger` is a closure rather than a `PaywallTrigger?` so call
+    /// sites that DON'T present a paywall (Settings toggles that are read-
+    /// only when blocked) can pass `nil`-equivalent `{}`.
+    @discardableResult
+    func gate(
+        _ feature: FeatureGate,
+        paywall paywallTrigger: () -> Void,
+        allow work: () -> Void,
+    ) -> EntitlementDecision {
+        let decision = canAccess(feature)
+        switch decision {
+        case .allowed:
+            work()
+        case .blockedByTier, .blockedByQuota, .blockedByBilling:
+            paywallTrigger()
+        }
+        return decision
+    }
 }

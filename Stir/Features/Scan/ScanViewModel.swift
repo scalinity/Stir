@@ -62,6 +62,11 @@ final class ScanViewModel {
     private(set) var parseID: UUID?
     private(set) var lastLatencyMS: Int?
     private(set) var overallConfidence: Double?
+    /// JPEG bytes of the most recent capture. Held here so the review
+    /// screen can render a thumbnail of "what we looked at" without
+    /// duplicating capture-side state. UIImage decoding happens in the
+    /// view; this is just the wire data. Cleared on `resetToPrimer`.
+    private(set) var capturedImageData: Data?
 
     private let aiDispatch: AIDispatch
     private let pantryRepo: PantryItemRepository
@@ -84,6 +89,12 @@ final class ScanViewModel {
 
     func enterCapturing() {
         phase = .capturing
+    }
+
+    /// Stash the captured JPEG so the review screen can render a
+    /// thumbnail. Caller passes `nil` to clear (e.g. retake flow).
+    func setCapturedImageData(_ data: Data?) {
+        capturedImageData = data
     }
 
     /// Submit a captured image for AI parsing.
@@ -264,6 +275,7 @@ final class ScanViewModel {
         parseID = nil
         lastLatencyMS = nil
         overallConfidence = nil
+        capturedImageData = nil
     }
 
     #if DEBUG

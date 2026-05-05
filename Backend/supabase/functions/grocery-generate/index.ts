@@ -23,7 +23,7 @@ import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { GroceryGenerateRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
@@ -168,7 +168,7 @@ Deno.serve(async (req) => {
       return responseFromCache(hit, requestId);
     }
   } catch (err) {
-    userLog.warn('cache_read_failed', { err: String(err) });
+    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
   }
 
   // ---- Rate limit (IP)
@@ -339,7 +339,7 @@ Deno.serve(async (req) => {
   try {
     await writeCache(client, claims.canonical_user_key, body.source_id, FEATURE_KEY, 200, responseBody);
   } catch (err) {
-    userLog.warn('cache_write_failed', { err: String(err) });
+    userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
 
   userLog.info('request_complete', {

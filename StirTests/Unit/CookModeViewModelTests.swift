@@ -307,6 +307,7 @@ final class CookModeViewModelTests: XCTestCase {
             repository: timerRepo,
             sessionRepository: CookingSessionRepository(controller: controller),
             notificationCenter: notifyCenter,
+            liveActivityManager: nil,
         )
         let vm = CookModeViewModel(
             session: session,
@@ -467,6 +468,7 @@ final class CookModeViewModelTests: XCTestCase {
             repository: timerRepo,
             sessionRepository: CookingSessionRepository(controller: controller),
             notificationCenter: PermissiveNotificationCenter(),
+            liveActivityManager: nil,
         )
         let vm = CookModeViewModel(
             session: session,
@@ -534,6 +536,7 @@ final class CookModeViewModelTests: XCTestCase {
             repository: timerRepo,
             sessionRepository: CookingSessionRepository(controller: controller),
             notificationCenter: PermissiveNotificationCenter(),
+            liveActivityManager: nil,
         )
         return CookModeViewModel(
             session: session,
@@ -577,6 +580,312 @@ final class CookModeViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Transcript card (recordTurnTranscript)
+    //
+    // The voice-active transcript card pulls `lastUserTranscript` /
+    // `lastModelTranscript` set by `recordTurnTranscript`. The behavior
+    // contract has three branches worth pinning:
+    //
+    //   1. Both halves non-empty (normal turn) → both populate.
+    //   2. Only userText non-empty (tool-call-only turn) → userText
+    //      populates AND prior modelText is BLANKED so the card doesn't
+    //      pair fresh user input with stale Stir reply (review #1).
+    //   3. Only modelText non-empty (rare; e.g., proactive narration) →
+    //      modelText populates without disturbing prior userText.
+
+    func test_recordTurnTranscript_normalTurn_populatesBothFields() throws {
+        let vm = makeVM(session: try freshSession())
+        XCTAssertNil(vm.lastUserTranscript)
+        XCTAssertNil(vm.lastModelTranscript)
+
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(
+                turnIndex: 1,
+                userText: "How long should I sear it?",
+                modelText: "Four minutes on this side.",
+            ),
+        )
+
+        XCTAssertEqual(vm.lastUserTranscript, "How long should I sear it?")
+        XCTAssertEqual(vm.lastModelTranscript, "Four minutes on this side.")
+    }
+
+    func test_recordTurnTranscript_toolCallOnlyTurn_blanksStaleModelReply() throws {
+        let vm = makeVM(session: try freshSession())
+
+        // Turn 1: normal exchange — both halves populate.
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(
+                turnIndex: 1,
+                userText: "How long?",
+                modelText: "Four minutes.",
+            ),
+        )
+        XCTAssertEqual(vm.lastModelTranscript, "Four minutes.")
+
+        // Turn 2: tool-call-only — fresh user input, no spoken reply.
+        // The OLD model reply must NOT remain visible alongside the
+        // NEW user input — that pairing reads as "Stir replied to my
+        // latest utterance with this old reply".
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(
+                turnIndex: 2,
+                userText: "Next step",
+                modelText: "",
+            ),
+        )
+
+        XCTAssertEqual(vm.lastUserTranscript, "Next step")
+        XCTAssertNil(vm.lastModelTranscript,
+            "tool-call-only turn must blank prior model reply so card doesn't show stale STIR text")
+    }
+
+    func test_recordTurnTranscript_modelOnlyTurn_preservesUserText() throws {
+        let vm = makeVM(session: try freshSession())
+
+        // Seed a prior turn so userText is non-nil.
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(turnIndex: 1, userText: "How long?", modelText: "Four minutes."),
+        )
+
+        // Then a model-only update (rare — e.g., proactive narration).
+        // The blank-userText branch must not touch lastUserTranscript.
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(turnIndex: 2, userText: "", modelText: "About two and a half left."),
+        )
+
+        XCTAssertEqual(vm.lastUserTranscript, "How long?")
+        XCTAssertEqual(vm.lastModelTranscript, "About two and a half left.")
+    }
+
+    func test_recordTurnTranscript_attachVoiceDriverNil_clearsBothTranscripts() throws {
+        let vm = makeVM(session: try freshSession())
+
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(turnIndex: 1, userText: "u", modelText: "m"),
+        )
+        XCTAssertNotNil(vm.lastUserTranscript)
+        XCTAssertNotNil(vm.lastModelTranscript)
+
+        // Detaching the driver (e.g., closeVoiceSession path) must
+        // wipe transcripts so the next attach starts with a clean
+        // card. Carrying prior content into a fresh session would
+        // mislead the user about what they just said.
+        vm.attachVoiceDriver(nil)
+
+        XCTAssertNil(vm.lastUserTranscript)
+        XCTAssertNil(vm.lastModelTranscript)
+    }
+
+    func test_isVoiceActive_falseWhenStateClosedOrIdle() throws {
+        let vm = makeVM(session: try freshSession())
+        // Force user-intent flag true so the gating reduces to the
+        // state check alone — terminal states must STILL return false
+        // even when the user has explicitly engaged voice.
+        vm._testForceVoiceUIRequested(true)
+
+        // Default state — voiceState is nil; no driver attached.
+        XCTAssertFalse(vm.isVoiceActive)
+
+        vm._testForceVoiceState(.idle)
+        XCTAssertFalse(vm.isVoiceActive)
+
+        vm._testForceVoiceState(.closed)
+        XCTAssertFalse(vm.isVoiceActive)
+
+        vm._testForceVoiceState(.error)
+        XCTAssertFalse(vm.isVoiceActive)
+    }
+
+    func test_isVoiceActive_trueAcrossLiveStates() throws {
+        let vm = makeVM(session: try freshSession())
+        // User-intent flag must be set; otherwise live states still
+        // return false (the auto-engage prevention guard — see
+        // `test_isVoiceActive_falseWhenUIRequestedFalse_preventsAutoEngage`).
+        vm._testForceVoiceUIRequested(true)
+        let liveStates: [VoiceSessionState] = [
+            .connecting, .ready, .userSpeaking, .transcribing,
+            .thinking, .modelSpeaking, .toolCalling,
+            .refreshing, .fallingBack,
+        ]
+        for state in liveStates {
+            vm._testForceVoiceState(state)
+            XCTAssertTrue(vm.isVoiceActive,
+                "isVoiceActive should be true for state \(state.rawValue) when user has engaged voice")
+        }
+    }
+
+    /// Regression: at Cook Mode entry, `CookModeRoot.task` pre-warms
+    /// the voice driver, which transitions state through `.connecting`
+    /// → `.ready`. Without the user-intent gating, `isVoiceActive`
+    /// would return true on `.ready` and the voice-active chrome would
+    /// auto-show on entry without the user tapping anything (observed
+    /// 2026-04-27 — user reported "automatically starts you in voice
+    /// mode"). This test pins the new gating: `.ready` alone is not
+    /// enough; `isVoiceUIRequested` must also be true.
+    func test_isVoiceActive_falseWhenUIRequestedFalse_preventsAutoEngage() throws {
+        let vm = makeVM(session: try freshSession())
+        // Simulate post-preWarm state without the user having tapped.
+        vm._testForceVoiceUIRequested(false)
+        for state: VoiceSessionState in [.connecting, .ready, .userSpeaking, .modelSpeaking] {
+            vm._testForceVoiceState(state)
+            XCTAssertFalse(vm.isVoiceActive,
+                "isVoiceActive must stay false on \(state.rawValue) until user engages voice")
+        }
+    }
+
+    func test_endVoiceMode_clearsFlagAfterCall() async throws {
+        let vm = makeVM(session: try freshSession())
+        vm._testForceVoiceUIRequested(true)
+        vm._testForceVoiceState(.userSpeaking)
+        XCTAssertTrue(vm.isVoiceActive)
+
+        await vm.endVoiceMode()
+
+        XCTAssertFalse(vm.isVoiceActive,
+            "endVoiceMode must drop isVoiceUIRequested so chrome reverts")
+    }
+
+    /// Verifies the "responsive UI" property: the flag flip happens
+    /// in the synchronous prologue of `endVoiceMode`, before any
+    /// `await` suspension. We spawn the call into a Task, yield once
+    /// so the MainActor scheduler runs the spawned task to its first
+    /// suspension (or completion), and then assert the flag is
+    /// already false BEFORE awaiting the Task itself. If the flip
+    /// were post-await, the assertion would race the close work.
+    ///
+    /// Caveat: with no driver attached, `closeVoiceSession` short-
+    /// circuits at its `guard let driver` and never actually
+    /// suspends, so this test can't distinguish "flipped before
+    /// await" from "Task ran to completion synchronously" — both
+    /// satisfy the assertion. The contract is documented in the
+    /// production-code comment + the explicit ordering of
+    /// `isVoiceUIRequested = false` before `await closeVoiceSession()`.
+    /// A mock-driver harness with an awaitable close would tighten
+    /// this further; tracked as future work.
+    func test_endVoiceMode_clearsFlagBeforeAsyncWork() async throws {
+        let vm = makeVM(session: try freshSession())
+        vm._testForceVoiceUIRequested(true)
+        vm._testForceVoiceState(.userSpeaking)
+        XCTAssertTrue(vm.isVoiceActive)
+
+        let endTask = Task { await vm.endVoiceMode() }
+        // Yield current MainActor execution so the spawned Task can
+        // run cooperatively up to its first suspension point. After
+        // resumption here the synchronous prologue (flag flip) has
+        // executed.
+        await Task.yield()
+        XCTAssertFalse(vm.isVoiceActive,
+            "flag must be cleared in the synchronous prologue, before any await")
+
+        await endTask.value
+        XCTAssertFalse(vm.isVoiceActive)
+    }
+
+    func test_endVoiceMode_skipsTelemetryWhenNoDriverAttached() async throws {
+        // Defensive check on Suggestion #3 from the 2026-04-27 review:
+        // `endVoiceMode` is theoretically reachable without a driver
+        // (the listening pill normally only renders with a live
+        // session, but a future state-machine quirk could surface it
+        // pill-less). We must not emit `voice_stopped` for a session
+        // that never existed. Behavioral pin: flag still clears, no
+        // crash, no exception.
+        let vm = makeVM(session: try freshSession())
+        vm._testForceVoiceUIRequested(true)
+        vm._testForceVoiceState(.userSpeaking)
+        // No driver attached — `voiceDriver` is nil by default.
+
+        await vm.endVoiceMode()
+
+        XCTAssertFalse(vm.isVoiceActive)
+        // Telemetry skip is best-verified by absence; this test
+        // documents the behavior contract. A PostHogClient stub that
+        // records emissions would let us assert non-emission directly;
+        // not yet wired (would require wider PostHog DI).
+    }
+
+    func test_handleMicTap_engageFailureClearsFlagSoUserCanRetry() async throws {
+        // Regression for Warning #1 from the 2026-04-27 review:
+        // `handleMicTap` flips `isVoiceUIRequested = true` synchronously
+        // before awaiting `beginVoiceTurnInner()`. When that throws
+        // (`recognizerUnavailable` is the path with no driver attached
+        // — exact scenario in this unit test), the flag must be
+        // cleared so the chrome reverts to tap-mode and the user sees
+        // the "Ask with voice" button to retry. Without the cleanup,
+        // the voice chrome stayed on screen showing a stuck pill with
+        // copy that read "Listening — Tap to talk" but tapping closed
+        // voice mode entirely.
+
+        // Premium-active entitlement so the entitlement gate passes
+        // and we actually reach the engage path (without this, the
+        // gate returns early with a paywall trigger and the test
+        // would pass for the wrong reason).
+        let entitlements = EntitlementService(keychain: MockKeychain())
+        entitlements.hydrate(from: Self.premiumActiveEntitlements())
+
+        let session = try freshSession()
+        let vm = CookModeViewModel(
+            session: session,
+            recipePlan: recipePlan,
+            household: household,
+            source: .solve,
+            cookingSessionRepository: CookingSessionRepository(controller: controller),
+            cookTimerRepository: CookTimerRepository(controller: controller),
+            timerService: TimerService(
+                repository: CookTimerRepository(controller: controller),
+                sessionRepository: CookingSessionRepository(controller: controller),
+                notificationCenter: FakeNotificationCenter(),
+                liveActivityManager: nil,
+            ),
+            entitlements: entitlements,
+        )
+        XCTAssertFalse(vm.isVoiceActive)
+
+        // No driver attached, no rebuild closure → engage path runs:
+        // sets `isVoiceUIRequested = true`, then `beginVoiceTurnInner`
+        // throws `recognizerUnavailable` (the `guard let voiceDriver`
+        // path). The `defer` cleanup in the catch chain must clear the
+        // flag so the chrome reverts.
+        await vm.handleMicTap()
+
+        XCTAssertFalse(vm.isVoiceActive,
+            "engage-path failure must clear isVoiceUIRequested so chrome reverts to tap-mode")
+    }
+
+    // MARK: - Entitlement helpers (for tests that need to bypass the
+    //         paywall gate in handleMicTap)
+
+    private static func premiumActiveEntitlements() -> BootstrapResponse.Entitlements {
+        BootstrapResponse.Entitlements(
+            tier: .premium,
+            billingState: .active,
+            isTrial: false,
+            expiresAt: nil,
+            voiceEnabled: true,
+            billingRetryBanner: false,
+            quotas: [
+                BootstrapResponse.Quota(
+                    featureKey: .voiceCookSession,
+                    used: 0,
+                    cap: 13,
+                    periodEnd: "2026-05-17",
+                ),
+                BootstrapResponse.Quota(
+                    featureKey: .dinnerSolve,
+                    used: 0,
+                    cap: 40,
+                    periodEnd: "2026-05-17",
+                ),
+                BootstrapResponse.Quota(
+                    featureKey: .recipeImport,
+                    used: 0,
+                    cap: 100_000,
+                    periodEnd: "2026-05-17",
+                ),
+            ],
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeVM(session: CookingSession, source: CookModeViewModel.EntrySource = .solve) -> CookModeViewModel {
@@ -592,6 +901,7 @@ final class CookModeViewModelTests: XCTestCase {
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),
                 notificationCenter: FakeNotificationCenter(),
+                liveActivityManager: nil,
             ),
         )
     }

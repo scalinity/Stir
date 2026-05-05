@@ -29,17 +29,20 @@ import SwiftUI
 
 struct PrimaryButton: View {
     let title: String
+    let trailingIcon: Image?
     let isBusy: Bool
     let isDisabled: Bool
     let action: () -> Void
 
     init(
         title: String,
+        trailingIcon: Image? = nil,
         isBusy: Bool = false,
         isDisabled: Bool = false,
         action: @escaping () -> Void,
     ) {
         self.title = title
+        self.trailingIcon = trailingIcon
         self.isBusy = isBusy
         self.isDisabled = isDisabled
         self.action = action
@@ -58,6 +61,13 @@ struct PrimaryButton: View {
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.paper50)
+                if let trailingIcon, !isBusy {
+                    trailingIcon
+                        // justification: 16pt trailing-icon glyph aligned with .labelLg cap-height; matches mockup-04 §Review CTA arrow proportions
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.Stir.paper50)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: 52)

@@ -29,7 +29,7 @@
 // payloads, auth header typos) should not generate retry storms on RC's
 // side. Only signature verify (a real security boundary) returns 401.
 
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import {
@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
   try {
     parsedJson = JSON.parse(rawBody);
   } catch (err) {
-    log.warn('json_parse_failed', { err: String(err) });
+    log.warn('json_parse_failed', { err: sanitizeErrorForLog(err) });
     // Deliberately DO NOT store raw attacker-chosen bytes. The Zod
     // `issues` payload in the logger + the `json_parse_failed` log line
     // carry enough for debugging; persisting raw body content into the

@@ -254,6 +254,28 @@ struct LiveTurnSummary: Sendable, Equatable {
     let endedAt: Date
 }
 
+/// Snapshot of the textual exchange for a single Live turn, fired
+/// alongside `LiveTurnSummary` on `turnComplete`. Used by the voice-
+/// active Cook Mode UI to render the YOU SAID / STIR transcript card.
+///
+/// `userText`  — concatenation of every server-side `inputTranscription`
+///                delta delivered during the turn. Empty when the server
+///                emitted no transcription frames (very short utterances
+///                or transcription-disabled mints).
+/// `modelText` — concatenation of every `outputTranscription` /
+///                `inlineText` delta. Empty for tool-call-only turns
+///                where the model produced no spoken response.
+///
+/// Either field can be empty independently; the consumer decides
+/// whether to render with one-sided content. Distinct from
+/// `LiveTurnSummary` so token / latency aggregation stays separate
+/// from the UI-facing transcript display path.
+struct LiveTurnTranscript: Sendable, Equatable {
+    let turnIndex: Int
+    let userText: String
+    let modelText: String
+}
+
 @MainActor
 final class RealtimeSession: VoiceSessionDriver {
 
@@ -262,6 +284,18 @@ final class RealtimeSession: VoiceSessionDriver {
     let pathLabel: VoiceSessionPath = .liveAPI
 
     var currentState: VoiceSessionState { stateMachine.state }
+
+    /// Latest peak amplitude from either the mic capture or the
+    /// playback path, whichever is hotter right now. Half-duplex (the
+    /// mic is muted during model speech and vice versa per the state
+    /// machine), so `max` cleanly picks the active direction without
+    /// branching on state. Returns 0 before `preWarm()` and after
+    /// `close()` (audio pipeline gone). UI reads at TimelineView tick
+    /// rate and applies its own attack/decay smoothing.
+    var currentAudioLevel: Float {
+        guard let pipeline = audioPipeline else { return 0 }
+        return max(pipeline.currentMicLevel, pipeline.currentOutputLevel)
+    }
 
     /// Backend-minted session id. Set at preWarm success; nil before
     /// preWarm and after close. VM uses this as the PostHog $ai_trace_id
@@ -348,6 +382,13 @@ final class RealtimeSession: VoiceSessionDriver {
     // Per-turn accumulator. Reset at `flushPendingReport()`. so hands-free
     // turns (which never re-enter beginTurn) get clean slate per turn.
     private var currentTurnInlineText: String?
+    /// Per-turn accumulator for what the SERVER heard the user say —
+    /// concatenation of every `inputTranscription.text` delta delivered
+    /// during the turn. Reset alongside `currentTurnInlineText`. Drained
+    /// into the `onTurnTranscriptFinalized` callback when the turn
+    /// finalizes; UI uses it to render the YOU SAID side of the
+    /// voice-active transcript card.
+    private var currentTurnUserTranscript: String?
     private var turnCompleteContinuation: CheckedContinuation<Void, Error>?
     /// Accumulates per-chunk `usageMetadata` deltas across the current
     /// turn. Reset at `flushPendingReport()`. See `TurnUsageAccumulator`
@@ -548,6 +589,13 @@ final class RealtimeSession: VoiceSessionDriver {
         let submittedAt: Date
         let endedAt: Date
         let nonce: UUID
+        /// Textual exchange for this turn, latched at finalizeTurn
+        /// time (pre-reset). nil iff both user and model transcripts
+        /// were empty for the turn — consumers (`onTurnTranscriptFinalized`)
+        /// don't fire callbacks on empty content. Independent of the
+        /// token / latency aggregation contract — text is best-effort
+        /// observability, summary numbers gate cap math.
+        let transcript: LiveTurnTranscript?
     }
     private var pendingReport: PendingTurnReport?
 
@@ -603,6 +651,15 @@ final class RealtimeSession: VoiceSessionDriver {
     /// and the backend PostHog capture are independent observability
     /// paths. Always invoked on MainActor.
     var onTurnFinalized: (@MainActor (LiveTurnSummary) -> Void)?
+
+    /// Fires alongside `onTurnFinalized` on every `turnComplete`,
+    /// carrying the textual exchange so the voice-active Cook Mode UI
+    /// can render the YOU SAID / STIR card. Distinct from
+    /// `onTurnFinalized` because the transcript display path doesn't
+    /// share the token/latency aggregation contract — text is
+    /// best-effort observability, summary numbers gate cap math.
+    /// Always invoked on MainActor.
+    var onTurnTranscriptFinalized: (@MainActor (LiveTurnTranscript) -> Void)?
 
     /// Fires when `refreshSession()` RESOLVES — success OR failure. Wired
     /// to CookModeViewModel.recordVoiceSessionRefresh which emits the
@@ -1077,6 +1134,7 @@ final class RealtimeSession: VoiceSessionDriver {
         // Reset per-turn accumulators for the first turn; subsequent
         // hands-free turns get the same reset via `flushPendingReport()`.
         currentTurnInlineText = nil
+        currentTurnUserTranscript = nil
         turnUsageAccumulator.reset()
         turnStartedAt = Date()
 
@@ -1324,6 +1382,7 @@ final class RealtimeSession: VoiceSessionDriver {
         finalizeWasTransportError = false
         clearHouseholdContextCache()  // P3-H
         currentTurnInlineText = nil
+        currentTurnUserTranscript = nil
         turnUsageAccumulator.reset()
         #if DEBUG
         VoiceSessionLog.sessionEnd()
@@ -1535,6 +1594,7 @@ final class RealtimeSession: VoiceSessionDriver {
             // so accumulators start fresh.
             turnUsageAccumulator = TurnUsageAccumulator()
             currentTurnInlineText = nil
+            currentTurnUserTranscript = nil
             lastRefreshedAtTurn = turnCount
 
             let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -1603,6 +1663,17 @@ final class RealtimeSession: VoiceSessionDriver {
                 // connections accumulating per failed refresh, which
                 // at beta user cadence compounds meaningfully.
                 oldTransport?.close()
+                // CA2-6 fix: also tear down the mic forwarder. After the
+                // swap commit, micForwardTask reads `self.transport` per
+                // iteration and is now writing PCM frames to the broken
+                // newTransport. Without explicit cancel, the forwarder
+                // drips send-failures + CPU + network until the VM closes
+                // the driver via C.3 fallback — which can be seconds
+                // away on a slow tap. Cancel here so the next iteration
+                // exits, then null the slot so a future preWarm can
+                // restart it cleanly.
+                micForwardTask?.cancel()
+                micForwardTask = nil
                 // P1-J: route via .fallingBack → .error so the grammar
                 // records the failure path explicitly. .fallingBack is
                 // the canonical "Live → C.3 handoff" state per
@@ -2013,6 +2084,24 @@ final class RealtimeSession: VoiceSessionDriver {
         // the handler clears it for the next turn.
         let containedToolCall = turnContainedToolCall
 
+        // Latch the textual exchange BEFORE the per-turn reset below
+        // so PendingTurnReport carries it through to flushPendingReport,
+        // which is where `onTurnTranscriptFinalized` fires the snapshot
+        // up to the VM. Either side may be empty; consumers decide
+        // whether to render. Trimmed because servers occasionally emit
+        // leading/trailing whitespace in delta frames.
+        let userTextThisTurn = (currentTurnUserTranscript ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelTextThisTurn = (currentTurnInlineText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let transcriptSnapshot: LiveTurnTranscript? = (
+            userTextThisTurn.isEmpty && modelTextThisTurn.isEmpty
+        ) ? nil : LiveTurnTranscript(
+            turnIndex: turnCount,
+            userText: userTextThisTurn,
+            modelText: modelTextThisTurn,
+        )
+
         #if DEBUG
         VoiceSessionLog.log("turn.complete", [
             "turn": turnCount,
@@ -2097,6 +2186,7 @@ final class RealtimeSession: VoiceSessionDriver {
         // Reset per-turn accumulators EXCEPT `turnUsageAccumulator` —
         // it stays populated so `flushPendingReport` can snapshot it.
         currentTurnInlineText = nil
+        currentTurnUserTranscript = nil
         turnStartedAt = now
         // Reset TTFA anchors so the next turn measures fresh. Must land
         // AFTER the `ttfaMs` compute above; resetting before the snapshot
@@ -2184,6 +2274,7 @@ final class RealtimeSession: VoiceSessionDriver {
             submittedAt: startedAt,
             endedAt: now,
             nonce: nonce,
+            transcript: transcriptSnapshot,
         )
 
         // Short-circuit: if we already accumulated any non-zero usage
@@ -2385,6 +2476,19 @@ final class RealtimeSession: VoiceSessionDriver {
             endedAt: pending.endedAt,
         )
         onTurnFinalized?(summary)
+
+        // Surface the textual exchange to the UI layer for the voice-
+        // active transcript card. Pulled from the `pending` snapshot
+        // (captured pre-reset) — `currentTurnInlineText` and
+        // `currentTurnUserTranscript` are already nil at this point
+        // because the per-turn reset block above runs before
+        // `flushPendingReport`. Either side may be empty (tool-call-
+        // only turns produce no model text; very short utterances may
+        // produce no user transcription frames) — consumers decide
+        // whether to render.
+        if let transcript = pending.transcript {
+            onTurnTranscriptFinalized?(transcript)
+        }
     }
 
     // MARK: - Private: mint + setup
@@ -2806,6 +2910,26 @@ final class RealtimeSession: VoiceSessionDriver {
             // User-transcript ring buffer REMOVED 2026-04-22 PM — recap
             // is step-position-only. input.text is still logged above for
             // diagnostic trace purposes (VoiceSessionLog `transcription.user`).
+            //
+            // 2026-04-25: also accumulate into `currentTurnUserTranscript`
+            // for the voice-active transcript card. Captured per-turn,
+            // drained via `onTurnTranscriptFinalized` in `finalizeTurn`,
+            // reset alongside `currentTurnInlineText`. Independent of the
+            // recap path — recap is step-position-only by design.
+            //
+            // ASSUMPTION: `input.text` is a delta, not a cumulative
+            // transcription. The model-side accumulator at line ~2876
+            // (`currentTurnInlineText += output.text`) ships in
+            // production with the same delta assumption and works
+            // correctly, so by symmetry input.text is also a delta. If
+            // device testing of voice mode reveals stutter ("How long
+            // do How long do you se How long do you sear it?") the
+            // protocol is sending cumulatives — flip this to overwrite
+            // (`currentTurnUserTranscript = input.text`) and check
+            // outputTranscription for the same drift. Verified deltas
+            // would let us drop this comment. Filed against ADR 0014
+            // sharp-edges as item to confirm on first device run.
+            currentTurnUserTranscript = (currentTurnUserTranscript ?? "") + input.text
         }
         if let output = content.outputTranscription, !output.text.isEmpty {
             // Accumulate model transcript into currentTurnInlineText
@@ -3364,6 +3488,7 @@ final class RealtimeSession: VoiceSessionDriver {
                 // be double-counting by persisting here. The next
                 // user-visible tap / utterance will start a fresh turn.
                 currentTurnInlineText = nil
+                currentTurnUserTranscript = nil
                 turnStartedAt = nil
                 userTurnEndAt = nil
                 firstModelAudioAt = nil
@@ -3559,6 +3684,7 @@ final class RealtimeSession: VoiceSessionDriver {
         // back to .ready (on refresh success, handled in
         // handleTransportError's .success branch) or to .error.
         currentTurnInlineText = nil
+        currentTurnUserTranscript = nil
         turnStartedAt = nil
         userTurnEndAt = nil
         firstModelAudioAt = nil

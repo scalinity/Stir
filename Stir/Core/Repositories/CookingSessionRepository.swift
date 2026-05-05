@@ -100,8 +100,12 @@ final class CookingSessionRepository {
     /// Nil if nothing to resume.
     func resumableSession(for household: HouseholdProfile) throws -> CookingSession? {
         let request = NSFetchRequest<CookingSession>(entityName: "CookingSession")
+        // `recipePlan.deletedAt == nil` guards against the user
+        // soft-deleting a plan from the Saved tab while a session is
+        // still active for it — without this, Tonight's Resume card
+        // would deep-link into Cook Mode for a tombstoned recipe.
         request.predicate = NSPredicate(
-            format: "household == %@ AND deletedAt == nil AND endedAt == nil AND sessionStatus == %@",
+            format: "household == %@ AND deletedAt == nil AND endedAt == nil AND sessionStatus == %@ AND recipePlan.deletedAt == nil",
             household,
             CookingSession.Status.active.rawValue,
         )
@@ -152,9 +156,24 @@ final class CookingSessionRepository {
 
     func savedMealEntries(for household: HouseholdProfile) throws -> [SavedMealEntry] {
         let request = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
+        // Only surface plans the user has actually engaged with: starred
+        // (favorited) OR has at least one non-deleted completed cook
+        // session. Without this guard every dinner-solve's three
+        // RecipePlans land in the Saved tab automatically — observed as
+        // duplicate / auto-saved meals in the wild.
+        //
+        // SUBQUERY (not ANY) — both `deletedAt == nil` and
+        // `sessionStatus == completed` must match the SAME session row;
+        // ANY would let a non-deleted session and a separate completed
+        // session jointly satisfy the filter.
         request.predicate = NSPredicate(
-            format: "household == %@ AND deletedAt == nil",
+            format: """
+            household == %@ AND deletedAt == nil AND \
+            (isFavorite == YES OR \
+            SUBQUERY(cookingSessions, $s, $s.deletedAt == nil AND $s.sessionStatus == %@).@count > 0)
+            """,
             household,
+            CookingSession.Status.completed.rawValue,
         )
         request.relationshipKeyPathsForPrefetching = [
             "cookingSessions",

@@ -3,6 +3,14 @@
 // Phase-driven routing: loading → (onboarding | ready | offline | error).
 // RootCoordinator is the Observable source of truth; every branch reads from
 // coordinator.phase.
+//
+// Step 9 (2026-04-25): the post-launch shell switched from a single
+// TonightHomeView push to a 3-tab `StirTabRoot` (Tonight / Saved /
+// Settings) — Saved + Settings used to live inside Tonight as a list
+// destination + a top-trailing toolbar push; both surfaces graduated
+// to top-level tabs to match the mockup-03 reference image. The
+// offline-fallback banner now floats above the tab shell rather than
+// above Tonight specifically.
 
 import SwiftUI
 
@@ -32,12 +40,12 @@ struct RootView: View {
                 }
 
             case .ready:
-                TonightHomeView(coordinator: coordinator)
+                StirTabRoot(coordinator: coordinator)
 
             case .offlineFallback:
                 VStack(spacing: 0) {
                     OfflineBanner(onRetry: coordinator.retry)
-                    TonightHomeView(coordinator: coordinator)
+                    StirTabRoot(coordinator: coordinator)
                 }
             }
         }
@@ -71,7 +79,7 @@ struct RootView: View {
             if new == .active {
                 ReactivationScheduler.shared.cancel()
                 if coordinator.phase == .ready || coordinator.phase == .offlineFallback {
-                    Task { await coordinator.refreshEntitlementsOnForeground() }
+                    Task { await coordinator.refreshEntitlementsIfStale() }
                 }
                 // widget_added Retention funnel (spec §15). Widget process
                 // writes a first-seen timestamp on its first getTimeline
@@ -127,6 +135,274 @@ struct RootView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - StirTabRoot
+
+/// Three-tab shell: Tonight (default), Saved, Settings.
+///
+/// Visual: a custom floating-pill tab bar (`StirCustomTabBar`) replaces
+/// the default iOS 26 glass `UITabBar`. Each tab's content carries
+/// `.toolbar(.hidden, for: .tabBar)` so the system bar's chrome and
+/// reserved safe-area space disappear; we then inject our pill bar
+/// via `.safeAreaInset(edge: .bottom)` so each tab's content sees a
+/// safe area that excludes the bar's height (no overlap on scroll
+/// views) and the bar floats over the home-indicator gap. `TabView`
+/// itself stays as the selection driver — it preserves per-tab
+/// `NavigationStack` push history and per-tab `@State` across
+/// selection changes (a `switch`-based replacement would lose both).
+///
+/// Selection is driven by `coordinator.selectedTab` so Tonight's
+/// bookmark-jump button (and any future deep-link that wants to
+/// land on a specific tab) can flip tabs by writing one observable
+/// property.
+///
+/// Saved + Settings are wrapped in their own `NavigationStack` so
+/// each tab keeps its own back-stack across tab switches (per
+/// platform convention). Tonight intentionally does NOT use a
+/// NavigationStack — the screen title is rendered as scroll-view
+/// content (mockup-03), not as a navigation-bar title, and the
+/// only push destinations were Saved + Settings (now their own tabs).
+private struct StirTabRoot: View {
+    @Bindable var coordinator: RootCoordinator
+
+    var body: some View {
+        // `@Bindable` exposes a Binding over `coordinator.selectedTab`
+        // directly (`$coordinator.selectedTab`), so the manual
+        // Binding(get:set:) closure isn't needed.
+        TabView(selection: $coordinator.selectedTab) {
+            TonightHomeView(coordinator: coordinator)
+                .toolbar(.hidden, for: .tabBar)
+                .tag(RootCoordinator.Tab.tonight)
+
+            savedTab
+                .toolbar(.hidden, for: .tabBar)
+                .tag(RootCoordinator.Tab.saved)
+
+            NavigationStack {
+                SettingsRootView()
+            }
+            .toolbar(.hidden, for: .tabBar)
+            .tag(RootCoordinator.Tab.settings)
+        }
+        // The custom bar is injected via `.safeAreaInset` rather than
+        // `.overlay` so each tab's scrolling content reserves its own
+        // bottom space — list content stays fully reachable and the
+        // last row never sits under the bar.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            StirCustomTabBar(selection: $coordinator.selectedTab)
+        }
+    }
+
+    /// Saved tab body. Saved meals require a household profile — the
+    /// `.ready` phase guarantees one (bootstrap eager-creates it), but
+    /// guard defensively so an unexpected nil state shows a friendly
+    /// empty rather than crashing.
+    @ViewBuilder
+    private var savedTab: some View {
+        NavigationStack {
+            if let household = coordinator.household.profile {
+                SavedMealsView(
+                    household: household,
+                    aiDispatch: coordinator.aiDispatch,
+                )
+            } else {
+                VStack(spacing: CGFloat.Stir.space3) {
+                    Image.Stir.bookmark
+                        .font(.system(size: CGFloat.Stir.iconXl, weight: .regular))
+                        .foregroundStyle(Color.Stir.ink300)
+                    Text("Saved meals load once your kitchen is set up.")
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, CGFloat.Stir.space5)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.Stir.paper50)
+                .navigationTitle("Saved meals")
+                .navigationBarTitleDisplayMode(.large)
+            }
+        }
+    }
+}
+
+// MARK: - StirCustomTabBar
+
+/// Flat edge-to-edge tab bar — replaces iOS 26's glass `UITabBar`.
+///
+/// Visual grammar (mirrors the user-provided screenshot reference;
+/// supersedes the earlier floating-pill draft after design review):
+///   - Full-width `paper.50` background with a 1pt `divider` hairline
+///     across the top edge (matches mockup-03 §StirTabBar JSX exactly).
+///   - Three equal-width cells inside (`maxWidth: .infinity`). Each
+///     cell stacks an SF Symbol (~22pt) over a `.labelMd` label, both
+///     in the same color so the active state reads as a clean color
+///     flip with no sub-pill highlight.
+///   - Active cell: `ember.600` icon + label. Inactive: `ink.500`
+///     icon + label (matching color across icon and label is a
+///     deliberate departure from the standard iOS bar's slightly-darker
+///     icon — the screenshot reads as a single-tone column per cell).
+///   - The Saved bookmark stays outlined regardless of active state
+///     per the screenshot. (Earlier draft swapped to `bookmark.fill`
+///     when active per mockup-03 JSX; the user-provided reference is
+///     newer and overrides — outlined is the v1 visual.)
+///
+/// Reduce Motion: the selection write goes through `.stirAnimation`,
+/// so the color flip is animated unless RM is on.
+///
+/// Accessibility: each cell is a `Button` with `accessibilityLabel(
+/// "<Name> tab")` + `.isSelected` trait when active. VoiceOver reads
+/// "Tonight tab, selected" — HIG-conventional for custom tab bars.
+private struct StirCustomTabBar: View {
+    @Binding var selection: RootCoordinator.Tab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            tabCell(.tonight, label: "Tonight", icon: Image.Stir.fork)
+            tabCell(.saved, label: "Saved", icon: Image.Stir.bookmark)
+            tabCell(.settings, label: "Settings", icon: Image.Stir.settings)
+        }
+        // 12pt top breathing room; −14pt bottom is intentional negative
+        // padding that encroaches into the system home-indicator inset
+        // so the labels sit visually close to the home-indicator pill.
+        // Trade-off: the bar's measured frame is shorter than its
+        // visual extent (`safeAreaInset` reserves the smaller value),
+        // which is why the parent ScrollView's bottom padding is
+        // bumped to 64pt to clear the gap. The two values are coupled
+        // — change one, recheck the other. Locked at 12/−14 per design
+        // review 2026-04-28.
+        .padding(.top, CGFloat.Stir.space3)                // 12pt
+        .padding(.bottom, -CGFloat.Stir.space3Half)        // −14pt
+        .frame(maxWidth: .infinity)
+        // `ignoresSafeAreaEdges: .bottom` extends the paper-50 fill
+        // INTO the home-indicator strip so a tab whose content uses a
+        // non-paper-50 background (Saved's List, Settings's grouped
+        // List) doesn't show a colored seam below the bar.
+        .background(Color.Stir.paper50, ignoresSafeAreaEdges: .bottom)
+        .overlay(alignment: .top) {
+            // 1pt hairline matches mockup-03 (`borderTop: 1px solid
+            // ink100`) and also gives the bar a definite top edge when
+            // the content above is also `paper.50` (no fill contrast).
+            Rectangle()
+                .fill(Color.Stir.divider)
+                .frame(height: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func tabCell(
+        _ tab: RootCoordinator.Tab,
+        label: String,
+        icon: Image,
+    ) -> some View {
+        let isActive = selection == tab
+        // Icon and label share one color per cell — single-tone column
+        // per the screenshot. Active = ember; inactive = ink.500 (chosen
+        // over ink.700 so the contrast against the paper.50 bar reads
+        // as "quiet" rather than "bold").
+        let color = isActive ? Color.Stir.ember600 : Color.Stir.ink500
+        return Button {
+            // Plain assignment — no `withStirAnimation` wrapping. The
+            // observed-property write doesn't always carry the
+            // animation transaction through `@Observable`'s tracking,
+            // and even when it does, the cleaner pattern is to
+            // animate the visible property locally via
+            // `.stirAnimation(_:value:)` on the modifier chain below.
+            // That approach is Reduce-Motion-aware out of the box.
+            selection = tab
+        } label: {
+            VStack(spacing: CGFloat.Stir.space1) {              // 4pt
+                icon
+                    // justification: 22pt icon — between iconMd (20)
+                    // and iconLg (28). One-off for the tab-bar visual
+                    // weight; promote to a token if a second bar
+                    // adopts the size.
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(color)
+                Text(label)
+                    .stirFont(.labelMd)
+                    .foregroundStyle(color)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Reduce-Motion-aware color flip. `.stirAnimation` collapses
+        // to identity under RM, so the selection cue is preserved
+        // (color still changes) without animating the transition.
+        .stirAnimation(.Stir.standard, value: isActive)
+        .accessibilityLabel("\(label) tab")
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
+
+#Preview("StirCustomTabBar — light") {
+    StatefulTabBarPreview()
+        .padding(.bottom, 0)
+        .frame(width: 390, height: 120)
+        .background(Color.Stir.paper100)
+        .preferredColorScheme(.light)
+}
+
+#Preview("StirCustomTabBar — dark") {
+    StatefulTabBarPreview()
+        .frame(width: 390, height: 120)
+        .background(Color.Stir.paper100)
+        .preferredColorScheme(.dark)
+}
+
+/// Mount-path preview — exercises `.safeAreaInset(edge: .bottom)`
+/// over a non-`paper.50` background (mimics what the Saved tab's
+/// List looks like underneath) AND simulates the system's
+/// home-indicator inset via a faint gutter strip below the safe-
+/// area-inset boundary. Two things become verifiable:
+///   1. `ignoresSafeAreaEdges: .bottom` on the bar's bg correctly
+///      fills the gutter (no colored seam from the white-ish List bg
+///      bleeding through); and
+///   2. With negative `.padding(.bottom, ...)` on the bar, the cell
+///      content visibly overflows the inset's reserved frame INTO
+///      the simulated gutter — the home-indicator-encroach trade-off
+///      is visible at design-time rather than only on-device.
+#Preview("StirCustomTabBar — over Saved-style background") {
+    StatefulTabBarMountPreview()
+        .preferredColorScheme(.light)
+}
+
+private struct StatefulTabBarPreview: View {
+    @State private var tab: RootCoordinator.Tab = .tonight
+    var body: some View {
+        StirCustomTabBar(selection: $tab)
+    }
+}
+
+private struct StatefulTabBarMountPreview: View {
+    @State private var tab: RootCoordinator.Tab = .saved
+    var body: some View {
+        // White-ish List-style fill on top, to expose any bar-bg-vs-
+        // content seam at the home-indicator boundary. Below the bar,
+        // a faint gray gutter simulates iOS's reserved home-indicator
+        // inset (which previews don't render on their own). The
+        // gutter makes the bar's negative-padding visual encroach
+        // visible at design-time — cell content (icons + labels)
+        // should overflow into the gutter, while the bar's `paper.50`
+        // bg should fill the gutter end-to-end (no white-bg seam).
+        VStack(spacing: 0) {
+            Color.white
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    StirCustomTabBar(selection: $tab)
+                }
+            Rectangle()
+                .fill(Color.gray.opacity(0.15))
+                .frame(height: 34)              // typical iPhone home-indicator inset
+                .overlay(
+                    Capsule()
+                        .fill(Color.black.opacity(0.5))
+                        .frame(width: 134, height: 5)
+                        .padding(.bottom, 8),
+                    alignment: .bottom,
+                )
         }
     }
 }

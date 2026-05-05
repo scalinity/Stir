@@ -25,6 +25,11 @@ extension CGFloat.Stir {
     /// 18pt — elevated accent cards (inline paywall card, emphasized
     /// inline blocks with decorative corner glow).
     static let radiusAccent: CGFloat = 18
+    /// 20pt — Tonight hero card silhouette + first-use empty-state
+    /// container (5 sites in TonightHomeView). FD1-3: promoted from
+    /// "literal in TonightHomeView" once the second adoption made it a
+    /// de facto token.
+    static let radiusHero: CGFloat = 20
     /// 22pt — centered modals (voice paywall, substitution result).
     static let radiusXl: CGFloat = 22
     /// 24pt — bottom-sheet top corners (iOS `.medium` detent).

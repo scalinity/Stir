@@ -148,7 +148,12 @@ struct DinnerSolveRequest: Encodable, Sendable {
         }
     }
 
-    struct IngredientLite: Encodable, Sendable {
+    /// `Equatable` conformance lets `RootCoordinator.SolveAgainEntry`
+    /// synthesize Equatable so a SwiftUI `.onChange(of:)` on the seeded
+    /// pantry binding fires only when the actual ingredient list shifts
+    /// (CR2-W7 rationale, 2026-05-04). All three stored fields are
+    /// already Equatable, so the synthesis is free.
+    struct IngredientLite: Encodable, Sendable, Equatable {
         let displayName: String
         let canonicalSlug: String?
         let amountText: String?

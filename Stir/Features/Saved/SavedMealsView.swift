@@ -106,18 +106,48 @@ struct SavedMealsView: View {
                 list
             }
         }
-        .navigationTitle("Saved meals")
-        .navigationBarTitleDisplayMode(.large)
+        // Page bg + nav bar tinted paper50 keeps the saved-tab surface
+        // continuous with Tonight (matches mockup 10 §Saved Library).
+        //
+        // Nav bar is hidden so we can render the serif title inline in
+        // the safeAreaInset header — the `.principal` ToolbarItem
+        // approach grew the bar unpredictably with a non-default font
+        // and left a wide dead-air gap below the title. The inline
+        // `Text("Saved meals")` carries the `.isHeader` accessibility
+        // trait, so VoiceOver still announces a header for the screen.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Stir.paper50)
+        // Propagates to descendants — any future navigationDestination
+        // pushed from this view must restore its own toolbar.
+        .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top) {
-            filterBar
-                .padding(.horizontal, CGFloat.Stir.screenMargin)
-                .padding(.vertical, CGFloat.Stir.space2)
-                .background(Color.Stir.backgroundCard)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(Color.Stir.divider)
-                        .frame(height: 1)
-                }
+            // Single source of truth for title vertical rhythm. Above-
+            // title padding and title-to-filterBar VStack spacing are
+            // wired to the same value so the "Saved meals" band stays
+            // symmetric — bumping one without the other would silently
+            // un-center the title within its header strip.
+            let titleVerticalPadding = CGFloat.Stir.space5
+            VStack(spacing: titleVerticalPadding) {
+                Text("Saved meals")
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.top, titleVerticalPadding)
+                filterBar
+            }
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.bottom, CGFloat.Stir.space2)
+            .background(Color.Stir.paper50)
+            // Hairline seam — header inset is sticky, so when list
+            // rows scroll behind it the divider keeps the boundary
+            // legible. Subtle on paper50 (ink100 vs #FAF7F2) but
+            // present.
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.Stir.divider)
+                    .frame(height: 1)
+            }
         }
         .task {
             await load()
@@ -181,7 +211,7 @@ struct SavedMealsView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down")
+                    Image.Stir.sort
                         .foregroundStyle(Color.Stir.ink700)
                         .minTapTarget()
                 }
@@ -189,7 +219,7 @@ struct SavedMealsView: View {
             }
 
             HStack(spacing: CGFloat.Stir.space2) {
-                Image(systemName: "magnifyingglass")
+                Image.Stir.search
                     .foregroundStyle(Color.Stir.ink500)
                     .accessibilityHidden(true)
                 TextField("Search by title or ingredient", text: $searchQuery)
@@ -198,7 +228,7 @@ struct SavedMealsView: View {
                     .foregroundStyle(Color.Stir.ink900)
                 if !searchQuery.isEmpty {
                     Button { searchQuery = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image.Stir.clearField
                             .foregroundStyle(Color.Stir.ink300)
                             .minTapTarget()
                     }
@@ -219,7 +249,11 @@ struct SavedMealsView: View {
 
     private var list: some View {
         List(filteredRows) { row in
-            HStack(alignment: .top, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
+            // `.center` so the star aligns with the vertical middle of
+            // the row regardless of how many lines the title wraps to.
+            // `.top` left it hugging the first title baseline, which
+            // looked off when the title spanned two lines.
+            HStack(alignment: .center, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
                 Button {
                     if let plan = row.plan { cookAgainPlan = plan }
                 } label: {
@@ -243,8 +277,23 @@ struct SavedMealsView: View {
                 favoriteButton(for: row)
             }
             .padding(.vertical, CGFloat.Stir.space1)
+            .listRowBackground(Color.Stir.paper50)
+            .listRowSeparatorTint(Color.Stir.divider)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    handleDeleteTap(row: row)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                // ember700 is the deepest brand red-orange — destructive
+                // intent in the warm palette without the system .red
+                // pop, keeps the saved-tab surface continuous.
+                .tint(Color.Stir.ember700)
+            }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.Stir.paper50)
     }
 
     // MARK: - Favorite toggle (per row)
@@ -257,7 +306,7 @@ struct SavedMealsView: View {
         return Button {
             handleFavoriteTap(row: row)
         } label: {
-            Image(systemName: isFavorite ? "star.fill" : "star")
+            (isFavorite ? Image.Stir.favoriteFill : Image.Stir.favoriteOutline)
                 .foregroundStyle(isFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
                 .minTapTarget()
         }
@@ -265,25 +314,40 @@ struct SavedMealsView: View {
         .accessibilityLabel(isFavorite ? "Remove from favorites" : "Save to favorites")
     }
 
-    private func handleFavoriteTap(row: CookingSessionRepository.SavedMealEntry) {
-        switch entitlements.canAccess(.savedFavorites) {
-        case .allowed:
-            guard let plan = row.plan else { return }
-            let newValue = !plan.isFavorite
-            _ = solveRepository.setFavorite(newValue, on: plan)
-            if newValue {
-                PostHogClient.shared.capture(
-                    .favoriteSaved,
-                    properties: BillingTelemetryProperties.favoriteSaved(
-                        recipeOrigin: plan.typedOrigin.rawValue,
-                    ),
-                )
-            }
-            // Refresh rows so the UI picks up the new isFavorite.
+    private func handleDeleteTap(row: CookingSessionRepository.SavedMealEntry) {
+        guard let plan = row.plan else { return }
+        // Optimistic: remove from in-memory state first so the row
+        // animates out without waiting on the Core Data save. If the
+        // save fails we reload to restore truth.
+        rows.removeAll { $0.id == row.id }
+        searchBlobs.removeValue(forKey: row.id)
+        rebuildFilteredRows()
+        let saved = solveRepository.softDelete(plan)
+        if !saved {
             Task { await load() }
-        case .blockedByTier, .blockedByQuota, .blockedByBilling:
-            coordinator.presentPaywall(.savedFavoritesGate)
         }
+    }
+
+    private func handleFavoriteTap(row: CookingSessionRepository.SavedMealEntry) {
+        entitlements.gate(
+            .savedFavorites,
+            paywall: { coordinator.presentPaywall(.savedFavoritesGate) },
+            allow: {
+                guard let plan = row.plan else { return }
+                let newValue = !plan.isFavorite
+                _ = solveRepository.setFavorite(newValue, on: plan)
+                if newValue {
+                    PostHogClient.shared.capture(
+                        .favoriteSaved,
+                        properties: BillingTelemetryProperties.favoriteSaved(
+                            recipeOrigin: plan.typedOrigin.rawValue,
+                        ),
+                    )
+                }
+                // Refresh rows so the UI picks up the new isFavorite.
+                Task { await load() }
+            },
+        )
     }
 
     @ViewBuilder
@@ -299,7 +363,7 @@ struct SavedMealsView: View {
 
     private var emptyState: some View {
         VStack(spacing: CGFloat.Stir.space3 + 2) { // 14pt — airy but not lonely
-            Image(systemName: showFavoritesOnly ? "star" : "tray")
+            (showFavoritesOnly ? Image.Stir.favoriteOutline : Image.Stir.savedTray)
                 .font(.system(size: CGFloat.Stir.iconXl))
                 .foregroundStyle(Color.Stir.textTertiary)
                 .accessibilityHidden(true)

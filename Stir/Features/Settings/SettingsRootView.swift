@@ -1,24 +1,42 @@
 // SettingsRootView
 //
-// Settings shell per spec §6:
-//   - Plan & Billing card — tier + billing_state, upgrade/manage CTAs,
-//     Restore Purchases, trial-reminder toggle
-//   - Household Preferences → full edit of diet / equipment / servings / units
-//   - Sync Status row (CloudKit availability + SYNC-01 state)
-//   - Privacy Policy + Terms of Service placeholder links
-//   - Version info
+// Settings shell per spec §6 — rebuilt 2026-04-28 onto the custom Stir
+// design system. The pre-rebuild file rendered everything through
+// SwiftUI's default `List`/`Form`, which inherited iOS's grey grouped
+// background, default serif-less section headers, and SF Symbol
+// multicolor renderings on `Label("…", systemImage:)` rows. The result
+// drifted visibly from Tonight + Saved (same warm paper50 surface,
+// New York display titles, ember-tinted glyph tiles in paper100 cards
+// with ink100 dividers) and clipped the bottom of the scroll under
+// the floating `StirCustomTabBar`.
 //
-// Step 5 additions:
-//   - Trial + expiration + grace + cancelled + expired states each render
-//     distinct copy + CTAs.
-//   - Manage Subscription deep-link to apps.apple.com/account/subscriptions.
-//   - Restore Purchases button emits `restore_purchases_tapped` with
-//     origin="settings".
-//   - Trial-reminder 2-day-before notification toggle (Premium trial only).
+// Visual grammar (mirrors mockup `14_settings.html`):
+//   - paper50 screen background, principal-toolbar New York title
+//     matching Saved's pattern.
+//   - Each section: small UPPERCASE labelEyebrow ink500 header + a
+//     paper100 card (`stirCard`) containing one or more rows.
+//   - Rows: 32×32 ember100 tile with an ember600 glyph, title in
+//     labelLg, optional bodySm subtitle, trailing chevron / value /
+//     toggle. Multi-row cards use 1pt ink100 internal dividers.
+//   - 64pt bottom padding to clear the −14pt-encroach `StirCustomTabBar`
+//     (same pattern Tonight uses, see RootView §StirCustomTabBar).
+//
+// Plan & Billing keeps its state-machine surface (free / trial / active
+// / grace / cancelled / expired) but renders through one unified
+// `planBillingCard` instead of `List` Section header + footer + button
+// rows. Notifications push, Household push, Sync status, About links,
+// Build version, and the DEBUG-only Voice Diagnostics push are all
+// preserved. Restore flow, paywall trigger plumbing, and all
+// telemetry are unchanged.
+//
+// The trial-reminder card was removed 2026-04-28 — it duplicated the
+// (now also removed) trial-reminder toggle in the Notifications page,
+// and the two were wired to different stores so they could disagree.
+// The `TrialReminderScheduler` and `Preferences.trialReminder` field
+// are now dead code; removable in a follow-up cleanup.
 
 import SwiftUI
 import UIKit
-import UserNotifications
 
 struct SettingsRootView: View {
     @Environment(EntitlementService.self) private var entitlements
@@ -28,352 +46,486 @@ struct SettingsRootView: View {
     @State private var isRestoring = false
     @State private var restoreToast: StirToastPayload?
 
-    /// User setting for the trial reminder. Hydrated on appear from the
-    /// actual pending `UNNotificationRequest` state so a user who
-    /// previously turned the toggle off sees it off again — earlier
-    /// version hardcoded `true` and silently re-scheduled on nav
-    /// return.
-    @State private var trialReminderEnabled: Bool = true
-
     var body: some View {
-        List {
-            planBillingSection
-            if isTrialActive {
-                trialReminderSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                planBillingSection
+                notificationsSection
+                householdSection
+                syncSection
+                aboutSection
+                buildSection
             }
-            notificationsSection
-            householdSection
-            syncSection
-            aboutSection
-            versionSection
-            #if DEBUG
-            debugSection
-            #endif
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.top, CGFloat.Stir.space3)
+            // Match Tonight's clearance for the −14pt-encroach floating
+            // tab bar. The bar's measured frame is shorter than its
+            // visual extent, so the system-reserved bottom inset alone
+            // leaves the last row clipped (the original-bug screenshot).
+            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Stir.paper50)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .stirToast($restoreToast)
-    }
-
-    #if DEBUG
-    /// DEBUG-only surface for validation-harness flows (D.1). Hidden
-    /// from release builds via the `#if DEBUG` guard on both the
-    /// section and the destination view file.
-    private var debugSection: some View {
-        Section("Debug") {
-            NavigationLink(destination: VoiceDiagnosticsView()) {
-                Label("Voice Diagnostics", systemImage: "waveform.badge.magnifyingglass")
+        .toolbar {
+            // Principal item renders the screen title in the Stir
+            // display serif, matching Saved (`SavedMealsView`). The
+            // default `navigationTitle` chrome would fall back to SF
+            // Pro and break the cross-tab visual rhythm.
+            ToolbarItem(placement: .principal) {
+                Text("Settings")
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.textPrimary)
             }
         }
+        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .stirToast($restoreToast)
     }
-    #endif
 
     // MARK: - Plan & Billing
 
     private var planBillingSection: some View {
-        Section {
-            planHeader
-
-            switch (entitlements.tier, entitlements.billingState) {
-            case (.free, _):
-                freeFooter
-            case (_, .expired):
-                expiredFooter
-            case (_, .grace):
-                graceFooter
-            case (_, .cancelledActive):
-                cancelledFooter
-            case (_, .trial):
-                activeFooter  // trial treated as "active" in UI
-            case (_, .active):
-                activeFooter
-            case (_, .none):
-                // Paid tier somehow with billing_state=none — defensive, treat as free.
-                freeFooter
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("Plan & Billing")
+            VStack(spacing: 0) {
+                planHeader
+                rowDivider
+                planStateRow
+                rowDivider
+                restoreRow
             }
-
-            restoreButton
-        } header: {
-            Text("Plan & Billing")
+            .stirCard()
         }
     }
 
     private var planHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+        HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) { // 2pt — matches every other title→subtitle pair in this file
                 Text(entitlements.tier.displayName)
                     .stirFont(.displaySm)
                     .foregroundStyle(Color.Stir.textPrimary)
                 Text(entitlements.billingStateHelpText)
                     .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.textTertiary)
+                    .multilineTextAlignment(.leading)
             }
-            Spacer()
-            // Free uses `sparkles` (not `star`) to keep `star` reserved
-            // for the favorites metaphor across the app. Paid tiers get
-            // the crown, colored ember to match the mockup's premium-
-            // emphasis hue rather than the gold/yellow SF default.
-            Image(systemName: entitlements.tier == .free ? "sparkles" : "crown.fill")
+            // Without `fixedSize`, a long `billingStateHelpText` (trial-
+            // day-counter copy, cancellation-with-date copy) competing
+            // with the trailing tier badge would ellipsize before
+            // wrapping. Force vertical growth, never horizontal.
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: CGFloat.Stir.space2)
+            // Free uses `.sparkles` (the project's Premium-upsell glyph,
+            // muted to ink500 here to read as "you could be using more"
+            // rather than "this is active"). Paid tiers get `.tierCrown`
+            // — the same crown for both Premium and Pro because the
+            // tier name (`Tier.displayName`) is the discriminator. The
+            // dedicated `.tierCrown` semantic in `Icons.swift` keeps
+            // this contextual use distinct from `.premium`/`.pro` which
+            // are the upsell-tile feature glyphs (Design-System.md §6).
+            tierBadge
+                .font(.system(size: CGFloat.Stir.iconMd, weight: .semibold))
                 .foregroundStyle(
                     entitlements.tier == .free
                         ? Color.Stir.textTertiary
                         : Color.Stir.ember600,
                 )
         }
+        .padding(.horizontal, CGFloat.Stir.space3Half) // 14pt
+        .padding(.vertical, CGFloat.Stir.space3Half)
     }
 
-    // Free / expired-fallback: prompt to upgrade.
-    private var freeFooter: some View {
-        Button {
-            coordinator.presentPaywall(.settingsUpgrade)
-        } label: {
-            Label {
-                Text("Upgrade to Premium")
-                    .stirFont(.labelLg)
-            } icon: {
-                Image.Stir.sparkles
-            }
-            .foregroundStyle(Color.Stir.ember600)
+    private var tierBadge: Image {
+        entitlements.tier == .free ? Image.Stir.sparkles : Image.Stir.tierCrown
+    }
+
+    /// Plan state row — one of upgrade / manage / update payment /
+    /// keep / resubscribe based on the (tier, billing_state) pair.
+    /// Plan state row — one of upgrade / manage / update payment /
+    /// keep / resubscribe based on the (tier, billing_state) pair.
+    /// Each arm has its own copy rather than threading conditionals
+    /// through one shared row, so the strings stay greppable.
+    @ViewBuilder
+    private var planStateRow: some View {
+        switch (entitlements.tier, entitlements.billingState) {
+        case (.free, _):
+            // Free user (any billing_state — `.none` is the steady-state
+            // for free; the others can occur transiently when an
+            // entitlement just downgraded).
+            settingsActionRow(
+                icon: Image.Stir.sparkles,
+                title: "Upgrade to Premium",
+                action: { coordinator.presentPaywall(.settingsUpgrade) },
+            )
+        case (_, .expired):
+            // Win-back path. Paid tier with billing_state == .expired
+            // — sub ended cleanly, eligible for re-subscribe offers.
+            settingsActionRow(
+                icon: Image.Stir.sparkles,
+                title: "Resubscribe",
+                subtitle: "Your Premium plan ended. Start again?",
+                action: { coordinator.presentPaywall(.settingsUpgrade) },
+            )
+        case (.premium, .none), (.pro, .none):
+            // Defensive — paid tier with billing_state == .none
+            // shouldn't happen (the RevenueCat webhook fan-out is
+            // supposed to set billing_state when tier flips paid). If
+            // we ever land here, neither "Upgrade" nor "Manage" copy
+            // is honest: the user IS on a paid tier, and there's no
+            // verified sub for Apple to surface. Route to the Apple
+            // page (source of truth) with neutral copy.
+            settingsActionRow(
+                icon: Image.Stir.manageAccount,
+                title: "Manage your plan",
+                subtitle: "We couldn't read your subscription state. Check it in your App Store account.",
+                action: { openManageSubscriptions() },
+            )
+        case (_, .grace):
+            settingsActionRow(
+                icon: Image.Stir.creditCard,
+                title: "Update payment method",
+                subtitle: "Apple couldn't renew your subscription. Update billing to keep Premium features.",
+                accent: .amber,
+                action: { openManageSubscriptions() },
+            )
+        case (_, .cancelledActive):
+            settingsActionRow(
+                icon: Image.Stir.uncancel,
+                title: "Keep Premium",
+                subtitle: cancelledSubtitle,
+                action: { openManageSubscriptions() },
+            )
+        case (_, .trial), (_, .active):
+            settingsActionRow(
+                icon: Image.Stir.manageAccount,
+                title: "Manage subscription",
+                action: { openManageSubscriptions() },
+            )
         }
     }
 
-    // Active / trial: show manage link + trial conversion date when applicable.
-    private var activeFooter: some View {
-        Button {
-            openManageSubscriptions()
-        } label: {
-            Label {
-                Text("Manage subscription")
-                    .stirFont(.labelLg)
-            } icon: {
-                Image(systemName: "person.crop.circle.badge.checkmark")
-            }
-            .foregroundStyle(Color.Stir.ember600)
-        }
+    private var cancelledSubtitle: String? {
+        guard let expires = entitlements.expiresAt else { return nil }
+        let date = expires.formatted(date: .abbreviated, time: .omitted)
+        return "Cancels \(date). You still have Premium until then."
     }
 
-    // Grace: billing retry in progress. Show alert + manage link to fix payment.
-    private var graceFooter: some View {
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            HStack(spacing: CGFloat.Stir.space2) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(Color.Stir.amber600)
-                Text("Apple couldn't renew your subscription. Update billing to keep Premium features.")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.textSecondary)
-            }
-            Button {
-                openManageSubscriptions()
-            } label: {
-                Label {
-                    Text("Update payment method")
-                        .stirFont(.labelLg)
-                } icon: {
-                    Image(systemName: "creditcard")
-                }
-                .foregroundStyle(Color.Stir.ember600)
-            }
-        }
-    }
-
-    // Cancelled but still active until period end. Single CTA —
-    // earlier version had "Keep Premium" + "Manage" both linking to the
-    // same apps.apple.com URL, which is redundant.
-    private var cancelledFooter: some View {
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            if let expires = entitlements.expiresAt {
-                Text("Cancels \(expires.formatted(date: .abbreviated, time: .omitted)). You still have Premium until then.")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.textTertiary)
-            }
-            Button {
-                openManageSubscriptions()
-            } label: {
-                Label {
-                    Text("Keep Premium")
-                        .stirFont(.labelLg)
-                } icon: {
-                    Image(systemName: "arrow.uturn.backward.circle")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.Stir.ember600)
-        }
-    }
-
-    // Expired: full win-back CTA.
-    private var expiredFooter: some View {
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            Text("Your Premium plan ended. Start again?")
-                .stirFont(.bodySm)
-                .foregroundStyle(Color.Stir.textTertiary)
-            Button {
-                coordinator.presentPaywall(.settingsUpgrade)
-            } label: {
-                Label {
-                    Text("Resubscribe")
-                        .stirFont(.labelLg)
-                } icon: {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.Stir.ember600)
-        }
-    }
-
-    // Restore Purchases — always visible, even for paid users.
-    private var restoreButton: some View {
+    private var restoreRow: some View {
         Button {
             Task { await restore() }
         } label: {
-            HStack {
-                Label {
-                    Text("Restore purchases")
-                        .stirFont(.labelLg)
-                } icon: {
-                    Image(systemName: "arrow.down.circle")
-                }
-                .foregroundStyle(Color.Stir.ember600)
-                Spacer()
+            HStack(alignment: .center, spacing: CGFloat.Stir.space3) {
+                iconTile(Image.Stir.restore)
+                Text("Restore purchases")
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.ember600)
+                Spacer(minLength: CGFloat.Stir.space2)
                 if isRestoring {
                     ProgressView()
                         .tint(Color.Stir.ember600)
+                } else {
+                    Image.Stir.disclosure
+                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                        .foregroundStyle(Color.Stir.ink300)
                 }
             }
+            .padding(.horizontal, CGFloat.Stir.space3Half)
+            .padding(.vertical, CGFloat.Stir.space3Half)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .disabled(isRestoring)
-    }
-
-    // MARK: - Trial reminder toggle
-
-    private var trialReminderSection: some View {
-        Section {
-            Toggle(isOn: $trialReminderEnabled) {
-                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight title/subtitle pairing
-                    Text("Trial ending reminder")
-                        .stirFont(.labelLg)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                    Text("Get a notification 2 days before your trial ends.")
-                        .stirFont(.bodySm)
-                        .foregroundStyle(Color.Stir.textTertiary)
-                }
-            }
-            .tint(Color.Stir.ember600)
-            .onChange(of: trialReminderEnabled) { _, newValue in
-                Task {
-                    if newValue, let expires = entitlements.expiresAt {
-                        await TrialReminderScheduler.shared.ensureReminder(expiresAt: expires)
-                    } else {
-                        TrialReminderScheduler.shared.cancel()
-                    }
-                }
-            }
-            .task { await loadTrialReminderState() }
-        } header: {
-            Text("Trial")
-        }
-    }
-
-    private var isTrialActive: Bool {
-        entitlements.billingState == .trial && entitlements.expiresAt != nil
+        .accessibilityLabel("Restore purchases")
     }
 
     // MARK: - Notifications
 
     private var notificationsSection: some View {
-        Section {
-            NavigationLink(destination: NotificationPrefsView()) {
-                Label("Notifications", systemImage: "bell")
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            // Single-row section — eyebrow added for visual rhythm
+            // consistency with Household / Sync / About / Debug. The
+            // duplication ("NOTIFICATIONS" eyebrow over a row also
+            // titled "Notifications") is acceptable: the eyebrow is
+            // 11pt UPPERCASE tracked tertiary text, the row title is
+            // 15pt ink900 — they read as group + member, not echo.
+            sectionEyebrow("Notifications")
+            NavigationLink {
+                NotificationPrefsView()
+            } label: {
+                settingsRowContent(
+                    icon: Image.Stir.notifications,
+                    title: "Notifications",
+                    trailing: .chevron,
+                )
+                .stirCard()
             }
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Household
 
     private var householdSection: some View {
-        Section {
-            NavigationLink(destination: HouseholdPreferencesView()) {
-                Label {
-                    Text("Household preferences")
-                        .stirFont(.labelLg)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                } icon: {
-                    Image.Stir.profile
-                        .foregroundStyle(Color.Stir.ember600)
-                }
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("Household")
+            NavigationLink {
+                HouseholdPreferencesView()
+            } label: {
+                settingsRowContent(
+                    icon: Image.Stir.profile,
+                    title: "Household preferences",
+                    trailing: .chevron,
+                )
+                .stirCard()
             }
-        } header: {
-            Text("Household")
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Sync
 
     private var syncSection: some View {
-        // Status dot uses sage (success) / amber (warning) — Design-System
-        // §3 semantic pairing. Previous version used `.green`/`.orange`
-        // which reads too-saturated against the warm paper palette.
-        Section {
-            HStack(spacing: CGFloat.Stir.space3) {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("Sync")
+            HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+                // Status dot in lieu of an icon tile — sage when syncing,
+                // amber when iCloud unavailable. Both pair with the
+                // status copy so screen readers + sighted users get
+                // the same signal (color-independence per §3.3).
+                //
+                // Wrapped in a labelLg-line-height (20pt) container so
+                // the dot stays vertically centered on the title's cap
+                // height under Dynamic Type — a literal `padding(.top:)`
+                // would drift the dot off-baseline as the title scales.
                 Circle()
                     .fill(cloudKit.isAvailable ? Color.Stir.sage600 : Color.Stir.amber600)
-                    .frame(width: CGFloat.Stir.space3 - 2, height: CGFloat.Stir.space3 - 2) // 10pt dot
+                    .frame(width: 10, height: 10) // dot, intentionally smaller than iconSm
+                    .frame(width: Self.iconTileSize, height: 20, alignment: .center)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
                     Text(cloudKit.isAvailable ? "iCloud synced" : "Local only")
                         .stirFont(.labelLg)
                         .foregroundStyle(Color.Stir.textPrimary)
-                    Text(cloudKit.isAvailable ? "Your kitchen syncs across your devices."
-                                              : "iCloud Sync isn't available. Stir will work on this device only for now.")
-                        .stirFont(.bodySm)
-                        .foregroundStyle(Color.Stir.textTertiary)
+                    Text(
+                        cloudKit.isAvailable
+                            ? "Your kitchen syncs across your devices."
+                            : "iCloud Sync isn't available. Stir will work on this device only for now.",
+                    )
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textTertiary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.horizontal, CGFloat.Stir.space3Half)
+            .padding(.vertical, CGFloat.Stir.space3Half)
+            .stirCard()
             .accessibilityElement(children: .combine)
-        } header: {
-            Text("Sync")
         }
     }
 
     // MARK: - About
 
     private var aboutSection: some View {
-        Section {
-            Link("Privacy Policy", destination: URL(string: "https://getstir.app/privacy")!)
-                .stirFont(.labelLg)
-                .foregroundStyle(Color.Stir.ember600)
-            Link("Terms of Service", destination: URL(string: "https://getstir.app/terms")!)
-                .stirFont(.labelLg)
-                .foregroundStyle(Color.Stir.ember600)
-            // EULA points at Apple's standard licensed-application terms (no
-            // custom Stir EULA; ToS covers Stir-specific usage). Symmetric
-            // with the paywall's three-link disclosure footer.
-            Link("End User License Agreement", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-                .stirFont(.labelLg)
-                .foregroundStyle(Color.Stir.ember600)
-            Link("Support", destination: URL(string: "mailto:support@getstir.app")!)
-                .stirFont(.labelLg)
-                .foregroundStyle(Color.Stir.ember600)
-        } header: {
-            Text("About")
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("About")
+            VStack(spacing: 0) {
+                aboutLink("Privacy Policy", url: "https://getstir.app/privacy")
+                rowDivider
+                aboutLink("Terms of Service", url: "https://getstir.app/terms")
+                rowDivider
+                // EULA points at Apple's standard licensed-application
+                // terms (no custom Stir EULA; ToS covers Stir-specific
+                // usage). Symmetric with the paywall's three-link
+                // disclosure footer.
+                aboutLink(
+                    "End User License Agreement",
+                    url: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
+                )
+                rowDivider
+                aboutLink("Support", url: "mailto:support@getstir.app")
+            }
+            .stirCard()
         }
     }
 
-    private var versionSection: some View {
-        Section {
-            LabeledContent {
-                let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-                Text("\(short) (\(build))")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.textTertiary)
-            } label: {
-                Text("Build")
-                    .stirFont(.bodyMd)
-                    .foregroundStyle(Color.Stir.textSecondary)
+    /// About rows are plain ember links per mockup 14 — no trailing
+    /// glyph. The earlier draft added an `arrow.up.right` chevron, but
+    /// it wasn't in `Icons.swift`'s semantic map (Design-System.md §6
+    /// requires additions to Icons.swift + the §6 table in the same
+    /// PR), and the mockup's About rows are deliberately glyph-free.
+    private func aboutLink(_ title: String, url: String) -> some View {
+        Button {
+            if let u = URL(string: url) {
+                UIApplication.shared.open(u)
+            }
+        } label: {
+            Text(title)
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.ember600)
+                .padding(.horizontal, CGFloat.Stir.space3Half)
+                .padding(.vertical, CGFloat.Stir.space3Half)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    // MARK: - Build version
+
+    private var buildSection: some View {
+        HStack {
+            Text("Build")
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.textSecondary)
+            Spacer()
+            Text(Self.versionDisplay)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textTertiary)
+        }
+        .padding(.horizontal, CGFloat.Stir.space3Half)
+        .padding(.vertical, CGFloat.Stir.space3Half)
+        .stirCard()
+    }
+
+    /// Bundle short-version + build number, resolved once at type-load
+    /// rather than on every `body` re-eval (entitlement state changes
+    /// alone re-evaluate this view; the bundle keys are immutable).
+    private static let versionDisplay: String = {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "\(short) (\(build))"
+    }()
+
+    // MARK: - DS primitives
+
+    private func sectionEyebrow(_ text: String) -> some View {
+        Text(text)
+            .stirFont(.labelEyebrow)
+            .foregroundStyle(Color.Stir.textTertiary)
+            .padding(.horizontal, CGFloat.Stir.space1)
+    }
+
+    /// Width + height of the row's leading icon tile (and the sync-row's
+    /// status-dot column, which aligns to the same gutter). Hoisted to a
+    /// single constant so divider insets, tile frames, and the sync-dot
+    /// column never drift apart on a future tile-size adjustment.
+    private static let iconTileSize: CGFloat = 32
+
+    private var rowDivider: some View {
+        // Internal hairline for multi-row cards. Inset by the icon-tile
+        // column so the divider visually starts at the title baseline,
+        // matching mockup 14 grouped-list rows.
+        Rectangle()
+            .fill(Color.Stir.divider)
+            .frame(height: 1)
+            .padding(.leading, CGFloat.Stir.space3Half + Self.iconTileSize + CGFloat.Stir.space3)
+    }
+
+    /// 32×32 tile with an ember600 glyph on an ember100 fill — the
+    /// dominant settings-row glyph treatment from mockup 14. Optional
+    /// accent flips the tile to amber for the grace-period state.
+    private enum RowAccent { case ember, amber }
+
+    private func iconTile(_ icon: Image, accent: RowAccent = .ember) -> some View {
+        let fill: Color = accent == .ember ? Color.Stir.ember100 : Color.Stir.amber100
+        let glyph: Color = accent == .ember ? Color.Stir.ember600 : Color.Stir.amber600
+        return ZStack {
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusSm, style: .continuous)
+                .fill(fill)
+            icon
+                .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                .foregroundStyle(glyph)
+        }
+        .frame(width: Self.iconTileSize, height: Self.iconTileSize)
+    }
+
+    private enum TrailingAffordance {
+        case chevron
+        case none
+    }
+
+    /// Static row content (icon + title + optional subtitle + trailing).
+    /// Used when the row's interactivity is owned by an outer
+    /// `NavigationLink` or `Button`.
+    private func settingsRowContent(
+        icon: Image,
+        title: String,
+        subtitle: String? = nil,
+        trailing: TrailingAffordance = .none,
+    ) -> some View {
+        HStack(alignment: subtitle == nil ? .center : .top, spacing: CGFloat.Stir.space3) {
+            iconTile(icon)
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                Text(title)
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: CGFloat.Stir.space2)
+            switch trailing {
+            case .chevron:
+                Image.Stir.disclosure
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
+            case .none:
+                EmptyView()
             }
         }
+        .padding(.horizontal, CGFloat.Stir.space3Half)
+        .padding(.vertical, CGFloat.Stir.space3Half)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    /// Action row — the settings-row equivalent of an inline button.
+    /// Title + icon render in ember (it's a CTA, not navigation), so
+    /// it visually matches the original `.foregroundStyle(ember600)`
+    /// labels but in the rebuilt grouped-card grammar.
+    private func settingsActionRow(
+        icon: Image,
+        title: String,
+        subtitle: String? = nil,
+        accent: RowAccent = .ember,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: subtitle == nil ? .center : .top, spacing: CGFloat.Stir.space3) {
+                iconTile(icon, accent: accent)
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                    Text(title)
+                        .stirFont(.labelLg)
+                        .foregroundStyle(accent == .amber ? Color.Stir.textPrimary : Color.Stir.ember600)
+                    if let subtitle {
+                        Text(subtitle)
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.textTertiary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: CGFloat.Stir.space2)
+                Image.Stir.disclosure
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
+            }
+            .padding(.horizontal, CGFloat.Stir.space3Half)
+            .padding(.vertical, CGFloat.Stir.space3Half)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .modifier(OptionalAccessibilityHint(hint: subtitle))
     }
 
     // MARK: - Helpers
@@ -407,9 +559,9 @@ struct SettingsRootView: View {
         }
 
         // Race guard: a second tap within 2.5s would cause the first
-        // task's clear to dismiss the second toast prematurely. StirToastPayload
-        // carries a UUID id — only clear if the currently-presented toast
-        // is still the one this task set.
+        // task's clear to dismiss the second toast prematurely.
+        // StirToastPayload carries a UUID id — only clear if the
+        // currently-presented toast is still the one this task set.
         let myID = payload.id
         restoreToast = payload
         try? await Task.sleep(nanoseconds: 2_500_000_000)
@@ -418,15 +570,6 @@ struct SettingsRootView: View {
         }
     }
 
-    /// Hydrate `trialReminderEnabled` from the actual pending-notification
-    /// state. Runs once on appear so a user who toggled it off previously
-    /// sees the toggle reflect that.
-    @MainActor
-    private func loadTrialReminderState() async {
-        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
-        let hasReminder = pending.contains { $0.identifier == "stir.trial.reminder.2d" }
-        trialReminderEnabled = hasReminder
-    }
 }
 
 // MARK: - Display helpers on typed enums
@@ -444,3 +587,20 @@ extension Tier {
 // `billingStateHelpText` lives in `Core/Services/EntitlementService+Display.swift`
 // per the step-5 review (SRP: EntitlementService extensions belong with the
 // service, not in feature files).
+
+// MARK: - Accessibility helpers
+
+/// Applies `.accessibilityHint(_:)` only when a hint is provided.
+/// `accessibilityHint("")` is benign but pollutes the accessibility tree
+/// with empty hints; this keeps the tree clean for VoiceOver.
+private struct OptionalAccessibilityHint: ViewModifier {
+    let hint: String?
+
+    func body(content: Content) -> some View {
+        if let hint, !hint.isEmpty {
+            content.accessibilityHint(hint)
+        } else {
+            content
+        }
+    }
+}

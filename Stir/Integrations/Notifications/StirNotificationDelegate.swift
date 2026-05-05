@@ -2,6 +2,8 @@
 //
 // UNUserNotificationCenterDelegate implementation. Responsible for:
 //   - Presenting notifications in-foreground with banner + sound.
+//   - Swapping the default iOS Tri-tone for a softer "Tink" chime when
+//     a Cook Mode timer notification fires while the app is foreground.
 //   - Emitting `trial_reminder_sent` when the trial-reminder notification
 //     is delivered (spec §15 canonical).
 //
@@ -9,11 +11,20 @@
 // `StirNotificationDelegate.register()`. It's a singleton because
 // UNUserNotificationCenter.delegate is a global slot.
 
+import AudioToolbox
 import Foundation
 import UserNotifications
 
 final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = StirNotificationDelegate()
+
+    /// SystemSoundID for the foreground timer chime. 1057 is iOS's
+    /// "Tink" — a single-note soft chime that's audible without being
+    /// startling, suited to a kitchen-cook context. Hoisted as a named
+    /// constant so a future swap to a custom-bundled chime only touches
+    /// one place. `AudioServicesPlaySystemSound` respects the device
+    /// silent switch, so the cue correctly stays silent when muted.
+    private static let tinkSoundID: SystemSoundID = 1057
 
     private let telemetry: PostHogClient
     /// Identifiers we've already emitted `trial_reminder_sent` for this
@@ -41,6 +52,14 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     /// Delivery while app is foregrounded. Show banner + play sound so the
     /// user notices, and emit `trial_reminder_sent` if this is the trial
     /// reminder payload.
+    ///
+    /// Timer notifications take a custom audio path: the system Tri-tone
+    /// is too aggressive for a kitchen-cook chime, so we swap it for the
+    /// soft "Tink" SystemSoundID (1057) and suppress the default `.sound`
+    /// option. This applies in-foreground only — background / killed
+    /// delivery still uses `content.sound = .default` from the original
+    /// `UNNotificationRequest` so the user gets a familiar, audible cue
+    /// when the app isn't on screen.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -48,6 +67,16 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     ) {
         emitTelemetryIfTrialReminder(notification)
         emitTelemetryIfReactivation(notification)
+
+        let userInfo = notification.request.content.userInfo
+        if TimerNotification.isTimer(from: userInfo) {
+            // Single-note soft chime. We suppress `.sound` from the
+            // presentation options so the system doesn't ALSO fire the
+            // default Tri-tone on top of our chime.
+            AudioServicesPlaySystemSound(Self.tinkSoundID)
+            completionHandler([.banner])
+            return
+        }
         completionHandler([.banner, .sound])
     }
 
@@ -102,9 +131,11 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         emitLock.unlock()
         guard shouldEmit else { return }
 
+        // Route through the typed builder (same pattern as step-5/step-7
+        // telemetry — prevents property-name drift).
         telemetry.capture(
             .reactivationNotificationOpened,
-            properties: ["trigger_kind": triggerKind],
+            properties: StepSevenTelemetry.reactivationNotificationOpened(triggerKind: triggerKind),
         )
     }
 }

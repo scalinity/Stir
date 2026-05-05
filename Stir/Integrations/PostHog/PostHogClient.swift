@@ -39,7 +39,17 @@ class PostHogClient: @unchecked Sendable {
         lock.unlock()
 
         let config = PostHogConfig(apiKey: apiKey, host: host.absoluteString)
-        config.captureApplicationLifecycleEvents = true
+        // Auto-lifecycle disabled (2026-04-24): the SDK fires `Application
+        // Opened / Backgrounded / Installed` the moment `setup(...)`
+        // completes, attributed to an anonymous distinct_id because
+        // `identify(keyHash)` doesn't happen until after CloudKit +
+        // install-ID resolution in RootCoordinator. That bifurcated the
+        // identity graph AND introduced four events that violate
+        // CLAUDE.md's canonical allow-list (`TelemetryEvent` enum).
+        // Stir emits its own `app_opened` / `app_backgrounded` with
+        // the properly hashed canonical_user_key; those are the single
+        // source of truth.
+        config.captureApplicationLifecycleEvents = false
         config.captureScreenViews = false  // step-2 doesn't want auto screen events
         config.sessionReplay = false        // replays off until we've vetted privacy
         config.flushAt = 10
@@ -54,6 +64,33 @@ class PostHogClient: @unchecked Sendable {
         PostHogSDK.shared.identify(distinctID)
     }
 
+    /// Alias the CURRENT distinct ID to `newDistinctID` — merges the two
+    /// identities into one PostHog person. Called on install:→ck:
+    /// migration so the `voice_conversion_event` funnel (spec §15 line
+    /// 1641) doesn't fragment at every paid conversion. Must be called
+    /// BEFORE `identify(newDistinctID)` so the SDK ties the alias to
+    /// the previous-key person, not the new one.
+    ///
+    /// ADR 0009 + SA2-C1 (2026-04-24): prior to this method, identity
+    /// transitions were handled by `identify()` alone, which PostHog
+    /// treats as "the current device is now a different person" — no
+    /// merge. Paid Premium conversions attributed to two distinct
+    /// persons, breaking Premium-tier metric reconciliation.
+    func alias(to newDistinctID: String) {
+        guard isInitialized else { return }
+        PostHogSDK.shared.alias(newDistinctID)
+    }
+
+    /// Reset the SDK's local state — rotates `$device_id`, clears the
+    /// event queue, and unbinds `distinct_id`. Called on genuine A→B
+    /// user flip (two different CloudKit accounts sharing a device)
+    /// where aliasing would incorrectly merge them. Must be paired with
+    /// a fresh `identify(...)` immediately after.
+    func reset() {
+        guard isInitialized else { return }
+        PostHogSDK.shared.reset()
+    }
+
     /// Emit a typed event. Properties are Sendable JSON-compatible values.
     func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
         guard isInitialized else { return }
@@ -63,12 +100,16 @@ class PostHogClient: @unchecked Sendable {
     /// Emit a `$ai_trace` event for PostHog LLM Observability.
     ///
     /// Trace lifecycle (ADR 0009 + spec §15 dashboard-join contract):
-    ///   1. Backend fires $ai_trace at mint time with `inputState`
-    ///      populated (`voice_session_start` span_name).
-    ///   2. iOS fires $ai_trace at session close with the SAME
-    ///      `traceID` + `spanName` + `outputState` populated. PostHog
-    ///      treats same-id repeat emission as overwrite, so the final
-    ///      trace row carries both input and output state.
+    /// iOS fires EXACTLY ONE `$ai_trace` per voice session, at session
+    /// close, carrying BOTH `$ai_input_state` (captured at VM attach
+    /// time) AND `$ai_output_state` (session totals) in the same
+    /// emission. The backend does NOT emit a sibling mint-time trace
+    /// — PostHog is append-only, so a mint+close pair would create two
+    /// sibling rows rather than a single merged record (the documented
+    /// rejection in ADR 0009). See
+    /// `CookModeViewModel.fireVoiceSessionCloseTrace` for the single
+    /// call site and `_shared/ai_observability.ts` lines 168-172 for
+    /// the backend's explicit "no mint-time trace" contract.
     ///
     /// Privacy: no user content. `inputState` / `outputState` must
     /// contain only metadata (turn counts, token totals, ended_reason,

@@ -123,8 +123,11 @@ final class CameraService: NSObject {
 
     // MARK: - Capture
 
-    /// Capture a single photo, return JPEG-compressed Data resized to the
-    /// pantry-parse payload budget (max 1600px long edge, q=0.85).
+    /// Capture a single photo and return the AVFoundation-encoded JPEG
+    /// bytes (full sensor resolution) as fast as possible. The caller
+    /// is responsible for any resize / re-encode before AI submit —
+    /// keeping that work out of the photo-output delegate is what lets
+    /// the shutter-tap → still-on-screen latency stay under ~300ms.
     func capturePhoto() async throws -> Data {
         guard let output = photoOutput else {
             throw CaptureError.configurationFailed("photoOutput missing")
@@ -195,23 +198,25 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?,
     ) {
+        // Read the encoded JPEG synchronously here — `fileDataRepresentation`
+        // is a memcpy of the buffer AVFoundation already encoded, no
+        // pixel decode happens. Anything heavier (UIImage decode,
+        // UIGraphicsImageRenderer resize, JPEG re-encode) used to live
+        // here on the main actor and was the dominant cause of the
+        // multi-second tap-to-still latency. Caller now does that work
+        // off-main.
+        let fullData = photo.fileDataRepresentation()
+        let captureError = error
+
         Task { @MainActor in
             guard let continuation = self.captureContinuation else { return }
             self.captureContinuation = nil
-            if let error {
-                continuation.resume(throwing: CaptureError.captureFailed(error))
-                return
-            }
-            guard let fullData = photo.fileDataRepresentation(),
-                  let image = UIImage(data: fullData) else {
+            if let captureError {
+                continuation.resume(throwing: CaptureError.captureFailed(captureError))
+            } else if let fullData {
+                continuation.resume(returning: fullData)
+            } else {
                 continuation.resume(throwing: CaptureError.imageProcessingFailed)
-                return
-            }
-            do {
-                let compressed = try ImageCompression.jpeg(image, maxLongEdge: 1600, quality: 0.85)
-                continuation.resume(returning: compressed)
-            } catch {
-                continuation.resume(throwing: error)
             }
         }
     }
