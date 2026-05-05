@@ -38,6 +38,19 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     /// User tapped "Upgrade" from Settings > Plan & Billing.
     case settingsUpgrade
 
+    /// User opened the Premium-vs-Pro comparison sheet directly from
+    /// Settings > Plan & Billing — distinct from `.settingsUpgrade`
+    /// (which routes to the full Premium-CTA paywall). Two entry points
+    /// share this trigger:
+    ///   * Free user tapped "See Pro features" (discovery)
+    ///   * Premium subscriber tapped "Upgrade to Pro" (cross-tier upgrade)
+    /// `current_tier` on `paywall_viewed` discriminates the two. Kept
+    /// distinct from `.settingsUpgrade` so PostHog dashboards filtering
+    /// on `trigger=settings_upgrade` aren't polluted by comparison-sheet
+    /// impressions (which never lead to a Premium trial — only to Pro
+    /// purchase or dismiss).
+    case settingsProComparison
+
     /// Free user tapped the Cook Mode voice affordance — the highest-intent
     /// conversion moment per spec §9. Defined now; the paywall path wires
     /// in step 6 (Cook Mode voice).
@@ -61,6 +74,7 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         case .leftoversGate:               return "leftovers_gate"
         case .multiImageScanGate:          return "multi_image_scan_gate"
         case .settingsUpgrade:             return "settings_upgrade"
+        case .settingsProComparison:       return "settings_pro_comparison"
         case .voiceAffordanceTapped:       return "voice_affordance_tapped"
         case .voiceCookQuotaExhausted:     return "voice_cook_quota_exhausted"
         }
@@ -96,6 +110,12 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
             // free for 7 days." produced Premium-hero + Pro-feature-
             // list dissonance on the same surface.
             return "Upgrade for every-dinner voice and multi-image scan."
+        case .settingsProComparison:
+            // Surface uses ProComparisonSheet's own header ("Premium or
+            // Pro?"); this string is unread on that path and exists
+            // only so the enum stays exhaustive. Kept Pro-flavored for
+            // any future PaywallView-routed reuse.
+            return "Premium or Pro? Compare your options."
         }
     }
 
@@ -147,6 +167,10 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
             // per ADR 0015 paywall copy table, row 2 — the surface
             // needs a strong voice anchor because it's context-free
             // (unlike feature-gated triggers which have their own lead).
+            return proValueProp
+        case .settingsProComparison:
+            // Same Pro-anchoring as `.settingsUpgrade`. Unread on the
+            // ProComparisonSheet path (sheet has its own static prose).
             return proValueProp
         case .dinnerSolveQuotaExhausted,
              .recipeImportQuotaExhausted,

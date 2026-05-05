@@ -32,8 +32,19 @@ extension EntitlementService {
     /// Human-friendly sentence under the tier name in the Plan & Billing
     /// card. Covers all six `BillingState` values plus the `.free` tier
     /// shortcut.
+    ///
+    /// Note: `tier` is the SERVER-EFFECTIVE tier — Backend
+    /// `_shared/entitlements.ts:effectiveTier()` demotes `.expired` and
+    /// `.none` tiers to `.free` before serializing. So a previously-paid
+    /// user whose sub just expired arrives here as `(.free, .expired)`,
+    /// not `(.premium, .expired)`. Match `(.free, .expired)` BEFORE the
+    /// catch-all `(.free, _)` arm — ordering is load-bearing.
     var billingStateHelpText: String {
         switch (tier, billingState) {
+        case (.free, .expired):
+            // Win-back recovery — server demoted a previously-paid sub
+            // to free while preserving `billing_state == .expired`.
+            return "Your previous plan ended. Resubscribe to regain features."
         case (.free, _):
             return "6 Dinner Solves a month. Upgrade for hands-free Cook Mode."
         case (_, .trial):
@@ -59,7 +70,12 @@ extension EntitlementService {
             }
             return "Cancels at end of current period."
         case (_, .expired):
-            return "Expired. Resubscribe to regain Premium features."
+            // Defensive — unreachable under server's `effectiveTier()`
+            // sanitization (see file-level note). Listed for switch
+            // exhaustiveness; if the wire contract ever exposes a
+            // raw-tier path with `(.premium, .expired)` / `(.pro, .expired)`,
+            // this arm activates.
+            return "Your \(tier.displayName) plan ended. Resubscribe to regain features."
         case (_, .none):
             return "Free."
         }

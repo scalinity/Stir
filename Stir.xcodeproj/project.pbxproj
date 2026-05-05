@@ -61,6 +61,7 @@
 		34F5BB054D4402919ED8FD1A /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */; };
 		35AC70781E412739ED5B3A1F /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F35DD33113B45A04F1536B90 /* SavedMealsView.swift */; };
 		3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */; };
+		7B4C8F02A19E82B5C3D71E64 /* SettingsRootViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9D5B24A1C8038F4B92D7E5 /* SettingsRootViewTests.swift */; };
 		373B720A9EB97C429D3E770E /* StirAppIntentsGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51409113088D5FC13B55348E /* StirAppIntentsGate.swift */; };
 		378FA665E786425D891D9BB9 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE699B170519127799279F /* SharedStorage.swift */; };
 		3791D22CC5C78E95E27BFFCF /* StepSevenDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85F59C4F79FC45212EC1CD81 /* StepSevenDTOTests.swift */; };
@@ -530,6 +531,7 @@
 		D0DCB3763498E55B79C6FA15 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
 		D10F98D2B68FE751D86384C7 /* SpeechFallbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackService.swift; sourceTree = "<group>"; };
 		D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallTelemetryTests.swift; sourceTree = "<group>"; };
+		6E9D5B24A1C8038F4B92D7E5 /* SettingsRootViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootViewTests.swift; sourceTree = "<group>"; };
 		D3F1C59757DD007948589427 /* GroceryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryViewModel.swift; sourceTree = "<group>"; };
 		D40A1B4A21CC6EFC11F1C3A1 /* SetupKitchenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupKitchenView.swift; sourceTree = "<group>"; };
 		D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerActivityAttributes.swift; sourceTree = "<group>"; };
@@ -684,6 +686,7 @@
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
 				5EB0A25C9F12C9916D340A79 /* SavedMealsSortingTests.swift */,
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
+				6E9D5B24A1C8038F4B92D7E5 /* SettingsRootViewTests.swift */,
 				EADB0DC1E2519C6564055D23 /* SolveViewModelPaywallTests.swift */,
 				6AB2E5F34DE0A73640FD592C /* SpeechFallbackServiceSpeakTests.swift */,
 				E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */,
@@ -1484,6 +1487,7 @@
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
 				71A07B871B5C0D2A4AC61668 /* SavedMealsSortingTests.swift in Sources */,
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
+				7B4C8F02A19E82B5C3D71E64 /* SettingsRootViewTests.swift in Sources */,
 				E45AAD4677CB23B582050AE6 /* Shadow.swift in Sources */,
 				B5BB0205DC8870803856A775 /* SharedStorage.swift in Sources */,
 				86AA82B314DE7ED038A3DF51 /* SharedTier.swift in Sources */,

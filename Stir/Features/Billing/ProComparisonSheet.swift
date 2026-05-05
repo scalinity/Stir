@@ -162,53 +162,145 @@ struct ProComparisonSheet: View {
     }
 
     private var proCTAs: some View {
-        VStack(spacing: CGFloat.Stir.space2 + 2) {
-            if let offerings = viewModel.currentOfferings() {
-                if let pkg = offerings.proAnnualPackage {
-                    Button {
-                        Task { await viewModel.purchase(productID: pkg.productID) }
-                    } label: {
-                        VStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight title/price pairing
-                            Text("Pro annual")
-                                .stirFont(.labelLg)
-                            Text("\(pkg.displayPrice) / year")
-                                .stirFont(.bodySm)
-                                .foregroundStyle(Color.Stir.paper50.opacity(0.85))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, CGFloat.Stir.controlVerticalPadding)
-                        .background(Color.Stir.ink900)
-                        .foregroundStyle(Color.Stir.paper50)
-                        .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
-                    }
-                    .accessibilityLabel("Upgrade to Pro annual, \(pkg.displayPrice) per year")
+        // Hoist `currentOfferings()` once per body re-eval and branch
+        // explicitly on state. The earlier `case .idle, .loading where
+        // viewModel.currentOfferings() == nil:` form was correct (Swift
+        // applies `where` to the whole case, not just the last pattern)
+        // but read ambiguously AND called `currentOfferings()` twice
+        // per evaluation. Reader-confidence > terseness here.
+        let offerings = viewModel.currentOfferings()
+        return VStack(spacing: CGFloat.Stir.space2 + 2) {
+            switch viewModel.state {
+            case .failedToLoad(let error):
+                loadFailureCTA(error: error)
+            case .idle, .loading:
+                // First-time load → spinner. Retry-after-success keeps
+                // the cached offerings visible so the UI doesn't blank
+                // during the re-fetch.
+                if let offerings {
+                    purchaseCTAs(offerings: offerings)
+                } else {
+                    loadingCTA
                 }
-                if let pkg = offerings.proMonthlyPackage {
-                    Button {
-                        Task { await viewModel.purchase(productID: pkg.productID) }
-                    } label: {
-                        Text("Pro monthly — \(pkg.displayPrice)/mo")
-                            .stirFont(.labelLg)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary)
-                            .background(Color.Stir.backgroundCard)
-                            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
-                                    .stroke(Color.Stir.divider, lineWidth: 1),
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Pro monthly, \(pkg.displayPrice) per month")
+            default:
+                if let offerings {
+                    purchaseCTAs(offerings: offerings)
+                } else {
+                    // Defensive: state past .loading without cached
+                    // offerings — `displaying` implies offerings loaded,
+                    // so this only fires on a corrupted state machine.
+                    // Treat as load failure for UX rather than blank.
+                    loadFailureCTA(error: .generic(description: "Plans unavailable."))
                 }
-            } else {
-                ProgressView()
-                    .tint(Color.Stir.ember600)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, CGFloat.Stir.space4)
             }
         }
+    }
+
+    /// Pro purchase buttons (annual + monthly). Disabled during
+    /// `.purchasing` / `.succeeded` / `.purchasePending` so a fast
+    /// double-tap can't spawn duplicate purchase Tasks (the VM's
+    /// state guard catches the second one, but only AFTER the first
+    /// `await` flips state — leaves a tiny window where two tasks
+    /// pass through and emit duplicate `purchase_started`).
+    @ViewBuilder
+    private func purchaseCTAs(offerings: PaywallOfferings) -> some View {
+        if let pkg = offerings.proAnnualPackage {
+            Button {
+                Task { await viewModel.purchase(productID: pkg.productID) }
+            } label: {
+                VStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt — tight title/price pairing
+                    Text("Pro annual")
+                        .stirFont(.labelLg)
+                    Text("\(pkg.displayPrice) / year")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.paper50.opacity(0.85))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, CGFloat.Stir.controlVerticalPadding)
+                .background(Color.Stir.ink900)
+                .foregroundStyle(Color.Stir.paper50)
+                .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+            }
+            .accessibilityLabel("Upgrade to Pro annual, \(pkg.displayPrice) per year")
+            .disabled(isPurchaseInFlight)
+        }
+        if let pkg = offerings.proMonthlyPackage {
+            Button {
+                Task { await viewModel.purchase(productID: pkg.productID) }
+            } label: {
+                Text("Pro monthly — \(pkg.displayPrice)/mo")
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary)
+                    .background(Color.Stir.backgroundCard)
+                    .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
+                            .stroke(Color.Stir.divider, lineWidth: 1),
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pro monthly, \(pkg.displayPrice) per month")
+            .disabled(isPurchaseInFlight)
+        }
+    }
+
+    /// True while a purchase is in flight or has reached a terminal state
+    /// the user shouldn't be able to re-tap from. `purchaseFailed` stays
+    /// enabled so the user can retry the same SKU; that path runs
+    /// through `purchase(productID:)`'s explicit `.purchaseFailed` arm.
+    private var isPurchaseInFlight: Bool {
+        switch viewModel.state {
+        case .purchasing, .succeeded, .purchasePending:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Spinner shown during the initial offerings load (state .idle / .loading).
+    private var loadingCTA: some View {
+        ProgressView()
+            .tint(Color.Stir.ember600)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, CGFloat.Stir.space4)
+            .accessibilityLabel("Loading plans")
+    }
+
+    /// Failure surface — error copy + Retry button calling `vm.load()`.
+    /// Mirrors PaywallView's `loadFailureContent` pattern so the user
+    /// has the same recovery affordance regardless of which surface
+    /// presented the offerings fetch.
+    @ViewBuilder
+    private func loadFailureCTA(error: PayError) -> some View {
+        VStack(spacing: CGFloat.Stir.space3) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: CGFloat.Stir.iconLg, weight: .semibold))
+                .foregroundStyle(Color.Stir.amber600)
+                .accessibilityHidden(true)
+            Text("Couldn't load plans")
+                .stirFont(.labelLg)
+                .foregroundStyle(Color.Stir.textPrimary)
+            Text(error.userFacingMessage)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textTertiary)
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await viewModel.load() }
+            } label: {
+                Text("Try again")
+                    .stirFont(.labelLg)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, CGFloat.Stir.controlVerticalPadding)
+                    .background(Color.Stir.ink900)
+                    .foregroundStyle(Color.Stir.paper50)
+                    .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+            }
+            .accessibilityLabel("Retry loading plans")
+        }
+        .padding(.vertical, CGFloat.Stir.space3)
+        .frame(maxWidth: .infinity)
     }
 
     private var proDisclosure: some View {

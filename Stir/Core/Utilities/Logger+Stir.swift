@@ -47,4 +47,10 @@ extension Logger {
 
     /// UI-layer events — Cook Mode, timers, sheets. Step 4.
     static let ui = Logger(subsystem: subsystem, category: "ui")
+
+    /// Settings surface — Plan & Billing state arms, sheet presentation,
+    /// restore taps. Distinct from `entitlement` (which logs the
+    /// service-side state machine) and `coordinator` (which logs
+    /// presentation routing).
+    static let settings = Logger(subsystem: subsystem, category: "settings")
 }

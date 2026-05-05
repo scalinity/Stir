@@ -94,9 +94,21 @@ final class PaywallViewModel {
         emitPaywallViewedIfNeeded()
 
         do {
-            let offerings = try await service.offerings()
+            let offerings = try await Self.withTimeout(seconds: Self.offeringsLoadTimeoutSec) {
+                try await self.service.offerings()
+            }
+            // Bail if the host view tore down while we were awaiting —
+            // SwiftUI auto-cancels the `.task` on view disappear, but
+            // RC's `offerings()` may complete before checkCancellation
+            // is reached, leaving us writing to a VM whose only owner
+            // (`@State` on the host view) is about to be cleared.
+            try Task.checkCancellation()
             cachedOfferings = offerings
             state = .displaying(offerings)
+        } catch is CancellationError {
+            // Quiet — `.task` cancellation is normal on sheet dismiss.
+            // No state write: the VM is on its way out.
+            return
         } catch let error as PayError {
             Logger.paywall.warning(
                 "offerings load failed: \(String(describing: error), privacy: .public)",
@@ -107,6 +119,46 @@ final class PaywallViewModel {
                 "offerings load failed (generic): \(error.localizedDescription, privacy: .public)",
             )
             state = .failedToLoad(.generic(description: error.localizedDescription))
+        }
+    }
+
+    /// Hard ceiling on the offerings round-trip. RC's CDN occasionally
+    /// stalls (TCP head-of-line on cellular; partial-response wedges)
+    /// in a way that doesn't surface a network error — without this
+    /// timeout, the paywall + ProComparisonSheet show a spinner with
+    /// no recovery. 10s matches the spec's "AI taking longer than
+    /// expected" threshold (AI-03) — same UX contract for any external
+    /// dependency that gates a primary surface.
+    private static let offeringsLoadTimeoutSec: TimeInterval = 10
+
+    /// Race the work against a sleep; whichever finishes first wins.
+    /// Throws `PayError.timeout` (or the work's own error) on
+    /// expiration. Cancels the loser so we don't leak a request.
+    ///
+    /// Cleanup semantics: Swift Concurrency auto-cancels remaining
+    /// task-group children when the closure exits — both on success
+    /// (after `return result`) and on throw (after `try` rethrows
+    /// from `group.next()`). The explicit `group.cancelAll()` after
+    /// `return result` covers the success path's brief window before
+    /// the closure returns; the throw path is cleaned up by the
+    /// task-group's implicit teardown. Adding defensive try/catch
+    /// around `cancelAll()` is unnecessary.
+    private static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T,
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw PayError.timeout
+            }
+            // First-to-finish wins; cancel the other branch.
+            guard let result = try await group.next() else {
+                throw PayError.timeout
+            }
+            group.cancelAll()
+            return result
         }
     }
 

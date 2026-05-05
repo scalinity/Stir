@@ -482,6 +482,8 @@ extension PayError {
             return "The App Store had a problem with this purchase."
         case .generic(let description):
             return description
+        case .timeout:
+            return "Couldn't load plans in time. Try again."
         }
     }
 }

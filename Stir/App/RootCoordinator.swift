@@ -124,6 +124,39 @@ final class RootCoordinator {
     /// drives presentation from this.
     var activePaywallTrigger: PaywallTrigger?
 
+    /// "Pro comparison" sheet signal — drives a `.sheet(item:)` mounted
+    /// on `SettingsRootView` (NOT RootView) that mounts
+    /// `ProComparisonSheet` directly (Premium-vs-Pro side-by-side, Pro
+    /// CTAs only). Distinct from `activePaywallTrigger` (which presents
+    /// the full Premium-anchored PaywallView via `.fullScreenCover(item:)`).
+    /// Keeping these two surfaces on separate coordinator slots means
+    /// the app retains its single-presenter invariant — opening one
+    /// while the other is up is a no-op rather than a silently-dropped
+    /// second presentation ("Currently, only presenting a single sheet
+    /// is supported"). UUID-keyed so two rapid taps produce distinct
+    /// entries (matches SolveAgain/OtherOptions pattern).
+    ///
+    /// Sheet binding lives on `SettingsRootView` rather than `RootView`
+    /// because Settings is the only origin of pro-comparison
+    /// presentation, AND stacking a `.sheet(item:)` adjacent to
+    /// RootView's paywall `.fullScreenCover(item:)` caused an iOS 26
+    /// modifier-stack conflict on voice-quota taps from inside Cook Mode
+    /// — see `CookModeRoot.swift:287`'s mirrored paywall fullScreenCover.
+    /// Both Cook Mode VC and RootView VC race to present the paywall on
+    /// `activePaywallTrigger` flips; the third presentation modifier on
+    /// RootView destabilized the reconciliation enough that Cook Mode
+    /// would tear down mid-presentation, dropping the user on Tonight.
+    var activeProComparison: ProComparisonEntry?
+
+    /// Identifiable wrapper for the pro-comparison sheet. Carries the
+    /// `PaywallTrigger` so `paywall_viewed` telemetry distinguishes the
+    /// two entry points (Free→Pro discovery vs Premium→Pro upgrade)
+    /// once their triggers diverge upstream.
+    struct ProComparisonEntry: Identifiable, Equatable {
+        let id: UUID
+        let trigger: PaywallTrigger
+    }
+
     /// Currently-selected tab in `StirTabRoot`. Defaults to Tonight on
     /// every fresh launch — a returning user lands on the most-seen
     /// surface, not whichever tab they last poked at. Mutated from
@@ -1004,6 +1037,22 @@ final class RootCoordinator {
         Task { await bootstrap() }
     }
 
+    // MARK: - Tutorial replay (SCA-5)
+
+    /// Reset the named in-app tutorial and route the user to the tab
+    /// where it presents. Called from Settings → "Show tutorial again".
+    /// Settings used to mutate `selectedTab` directly; centralizing the
+    /// reset+route here keeps the replay sequence in one owner so a
+    /// future tutorial added on a non-Tonight surface only changes this
+    /// switch, not every Settings call site.
+    func replayTutorial(_ key: TutorialKey, manager: TutorialManager = .shared) {
+        manager.reset(key)
+        switch key {
+        case .tonightTour:
+            selectedTab = .tonight
+        }
+    }
+
     // MARK: - Paywall presentation
 
     /// Surface the paywall from any feature gate. Idempotent — calling
@@ -1021,6 +1070,28 @@ final class RootCoordinator {
         if wasSuccessful {
             Task { await refreshEntitlementsOnForeground() }
         }
+    }
+
+    /// Surface the Premium-vs-Pro comparison sheet directly (skipping the
+    /// full PaywallView). Idempotent — calling while one is up is a no-op
+    /// (SwiftUI `.sheet(item:)` would otherwise replace the existing
+    /// presentation, which on rapid double-tap can leak the in-flight
+    /// `vm.load()` from the first presentation). If the full paywall is
+    /// open, this is also a no-op so we don't stack a sheet over a
+    /// fullScreenCover.
+    func presentProComparison(trigger: PaywallTrigger) {
+        if activeProComparison != nil { return }
+        if activePaywallTrigger != nil { return }
+        activeProComparison = ProComparisonEntry(id: UUID(), trigger: trigger)
+    }
+
+    /// Dismissal hook from `RootView`'s `.sheet(item:)` onDismiss. Clears
+    /// the active entry. Pro-comparison-driven purchases route through
+    /// the same `onEntitlementRefreshRequested` callback as PaywallView,
+    /// so no explicit refresh hook is needed here — the VM's success
+    /// path already kicks off `refreshEntitlementsOnForeground`.
+    func dismissProComparison() {
+        activeProComparison = nil
     }
 
     // MARK: - Cook Mode entry (from Solve flow)

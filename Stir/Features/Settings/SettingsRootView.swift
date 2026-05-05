@@ -35,6 +35,7 @@
 // The `TrialReminderScheduler` and `Preferences.trialReminder` field
 // are now dead code; removable in a follow-up cleanup.
 
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -47,12 +48,34 @@ struct SettingsRootView: View {
     @State private var restoreToast: StirToastPayload?
 
     var body: some View {
-        ScrollView {
+        // `@Bindable` wraps the @Observable coordinator so we can vend a
+        // Binding to its `activeProComparison` slot below. The sheet
+        // observation lives HERE rather than at RootView because:
+        //   1. Settings is the only origin of pro-comparison presentation
+        //      (Free "See Pro features" + Premium "Upgrade to Pro" rows),
+        //      so the sheet only needs to be reachable from this surface.
+        //   2. Stacking a `.sheet(item:)` adjacent to RootView's
+        //      `.fullScreenCover(item: $activePaywallTrigger)` introduced
+        //      a regression on iOS 26: when CookModeRoot's mirrored
+        //      paywall fullScreenCover (`CookModeRoot.swift:287`) and
+        //      RootView's paywall fullScreenCover both fired on a voice-
+        //      quota tap, iOS reconciled the three-modifier stack by
+        //      tearing down Cook Mode mid-presentation — the paywall
+        //      flashed, then both dismissed, dropping the user on Tonight.
+        //      Hosting the sheet on the Settings surface keeps RootView's
+        //      modifier stack at two and avoids the conflict.
+        //
+        // The explicit `return` below is required because `body` now has
+        // a declaration before the view expression — Swift's implicit-
+        // return only kicks in for single-expression view bodies.
+        @Bindable var coordinator = coordinator
+        return ScrollView {
             VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                 planBillingSection
                 notificationsSection
                 householdSection
                 syncSection
+                helpSection
                 aboutSection
                 buildSection
             }
@@ -82,6 +105,23 @@ struct SettingsRootView: View {
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .stirToast($restoreToast)
+        .sheet(item: $coordinator.activeProComparison) { entry in
+            // SwiftUI invokes this content closure once per `item`
+            // identity change (i.e., per presentation), not per
+            // render — so a fresh `PaywallViewModel` is built exactly
+            // once per sheet open. Subsequent re-renders of the
+            // already-presented sheet reuse this VM via the binding.
+            let vm = coordinator.makePaywallViewModel(trigger: entry.trigger)
+            ProComparisonSheet(viewModel: vm)
+                .task {
+                    if case .idle = vm.state {
+                        await vm.load()
+                    }
+                }
+                .onDisappear {
+                    coordinator.dismissProComparison()
+                }
+        }
     }
 
     // MARK: - Plan & Billing
@@ -92,7 +132,7 @@ struct SettingsRootView: View {
             VStack(spacing: 0) {
                 planHeader
                 rowDivider
-                planStateRow
+                planStateRows
                 rowDivider
                 restoreRow
             }
@@ -141,31 +181,126 @@ struct SettingsRootView: View {
         entitlements.tier == .free ? Image.Stir.sparkles : Image.Stir.tierCrown
     }
 
-    /// Plan state row — one of upgrade / manage / update payment /
-    /// keep / resubscribe based on the (tier, billing_state) pair.
-    /// Plan state row — one of upgrade / manage / update payment /
-    /// keep / resubscribe based on the (tier, billing_state) pair.
-    /// Each arm has its own copy rather than threading conditionals
-    /// through one shared row, so the strings stay greppable.
+    /// Plan-state surface — assembles up to two rows depending on tier:
+    ///
+    ///   * Premium subscribers in `.active` / `.trial` / `.cancelledActive`
+    ///     get a Pro-upsell row as the primary CTA above the existing
+    ///     admin row. `.cancelledActive` is included because cancellation
+    ///     recovery shouldn't strand the user from Pro — they may want
+    ///     to switch tier rather than un-cancel back into Premium.
+    ///     Suppressed during `.grace` (fix payment first; Apple won't
+    ///     allow tier-change with failed billing anyway) and the
+    ///     defensive `.none` arm.
+    ///   * Free users on the steady-state `.none` get the existing
+    ///     "Upgrade to Premium" row PLUS a "See Pro features" secondary
+    ///     row, so Pro isn't hidden two taps deep behind PaywallView's
+    ///     "Compare plans" link. Suppressed on `.expired` so the
+    ///     focused Resubscribe recovery copy is the only CTA.
+    ///   * Pro users keep the existing single-row admin surface — Apple
+    ///     handles tier downgrade via cross-grade in the manage-
+    ///     subscriptions sheet.
     @ViewBuilder
-    private var planStateRow: some View {
+    private var planStateRows: some View {
+        let placement = Self.proUpsellPlacement(
+            tier: entitlements.tier,
+            billingState: entitlements.billingState,
+        )
+        if placement == .above {
+            proRow(placement: .above)
+            rowDivider
+        }
+        primaryPlanStateRow
+        if placement == .below {
+            rowDivider
+            proRow(placement: .below)
+        }
+    }
+
+    /// Where the Pro-upsell row sits relative to the primary admin row,
+    /// or `.none` if it shouldn't render. Pure function on `(Tier,
+    /// BillingState)` so the matrix is testable without spinning up the
+    /// view. Exhaustive on both enums — adding a new tier or billing
+    /// state forces an update at compile time.
+    static func proUpsellPlacement(
+        tier: Tier,
+        billingState: BillingState,
+    ) -> ProUpsellPlacement {
+        switch (tier, billingState) {
+        // Premium subscribers in healthy or recoverable states — Pro
+        // upgrade is the call-to-action above admin chrome.
+        case (.premium, .active),
+             (.premium, .trial),
+             (.premium, .cancelledActive):
+            return .above
+        // Free users on the steady-state — Pro discovery is secondary
+        // to the primary "Upgrade to Premium" row.
+        case (.free, .none),
+             (.free, .active),
+             (.free, .trial),
+             (.free, .grace),
+             (.free, .cancelledActive):
+            return .below
+        // Free + .expired: focused Resubscribe recovery only — no Pro
+        // upsell competing with the win-back CTA.
+        case (.free, .expired):
+            return .none
+        // Premium + .grace: payment must be fixed before tier-change.
+        // Premium + .none: defensive (paid tier without billing state)
+        // — neutral admin row only.
+        // Premium + .expired: dead under server's effectiveTier()
+        // sanitization (server demotes .expired tier → .free), but
+        // listed for switch exhaustiveness.
+        case (.premium, .grace),
+             (.premium, .none),
+             (.premium, .expired):
+            return .none
+        // Pro tier: never upsell upward (no higher tier). Apple handles
+        // downgrade via cross-grade in the manage-subscriptions sheet.
+        case (.pro, _):
+            return .none
+        }
+    }
+
+    enum ProUpsellPlacement: Equatable {
+        /// Above the primary admin row (Premium subscribers).
+        case above
+        /// Below the primary admin row (Free users discovering Pro).
+        case below
+        /// No Pro upsell rendered.
+        case none
+    }
+
+    /// Primary admin / state-recovery row — one of upgrade / manage /
+    /// update payment / keep / resubscribe based on the (tier,
+    /// billing_state) pair. Each arm has its own copy rather than
+    /// threading conditionals through one shared row, so the strings
+    /// stay greppable.
+    ///
+    /// Note: `entitlements.tier` is the SERVER-EFFECTIVE tier — Backend
+    /// `_shared/entitlements.ts:effectiveTier()` demotes `.expired` and
+    /// `.none` to `.free` before serializing, so any `(_, .expired)`
+    /// arm will only see `tier == .free`. Match `(.free, .expired)`
+    /// FIRST to catch the win-back recovery moment; ordering matters.
+    @ViewBuilder
+    private var primaryPlanStateRow: some View {
         switch (entitlements.tier, entitlements.billingState) {
-        case (.free, _):
-            // Free user (any billing_state — `.none` is the steady-state
-            // for free; the others can occur transiently when an
-            // entitlement just downgraded).
-            settingsActionRow(
-                icon: Image.Stir.sparkles,
-                title: "Upgrade to Premium",
-                action: { coordinator.presentPaywall(.settingsUpgrade) },
-            )
-        case (_, .expired):
-            // Win-back path. Paid tier with billing_state == .expired
-            // — sub ended cleanly, eligible for re-subscribe offers.
+        case (.free, .expired):
+            // Win-back path. Server demoted a previously-paid sub to
+            // `.free` while preserving `billing_state == .expired`,
+            // so this arm is the reachable Resubscribe surface.
             settingsActionRow(
                 icon: Image.Stir.sparkles,
                 title: "Resubscribe",
-                subtitle: "Your Premium plan ended. Start again?",
+                subtitle: "Your previous plan ended. Start again?",
+                action: { coordinator.presentPaywall(.settingsUpgrade) },
+            )
+        case (.free, _):
+            // Free user (any non-expired billing_state — `.none` is the
+            // steady-state for free; the others can occur transiently
+            // when an entitlement just downgraded).
+            settingsActionRow(
+                icon: Image.Stir.sparkles,
+                title: "Upgrade to Premium",
                 action: { coordinator.presentPaywall(.settingsUpgrade) },
             )
         case (.premium, .none), (.pro, .none):
@@ -175,25 +310,41 @@ struct SettingsRootView: View {
             // we ever land here, neither "Upgrade" nor "Manage" copy
             // is honest: the user IS on a paid tier, and there's no
             // verified sub for Apple to surface. Route to the Apple
-            // page (source of truth) with neutral copy.
+            // page (source of truth) with neutral copy + log a
+            // breadcrumb so the team sees this when it actually fires.
             settingsActionRow(
                 icon: Image.Stir.manageAccount,
                 title: "Manage your plan",
                 subtitle: "We couldn't read your subscription state. Check it in your App Store account.",
-                action: { openManageSubscriptions() },
+                action: {
+                    Logger.settings.warning(
+                        "defensive paid+none arm rendered tier=\(entitlements.tier.rawValue, privacy: .public)",
+                    )
+                    // OSLog alone may not reach Sentry without the
+                    // Sentry SDK's OSLog bridge — emit an explicit
+                    // breadcrumb so this surfaces in dashboards. Fires
+                    // only on the row tap (not on every render) to
+                    // avoid breadcrumb-spam if the user lingers.
+                    SentryReporter.shared.breadcrumb(
+                        category: "billing.state",
+                        message: "defensive paid+none arm rendered",
+                        data: ["tier": entitlements.tier.rawValue],
+                    )
+                    openManageSubscriptions()
+                },
             )
         case (_, .grace):
             settingsActionRow(
                 icon: Image.Stir.creditCard,
                 title: "Update payment method",
-                subtitle: "Apple couldn't renew your subscription. Update billing to keep Premium features.",
+                subtitle: "Apple couldn't renew your subscription. Update billing to keep \(entitlements.tier.displayName) features.",
                 accent: .amber,
                 action: { openManageSubscriptions() },
             )
         case (_, .cancelledActive):
             settingsActionRow(
                 icon: Image.Stir.uncancel,
-                title: "Keep Premium",
+                title: "Keep \(entitlements.tier.displayName)",
                 subtitle: cancelledSubtitle,
                 action: { openManageSubscriptions() },
             )
@@ -203,13 +354,78 @@ struct SettingsRootView: View {
                 title: "Manage subscription",
                 action: { openManageSubscriptions() },
             )
+        case (_, .expired):
+            // Unreachable on the wire (server demotes `.expired` tier to
+            // `.free`, caught by `(.free, .expired)` above). Listed only
+            // for switch exhaustiveness — if the wire contract ever
+            // changes (`raw_tier` exposed, etc.), this arm activates.
+            settingsActionRow(
+                icon: Image.Stir.sparkles,
+                title: "Resubscribe",
+                subtitle: "Your \(entitlements.tier.displayName) plan ended. Start again?",
+                action: { coordinator.presentPaywall(.settingsUpgrade) },
+            )
         }
     }
 
+    /// Pro-upgrade / Pro-discovery row — one helper, two placements.
+    /// The Pro CTA is the same destination (`ProComparisonSheet`); the
+    /// only difference is framing — "Upgrade to Pro" for paying users
+    /// who already understand value, "See Pro features" for free users
+    /// where discovery is the goal. Strings stay at the call sites
+    /// (here) so they're greppable; the shared shape avoids the
+    /// 22-line drift the two former row builders had.
+    private func proRow(placement: ProUpsellPlacement) -> some View {
+        let title: String
+        let subtitle: String
+        switch placement {
+        case .above:
+            title = "Upgrade to Pro"
+            subtitle = "Voice for every dinner, multi-image scan, \(Tier.pro.displayPantryCap) pantry items."
+        case .below:
+            title = "See Pro features"
+            subtitle = "Compare Premium and Pro side by side."
+        case .none:
+            // Should never render — the call sites are gated on
+            // `placement != .none`. EmptyView keeps the function total.
+            title = ""
+            subtitle = ""
+        }
+        return settingsActionRow(
+            icon: Image.Stir.pro,
+            title: title,
+            subtitle: subtitle,
+            action: { presentProComparison() },
+        )
+    }
+
     private var cancelledSubtitle: String? {
-        guard let expires = entitlements.expiresAt else { return nil }
+        // Mirror `EntitlementService+Display.swift`'s cancelledActive
+        // help-text fallback so the same nil-`expiresAt` state doesn't
+        // produce divergent header (with fallback string) vs row
+        // (with collapsed/missing subtitle) treatments.
+        let tierName = entitlements.tier.displayName
+        guard let expires = entitlements.expiresAt else {
+            return "Cancels at end of current period. You still have \(tierName) until then."
+        }
         let date = expires.formatted(date: .abbreviated, time: .omitted)
-        return "Cancels \(date). You still have Premium until then."
+        return "Cancels \(date). You still have \(tierName) until then."
+    }
+
+    /// Present the Premium-vs-Pro comparison sheet via the coordinator.
+    /// Trigger is `.settingsProComparison` — distinct from
+    /// `.settingsUpgrade` (which routes to the full PaywallView) so
+    /// PostHog dashboards filtering on `paywall_viewed.trigger` keep
+    /// the Premium-trial funnel and the Pro-comparison funnel separate.
+    /// `current_tier` on the event further discriminates Free→Pro
+    /// discovery from Premium→Pro upgrade. Spec §15 documents both
+    /// trigger values.
+    ///
+    /// Idempotent — the coordinator no-ops if a comparison sheet (or
+    /// the full paywall) is already presenting, so a fast double-tap
+    /// can't duplicate-emit `paywall_viewed`.
+    private func presentProComparison() {
+        coordinator.presentProComparison(trigger: .settingsProComparison)
     }
 
     private var restoreRow: some View {
@@ -238,6 +454,25 @@ struct SettingsRootView: View {
         .buttonStyle(.plain)
         .disabled(isRestoring)
         .accessibilityLabel("Restore purchases")
+    }
+
+    // MARK: - Help
+
+    /// Help section. v1: a single "Show tutorial again" entry that
+    /// hands off to `RootCoordinator.replayTutorial` — the coordinator
+    /// owns reset + tab routing in one place so Settings stays
+    /// decoupled from `selectedTab` mutation.
+    private var helpSection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("Help")
+            settingsActionRow(
+                icon: Image.Stir.info,
+                title: "Show \(TutorialKey.tonightTour.displayName) again",
+                subtitle: TutorialKey.tonightTour.replaySubtitle,
+                action: { coordinator.replayTutorial(.tonightTour) },
+            )
+            .stirCard()
+        }
     }
 
     // MARK: - Notifications
@@ -580,6 +815,19 @@ extension Tier {
         case .free:    return "Free"
         case .premium: return "Premium"
         case .pro:     return "Pro"
+        }
+    }
+
+    /// Remembered-pantry-item cap, formatted with thousands separator
+    /// for marketing copy. Source of truth: spec §entitlements / CLAUDE.md
+    /// tier table. Free=25, Premium=250, Pro=1,000. Lifted out of inline
+    /// strings so a future cap revision doesn't leave stale "1,000" /
+    /// "250" literals scattered across paywall + Settings copy.
+    var displayPantryCap: String {
+        switch self {
+        case .free:    return "25"
+        case .premium: return "250"
+        case .pro:     return "1,000"
         }
     }
 }

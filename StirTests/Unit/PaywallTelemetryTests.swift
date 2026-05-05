@@ -153,7 +153,9 @@ final class PaywallTelemetryTests: XCTestCase {
         XCTAssertEqual(PaywallTrigger.leftoversGate.telemetryValue, "leftovers_gate")
         XCTAssertEqual(PaywallTrigger.multiImageScanGate.telemetryValue, "multi_image_scan_gate")
         XCTAssertEqual(PaywallTrigger.settingsUpgrade.telemetryValue, "settings_upgrade")
+        XCTAssertEqual(PaywallTrigger.settingsProComparison.telemetryValue, "settings_pro_comparison")
         XCTAssertEqual(PaywallTrigger.voiceAffordanceTapped.telemetryValue, "voice_affordance_tapped")
+        XCTAssertEqual(PaywallTrigger.voiceCookQuotaExhausted.telemetryValue, "voice_cook_quota_exhausted")
     }
 
     // MARK: forbidden property names — any invented key would fail here

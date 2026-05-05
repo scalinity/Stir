@@ -118,6 +118,11 @@ enum PayError: Error, Sendable, Equatable {
     case paymentNotAllowed
     case storeProblem(description: String)
     case generic(description: String)
+    /// Offerings load exceeded `PaywallViewModel.offeringsLoadTimeoutSec`.
+    /// Distinguishes a wedged RC CDN (no error surfaced) from a clean
+    /// network failure — the user-facing copy can suggest "try again"
+    /// instead of "check your connection."
+    case timeout
 }
 
 // ---------------------------------------------------------------------------
