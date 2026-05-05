@@ -162,21 +162,25 @@ final class EntitlementService {
 
     // MARK: - canAccess
 
-    func canAccess(_ gate: FeatureGate) -> EntitlementDecision {
-        // Demote to free for `expired` AND `none`. Server's effectiveTier()
-        // (entitlements.ts) does the same — iOS must match so a stale
-        // Keychain snapshot with (tier=.premium, billingState=.none) can't
-        // silently hand out paid features. This is a defensive guard: in
-        // normal flow RC would never leave tier=.premium while
-        // billing_state=.none, but keychain snapshots from earlier builds
-        // or hand-edited test states could produce it.
-        let effectiveTier: Tier = {
-            switch billingState {
-            case .expired, .none: return .free
-            default:              return tier
-            }
-        }()
+    /// Demote to free for `expired` AND `none`. Server's effectiveTier()
+    /// (entitlements.ts) does the same — iOS must match so a stale
+    /// Keychain snapshot with (tier=.premium, billingState=.none) can't
+    /// silently hand out paid features. This is a defensive guard: in
+    /// normal flow RC would never leave tier=.premium while
+    /// billing_state=.none, but keychain snapshots from earlier builds
+    /// or hand-edited test states could produce it. Hoisted to a
+    /// computed property so every entitlement decision (`canAccess`,
+    /// `rememberedPantryCap`, future tier-gated extensions) consumes
+    /// one definition — divergence here is the exact bug class the
+    /// stale-snapshot defense exists to prevent.
+    var effectiveTier: Tier {
+        switch billingState {
+        case .expired, .none: return .free
+        default:              return tier
+        }
+    }
 
+    func canAccess(_ gate: FeatureGate) -> EntitlementDecision {
         switch gate {
         // Premium-tier gates
         case .voiceCookMode:
@@ -354,19 +358,13 @@ final class EntitlementService {
 }
 
 extension EntitlementService {
-    /// Standing-pantry-item cap per tier (CLAUDE.md authoritative):
-    ///   Free    25
-    ///   Premium 250
-    ///   Pro     1000
-    /// Used by `PantryListViewModel` for client-side quota gating on
-    /// manual adds (the cap is not enforced server-side because user
-    /// content is CloudKit-only — no server visibility into pantry
-    /// state).
-    var rememberedPantryCap: Int {
-        switch tier {
-        case .free: return 25
-        case .premium: return 250
-        case .pro: return 1000
-        }
-    }
+    /// Standing-pantry-item cap per tier. Sourced from
+    /// `Tier.rememberedPantryCap` (single value table) and routed
+    /// through `effectiveTier` so a stale Keychain snapshot
+    /// `(tier=.premium, billingState=.none)` correctly demotes to the
+    /// Free cap — same defense the rest of the file relies on for
+    /// every other entitlement decision. Used by `PantryListViewModel`
+    /// for client-side quota gating on manual adds (cap is not
+    /// enforced server-side because user content is CloudKit-only).
+    var rememberedPantryCap: Int { effectiveTier.rememberedPantryCap }
 }

@@ -4,10 +4,12 @@
 // household, exposes a filtered view over a typeahead `searchText`,
 // and brokers manual-add / edit / delete through PantryItemRepository.
 //
-// Quota enforcement (Free 25 / Premium 250 / Pro 1000 remembered
-// items per CLAUDE.md) is checked client-side via
-// `repo.countRemembered(for:)` on every add — over-cap surfaces a
-// `PaywallTrigger.pantryCapReached` paywall instead of writing.
+// Quota enforcement: cap source-of-truth lives on `Tier` (see
+// `Tier.rememberedPantryCap`); `EntitlementService.rememberedPantryCap`
+// routes through `effectiveTier`. The actual at-cap rejection happens
+// inside `PantryItemRepository.insertManual` so a re-typed existing
+// remembered name at cap upserts (no row added) instead of being
+// wrongly routed to the paywall (review C4).
 
 import Foundation
 import Observation
@@ -48,98 +50,171 @@ final class PantryListViewModel {
         return items.filter { ($0.displayName ?? "").lowercased().contains(q) }
     }
 
+    /// Live count of items that count against the standing pantry cap
+    /// — non-deleted, non-expired `.remembered` rows. Mirrors
+    /// `PantryItemRepository.countRemembered`'s predicate but operates
+    /// on the in-memory `items` array so the header strip can re-render
+    /// inexpensively after every mutation. The header used to read
+    /// `vm.items.count` (which includes ephemeral / expired / unknown)
+    /// against `cap` and visibly lied — e.g. "27 of 25 saved" with 5
+    /// ephemeral + 22 remembered (review C2).
+    var rememberedCount: Int {
+        items.filter { item in
+            item.deletedAt == nil
+                && item.typedMemoryState == .remembered
+                && !item.isExpired
+        }.count
+    }
+
     /// Set when the most recent insert/update/delete failed. Bound to a
-    /// toast at the view layer so the user gets an actionable message
-    /// rather than a silent no-op.
+    /// toast at the view layer (see `PantryListView.errorToast` binding).
+    /// Pair with `errorEvent` so the view can re-fire a toast for the
+    /// same string without StringEquality dedupe via `.onChange`.
     var errorMessage: String?
+
+    /// Monotonic UUID stamped on every error transition. The view binds
+    /// this to a `.onChange` so duplicate errors (load-fail then add-
+    /// fail with the same generic copy) still surface as fresh toasts.
+    /// Reset to `nil` on every successful mutation entry so the toast
+    /// surface is single-shot per failure.
+    private(set) var errorEvent: UUID?
+
+    /// Set when `editingItem` is observed to have its `deletedAt`
+    /// flipped (CloudKit-tombstone race). View dismisses the edit
+    /// sheet and surfaces a typed toast. Cleared by the view after
+    /// presentation. Review W3.
+    var externallyRemovedItemEvent: UUID?
 
     private let household: HouseholdProfile
     private let repo: PantryItemRepository
     private let entitlements: EntitlementService
+    private let sentry: any SentryReporting
 
     init(
         household: HouseholdProfile,
         repo: PantryItemRepository,
         entitlements: EntitlementService,
+        sentry: any SentryReporting = SentryReporter.shared,
     ) {
         self.household = household
         self.repo = repo
         self.entitlements = entitlements
+        self.sentry = sentry
     }
 
     /// Hydrate `items` from Core Data. Called from `.task { }` on
     /// PantryListView's appearance and after every mutation.
     func load() {
+        clearError()
         do {
             items = try repo.fetchAll(for: household)
         } catch {
-            Logger.coreData.error("PantryListViewModel load failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Couldn't load your pantry. Pull to retry."
+            Logger.coreData.error(
+                "PantryListViewModel load failed: \(error.localizedDescription, privacy: .private)",
+            )
+            surfaceError("Couldn't load your pantry. Try again.")
         }
     }
 
     /// Manual-add path. Returns a typed `PantryAddResult`: `.capReached`
     /// routes to the paywall, `.failed` surfaces `errorMessage` via a
-    /// toast, `.added` is success. The VM doesn't own paywall
-    /// presentation — the view layer reads the result and dispatches.
+    /// toast (and the view keeps the AddSheet open so user input isn't
+    /// lost — review S11), `.added` is success.
+    ///
+    /// Cap enforcement lives in the repository (see
+    /// `PantryItemRepository.insertManual`'s `usedRemembered`/`cap` pair)
+    /// so a re-typed existing remembered name at cap upserts instead
+    /// of being paywalled — review C4. The VM still surfaces
+    /// `(used, cap)` from EntitlementService at the call site.
     @discardableResult
     func addItem(
         displayName: String,
         amountText: String?,
         memoryState: PantryItem.MemoryState = .remembered,
     ) -> PantryAddResult {
-        // Standing pantry items count against the cap; ephemeral
-        // (today-only) items do not.
+        clearError()
+
+        var usedRemembered: Int? = nil
         if memoryState == .remembered {
             do {
-                let used = try repo.countRemembered(for: household)
-                let cap = entitlements.rememberedPantryCap
-                guard used < cap else {
-                    return .capReached
-                }
+                usedRemembered = try repo.countRemembered(for: household)
             } catch {
-                Logger.coreData.warning("countRemembered failed; allowing add: \(error.localizedDescription, privacy: .public)")
-                // Fail-open on count failure — better to over-store than
-                // to dead-end the user behind a phantom quota error.
+                // Fail-open on count failure — better to over-store
+                // than to dead-end the user behind a phantom quota
+                // error. Surface as a Sentry breadcrumb so a systemic
+                // failure becomes observable in production.
+                Logger.coreData.warning(
+                    "countRemembered failed; allowing add: \(error.localizedDescription, privacy: .private)",
+                )
+                sentry.breadcrumb(
+                    category: "pantry",
+                    message: "countRemembered_failed_open",
+                    data: ["error_kind": String(describing: type(of: error))],
+                )
             }
         }
+        let cap = entitlements.rememberedPantryCap
+
         do {
-            _ = try repo.insertManual(
+            let outcome = try repo.insertManual(
                 displayName: displayName,
                 amountText: amountText,
                 memoryState: memoryState,
                 on: household,
+                usedRemembered: usedRemembered,
+                cap: cap,
             )
-            load()
-            return .added
+            switch outcome {
+            case .inserted, .upserted:
+                load()
+                return .added
+            case .capReached:
+                return .capReached
+            }
         } catch {
-            Logger.coreData.error("addItem failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Couldn't add this item. Try again."
+            Logger.coreData.error(
+                "addItem failed: \(error.localizedDescription, privacy: .private)",
+            )
+            surfaceError("Couldn't add this item. Try again.")
             return .failed
         }
     }
 
-    /// Edit-sheet commit. Refreshes the list so reorder by lastSeenAt
-    /// (technically unchanged here — only updatedAt moves) is honored.
+    /// Edit-sheet commit. Calls `load()` after success so any new
+    /// fields the row's `@ObservedObject` hadn't propagated synchronously
+    /// (e.g. memoryState changes affecting `rememberedCount` derivation)
+    /// surface immediately. `lastSeenAt` is intentionally NOT bumped on
+    /// edit — an edit shouldn't re-rank a row to the top of the
+    /// recently-seen list.
+    ///
+    /// `memoryState == nil` means "preserve the row's existing
+    /// memoryState" — sent by `PantryEditSheet` when the user didn't
+    /// touch the segmented picker. This avoids silently flipping
+    /// `.expired`/`.unknown` rows to `.remembered` on an untouched
+    /// save (review C3).
     @discardableResult
     func editItem(
         _ item: PantryItem,
         displayName: String,
         amountText: String?,
-        memoryState: PantryItem.MemoryState,
+        memoryState: PantryItem.MemoryState?,
     ) -> Bool {
+        clearError()
+        let stateToPersist = memoryState ?? item.typedMemoryState
         do {
             try repo.update(
                 item,
                 displayName: displayName,
                 amountText: amountText,
-                memoryState: memoryState,
+                memoryState: stateToPersist,
             )
             load()
             return true
         } catch {
-            Logger.coreData.error("editItem failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Couldn't save this change. Try again."
+            Logger.coreData.error(
+                "editItem failed: \(error.localizedDescription, privacy: .private)",
+            )
+            surfaceError("Couldn't save this change. Try again.")
             return false
         }
     }
@@ -149,14 +224,37 @@ final class PantryListViewModel {
     /// favorites delete pattern).
     @discardableResult
     func deleteItem(_ item: PantryItem) -> Bool {
+        clearError()
         do {
             try repo.softDelete(item)
             load()
             return true
         } catch {
-            Logger.coreData.error("deleteItem failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Couldn't remove this item. Try again."
+            Logger.coreData.error(
+                "deleteItem failed: \(error.localizedDescription, privacy: .private)",
+            )
+            surfaceError("Couldn't remove this item. Try again.")
             return false
         }
+    }
+
+    /// View invokes this when it observes `editingItem.deletedAt != nil`
+    /// while the edit sheet is presented (CloudKit-tombstone race).
+    /// Triggers a typed toast separate from the generic error message.
+    func surfaceExternallyRemoved() {
+        externallyRemovedItemEvent = UUID()
+    }
+
+    // MARK: - Error event helpers
+
+    private func surfaceError(_ message: String) {
+        errorMessage = message
+        errorEvent = UUID()
+    }
+
+    /// Reset error state at the head of every mutation so a stale
+    /// failure copy doesn't toast on a subsequent successful render.
+    private func clearError() {
+        errorMessage = nil
     }
 }

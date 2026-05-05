@@ -35,6 +35,7 @@ struct PantryAddSheet: View {
     @State private var amount: String = ""
     @State private var memoryState: PantryItem.MemoryState = .remembered
     @FocusState private var nameFocused: Bool
+    @FocusState private var amountFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -52,6 +53,8 @@ struct PantryAddSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { onCancel() }
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ember600)
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Add to pantry")
@@ -62,12 +65,27 @@ struct PantryAddSheet: View {
                     Button("Add") {
                         commit()
                     }
+                    .stirFont(.labelLg)
                     .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ember600)
                     .disabled(trimmedName.isEmpty)
                 }
             }
             .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            // Length caps at the input layer give immediate feedback
+            // (review W10). Repository validation guards repeat the
+            // check defense-in-depth so non-UI callers stay safe.
+            .onChange(of: name) { _, newValue in
+                if newValue.count > PantryItemRepository.maxDisplayNameLength {
+                    name = String(newValue.prefix(PantryItemRepository.maxDisplayNameLength))
+                }
+            }
+            .onChange(of: amount) { _, newValue in
+                if newValue.count > PantryItemRepository.maxAmountTextLength {
+                    amount = String(newValue.prefix(PantryItemRepository.maxAmountTextLength))
+                }
+            }
         }
         .onAppear { nameFocused = true }
     }
@@ -83,6 +101,7 @@ struct PantryAddSheet: View {
                 isFocused: nameFocused,
                 autocapitalization: .words,
                 submitLabel: .next,
+                onSubmit: { amountFocused = true },
             )
             .focused($nameFocused)
         }
@@ -94,9 +113,12 @@ struct PantryAddSheet: View {
             InputField(
                 placeholder: "e.g. 2 tbsp, 500g, half a bottle",
                 text: $amount,
+                isFocused: amountFocused,
                 autocapitalization: .never,
                 submitLabel: .done,
+                onSubmit: { commit() },
             )
+            .focused($amountFocused)
         }
     }
 

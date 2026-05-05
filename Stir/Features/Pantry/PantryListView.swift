@@ -3,23 +3,26 @@
 // Settings → "Manage pantry" destination. Lists the household's
 // PantryItems (NSManagedObject-bound rows for live KVO redraws via
 // PantryRow) with swipe-to-delete + tap-to-edit. Top-of-list shows
-// current count vs cap so users see headroom; tapping the toolbar
-// "+" opens PantryAddSheet, with quota enforcement routing to the
-// paywall when over-cap.
+// current REMEMBERED count vs cap so users see headroom; tapping the
+// toolbar "+" opens PantryAddSheet, with the repository's cap-aware
+// insert routing to the paywall when over-cap.
 //
 // Empty state mirrors TonightHomeView's first-use grammar (large
 // ember-tinted icon tile + title + subtitle + primary CTA) but
 // points at scan as the primary populate path with manual-add as
-// the fallback. Reachable from Settings, so dismissal is the system
-// back chevron.
+// the fallback.
 //
 // Coordinator is passed explicitly (not pulled from `@Environment`)
 // because this screen brokers two coordinator surfaces — the pantry
 // repository and `presentPaywall(_:)` — and the parameter form makes
 // the dependency contract visible to callers (Settings entry-point
-// in Task 10). Established pattern in Settings → HouseholdPreferences
-// uses environment injection; this view's tighter coupling to
-// coordinator-owned services made the parameter form clearer.
+// in Task 10).
+//
+// Toast surface: `vm.errorEvent` (UUID-stamped) drives a `.stirToast`
+// at the outer Group via `.onChange`. A separate
+// `vm.externallyRemovedItemEvent` handles the CloudKit-tombstone race
+// where an open edit sheet's row gets soft-deleted from another
+// device — the sheet auto-dismisses and a typed toast surfaces.
 
 import OSLog
 import SwiftUI
@@ -34,18 +37,24 @@ struct PantryListView: View {
     @State private var showingAddSheet = false
     @State private var editingItem: PantryItem?
     @State private var initError: String?
+    @State private var errorToast: StirToastPayload?
 
     var body: some View {
         Group {
             if let viewModel {
                 listBody(vm: viewModel)
-            } else if let initError {
+            } else if let message = initError {
                 // Profile unavailable at task-time — Settings is reachable
-                // pre-bootstrap on cold deeplink launches. Mirror the
-                // HouseholdPreferencesView posture: ConfigurationErrorView
-                // with a dismiss action so the user can back out.
-                ConfigurationErrorView(message: initError, onRetry: { dismiss() })
-                    .background(Color.Stir.paper50)
+                // pre-bootstrap on cold deeplink launches. ConfigurationErrorView's
+                // `onRetry` action genuinely retries: clear `initError`,
+                // SwiftUI re-runs the `.task` modifier on the next render
+                // when the conditional flips back to the loading branch.
+                // Previously the closure dismissed the screen, which
+                // contradicted the "Try again" button copy.
+                ConfigurationErrorView(message: message, onRetry: {
+                    initError = nil
+                })
+                .background(Color.Stir.paper50)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,10 +64,6 @@ struct PantryListView: View {
         .navigationTitle("Pantry")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Principal item renders the screen title in the Stir
-            // display serif, matching SettingsRootView and Saved.
-            // Default `navigationTitle` chrome falls back to SF Pro
-            // and breaks cross-tab visual rhythm.
             ToolbarItem(placement: .principal) {
                 Text("Pantry")
                     .stirFont(.displaySm)
@@ -70,6 +75,11 @@ struct PantryListView: View {
                 } label: {
                     Image.Stir.plus
                         .foregroundStyle(Color.Stir.ember600)
+                        // HIG floor: SF Symbol intrinsic ~22×22pt; toolbar
+                        // hit area is borderline without an explicit minimum
+                        // (review W14).
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(viewModel == nil)
                 .accessibilityLabel("Add item")
@@ -77,28 +87,26 @@ struct PantryListView: View {
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        // Single AddSheet presentation hoisted to the outer Group so
-        // the sheet survives the empty→populated subtree swap and
-        // doesn't dead-end when the VM hasn't initialized yet.
-        // (Toolbar `+` is disabled while `viewModel == nil`, so the
-        // `if let` branch always lands in practice.)
+        // AddSheet hoisted to outer Group so it survives empty→populated
+        // subtree swaps. Toolbar `+` is disabled while VM is nil so the
+        // `if let` branch always lands. On `.failed` the sheet stays
+        // open (review S11) so the user's input isn't silently lost; a
+        // toast surfaces via the errorEvent binding below.
         .sheet(isPresented: $showingAddSheet) {
             if let viewModel {
                 PantryAddSheet(
                     onSave: { name, amount, state in
                         let result = viewModel.addItem(displayName: name, amountText: amount, memoryState: state)
-                        showingAddSheet = false
                         switch result {
                         case .added:
-                            break  // success; vm.load() inside addItem already refreshed items
+                            showingAddSheet = false
                         case .capReached:
+                            showingAddSheet = false
                             coordinator.presentPaywall(.pantryCapReached)
                         case .failed:
-                            // errorMessage was set by the VM; the sheet's
-                            // dismissal will expose the underlying list.
-                            // Toast binding lands in a follow-up — see
-                            // the TODO(pantry-toast) marker in
-                            // populatedList(vm:) for the deferred work.
+                            // Keep sheet open; toast surfaces via errorEvent.
+                            // User's input is preserved so they can retry
+                            // without re-typing.
                             break
                         }
                     },
@@ -106,6 +114,15 @@ struct PantryListView: View {
                 )
             }
         }
+        // Toast wiring extracted to a modifier so the outer body
+        // doesn't tip over the SwiftUI typecheck-complexity ceiling
+        // (the .sheet closures + 3 .onChanges + .stirToast push the
+        // expression past it). Functionally identical to inlining.
+        .modifier(PantryToastModifier(
+            viewModel: viewModel,
+            errorToast: $errorToast,
+            editingItem: $editingItem,
+        ))
         .task {
             guard viewModel == nil else { return }
             if let profile = coordinator.household.profile {
@@ -134,20 +151,27 @@ struct PantryListView: View {
 
     private func populatedList(vm: PantryListViewModel) -> some View {
         @Bindable var bindable = vm
-        // TODO(pantry-toast): bind viewModel.errorMessage to a
-        // .stirToast at the view layer so swipe-delete / edit-save
-        // failures surface to the user. Deferred from Task 9.
         return VStack(spacing: 0) {
-            // Header strip — count + cap headroom. Reads "23 of 250
-            // saved" so users see remaining room before the cap kicks
-            // in. Cap is server-resolved per tier via EntitlementService.
+            // Header strip — REMEMBERED count vs cap. The previous
+            // `vm.items.count` lied: a user with 5 ephemeral + 22
+            // remembered would see "27 of 25 saved" because items
+            // includes ephemeral rows that don't count against the
+            // cap (review C2). `rememberedCount` mirrors the
+            // repository's `countRemembered` predicate.
             HStack(alignment: .firstTextBaseline) {
-                Text("\(vm.items.count)")
+                Text("\(vm.rememberedCount)")
                     .stirFont(.displayMd)
                     .foregroundStyle(Color.Stir.ink900)
                 Text("of \(entitlements.rememberedPantryCap) saved")
                     .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
+                    // Dynamic Type protection: at AX3+ on iPhone SE
+                    // (320pt content), the displayMd count + bodySm
+                    // trailing text would clip without scaling
+                    // (review W12).
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
@@ -164,11 +188,9 @@ struct PantryListView: View {
                             Button(role: .destructive) {
                                 vm.deleteItem(item)
                             } label: {
-                                // Label's `icon:` slot accepts an arbitrary
-                                // View, so we route through Image.Stir.delete
-                                // rather than the systemImage shorthand —
-                                // keeps the no-raw-Image(systemName:) rule
-                                // intact even inside swipeActions.
+                                // Label's `icon:` slot routes through
+                                // Image.Stir.delete rather than systemImage
+                                // shorthand — keeps the no-raw-Image rule.
                                 Label {
                                     Text("Remove")
                                 } icon: {
@@ -184,11 +206,11 @@ struct PantryListView: View {
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
-        // AddSheet presentation lives on the outer Group in `body` so
-        // it survives empty→populated subtree swaps and is gated by
-        // toolbar disable while VM is nil. Edit sheet stays here
+        // Edit sheet stays here (rather than hoisted to outer Group)
         // because it's `.sheet(item:)` driven by a row tap and only
-        // exists when the populated list is on screen.
+        // makes sense when the populated list is on screen. The
+        // tombstone race is handled by the sheet itself observing
+        // `item.deletedAt` and calling onExternallyRemoved.
         .sheet(item: $editingItem) { item in
             PantryEditSheet(
                 item: item,
@@ -201,6 +223,9 @@ struct PantryListView: View {
                     editingItem = nil
                 },
                 onCancel: { editingItem = nil },
+                onExternallyRemoved: {
+                    vm.surfaceExternallyRemoved()
+                },
             )
         }
     }
@@ -235,8 +260,6 @@ struct PantryListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, CGFloat.Stir.screenMargin)
         .background(Color.Stir.paper50)
-        // AddSheet presentation lives on the outer Group in `body` —
-        // see the consolidated `.sheet(isPresented:)` there.
     }
 }
 
@@ -245,3 +268,32 @@ struct PantryListView: View {
 // the entity's `@NSManaged var id: UUID?` would collide with any
 // `var id: NSManagedObjectID` we tried to declare. Sheet(item:)
 // happily uses the inherited objectID-based identity.
+
+/// Folds the error-toast + tombstone-toast wiring out of the outer
+/// `body` so the expression stays under SwiftUI's typecheck ceiling.
+/// Subscribes to `vm.errorEvent` (UUID-stamped, so string-equal
+/// errors re-fire) and `vm.externallyRemovedItemEvent` (CloudKit
+/// tombstone race), routing both through a single `.stirToast`.
+private struct PantryToastModifier: ViewModifier {
+    let viewModel: PantryListViewModel?
+    @Binding var errorToast: StirToastPayload?
+    @Binding var editingItem: PantryItem?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: viewModel?.errorEvent) { _, newEvent in
+                guard newEvent != nil, let message = viewModel?.errorMessage else { return }
+                errorToast = StirToastPayload(id: UUID(), message: message, kind: .failed)
+            }
+            .onChange(of: viewModel?.externallyRemovedItemEvent) { _, newEvent in
+                guard newEvent != nil else { return }
+                editingItem = nil
+                errorToast = StirToastPayload(
+                    id: UUID(),
+                    message: "This item was removed on another device.",
+                    kind: .info,
+                )
+            }
+            .stirToast($errorToast)
+    }
+}

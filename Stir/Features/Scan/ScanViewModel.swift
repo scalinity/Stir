@@ -251,7 +251,20 @@ final class ScanViewModel {
             )
         }
         do {
-            _ = try pantryRepo.upsertFromScan(scanInputs, on: household)
+            // Cap-aware upsert: Free 25 / Premium 250 / Pro 1000 from
+            // EntitlementService. Without this pair the repo would
+            // happily insert unbounded `.remembered` rows from a
+            // staple-heavy scan, breaking the standing-cap the manual-
+            // add path enforces. See PantryItemRepository docstring +
+            // review C1.
+            let usedRemembered = (try? pantryRepo.countRemembered(for: household)) ?? 0
+            let cap = entitlements.rememberedPantryCap
+            _ = try pantryRepo.upsertFromScan(
+                scanInputs,
+                on: household,
+                usedRemembered: usedRemembered,
+                cap: cap,
+            )
         } catch {
             Logger.scanFeature.error("upsertFromScan failed: \(error.localizedDescription, privacy: .public)")
             // Continue despite persistence failure — the solve call doesn't

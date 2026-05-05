@@ -63,7 +63,42 @@ struct PantryRow: View {
             stateBadge
         }
         .padding(.vertical, CGFloat.Stir.space2)
-        .accessibilityElement(children: .combine)
+        // VoiceOver: replace `.combine` (which folds in the visible
+        // text but drops the decorative source glyph's semantics) with
+        // an explicit label that includes source attribution. Source
+        // is meaningful info — "scanned" vs "manually entered" vs
+        // "imported from a recipe" tells the user where the row came
+        // from when they're auditing pantry contents (review W13).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(combinedAccessibilityLabel)
+    }
+
+    /// Combined VoiceOver label: "{name}, {amount?}, {state}, source:
+    /// {source}". Empty fields are skipped so the label doesn't read
+    /// dead commas. Mirrors the visible row order so cursor-by-row
+    /// review feels like reading the visible UI, with source appended
+    /// at the end.
+    private var combinedAccessibilityLabel: String {
+        var parts: [String] = []
+        parts.append(item.displayName ?? "Unnamed")
+        if let amount = item.amountText, !amount.isEmpty {
+            parts.append(amount)
+        }
+        let state = item.memoryStateLabel
+        if !state.isEmpty {
+            parts.append(state)
+        }
+        parts.append("source: \(sourceAccessibilityLabel)")
+        return parts.joined(separator: ", ")
+    }
+
+    private var sourceAccessibilityLabel: String {
+        switch item.typedSource {
+        case .scan:    return "scanned"
+        case .manual:  return "manually entered"
+        case .staple:  return "staple"
+        case .import:  return "imported from a recipe"
+        }
     }
 
     private var sourceGlyph: some View {
