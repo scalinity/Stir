@@ -110,6 +110,13 @@
 		58781C6158D7EAD5ABAEAEC0 /* OutcomeFeedbackRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A0F00261FF6319D1A39150 /* OutcomeFeedbackRepository.swift */; };
 		58E57E09864E1CFCC5191237 /* KeychainStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 374669111D98B028BEC3824D /* KeychainStorage.swift */; };
 		59F7447C13EF0C7D5B9F704C /* PantryItemRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6857735F3B85783592B1FBC /* PantryItemRepository.swift */; };
+		3BA6034BF381AFBF1571FDAE /* PantryListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10F947AC2BE674F194DD60D /* PantryListViewModel.swift */; };
+		0E89338426F268C8279ADE1D /* PantryRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C069940C8A47491179507BD9 /* PantryRow.swift */; };
+		7A6B41E8C9D305724FE17A2C /* PantryAddSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C84A1FB23E907B36510D8E4 /* PantryAddSheet.swift */; };
+		2E7F19D8AB6043C512BF7081 /* PantryEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19A50D7CC284E61A37CB592 /* PantryEditSheet.swift */; };
+		8B2D71F4A4C9E061B7A40915 /* PantryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F38C6A20D3E92B7561C8423 /* PantryListView.swift */; };
+		9E6486BB7FCC81ACFC03BAE7 /* PantryListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396B17FFCB80C34D584EBFE4 /* PantryListViewModelTests.swift */; };
+		B71D5F0E2A3B4C8E9F605142 /* PantryItemDisplayExtensionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E624190B4C5D9F1A716253 /* PantryItemDisplayExtensionsTests.swift */; };
 		5BF954E819D3CA46056674C9 /* Radius.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DD780A4BED6D4714A5AD9D /* Radius.swift */; };
 		5D064EAFE485CE103D180BA2 /* LiveFramesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E851A6B4AAD065C5217BF5 /* LiveFramesTests.swift */; };
 		5E6AC0A940D710330894EB3C /* StirError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74588281F314D67EE09DCD8A /* StirError.swift */; };
@@ -155,6 +162,7 @@
 		8BBEFC364CEFE0A1F037F29E /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F2075E34D782898B6DAC024A /* WidgetKit.framework */; };
 		8C6E380CAAA79444AA8FD0ED /* AIDispatchDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */; };
 		D7A1B5C9E4F30182A6B5C7D8 /* BlankOptionalEncodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B2C6DAF50402938A6C5D8E /* BlankOptionalEncodingTests.swift */; };
+		B4C7E2F1A85F3D906B7E29C4 /* PantryItemRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D8F1E3C9407B815D6E48F2 /* PantryItemRepositoryTests.swift */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
 		8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */; };
 		8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */; };
@@ -353,6 +361,7 @@
 		16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowRoot.swift; sourceTree = "<group>"; };
 		173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDispatchDecoderTests.swift; sourceTree = "<group>"; };
 		E8B2C6DAF50402938A6C5D8E /* BlankOptionalEncodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankOptionalEncodingTests.swift; sourceTree = "<group>"; };
+		A2D8F1E3C9407B815D6E48F2 /* PantryItemRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryItemRepositoryTests.swift; sourceTree = "<group>"; };
 		185217A5FC09EE50EC99E59A /* CanonicalKeyHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalKeyHash.swift; sourceTree = "<group>"; };
 		18E8619A7FDF88B9465134C3 /* SentryReporting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryReporting.swift; sourceTree = "<group>"; };
 		1925C8B72C619B5F85424775 /* LeftoversSessionViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoversSessionViewModelTests.swift; sourceTree = "<group>"; };
@@ -538,6 +547,13 @@
 		D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerActivityAttributes.swift; sourceTree = "<group>"; };
 		D61ECEB2E68886B41D1AE79C /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		D6857735F3B85783592B1FBC /* PantryItemRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryItemRepository.swift; sourceTree = "<group>"; };
+		D10F947AC2BE674F194DD60D /* PantryListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryListViewModel.swift; sourceTree = "<group>"; };
+		C069940C8A47491179507BD9 /* PantryRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryRow.swift; sourceTree = "<group>"; };
+		9C84A1FB23E907B36510D8E4 /* PantryAddSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryAddSheet.swift; sourceTree = "<group>"; };
+		F19A50D7CC284E61A37CB592 /* PantryEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryEditSheet.swift; sourceTree = "<group>"; };
+		4F38C6A20D3E92B7561C8423 /* PantryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryListView.swift; sourceTree = "<group>"; };
+		396B17FFCB80C34D584EBFE4 /* PantryListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryListViewModelTests.swift; sourceTree = "<group>"; };
+		C8E624190B4C5D9F1A716253 /* PantryItemDisplayExtensionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryItemDisplayExtensionsTests.swift; sourceTree = "<group>"; };
 		D6FDAF0954F8D77AEA674D3F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryListView.swift; sourceTree = "<group>"; };
 		D7A235A27546345C45BC15C3 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
@@ -653,6 +669,9 @@
 				948032DBA10C08623AB8E7A4 /* AccountStateTests.swift */,
 				173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */,
 				E8B2C6DAF50402938A6C5D8E /* BlankOptionalEncodingTests.swift */,
+				A2D8F1E3C9407B815D6E48F2 /* PantryItemRepositoryTests.swift */,
+				396B17FFCB80C34D584EBFE4 /* PantryListViewModelTests.swift */,
+				C8E624190B4C5D9F1A716253 /* PantryItemDisplayExtensionsTests.swift */,
 				71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */,
 				288F193547101468063792F0 /* AppIntentsGateTests.swift */,
 				1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */,
@@ -773,6 +792,7 @@
 				64834C339DA53E64BEB2C865 /* Import */,
 				6F0C914C0CB978CD927D593A /* Leftovers */,
 				C5449C2C115933DC763671EB /* Onboarding */,
+				38BBB41CC12C04086ABAD2FF /* Pantry */,
 				E7154D788470A3CDFA1AB59E /* Saved */,
 				C711A27F7354E963F218F7D5 /* Scan */,
 				699971EC776F51AE8DE0FFA2 /* Settings */,
@@ -1145,6 +1165,18 @@
 			path = Saved;
 			sourceTree = "<group>";
 		};
+		38BBB41CC12C04086ABAD2FF /* Pantry */ = {
+			isa = PBXGroup;
+			children = (
+				4F38C6A20D3E92B7561C8423 /* PantryListView.swift */,
+				D10F947AC2BE674F194DD60D /* PantryListViewModel.swift */,
+				C069940C8A47491179507BD9 /* PantryRow.swift */,
+				9C84A1FB23E907B36510D8E4 /* PantryAddSheet.swift */,
+				F19A50D7CC284E61A37CB592 /* PantryEditSheet.swift */,
+			);
+			path = Pantry;
+			sourceTree = "<group>";
+		};
 		E7D1D5AB334D13A5C1A0907D /* App */ = {
 			isa = PBXGroup;
 			children = (
@@ -1446,6 +1478,9 @@
 			files = (
 				8C6E380CAAA79444AA8FD0ED /* AIDispatchDecoderTests.swift in Sources */,
 				D7A1B5C9E4F30182A6B5C7D8 /* BlankOptionalEncodingTests.swift in Sources */,
+				B4C7E2F1A85F3D906B7E29C4 /* PantryItemRepositoryTests.swift in Sources */,
+				9E6486BB7FCC81ACFC03BAE7 /* PantryListViewModelTests.swift in Sources */,
+				B71D5F0E2A3B4C8E9F605142 /* PantryItemDisplayExtensionsTests.swift in Sources */,
 				DEDE8060ACCB17D36A8AA4F8 /* AIDispatchSSETests.swift in Sources */,
 				D3B2F3B6BDD2CFDDA4FD82F4 /* AccountStateTests.swift in Sources */,
 				AA628CBD9D02A7D0A5A95279 /* AppGroup.swift in Sources */,
@@ -1610,6 +1645,11 @@
 				4A1FAB853D85EE8116CAB750 /* OutcomeFeedbackView.swift in Sources */,
 				3AD32ADEBDCC71B2996F70D1 /* PantryItem+Extensions.swift in Sources */,
 				59F7447C13EF0C7D5B9F704C /* PantryItemRepository.swift in Sources */,
+				3BA6034BF381AFBF1571FDAE /* PantryListViewModel.swift in Sources */,
+				0E89338426F268C8279ADE1D /* PantryRow.swift in Sources */,
+				7A6B41E8C9D305724FE17A2C /* PantryAddSheet.swift in Sources */,
+				2E7F19D8AB6043C512BF7081 /* PantryEditSheet.swift in Sources */,
+				8B2D71F4A4C9E061B7A40915 /* PantryListView.swift in Sources */,
 				825AC9F3318A1AC1D5EFCFAE /* PaywallCard.swift in Sources */,
 				548AD7648595DBBBE8AB0167 /* PaywallTrigger.swift in Sources */,
 				89C550D052175C8023691845 /* PaywallView.swift in Sources */,

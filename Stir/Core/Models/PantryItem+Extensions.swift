@@ -39,3 +39,26 @@ extension PantryItem {
 
     var isSoftDeleted: Bool { deletedAt != nil }
 }
+
+extension PantryItem {
+    /// True when `expiresAt` is in the past. Used by `PantryRow`'s
+    /// "expired" badge styling.
+    var isExpired: Bool {
+        guard let expires = expiresAt else { return false }
+        return expires < Date()
+    }
+
+    /// User-facing label for `typedMemoryState`. Drives the badge
+    /// chip on `PantryRow`. The "Expired" string preempts state when
+    /// `isExpired` is true so a `.remembered` row past its `expiresAt`
+    /// reads as "Expired" rather than "Standing".
+    var memoryStateLabel: String {
+        if isExpired { return "Expired" }
+        switch typedMemoryState {
+        case .ephemeral: return "Today"
+        case .remembered: return "Standing"
+        case .expired: return "Expired"
+        case .unknown: return ""
+        }
+    }
+}

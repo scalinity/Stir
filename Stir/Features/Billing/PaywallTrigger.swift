@@ -19,6 +19,12 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     /// Free user ran out of Dinner Solves for the month.
     case dinnerSolveQuotaExhausted
 
+    /// User hit their tier's remembered-pantry-items cap (Free: 25,
+    /// Premium: 250, Pro: 1000). Surfaced from the Pantry Management
+    /// list when a Free or Premium user attempts to add a 26th / 251st
+    /// remembered item.
+    case pantryCapReached
+
     /// Free user ran out of Recipe Imports for the month.
     /// (UI path lands in step 7; enum exists now for backend gate.)
     case recipeImportQuotaExhausted
@@ -68,6 +74,7 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     var telemetryValue: String {
         switch self {
         case .dinnerSolveQuotaExhausted:   return "dinner_solve_quota_exhausted"
+        case .pantryCapReached:            return "pantry_cap_reached"
         case .recipeImportQuotaExhausted:  return "recipe_import_quota_exhausted"
         case .savedFavoritesGate:          return "saved_favorites_gate"
         case .widgetsGate:                 return "widgets_gate"
@@ -93,6 +100,8 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
             return "You've used this month's voice Cook Sessions. Upgrade to Pro for more."
         case .dinnerSolveQuotaExhausted:
             return "You're out of Dinner Solves for this month. Upgrade to keep going."
+        case .pantryCapReached:
+            return "Need more pantry space?"
         case .recipeImportQuotaExhausted:
             return "You've used your import quota. Upgrade for unlimited imports."
         case .savedFavoritesGate:
@@ -172,6 +181,13 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
             // Same Pro-anchoring as `.settingsUpgrade`. Unread on the
             // ProComparisonSheet path (sheet has its own static prose).
             return proValueProp
+        case .pantryCapReached:
+            // Pantry cap is per-tier (Free 25 / Premium 250 / Pro 1000),
+            // so the subhead names both Premium and Pro counts to keep
+            // the upgrade choice legible. Frequency framing doesn't fit
+            // a "remembered ingredients" cap — exact counts read as
+            // capability, not rationing.
+            return "Premium remembers up to 250 ingredients. Pro remembers 1000."
         case .dinnerSolveQuotaExhausted,
              .recipeImportQuotaExhausted,
              .savedFavoritesGate,

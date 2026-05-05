@@ -689,6 +689,8 @@ Anchors:
 - `core_success_event`: scan → select → cook within 3 min → rate ≥4
 - `voice_conversion_event`: voice_affordance_tapped(free) → paywall_viewed → trial_started → purchase_completed
 
+`paywall_viewed.trigger` values: `dinner_solve_quota_exhausted`, `pantry_cap_reached`, `recipe_import_quota_exhausted`, `saved_favorites_gate`, `widgets_gate`, `leftovers_gate`, `multi_image_scan_gate`, `settings_upgrade`, `voice_affordance_tapped`, `voice_cook_quota_exhausted`. Mirrored 1:1 with `PaywallTrigger.telemetryValue` (iOS); enumerated also in spec §15 paywall_viewed.trigger clarification.
+
 PostHog LLM Observability events (`$ai_generation`, `$ai_trace`) are SEPARATE from product events — they feed PostHog's LLM Analytics dashboards. Every AI call emits both an `ai_request_log` row AND a `$ai_generation` event; link is `$ai_span_id = ai_request_log.request_id`. Spec §15 has property tables. Privacy: no `$ai_input` / `$ai_output_choices`, no user content, ever (ADR 0009).
 
 ---

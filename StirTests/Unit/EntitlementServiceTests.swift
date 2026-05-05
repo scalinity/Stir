@@ -321,6 +321,52 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertNil(service.flagBool(forKey: "nonexistent_flag"))
     }
 
+    // MARK: - rememberedPantryCap
+
+    func test_rememberedPantryCap_freeTierReturns25() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .free, billingState: .none))
+        XCTAssertEqual(service.rememberedPantryCap, 25)
+    }
+
+    func test_rememberedPantryCap_premiumActiveReturns250() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .premium, billingState: .active))
+        XCTAssertEqual(service.rememberedPantryCap, 250)
+    }
+
+    func test_rememberedPantryCap_proActiveReturns1000() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .pro, billingState: .active))
+        XCTAssertEqual(service.rememberedPantryCap, 1_000)
+    }
+
+    /// Stale-snapshot defense: a Keychain snapshot with
+    /// `tier=.premium, billingState=.expired` (or `.none`) must demote
+    /// to the Free cap, mirroring `canAccess`'s effectiveTier logic.
+    /// Without this, a lapsed Premium would keep their 250-item cap
+    /// indefinitely (review W1).
+    func test_rememberedPantryCap_premiumExpiredDemotesToFreeCap() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .premium, billingState: .expired))
+        XCTAssertEqual(service.rememberedPantryCap, 25, "expired billingState demotes to .free cap")
+    }
+
+    func test_rememberedPantryCap_proExpiredDemotesToFreeCap() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(tier: .pro, billingState: .expired))
+        XCTAssertEqual(service.rememberedPantryCap, 25)
+    }
+
+    func test_tier_rememberedPantryCap_centralizedValueTable() {
+        // Lock the cap-per-tier table at the Tier enum so the values
+        // can't drift between EntitlementService, PantryListViewModel
+        // doc-comments, and CLAUDE.md (review W11).
+        XCTAssertEqual(Tier.free.rememberedPantryCap, 25)
+        XCTAssertEqual(Tier.premium.rememberedPantryCap, 250)
+        XCTAssertEqual(Tier.pro.rememberedPantryCap, 1_000)
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [

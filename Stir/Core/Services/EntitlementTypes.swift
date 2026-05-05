@@ -9,6 +9,20 @@ enum Tier: String, Codable, Sendable, CaseIterable, Equatable {
     case free
     case premium
     case pro
+
+    /// Standing-pantry-item cap per tier — CLAUDE.md §Tier-entitlements
+    /// is the authoritative source. Centralized here so the value table
+    /// has one home; `EntitlementService.rememberedPantryCap` routes
+    /// through `effectiveTier` to apply the stale-snapshot demotion.
+    /// PaywallTrigger.subheadline references the values inline because
+    /// it's user-facing copy, not a programmatic constant.
+    var rememberedPantryCap: Int {
+        switch self {
+        case .free:    return 25
+        case .premium: return 250
+        case .pro:     return 1000
+        }
+    }
 }
 
 enum BillingState: String, Codable, Sendable, CaseIterable, Equatable {
