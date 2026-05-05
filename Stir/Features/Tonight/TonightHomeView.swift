@@ -103,6 +103,10 @@ struct TonightHomeView: View {
             get: { coordinator.activeSolveAgain },
             set: { coordinator.activeSolveAgain = $0 },
         ), content: solveAgainCoverContent)
+        .fullScreenCover(item: Binding(
+            get: { coordinator.activeOtherOptions },
+            set: { coordinator.activeOtherOptions = $0 },
+        ), content: otherOptionsCoverContent)
         .task { await refreshState() }
     }
 
@@ -150,6 +154,26 @@ struct TonightHomeView: View {
             },
             onDismiss: {
                 coordinator.dismissSolveAgain()
+                Task { await refreshState() }
+            },
+        )
+    }
+
+    @ViewBuilder
+    private func otherOptionsCoverContent(
+        entry: RootCoordinator.OtherOptionsEntry,
+    ) -> some View {
+        let capturedCoordinator = coordinator
+        OtherOptionsRoot(
+            currentPickSuggestedDishId: entry.currentPickSuggestedDishId,
+            aiDispatch: coordinator.aiDispatch,
+            solveRepo: coordinator.solveRepository,
+            householdStore: coordinator.household,
+            presentPaywall: { trigger in
+                capturedCoordinator.presentPaywall(trigger)
+            },
+            onDismiss: {
+                coordinator.dismissOtherOptions()
                 Task { await refreshState() }
             },
         )
@@ -331,7 +355,7 @@ struct TonightHomeView: View {
                     servings: pick.servings,
                     chips: pick.chips,
                     onStartCooking: { startCooking(pick) },
-                    onOtherOptions: { showOtherOptionsToast() },
+                    onOtherOptions: { presentOtherOptions(for: pick) },
                     onSaveForLater: { saveForLater(pick) },
                 )
                 secondaryTiles(for: pick)
@@ -471,14 +495,14 @@ struct TonightHomeView: View {
         return "Last: \(max(2, days)) days ago"
     }
 
-    /// "Other options" placeholder — the data is already there (the
-    /// MealSolveRequest carries 3 SuggestedDishes), but the UI to
-    /// present the other two from Tonight needs a dedicated view.
-    /// `DinnerOptionsView` is wired into ScanFlowRoot's mid-flow
-    /// step and isn't usable standalone. Toasting "coming soon"
-    /// keeps the affordance present without the half-built nav.
-    private func showOtherOptionsToast() {
-        toastMessage = "Other options coming soon."
+    /// Present the alts from the same MealSolveRequest as the current
+    /// pick. `OtherOptionsRoot` rehydrates DishCards from persisted
+    /// Core Data (no AI spend) and reuses `DishPreviewView` as the
+    /// destination, so users land on the same full-detail surface
+    /// they get from a fresh solve. Coordinator drives the
+    /// fullScreenCover via `activeOtherOptions` (mirrors SolveAgain).
+    private func presentOtherOptions(for pick: SolveRepository.TonightPick) {
+        coordinator.requestOtherOptions(currentPickSuggestedDishId: pick.suggestedDishId)
     }
 
     /// Save-for-later writes to `RecipePlan.isFavorite` so the dish

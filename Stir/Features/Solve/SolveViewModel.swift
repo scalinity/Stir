@@ -116,6 +116,64 @@ final class SolveViewModel {
         self.persistedSuggestedDishIDs = []
     }
 
+    /// Prime the VM from already-persisted dishes (no AI spend, no
+    /// stream). Used by `OtherOptionsRoot` to mount `DishPreviewView`
+    /// against the alternates from a previously-completed solve.
+    ///
+    /// Sets `phase = .options` directly — `DinnerOptionsView`'s
+    /// `.task(id:)` only auto-solves when phase is `.constraints`, so
+    /// this seed cannot accidentally re-issue the dinner-solve request.
+    ///
+    /// Rank alignment matters: `persistedRecipePlan(for:)` looks up the
+    /// dish-id by `dish.rank - 1` index. We pad both arrays to length 3
+    /// so a tap on a rank-3 card always resolves to the rank-3 UUID
+    /// even if rank-2 is missing (corner case: that dish's RecipePlan
+    /// was soft-deleted between persistence and seed). Empty slots
+    /// fill with a fresh placeholder UUID that resolves to `nil` via
+    /// `fetchRecipePlan` — tapping such a slot can't happen because
+    /// OtherOptionsRoot only renders cards that came in via `inputs`.
+    func seedFromPersistedSolve(
+        inputs: [(rank: Int, card: DishCard, dishId: UUID)],
+    ) {
+        streamTask?.cancel()
+        streamTask = nil
+        // `uniquingKeysWith: first` (not `uniqueKeysWithValues:`) so a
+        // CloudKit-conflict-induced duplicate-rank in Core Data does not
+        // fatalError on the user — first occurrence wins, drift is
+        // logged below for triage rather than crashing.
+        let byRank = Dictionary(inputs.map { ($0.rank, $0) }, uniquingKeysWith: { first, _ in first })
+        let ranks = [1, 2, 3]
+        self.slots = ranks.map { rank in
+            SlotState(rank: rank, dish: byRank[rank]?.card, errorCode: nil)
+        }
+        self.persistedSuggestedDishIDs = ranks.map { rank in
+            // Placeholder UUID for missing ranks — preserves positional
+            // alignment so `persistedRecipePlan(for:)` (which indexes
+            // by `dish.rank - 1`) resolves correctly for the ranks
+            // that DID seed. The placeholder won't match any row in
+            // fetchRecipePlan; tap on a missing-rank slot becomes a
+            // silent no-op in DishPreviewView (already error-toasted).
+            byRank[rank]?.dishId ?? UUID()
+        }
+        // Single summary log per seed — gives triage signal (which
+        // ranks landed, how many duplicates dropped) without spamming
+        // one line per missing rank.
+        let seededRanks = ranks.filter { byRank[$0] != nil }
+        let missingRanks = ranks.filter { byRank[$0] == nil }
+        let droppedDuplicates = inputs.count - byRank.count
+        if !missingRanks.isEmpty || droppedDuplicates > 0 {
+            Logger.solveFeature.debug(
+                "solve_vm_seed_summary input_count=\(inputs.count, privacy: .public) seeded_ranks=\(seededRanks, privacy: .public) missing_ranks=\(missingRanks, privacy: .public) dropped_duplicates=\(droppedDuplicates, privacy: .public)",
+            )
+        }
+        self.phase = .options
+        self.selectedDish = nil
+        self.lastCostUSD = nil
+        self.lastLatencyMS = nil
+        self.lastPromptVersion = nil
+        self.persistedSolveID = nil
+    }
+
     /// Spawn the AIDispatch stream. ConstraintsSheet calls this on "Solve".
     func startSolve() {
         guard let household = householdStore.profile else {

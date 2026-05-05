@@ -284,6 +284,20 @@ struct DishCard: Decodable, Sendable, Equatable, Identifiable, Hashable {
     }
 }
 
+extension DishCard.RecipePlanWire.IngredientWire {
+    /// Memberwise init — Swift suppresses the implicit one because this
+    /// struct declares a custom `init(from:)` decoder. Restored here so
+    /// rehydrators (e.g. `SolveRepository.rehydrateDishCard`) can build
+    /// an IngredientWire from persisted Core Data without round-tripping
+    /// through JSON.
+    init(displayName: String, canonicalSlug: String?, amountText: String, isOptional: Bool?) {
+        self.displayName = displayName
+        self.canonicalSlug = canonicalSlug
+        self.amountText = amountText
+        self.isOptional = isOptional
+    }
+}
+
 /// SSE event the AIDispatch stream yields.
 enum DinnerSolveEvent: Sendable {
     case dish(DishCard)

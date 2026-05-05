@@ -179,6 +179,38 @@ final class RootCoordinator {
         activeSolveAgain = nil
     }
 
+    /// "Other options" launch signal. Drives a `.fullScreenCover(item:)`
+    /// at TonightHome that mounts `OtherOptionsRoot` — a list of the
+    /// alternate dishes from the same MealSolveRequest as the current
+    /// Tonight pick, lifted from persisted Core Data (no AI spend).
+    /// UUID-keyed (not Bool) so two rapid taps produce distinct
+    /// presentations, matching the SolveAgain pattern.
+    var activeOtherOptions: OtherOptionsEntry?
+
+    /// Identifiable wrapper for the other-options cover. Carries the
+    /// current pick's SuggestedDish UUID so the destination view knows
+    /// which dish to EXCLUDE from the alternate list.
+    struct OtherOptionsEntry: Identifiable, Equatable {
+        let id: UUID
+        let currentPickSuggestedDishId: UUID
+    }
+
+    /// Called from Tonight's "Other options" hero-card button. Consumers
+    /// pass the SuggestedDish id of the current Tonight pick; the cover
+    /// fetches the latest solve's other dishes and presents them.
+    func requestOtherOptions(currentPickSuggestedDishId: UUID) {
+        activeOtherOptions = OtherOptionsEntry(
+            id: UUID(),
+            currentPickSuggestedDishId: currentPickSuggestedDishId,
+        )
+    }
+
+    /// Dismissal hook from `OtherOptionsRoot`. Clears the active entry
+    /// so the cover drops.
+    func dismissOtherOptions() {
+        activeOtherOptions = nil
+    }
+
     /// Deep-link scan request signal. `StirDeepLinkHandler` flips this
     /// to a fresh UUID when a widget/intent/Live-Activity tap lands
     /// with `stir://scan/start`. TonightHomeView observes via

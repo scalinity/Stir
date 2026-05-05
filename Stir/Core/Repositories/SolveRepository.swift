@@ -293,6 +293,173 @@ final class SolveRepository {
         )
     }
 
+    /// Value-type projection of an alternate dish from the same solve as
+    /// the current Tonight pick — the OTHER 1–2 dishes the user might
+    /// swap to. Mirrors `TonightPick`'s "no live NSManagedObject in view
+    /// state" rule: the dish id is the stable handle, and tap-time
+    /// resolution goes through `fetchRecipePlan(forSuggestedDishId:)` so
+    /// soft-deletes / CloudKit conflict resolution can bail gracefully.
+    struct OtherOption: Sendable, Equatable, Identifiable {
+        let suggestedDishId: UUID
+        let rank: Int
+        let title: String
+        let totalTimeMinutes: Int
+        /// One-line "why it fits" summary. Drives `DishOptionCard`'s
+        /// body copy. Falls back to RecipePlan.summary if SuggestedDish
+        /// has none persisted.
+        let whyItFits: String
+        let missingIngredientCount: Int
+        let isHighMatch: Bool
+        var id: UUID { suggestedDishId }
+    }
+
+    /// The OTHER dishes from the most recent completed solve — the
+    /// alts the user can swap into when they tap "Other options" on
+    /// Tonight Home. Excludes the current hero pick (id passed in).
+    /// Returns empty when the latest solve has only one dish or every
+    /// other dish is unresolvable (recipePlan nil / soft-deleted) —
+    /// callers surface an empty state rather than crash.
+    func latestOtherOptions(
+        excluding currentPickSuggestedDishId: UUID,
+        for household: HouseholdProfile,
+    ) -> [OtherOption] {
+        guard let solve = latestCompletedSolve(for: household) else { return [] }
+        return solve.suggestedDishArray
+            .filter { $0.id != currentPickSuggestedDishId }
+            .compactMap(projectOtherOption(from:))
+            .sorted { $0.rank < $1.rank }
+    }
+
+    /// Shared `SuggestedDish` → `OtherOption` projection. Extracted so
+    /// `latestOtherOptions` and `latestOtherOptionsWithCards` produce
+    /// byte-identical OtherOption shapes; drift in the fallback chain
+    /// (title, why-it-fits, minutes) would otherwise be a hazard. The
+    /// trim guard on `reasoningSummary` filters whitespace-only values
+    /// so the body copy never surfaces blank text.
+    private func projectOtherOption(from dish: SuggestedDish) -> OtherOption? {
+        guard
+            let dishId = dish.id,
+            let plan = dish.recipePlan,
+            plan.deletedAt == nil,
+            let title = (dish.title?.isEmpty == false ? dish.title : plan.title)
+        else { return nil }
+        let why: String = {
+            if let s = dish.reasoningSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !s.isEmpty { return s }
+            return plan.summary ?? ""
+        }()
+        let minutes = Int(
+            dish.estimatedMinutes > 0 ? dish.estimatedMinutes : plan.estimatedMinutes,
+        )
+        return OtherOption(
+            suggestedDishId: dishId,
+            rank: Int(dish.rank),
+            title: title,
+            totalTimeMinutes: minutes,
+            whyItFits: why,
+            missingIngredientCount: Int(dish.missingIngredientCount),
+            isHighMatch: dish.confidence >= 0.7,
+        )
+    }
+
+    /// One-shot variant of `latestOtherOptions` that ALSO returns each
+    /// alt's rehydrated `DishCard` from the same Core Data fetch.
+    /// Callers reaching for both the `OtherOption` projection AND the
+    /// DishCard for `DishPreviewView` reuse should prefer this over the
+    /// 2-step `latestOtherOptions(...)` + per-alt `rehydrateDishCard(...)`
+    /// path — saves N+1 viewContext fetches.
+    func latestOtherOptionsWithCards(
+        excluding currentPickSuggestedDishId: UUID,
+        for household: HouseholdProfile,
+    ) -> [(option: OtherOption, card: DishCard)] {
+        guard let solve = latestCompletedSolve(for: household) else { return [] }
+        return solve.suggestedDishArray
+            .filter { $0.id != currentPickSuggestedDishId }
+            .compactMap { dish -> (option: OtherOption, card: DishCard)? in
+                guard let option = projectOtherOption(from: dish) else { return nil }
+                guard let card = projectDishCard(from: dish) else { return nil }
+                return (option, card)
+            }
+            .sorted { $0.option.rank < $1.option.rank }
+    }
+
+    /// Reconstruct the wire-shape `DishCard` from a persisted
+    /// `SuggestedDish` so the existing `DishPreviewView` (which reads
+    /// all display data from a `DishCard`) can render an alt without
+    /// any UI duplication. Returns nil if the dish row is gone or the
+    /// linked RecipePlan was soft-deleted.
+    ///
+    /// Wire-shape coupling: `DishCard` / `RecipePlanWire` evolve
+    /// together with the dinner-solve SSE contract; this rehydrator
+    /// keeps in lockstep. Persisted columns are a near-1:1 superset of
+    /// the wire shape (we drop `confidence` and `hardConstraintPass`
+    /// from the rehydrated card — they're inputs to display fit-label,
+    /// not fields DishPreviewView reads directly).
+    func rehydrateDishCard(forSuggestedDishId id: UUID) -> DishCard? {
+        let request = NSFetchRequest<SuggestedDish>(entityName: "SuggestedDish")
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        request.fetchLimit = 1
+        request.relationshipKeyPathsForPrefetching = [
+            "recipePlan",
+            "recipePlan.ingredients",
+            "recipePlan.steps",
+        ]
+        guard let dish = try? controller.viewContext.fetch(request).first else {
+            return nil
+        }
+        return projectDishCard(from: dish)
+    }
+
+    /// Shared `SuggestedDish` → `DishCard` projection. Extracted so
+    /// `rehydrateDishCard(forSuggestedDishId:)` and the bulk variant
+    /// `latestOtherOptionsWithCards(...)` produce identical DishCards
+    /// from the same source row. Returns nil when the linked RecipePlan
+    /// is gone, soft-deleted, or the title resolves to empty.
+    private func projectDishCard(from dish: SuggestedDish) -> DishCard? {
+        guard
+            let plan = dish.recipePlan,
+            plan.deletedAt == nil,
+            let title = (dish.title?.isEmpty == false ? dish.title : plan.title)
+        else { return nil }
+        let ingredients: [DishCard.RecipePlanWire.IngredientWire] = plan.ingredientArray.map { ing in
+            DishCard.RecipePlanWire.IngredientWire(
+                displayName: ing.displayName ?? "",
+                canonicalSlug: ing.canonicalIngredientSlug,
+                amountText: ing.amountText ?? "",
+                isOptional: ing.isOptional,
+            )
+        }
+        let steps: [DishCard.RecipePlanWire.StepWire] = plan.stepArray.map { step in
+            DishCard.RecipePlanWire.StepWire(
+                stepNumber: Int(step.stepNumber),
+                instructionText: step.instructionText ?? "",
+                timerSeconds: step.timerSeconds > 0 ? Int(step.timerSeconds) : nil,
+                cautionTags: step.cautionTagsArray,
+            )
+        }
+        let totalMinutes = Int(
+            dish.estimatedMinutes > 0 ? dish.estimatedMinutes : plan.estimatedMinutes,
+        )
+        return DishCard(
+            rank: Int(dish.rank),
+            title: title,
+            totalTimeMinutes: totalMinutes,
+            whyItFits: dish.reasoningSummary ?? plan.summary ?? "",
+            missingIngredientCount: Int(dish.missingIngredientCount),
+            fitLabelPrimary: dish.typedFitLabelPrimary.rawValue,
+            fitLabelSecondary: dish.typedFitLabelSecondary?.rawValue,
+            hardConstraintPass: dish.hardConstraintPass,
+            recipePlan: DishCard.RecipePlanWire(
+                servings: Int(plan.servings),
+                difficulty: Int(plan.difficulty),
+                cuisine: plan.cuisine,
+                ingredients: ingredients,
+                steps: steps,
+            ),
+            reasoningSummary: dish.reasoningSummary ?? "",
+        )
+    }
+
     /// Latest pantry snapshot, projected to the IngredientLite shape
     /// the `/v1/ai/dinner-solve` endpoint expects. Used by Tonight's
     /// "Solve again" tile so a re-solve from the existing pantry

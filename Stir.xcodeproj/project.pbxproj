@@ -82,6 +82,7 @@
 		460628BDAA14878D2762AFB1 /* VoiceTurnUsageDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8893F1B9DC617B40A8E19877 /* VoiceTurnUsageDTOTests.swift */; };
 		472BB60F98CA43956D4ED4B1 /* CookingSessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE194C00CBA1EC009095718F /* CookingSessionRepository.swift */; };
 		4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CC0200F54DD79B24299BCF /* TonightHomeView.swift */; };
+		B5F4E3C2A1908A7B6C5D4E3F /* OtherOptionsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */; };
 		482A2F31B55D16103EC1FA87 /* CloudKitAccountMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81FCD69FD54A65576C313EE2 /* CloudKitAccountMonitor.swift */; };
 		49C51EEBB4AA6C51B4E4CB34 /* LiveAudioPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151133441B87DA5FA6CC975E /* LiveAudioPipeline.swift */; };
 		4A1FAB853D85EE8116CAB750 /* OutcomeFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */; };
@@ -369,6 +370,7 @@
 		31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackView.swift; sourceTree = "<group>"; };
 		34CB787B7AC60304704C39E1 /* VoiceSessionDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionDriver.swift; sourceTree = "<group>"; };
 		34CC0200F54DD79B24299BCF /* TonightHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightHomeView.swift; sourceTree = "<group>"; };
+		C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtherOptionsRoot.swift; sourceTree = "<group>"; };
 		37216544E460CDD56A4AFF6D /* RealtimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSession.swift; sourceTree = "<group>"; };
 		374669111D98B028BEC3824D /* KeychainStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStorage.swift; sourceTree = "<group>"; };
 		383FBF80C0D47CD3C63E9C75 /* MinTapTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinTapTarget.swift; sourceTree = "<group>"; };
@@ -817,6 +819,7 @@
 			isa = PBXGroup;
 			children = (
 				34CC0200F54DD79B24299BCF /* TonightHomeView.swift */,
+				C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */,
 			);
 			path = Tonight;
 			sourceTree = "<group>";
@@ -1660,6 +1663,7 @@
 				2D40D772E5045D1BA3973C38 /* TimerCountdownView.swift in Sources */,
 				51F0E744287869B3D4238E5D /* TimerService.swift in Sources */,
 				4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */,
+				B5F4E3C2A1908A7B6C5D4E3F /* OtherOptionsRoot.swift in Sources */,
 				BAE68A81DE3914972A55E2C5 /* TonightSnapshot.swift in Sources */,
 				BDB6D6710EDF448E5C2E154A /* TonightSnapshotService.swift in Sources */,
 				08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */,
