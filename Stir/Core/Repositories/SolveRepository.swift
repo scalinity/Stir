@@ -455,11 +455,25 @@ final class SolveRepository {
         // DishPreviewView to render the same paragraph twice (once
         // in the bodyLg slot and once in the bodySm slot). Reading
         // the correct backing field restores the two-tier display.
+        //
+        // Trim guards mirror `projectOtherOption` — a persisted
+        // whitespace-only value should fall through to the next
+        // fallback rather than surface as visible blank body copy.
+        let whyItFits: String = {
+            if let s = dish.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !s.isEmpty { return s }
+            return plan.summary ?? ""
+        }()
+        let reasoningSummary: String = {
+            if let s = dish.reasoningSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !s.isEmpty { return s }
+            return ""
+        }()
         return DishCard(
             rank: Int(dish.rank),
             title: title,
             totalTimeMinutes: totalMinutes,
-            whyItFits: dish.summary ?? plan.summary ?? "",
+            whyItFits: whyItFits,
             missingIngredientCount: Int(dish.missingIngredientCount),
             fitLabelPrimary: dish.typedFitLabelPrimary.rawValue,
             fitLabelSecondary: dish.typedFitLabelSecondary?.rawValue,
@@ -471,7 +485,7 @@ final class SolveRepository {
                 ingredients: ingredients,
                 steps: steps,
             ),
-            reasoningSummary: dish.reasoningSummary ?? "",
+            reasoningSummary: reasoningSummary,
         )
     }
 
