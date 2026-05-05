@@ -52,6 +52,7 @@ struct SettingsRootView: View {
                 planBillingSection
                 notificationsSection
                 householdSection
+                pantrySection
                 syncSection
                 aboutSection
                 buildSection
@@ -276,6 +277,25 @@ struct SettingsRootView: View {
                 settingsRowContent(
                     icon: Image.Stir.profile,
                     title: "Household preferences",
+                    trailing: .chevron,
+                )
+                .stirCard()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Pantry
+
+    private var pantrySection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            sectionEyebrow("Pantry")
+            NavigationLink {
+                PantryListView(coordinator: coordinator)
+            } label: {
+                settingsRowContent(
+                    icon: Image.Stir.pantry,
+                    title: "Manage pantry",
                     trailing: .chevron,
                 )
                 .stirCard()
