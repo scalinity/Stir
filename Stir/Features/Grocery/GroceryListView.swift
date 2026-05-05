@@ -32,7 +32,24 @@ struct GroceryListView: View {
                 case .generating:
                     GeneratingView()
                 case .ready:
-                    readyBody
+                    // Branch on missingCount so a "you have everything"
+                    // result doesn't render as the busted "0 items to
+                    // buy · grouped by aisle" hero + a disabled grey
+                    // Export button — that combination reads as a UI
+                    // bug rather than a positive outcome. The model
+                    // returns missing=0 when the pantry diff covers
+                    // every recipe ingredient (legitimately, or via
+                    // over-aggressive matching on vague names like
+                    // "dried herbs"); either way the user has nothing
+                    // to do here, so surface that affirmatively.
+                    if viewModel.missingCount == 0 {
+                        AllSetView(
+                            recipeTitle: viewModel.recipePlan.title ?? "this recipe",
+                            onDismiss: onDismiss,
+                        )
+                    } else {
+                        readyBody
+                    }
                 case .exported:
                     ExportedView(onDismiss: onDismiss)
                 case .error(let code, let message):
@@ -254,6 +271,53 @@ private struct GeneratingView: View {
                 .foregroundStyle(Color.Stir.ink500)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// "You have everything" empty state — surfaced when the grocery
+/// generator returns `missing=0`. Mirrors `ExportedView`'s sage-check
+/// hero so the success grammar is consistent across the two terminal
+/// states; copy carries the recipe title so the user understands
+/// which dish was diffed (handy when the model over-matched and they
+/// need to mentally double-check the pantry).
+private struct AllSetView: View {
+    let recipeTitle: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(Color.Stir.sage100)
+                    .frame(width: 72, height: 72)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(Color.Stir.sage600)
+            }
+            Text("You're all set!")
+                .stirFont(.displayMd)
+                .foregroundStyle(Color.Stir.ink900)
+            Text("Looks like you've got everything for \(recipeTitle).")
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.ink500)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Button(action: onDismiss) {
+                Text("Done")
+                    .stirFont(.labelLg)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(width: 160, height: 48)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.Stir.ember600),
+                    )
+            }
+            .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You're all set. You've got everything for \(recipeTitle).")
     }
 }
 
