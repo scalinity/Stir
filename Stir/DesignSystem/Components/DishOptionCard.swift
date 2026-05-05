@@ -39,6 +39,12 @@ struct DishOptionCard: View {
     /// DinnerOptionsView passes `rank == 1`; defaulted to false so
     /// previews and other callers can opt in explicitly.
     let tonightPick: Bool
+    /// Max line count for the recipe title. Defaults to 2 to preserve
+    /// the post-solve grid's compact silhouette; OtherOptionsRoot
+    /// passes 3 because its long Gemini-generated titles ("Quick
+    /// Flatbread with Tomato & Mozzarella") otherwise truncate
+    /// mid-word with the ellipsis swallowing the meaningful tail.
+    let titleLineLimit: Int
 
     init(
         rank: Int,
@@ -47,6 +53,7 @@ struct DishOptionCard: View {
         whyItFits: String,
         missingIngredientCount: Int,
         tonightPick: Bool = false,
+        titleLineLimit: Int = 2,
     ) {
         self.rank = rank
         self.title = title
@@ -54,6 +61,7 @@ struct DishOptionCard: View {
         self.whyItFits = whyItFits
         self.missingIngredientCount = missingIngredientCount
         self.tonightPick = tonightPick
+        self.titleLineLimit = titleLineLimit
     }
 
     /// Strip whitespace + leading/trailing periods from `whyItFits`
@@ -133,7 +141,7 @@ struct DishOptionCard: View {
                 .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.ink900)
                 .multilineTextAlignment(.leading)
-                .lineLimit(2)
+                .lineLimit(titleLineLimit)
                 .fixedSize(horizontal: false, vertical: true)
             Text(subtitle)
                 .stirFont(.bodyMd)

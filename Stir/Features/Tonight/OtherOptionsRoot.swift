@@ -95,13 +95,27 @@ struct OtherOptionsRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             content
+                // Keep `navigationTitle` for the back-chevron label that
+                // pushed destinations (DishPreviewView) read; the
+                // visual title comes from the .principal toolbar item
+                // below in the Stir display serif (matches Settings /
+                // Saved / Substitution sheet so cross-screen rhythm
+                // holds). Default `navigationTitle` chrome would fall
+                // back to SF Pro Bold and read as off-brand.
                 .navigationTitle("Other options")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel", action: onDismiss)
                     }
+                    ToolbarItem(placement: .principal) {
+                        Text("Other options")
+                            .stirFont(.displaySm)
+                            .foregroundStyle(Color.Stir.textPrimary)
+                    }
                 }
+                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case let .preview(dish):
@@ -151,6 +165,7 @@ struct OtherOptionsRoot: View {
                                     whyItFits: option.whyItFits,
                                     missingIngredientCount: option.missingIngredientCount,
                                     tonightPick: false,
+                                    titleLineLimit: 3,
                                 )
                             }
                             .buttonStyle(DishOptionCardStyle())
