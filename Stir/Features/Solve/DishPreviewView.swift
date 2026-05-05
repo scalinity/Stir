@@ -48,9 +48,26 @@ struct DishPreviewView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
+        // Keep `navigationTitle` for the back-chevron label that
+        // any caller pushed onto can read, plus VoiceOver. The
+        // visible title comes from the .principal toolbar item
+        // below in the Stir display serif (matches Settings /
+        // Saved / OtherOptionsRoot grammar). Default chrome would
+        // render in SF Pro Bold and break cross-screen rhythm.
+        // `minimumScaleFactor` keeps long Gemini-generated names
+        // readable when the bar is squeezed by trailing buttons —
+        // mid-word "Quick Flatbrea…" truncation is the failure
+        // mode we're avoiding.
         .navigationTitle(dish.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(dish.title)
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 14) {
                     Button {
@@ -75,6 +92,8 @@ struct DishPreviewView: View {
                 }
             }
         }
+        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .fullScreenCover(isPresented: $showGrocery) {
             if let plan = viewModel.persistedRecipePlan(for: dish),
                let household = viewModel.currentHousehold {

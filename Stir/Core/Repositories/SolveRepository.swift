@@ -333,9 +333,16 @@ final class SolveRepository {
     /// Shared `SuggestedDish` → `OtherOption` projection. Extracted so
     /// `latestOtherOptions` and `latestOtherOptionsWithCards` produce
     /// byte-identical OtherOption shapes; drift in the fallback chain
-    /// (title, why-it-fits, minutes) would otherwise be a hazard. The
-    /// trim guard on `reasoningSummary` filters whitespace-only values
-    /// so the body copy never surfaces blank text.
+    /// (title, why-it-fits, minutes) would otherwise be a hazard.
+    ///
+    /// Source-of-truth note: persistence stores wire `whyItFits` in
+    /// `SuggestedDish.summary` (see `createSolveWithDishes`:
+    /// `suggested.summary = dish.summary` where DishInput.summary is
+    /// fed by `d.whyItFits`). `dish.reasoningSummary` is the AI's
+    /// longer rationale and is a DIFFERENT field — using it here
+    /// would cause DishPreviewView to render reasoningSummary twice
+    /// (in both the whyItFits and reasoningSummary slots). The trim
+    /// guard filters whitespace-only persisted values.
     private func projectOtherOption(from dish: SuggestedDish) -> OtherOption? {
         guard
             let dishId = dish.id,
@@ -344,7 +351,7 @@ final class SolveRepository {
             let title = (dish.title?.isEmpty == false ? dish.title : plan.title)
         else { return nil }
         let why: String = {
-            if let s = dish.reasoningSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let s = dish.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
                !s.isEmpty { return s }
             return plan.summary ?? ""
         }()
@@ -440,11 +447,19 @@ final class SolveRepository {
         let totalMinutes = Int(
             dish.estimatedMinutes > 0 ? dish.estimatedMinutes : plan.estimatedMinutes,
         )
+        // whyItFits + reasoningSummary are DISTINCT persisted fields:
+        // `SuggestedDish.summary` holds the wire `whyItFits` (one-line
+        // user-facing rationale) and `SuggestedDish.reasoningSummary`
+        // holds the longer AI rationale. Earlier drafts pulled
+        // `whyItFits` from `dish.reasoningSummary`, which caused
+        // DishPreviewView to render the same paragraph twice (once
+        // in the bodyLg slot and once in the bodySm slot). Reading
+        // the correct backing field restores the two-tier display.
         return DishCard(
             rank: Int(dish.rank),
             title: title,
             totalTimeMinutes: totalMinutes,
-            whyItFits: dish.reasoningSummary ?? plan.summary ?? "",
+            whyItFits: dish.summary ?? plan.summary ?? "",
             missingIngredientCount: Int(dish.missingIngredientCount),
             fitLabelPrimary: dish.typedFitLabelPrimary.rawValue,
             fitLabelSecondary: dish.typedFitLabelSecondary?.rawValue,
