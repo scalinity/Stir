@@ -24,9 +24,11 @@ final class PantryListViewModelTests: XCTestCase {
         household.id = UUID()
         household.createdAt = Date()
         try ctx.save()
-        entitlements = EntitlementService()
+        entitlements = EntitlementService(keychain: MockKeychain())
         // Free tier (cap 25) is the default state of EntitlementService
-        // when no hydrate runs.
+        // when no hydrate runs. MockKeychain ensures no cached snapshot
+        // from a prior test or live build leaks tier=.premium/.pro and
+        // silently degrades the cap-boundary test.
         XCTAssertEqual(entitlements.tier, .free)
     }
 
