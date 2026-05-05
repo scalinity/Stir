@@ -73,6 +73,32 @@ final class SavedMealsFavoriteStickinessTests: XCTestCase {
         XCTAssertFalse(plan.isFavorite)
     }
 
+    func test_unfavoritingPreFixRowMigratesIsSavedAndKeepsItInSaved() throws {
+        // Simulates pre-SCA-10 data: a row that was favorited by an
+        // older app build whose setFavorite did NOT touch isSaved. We
+        // bypass setFavorite for the initial state so isFavorite=true
+        // co-exists with isSaved=false (the impossible state under the
+        // new code path). Unfavoriting must (a) flip isFavorite false,
+        // (b) flip isSaved true so the row stays in Saved, (c) the row
+        // continues to surface in savedMealEntries.
+        let plan = makePlan(title: "Pre-fix Pierogi")
+        plan.isFavorite = true
+        plan.isSaved = false
+        try controller.viewContext.save()
+
+        // Sanity — visible because of the (now-redundant) isFavorite clause.
+        XCTAssertEqual(try cookRepo.savedMealEntries(for: household).map(\.title), ["Pre-fix Pierogi"])
+
+        _ = solveRepo.setFavorite(false, on: plan)
+        XCTAssertFalse(plan.isFavorite)
+        XCTAssertTrue(plan.isSaved, "setFavorite(false) must migrate pre-fix rows to isSaved=true")
+
+        XCTAssertEqual(
+            try cookRepo.savedMealEntries(for: household).map(\.title), ["Pre-fix Pierogi"],
+            "Pre-fix favorited row must remain in Saved after unfavorite (SCA-10 migration).",
+        )
+    }
+
     // MARK: - Predicate stays open to historical rows + cooked-only path
 
     func test_neverFavoritedNeverCookedPlanIsExcluded() throws {
