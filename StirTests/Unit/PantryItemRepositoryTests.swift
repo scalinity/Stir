@@ -15,6 +15,7 @@ final class PantryItemRepositoryTests: XCTestCase {
     private var repo: PantryItemRepository!
 
     override func setUp() async throws {
+        try await super.setUp()
         pc = PersistenceController(inMemory: true)
         repo = PantryItemRepository(controller: pc)
         let ctx = pc.viewContext
@@ -28,6 +29,7 @@ final class PantryItemRepositoryTests: XCTestCase {
         pc = nil
         household = nil
         repo = nil
+        try await super.tearDown()
     }
 
     func test_fetchAll_returnsRowsExcludingSoftDeleted() throws {
@@ -75,7 +77,7 @@ final class PantryItemRepositoryTests: XCTestCase {
             on: household,
         )
         let originalUpdate = row.updatedAt
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await Task.sleep(nanoseconds: 50_000_000)
         try repo.update(
             row,
             displayName: "extra-virgin olive oil",
@@ -87,12 +89,97 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertGreaterThan(row.updatedAt ?? .distantPast, originalUpdate ?? .distantPast)
     }
 
+    func test_fetchAll_isolatesByHousehold() throws {
+        let other = HouseholdProfile(context: pc.viewContext)
+        other.id = UUID()
+        other.createdAt = Date()
+        try pc.viewContext.save()
+
+        try seedItem(name: "ours", deleted: false)
+        let ourCount = try repo.fetchAll(for: household).count
+        XCTAssertEqual(ourCount, 1)
+
+        let theirRow = PantryItem(context: pc.viewContext)
+        theirRow.id = UUID()
+        theirRow.household = other
+        theirRow.displayName = "theirs"
+        theirRow.canonicalIngredientSlug = ""
+        theirRow.typedSource = .manual
+        theirRow.typedMemoryState = .remembered
+        theirRow.userConfirmed = true
+        theirRow.createdAt = Date()
+        theirRow.updatedAt = Date()
+        theirRow.lastSeenAt = Date()
+        try pc.viewContext.save()
+
+        XCTAssertEqual(try repo.fetchAll(for: household).map(\.displayName), ["ours"])
+        XCTAssertEqual(try repo.fetchAll(for: other).map(\.displayName), ["theirs"])
+        XCTAssertEqual(try repo.countRemembered(for: household), 1)
+        XCTAssertEqual(try repo.countRemembered(for: other), 1)
+    }
+
+    func test_fetchAll_sortsByLastSeenDescThenNameAsc() throws {
+        let now = Date()
+        try seedItem(name: "older", lastSeenAt: now.addingTimeInterval(-3600))
+        try seedItem(name: "alpha-newest", lastSeenAt: now)
+        try seedItem(name: "beta-newest", lastSeenAt: now)
+        let names = try repo.fetchAll(for: household).map(\.displayName)
+        XCTAssertEqual(names, ["alpha-newest", "beta-newest", "older"])
+    }
+
+    func test_fetchAll_includeSoftDeleted_surfacesDeletedRows() throws {
+        try seedItem(name: "live")
+        try seedItem(name: "tombstone", deleted: true)
+        let withDeleted = try repo.fetchAll(for: household, includeSoftDeleted: true)
+        XCTAssertEqual(Set(withDeleted.map(\.displayName)), ["live", "tombstone"])
+    }
+
+    func test_insertManual_throwsValidationOnEmptyDisplayName() throws {
+        XCTAssertThrowsError(try repo.insertManual(
+            displayName: "   ",
+            amountText: nil,
+            on: household,
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_update_throwsValidationOnEmptyDisplayName() throws {
+        let row = try repo.insertManual(displayName: "olive oil", amountText: nil, on: household)
+        XCTAssertThrowsError(try repo.update(
+            row,
+            displayName: "",
+            amountText: nil,
+            memoryState: .remembered,
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_update_throwsOnSoftDeletedItem() throws {
+        let row = try repo.insertManual(displayName: "olive oil", amountText: nil, on: household)
+        try repo.softDelete(row)
+        XCTAssertThrowsError(try repo.update(
+            row,
+            displayName: "EVOO",
+            amountText: nil,
+            memoryState: .remembered,
+        ))
+    }
+
     @discardableResult
     private func seedItem(
         name: String,
         slug: String? = nil,
         memoryState: PantryItem.MemoryState = .remembered,
         deleted: Bool = false,
+        lastSeenAt: Date? = nil,
     ) throws -> PantryItem {
         let row = PantryItem(context: pc.viewContext)
         row.id = UUID()
@@ -104,7 +191,7 @@ final class PantryItemRepositoryTests: XCTestCase {
         row.userConfirmed = true
         row.createdAt = Date()
         row.updatedAt = Date()
-        row.lastSeenAt = Date()
+        row.lastSeenAt = lastSeenAt ?? Date()
         if deleted { row.deletedAt = Date() }
         try pc.viewContext.save()
         return row

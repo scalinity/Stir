@@ -1,12 +1,16 @@
 // PantryItemRepository
 //
-// Step-3 scope: write confirmed ingredients from scan review. Step 4 adds
-// saved-meal freshness decay; step 7 adds leftovers + expiration.
+// CRUD over pantry rows, scoped to a HouseholdProfile.
 //
-// Upsert semantics: within a household, an ingredient is keyed on
-// (canonicalIngredientSlug || displayName_lowercased). When the user
-// confirms an ingredient from the scan-review chips, we either insert a
-// new row or bump lastSeenAt / amountText on the existing row.
+// Step-3 added the scan write path (`upsertFromScan`); step 4 added
+// soft-delete; the pantry management surface (ADR 0028) added read,
+// count, manual insert, and edit. Step 7 will layer leftovers +
+// expiration on top.
+//
+// Upsert semantics (used by both scan and manual paths): within a
+// household, an ingredient is keyed on
+// (canonicalIngredientSlug || displayName_lowercased). Existing
+// rows bump lastSeenAt / amountText; new rows insert.
 
 import CoreData
 import Foundation
@@ -123,11 +127,13 @@ final class PantryItemRepository {
         }
     }
 
-    /// Count rows that count against the standing pantry cap (Free 25 /
-    /// Premium 250 / Pro 1000 — CLAUDE.md authoritative). Excludes
-    /// `.ephemeral` (today-only matches), `.expired` (past expiresAt),
-    /// `.unknown`, and soft-deleted rows. Used by `PantryListViewModel`
-    /// for client-side quota enforcement on manual adds.
+    /// Counts rows that count against the standing pantry cap (Free 25 /
+    /// Premium 250 / Pro 1000 — CLAUDE.md authoritative). Counts only
+    /// `.remembered`, non-deleted rows; everything else (`.ephemeral`,
+    /// `.expired`, `.unknown`, soft-deleted) is excluded by the positive
+    /// `memoryState == 'remembered'` predicate. Used by
+    /// `PantryListViewModel` for client-side quota enforcement on
+    /// manual adds.
     func countRemembered(for household: HouseholdProfile) throws -> Int {
         let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
@@ -142,12 +148,14 @@ final class PantryItemRepository {
         }
     }
 
-    /// Insert (or upsert) a manually-added pantry item. Reuses the same
-    /// dedupe rule as `upsertFromScan` — case-insensitive `displayName`
-    /// or matching `canonicalIngredientSlug` updates the existing row
-    /// rather than creating a duplicate. Manual inserts always set
-    /// `userConfirmed = true` and `confidence = 1.0` (the user typed it
-    /// themselves; no AI hedge needed).
+    /// Insert (or upsert) a manually-added pantry item. Dedupes by
+    /// case-insensitive `displayName` only — manual entries don't carry
+    /// a canonical slug, so we deliberately don't fold typed names into
+    /// scan-matched slugs (a user typing "olive oil" against an
+    /// existing `olive_oil`-slug + "EVOO"-displayName row should still
+    /// produce the typed-name surface they expect). Manual inserts
+    /// always set `userConfirmed = true` and `confidence = 1.0` (the
+    /// user typed it themselves; no AI hedge needed).
     @discardableResult
     func insertManual(
         displayName: String,
@@ -159,11 +167,10 @@ final class PantryItemRepository {
         let now = Date()
         let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            throw StirError.coreData(underlying: NSError(
-                domain: "PantryItemRepository",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "displayName cannot be empty"],
-            ))
+            throw StirError.validation(
+                fieldErrors: [FieldError(field: "displayName", issue: "must not be empty")],
+                message: "displayName cannot be empty",
+            )
         }
         let trimmedAmount = amountText?.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -176,7 +183,7 @@ final class PantryItemRepository {
             existing.lastSeenAt = now
             existing.updatedAt = now
             existing.userConfirmed = true
-            existing.confidence = max(existing.confidence, 1.0)
+            existing.confidence = 1.0
             existing.typedMemoryState = memoryState
             if let trimmedAmount, !trimmedAmount.isEmpty {
                 existing.amountText = trimmedAmount
@@ -190,7 +197,7 @@ final class PantryItemRepository {
         row.household = household
         row.displayName = trimmedName
         row.canonicalIngredientSlug = ""
-        row.amountText = trimmedAmount?.isEmpty == false ? trimmedAmount : nil
+        row.amountText = (trimmedAmount?.isEmpty ?? true) ? nil : trimmedAmount
         row.confidence = 1.0
         row.userConfirmed = true
         row.typedSource = .manual
@@ -212,13 +219,18 @@ final class PantryItemRepository {
         amountText: String?,
         memoryState: PantryItem.MemoryState,
     ) throws {
+        guard item.deletedAt == nil else {
+            throw StirError.validation(
+                fieldErrors: [FieldError(field: "deletedAt", issue: "cannot edit a soft-deleted item")],
+                message: "Cannot edit a soft-deleted PantryItem",
+            )
+        }
         let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            throw StirError.coreData(underlying: NSError(
-                domain: "PantryItemRepository",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "displayName cannot be empty"],
-            ))
+            throw StirError.validation(
+                fieldErrors: [FieldError(field: "displayName", issue: "must not be empty")],
+                message: "displayName cannot be empty",
+            )
         }
         let trimmedAmount = amountText?.trimmingCharacters(in: .whitespacesAndNewlines)
         item.displayName = trimmedName
