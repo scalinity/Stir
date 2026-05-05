@@ -32,6 +32,8 @@ final class PantryItemRepositoryTests: XCTestCase {
         try await super.tearDown()
     }
 
+    // MARK: - Read
+
     func test_fetchAll_returnsRowsExcludingSoftDeleted() throws {
         try seedItem(name: "olive oil", deleted: false)
         try seedItem(name: "flour", deleted: true)
@@ -46,47 +48,6 @@ final class PantryItemRepositoryTests: XCTestCase {
         try seedItem(name: "stale flour", memoryState: .remembered, deleted: true)
         let count = try repo.countRemembered(for: household)
         XCTAssertEqual(count, 2, "only non-deleted .remembered rows count toward the cap")
-    }
-
-    func test_insertManual_persistsRowAndDedupesAgainstExisting() throws {
-        let first = try repo.insertManual(
-            displayName: "olive oil",
-            amountText: "1 bottle",
-            memoryState: .remembered,
-            on: household,
-        )
-        XCTAssertEqual(first.displayName, "olive oil")
-        XCTAssertEqual(first.typedSource, .manual)
-        XCTAssertEqual(first.typedMemoryState, .remembered)
-
-        _ = try repo.insertManual(
-            displayName: "olive oil",
-            amountText: "2 bottles",
-            memoryState: .remembered,
-            on: household,
-        )
-        let rows = try repo.fetchAll(for: household)
-        XCTAssertEqual(rows.count, 1, "case-insensitive name dedupe")
-        XCTAssertEqual(rows.first?.amountText, "2 bottles", "amount overwrites on dedupe")
-    }
-
-    func test_update_setsFieldsAndBumpsUpdatedAt() async throws {
-        let row = try repo.insertManual(
-            displayName: "olive oil",
-            amountText: "1 bottle",
-            on: household,
-        )
-        let originalUpdate = row.updatedAt
-        try await Task.sleep(nanoseconds: 50_000_000)
-        try repo.update(
-            row,
-            displayName: "extra-virgin olive oil",
-            amountText: "2 bottles",
-            memoryState: .remembered,
-        )
-        XCTAssertEqual(row.displayName, "extra-virgin olive oil")
-        XCTAssertEqual(row.amountText, "2 bottles")
-        XCTAssertGreaterThan(row.updatedAt ?? .distantPast, originalUpdate ?? .distantPast)
     }
 
     func test_fetchAll_isolatesByHousehold() throws {
@@ -134,6 +95,108 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(Set(withDeleted.map(\.displayName)), ["live", "tombstone"])
     }
 
+    // MARK: - insertManual
+
+    func test_insertManual_persistsRowAndDedupesAgainstExisting() throws {
+        let first = try insertedRow(displayName: "olive oil", amount: "1 bottle")
+        XCTAssertEqual(first.displayName, "olive oil")
+        XCTAssertEqual(first.typedSource, .manual)
+        XCTAssertEqual(first.typedMemoryState, .remembered)
+
+        let secondOutcome = try repo.insertManual(
+            displayName: "olive oil",
+            amountText: "2 bottles",
+            memoryState: .remembered,
+            on: household,
+        )
+        guard case .upserted = secondOutcome else {
+            return XCTFail("expected .upserted on dedupe; got \(secondOutcome)")
+        }
+        let rows = try repo.fetchAll(for: household)
+        XCTAssertEqual(rows.count, 1, "case-insensitive name dedupe")
+        XCTAssertEqual(rows.first?.amountText, "2 bottles", "amount overwrites on dedupe")
+    }
+
+    /// Review C5 regression test — manual entry first, then a scan
+    /// row with a canonical slug for the same item must dedupe to
+    /// the manual row instead of producing a duplicate.
+    func test_fetchExisting_slugFallsBackToNameWhenSlugMisses() throws {
+        _ = try insertedRow(displayName: "olive oil", amount: nil)
+        // Now upsert via the scan path (slug-aware) — should resolve
+        // back to the manual row by name fallback.
+        let outcome = try repo.upsertFromScan(
+            [
+                PantryItemRepository.ScanIngredient(
+                    displayName: "olive oil",
+                    canonicalSlug: "olive_oil",
+                    amountText: "1 bottle",
+                    confidence: 0.9,
+                    parseConfidence: .confirmed,
+                ),
+            ],
+            on: household,
+        )
+        XCTAssertEqual(outcome.rows.count, 1)
+        let allRows = try repo.fetchAll(for: household)
+        XCTAssertEqual(allRows.count, 1, "manual + scan dedupe via name fallback")
+    }
+
+    /// Review C4 regression test — at-cap re-add of an EXISTING
+    /// remembered row must upsert (no row added), not return
+    /// `.capReached`.
+    func test_insertManual_atCap_reAddingExistingUpsertsInsteadOfPaywall() throws {
+        for i in 0 ..< 25 {
+            _ = try insertedRow(displayName: "item-\(i)", amount: nil)
+        }
+        let outcome = try repo.insertManual(
+            displayName: "item-0",
+            amountText: nil,
+            memoryState: .remembered,
+            on: household,
+            usedRemembered: 25,
+            cap: 25,
+        )
+        guard case .upserted = outcome else {
+            return XCTFail("at-cap re-add of existing row should upsert; got \(outcome)")
+        }
+        XCTAssertEqual(try repo.fetchAll(for: household).count, 25, "no new row was created")
+    }
+
+    func test_insertManual_atCap_newNameReturnsCapReached() throws {
+        for i in 0 ..< 25 {
+            _ = try insertedRow(displayName: "item-\(i)", amount: nil)
+        }
+        let outcome = try repo.insertManual(
+            displayName: "over-cap",
+            amountText: nil,
+            memoryState: .remembered,
+            on: household,
+            usedRemembered: 25,
+            cap: 25,
+        )
+        guard case .capReached = outcome else {
+            return XCTFail("new-name at cap should be .capReached; got \(outcome)")
+        }
+        XCTAssertEqual(try repo.fetchAll(for: household).count, 25, "no row written")
+    }
+
+    func test_insertManual_ephemeralBypassesCap() throws {
+        for i in 0 ..< 25 {
+            _ = try insertedRow(displayName: "item-\(i)", amount: nil)
+        }
+        let outcome = try repo.insertManual(
+            displayName: "fresh basil",
+            amountText: nil,
+            memoryState: .ephemeral,
+            on: household,
+            usedRemembered: 25,
+            cap: 25,
+        )
+        guard case .inserted = outcome else {
+            return XCTFail("ephemeral at cap should insert; got \(outcome)")
+        }
+    }
+
     func test_insertManual_throwsValidationOnEmptyDisplayName() throws {
         XCTAssertThrowsError(try repo.insertManual(
             displayName: "   ",
@@ -147,8 +210,53 @@ final class PantryItemRepositoryTests: XCTestCase {
         }
     }
 
+    func test_insertManual_throwsValidationOnOverlongDisplayName() throws {
+        let tooLong = String(repeating: "a", count: PantryItemRepository.maxDisplayNameLength + 1)
+        XCTAssertThrowsError(try repo.insertManual(
+            displayName: tooLong,
+            amountText: nil,
+            on: household,
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_insertManual_throwsValidationOnOverlongAmountText() throws {
+        let tooLong = String(repeating: "a", count: PantryItemRepository.maxAmountTextLength + 1)
+        XCTAssertThrowsError(try repo.insertManual(
+            displayName: "olive oil",
+            amountText: tooLong,
+            on: household,
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    // MARK: - update
+
+    func test_update_setsFieldsAndBumpsUpdatedAt() async throws {
+        let row = try insertedRow(displayName: "olive oil", amount: "1 bottle")
+        let originalUpdate = row.updatedAt
+        try await Task.sleep(nanoseconds: 50_000_000)
+        try repo.update(
+            row,
+            displayName: "extra-virgin olive oil",
+            amountText: "2 bottles",
+            memoryState: .remembered,
+        )
+        XCTAssertEqual(row.displayName, "extra-virgin olive oil")
+        XCTAssertEqual(row.amountText, "2 bottles")
+        XCTAssertGreaterThan(row.updatedAt ?? .distantPast, originalUpdate ?? .distantPast)
+    }
+
     func test_update_throwsValidationOnEmptyDisplayName() throws {
-        let row = try repo.insertManual(displayName: "olive oil", amountText: nil, on: household)
+        let row = try insertedRow(displayName: "olive oil", amount: nil)
         XCTAssertThrowsError(try repo.update(
             row,
             displayName: "",
@@ -162,15 +270,116 @@ final class PantryItemRepositoryTests: XCTestCase {
         }
     }
 
-    func test_update_throwsOnSoftDeletedItem() throws {
-        let row = try repo.insertManual(displayName: "olive oil", amountText: nil, on: household)
+    /// Review W9 — previously asserted `XCTAssertThrowsError` without
+    /// inspecting the error case, which would have passed for any
+    /// thrown value. Now pattern-matches `.validation`.
+    func test_update_throwsValidationOnSoftDeletedItem() throws {
+        let row = try insertedRow(displayName: "olive oil", amount: nil)
         try repo.softDelete(row)
         XCTAssertThrowsError(try repo.update(
             row,
             displayName: "EVOO",
             amountText: nil,
             memoryState: .remembered,
-        ))
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    func test_update_throwsValidationOnOverlongDisplayName() throws {
+        let row = try insertedRow(displayName: "olive oil", amount: nil)
+        let tooLong = String(repeating: "a", count: PantryItemRepository.maxDisplayNameLength + 1)
+        XCTAssertThrowsError(try repo.update(
+            row,
+            displayName: tooLong,
+            amountText: nil,
+            memoryState: .remembered,
+        )) { error in
+            guard case StirError.validation = error else {
+                XCTFail("expected .validation, got \(error)")
+                return
+            }
+        }
+    }
+
+    // MARK: - upsertFromScan cap-aware
+
+    /// Review C1 regression test — `.likelyStaple` rows past the cap
+    /// downgrade to `.ephemeral` instead of silently exceeding it.
+    func test_upsertFromScan_downgradesStaplesPastCapToEphemeral() throws {
+        // Seed up to the cap with manual remembered rows.
+        for i in 0 ..< 25 {
+            _ = try insertedRow(displayName: "manual-\(i)", amount: nil)
+        }
+        // Scan adds 3 staples — all would-be `.remembered`.
+        let scan = (0 ..< 3).map { i in
+            PantryItemRepository.ScanIngredient(
+                displayName: "scan-\(i)",
+                canonicalSlug: "scan_\(i)",
+                amountText: nil,
+                confidence: 0.9,
+                parseConfidence: .likelyStaple,
+            )
+        }
+        let outcome = try repo.upsertFromScan(
+            scan,
+            on: household,
+            usedRemembered: 25,
+            cap: 25,
+        )
+        XCTAssertEqual(outcome.truncatedToEphemeral, 3)
+        XCTAssertEqual(try repo.countRemembered(for: household), 25, "cap respected")
+        let scanRows = try repo.fetchAll(for: household).filter { ($0.displayName ?? "").hasPrefix("scan-") }
+        XCTAssertEqual(scanRows.count, 3)
+        XCTAssertTrue(scanRows.allSatisfy { $0.typedMemoryState == .ephemeral })
+    }
+
+    func test_upsertFromScan_belowCapKeepsStaplesRemembered() throws {
+        let scan = [
+            PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: nil,
+                confidence: 0.9,
+                parseConfidence: .likelyStaple,
+            ),
+        ]
+        let outcome = try repo.upsertFromScan(
+            scan,
+            on: household,
+            usedRemembered: 0,
+            cap: 25,
+        )
+        XCTAssertEqual(outcome.truncatedToEphemeral, 0)
+        XCTAssertEqual(try repo.countRemembered(for: household), 1)
+    }
+
+    // MARK: - Helpers
+
+    /// Unwraps an `InsertManualOutcome.inserted(row)` for tests that
+    /// only care about the produced row. Fails the test on any other
+    /// outcome — call sites that genuinely want `.upserted` /
+    /// `.capReached` switch on the outcome directly.
+    private func insertedRow(
+        displayName: String,
+        amount: String?,
+        memoryState: PantryItem.MemoryState = .remembered,
+    ) throws -> PantryItem {
+        let outcome = try repo.insertManual(
+            displayName: displayName,
+            amountText: amount,
+            memoryState: memoryState,
+            on: household,
+        )
+        switch outcome {
+        case .inserted(let row): return row
+        case .upserted(let row): return row
+        case .capReached:
+            throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "unexpected .capReached in insertedRow helper — pass cap arg explicitly to test cap behavior"])
+        }
     }
 
     @discardableResult

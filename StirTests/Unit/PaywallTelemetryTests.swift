@@ -146,14 +146,35 @@ final class PaywallTelemetryTests: XCTestCase {
         // Dashboards key off these exact strings — renaming breaks existing
         // funnels. If we ever need to rename, it's a coordinated change
         // with PostHog dashboard updates and spec §15.
-        XCTAssertEqual(PaywallTrigger.dinnerSolveQuotaExhausted.telemetryValue, "dinner_solve_quota_exhausted")
-        XCTAssertEqual(PaywallTrigger.recipeImportQuotaExhausted.telemetryValue, "recipe_import_quota_exhausted")
-        XCTAssertEqual(PaywallTrigger.savedFavoritesGate.telemetryValue, "saved_favorites_gate")
-        XCTAssertEqual(PaywallTrigger.widgetsGate.telemetryValue, "widgets_gate")
-        XCTAssertEqual(PaywallTrigger.leftoversGate.telemetryValue, "leftovers_gate")
-        XCTAssertEqual(PaywallTrigger.multiImageScanGate.telemetryValue, "multi_image_scan_gate")
-        XCTAssertEqual(PaywallTrigger.settingsUpgrade.telemetryValue, "settings_upgrade")
-        XCTAssertEqual(PaywallTrigger.voiceAffordanceTapped.telemetryValue, "voice_affordance_tapped")
+        //
+        // Drive from `allCases` so a new `PaywallTrigger.*` case forces
+        // a corresponding entry here — preventing the "added the case
+        // but forgot to lock the wire string" regression that motivated
+        // tightening this test (review W5).
+        let expected: [PaywallTrigger: String] = [
+            .dinnerSolveQuotaExhausted:   "dinner_solve_quota_exhausted",
+            .recipeImportQuotaExhausted:  "recipe_import_quota_exhausted",
+            .savedFavoritesGate:          "saved_favorites_gate",
+            .widgetsGate:                 "widgets_gate",
+            .leftoversGate:               "leftovers_gate",
+            .multiImageScanGate:          "multi_image_scan_gate",
+            .settingsUpgrade:             "settings_upgrade",
+            .pantryCapReached:            "pantry_cap_reached",
+            .voiceAffordanceTapped:       "voice_affordance_tapped",
+            .voiceCookQuotaExhausted:     "voice_cook_quota_exhausted",
+        ]
+        for trigger in PaywallTrigger.allCases {
+            guard let wire = expected[trigger] else {
+                XCTFail("PaywallTrigger.\(trigger) is missing from telemetry stability lock — add to expected map and update PostHog dashboards if renaming")
+                continue
+            }
+            XCTAssertEqual(trigger.telemetryValue, wire, "telemetryValue drift on .\(trigger)")
+        }
+        XCTAssertEqual(
+            expected.count,
+            PaywallTrigger.allCases.count,
+            "expected map and PaywallTrigger.allCases out of sync",
+        )
     }
 
     // MARK: forbidden property names — any invented key would fail here
