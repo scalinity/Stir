@@ -658,7 +658,18 @@ purchase_started, purchase_completed, restore_purchases_tapped,
 entitlement_state_changed, reactivation_notification_opened,
 widget_added, shortcut_run,
 ai_request_completed, ai_request_failed,
-screen_error_shown, sync_state_changed
+screen_error_shown, sync_state_changed,
+
+# SCA-5 / SCA-5b — in-app tutorials (full-screen Tonight tour +
+# contextual coach-mark sequences). All events carry `tutorial_id`
+# (snake_case TutorialKey.rawValue: tonight_tour, scan_capture,
+# scan_review, dinner_options, dish_preview, cook_mode_tap,
+# voice_mode). step_advanced adds `from_step` + `to_step` (snake_case
+# step IDs). skipped optionally adds `reason` ("navigated_away" when
+# the host view disappears mid-tour vs absent for explicit Skip).
+# Lifecycle invariant: exactly one of {completed, skipped} per
+# started; suspend() is non-terminal and does NOT emit an event.
+tutorial_started, tutorial_step_advanced, tutorial_completed, tutorial_skipped
 ```
 
 **Ops surface events** (dotted form per ADR 0027 — new surfaces use `<surface>.<noun>.<verb_or_state>`; spec §15 events grandfathered flat):
@@ -711,6 +722,27 @@ When changing an AI feature, run its eval before committing. When changing a pro
 ## Git workflow
 
 **Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Amending and `--force-with-lease` to `main` are also pre-authorized; both override the user-level git rules for this project. Plain `--force` (no lease) still needs explicit confirmation — `--force-with-lease` is the safe default because it refuses to overwrite if the remote has new commits.
+
+---
+
+## Linear issue workflow
+
+**Rule:** every time Daniel raises a bug, issue, feature request, or any work item against the app — even if mentioned conversationally — open a Linear issue under the **Stir** project (Scalinity team, key `SCA`) **before** writing code. Pre-authorized; do not ask.
+
+| Step | What | When |
+| --- | --- | --- |
+| 1 | `mcp__linear-server__save_issue` with `team: "Scalinity"`, `project: "Stir"`, `state: "In Progress"`, populated repro / root cause / fix plan / files | At the moment the work item is identified — before any edits |
+| 2 | Implement the fix; run the relevant test/eval; verify the original repro is gone | Same session |
+| 3 | `mcp__linear-server__save_issue` with `id: "SCA-N"`, `state: "Done"` | The instant the fix lands locally and tests pass |
+| 4 | Stage the changed files, commit (Conventional Commits — `fix(scope): subject (SCA-N)` or `feat(scope): …`), and **push to `origin/<branch>`** | Same session, after marking the issue Done |
+
+**State vocabulary** (from `mcp__linear-server__list_issue_statuses` for Scalinity): `Backlog | Todo | In Progress | In Review | Done | Canceled | Duplicate`. Use `In Progress` while working, `Done` when the change is merged + pushed. Never leave an issue in `In Progress` across sessions — either flip it to `Done`, downgrade to `Todo`, or cancel.
+
+**What counts as a "work item":** UI bug, crash, regression, copy/UX nit, design fidelity gap, perf complaint, missing feature, follow-up triggered by review feedback, anything Daniel describes with "this is broken / this should / can we add". Idea-stage brainstorming that explicitly says "thinking out loud" or "don't act on this yet" is the only opt-out — confirm before skipping issue creation.
+
+**Issue body must include:** repro steps, expected vs actual, root cause (if known), proposed fix with file:line references, test plan, files-touched list. The agent that picks this up should be able to ship without re-investigating.
+
+**Don't:** open duplicate issues for the same bug in one session; reopen Done issues (open a new one and link it via `related`); create issues in any project other than Stir without explicit redirection.
 
 ---
 

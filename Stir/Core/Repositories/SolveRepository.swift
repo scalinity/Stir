@@ -618,6 +618,13 @@ final class SolveRepository {
     /// the UI; this catches up storage. Bumps `updatedAt` so CloudKit sync
     /// propagates the change to other devices.
     ///
+    /// Also flips `isSaved = true` (sticky — unfavoriting does NOT clear
+    /// it). Any interaction with the favorite star is treated as the
+    /// explicit "save this dish" signal, so a meal favorited via Tonight
+    /// Save-for-later doesn't disappear from Saved when the user later
+    /// unstars it (SCA-10). Soft-delete remains the only path that
+    /// removes a plan from Saved.
+    ///
     /// Silent on failure: returns without raising. Core Data saves here fail
     /// only on disk full / corruption; the UI optimistic state will desync
     /// but user-perceptible breakage is limited. Logged at warning level
@@ -626,6 +633,7 @@ final class SolveRepository {
     func setFavorite(_ isFavorite: Bool, on plan: RecipePlan) -> Bool {
         let context = controller.viewContext
         plan.isFavorite = isFavorite
+        plan.isSaved = true
         plan.updatedAt = Date()
         do {
             try context.save()

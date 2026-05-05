@@ -77,9 +77,17 @@ final class CookingSessionRepository {
     /// Transition to completed. Sets endedAt. OutcomeFeedback is persisted
     /// separately by OutcomeFeedbackRepository; this only touches the
     /// session state.
+    ///
+    /// Also flips `recipePlan.isSaved = true` so a cooked dish stays in
+    /// Saved even if the user never starred it (SCA-10 — sticky save
+    /// flag is the new gate alongside isFavorite/cooked-once).
     func markCompleted(_ session: CookingSession) throws {
         session.typedStatus = .completed
         session.endedAt = Date()
+        if let plan = session.recipePlan {
+            plan.isSaved = true
+            plan.updatedAt = Date()
+        }
         try controller.save()
     }
 
@@ -156,11 +164,18 @@ final class CookingSessionRepository {
 
     func savedMealEntries(for household: HouseholdProfile) throws -> [SavedMealEntry] {
         let request = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
-        // Only surface plans the user has actually engaged with: starred
-        // (favorited) OR has at least one non-deleted completed cook
-        // session. Without this guard every dinner-solve's three
-        // RecipePlans land in the Saved tab automatically — observed as
-        // duplicate / auto-saved meals in the wild.
+        // Only surface plans the user has actually engaged with:
+        //   - sticky `isSaved` flag (set by setFavorite + markCompleted —
+        //     SCA-10); OR
+        //   - currently starred (`isFavorite == YES` — kept for pre-SCA-10
+        //     rows that haven't passed through setFavorite/markCompleted
+        //     since the fix landed); OR
+        //   - has at least one non-deleted completed cook session (kept
+        //     for the same backward-compat reason).
+        //
+        // Without this guard every dinner-solve's three RecipePlans land
+        // in the Saved tab automatically — observed as duplicate /
+        // auto-saved meals in the wild.
         //
         // SUBQUERY (not ANY) — both `deletedAt == nil` and
         // `sessionStatus == completed` must match the SAME session row;
@@ -169,7 +184,7 @@ final class CookingSessionRepository {
         request.predicate = NSPredicate(
             format: """
             household == %@ AND deletedAt == nil AND \
-            (isFavorite == YES OR \
+            (isSaved == YES OR isFavorite == YES OR \
             SUBQUERY(cookingSessions, $s, $s.deletedAt == nil AND $s.sessionStatus == %@).@count > 0)
             """,
             household,

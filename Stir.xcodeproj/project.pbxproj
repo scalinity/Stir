@@ -290,6 +290,7 @@
 		FDCA0303383CF8045B4F7EE1 /* TimerActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */; };
 		FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */; };
 		FF707EDAE5ED2E58F3AF6183 /* TextButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79EEF31ED777951AF778AD00 /* TextButton.swift */; };
+		A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -577,6 +578,7 @@
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
 		"TEMP_25FC7C68-D3A9-4B34-A213-7B4A28DBF643" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsFavoriteStickinessTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -702,7 +704,8 @@
 				AFF0AB8E20B8FEEE5E1F06D2 /* VoiceSessionStateTests.swift */,
 				4300A920E84A19CD8F8AC1B3 /* VoiceTurnRepositoryTests.swift */,
 				8893F1B9DC617B40A8E19877 /* VoiceTurnUsageDTOTests.swift */,
-			);
+							9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */,
+);
 			path = Unit;
 			sourceTree = "<group>";
 		};
@@ -1511,7 +1514,8 @@
 				3334BAB679FB334A1FA1F52B /* VoiceSessionStateTests.swift in Sources */,
 				D8B040764AED517E1B242AE7 /* VoiceTurnRepositoryTests.swift in Sources */,
 				460628BDAA14878D2762AFB1 /* VoiceTurnUsageDTOTests.swift in Sources */,
-			);
+							A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */,
+);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7CA84D64FE6B899A8EB4D38B /* Sources */ = {
