@@ -952,6 +952,33 @@ struct GroceryGenerateRequest: Encodable, Sendable {
             case canonicalSlug = "canonical_slug"
             case amountText = "amount_text"
         }
+
+        /// Skip encoding `canonical_slug` and `amount_text` when blank
+        /// or whitespace-only. Backend Zod is `.min(1).max(128).optional()`
+        /// on both fields, so an empty pass-through trips VAL-01 →
+        /// AIDispatch throws → GroceryViewModel's catch surfaces AI-01.
+        /// Core Data string attrs default to `""` (RecipeIngredient.
+        /// amountText has `defaultValueString=""`; the dinner-solve
+        /// decoder coalesces missing slugs to nil but `""` flows
+        /// straight through). This pattern mirrors
+        /// `SubstitutionRequest.MissingIngredient.encode(to:)` —
+        /// surfaced again on the rehydrated-alt-from-Other-Options
+        /// path where ingredient strings sourced from older solves
+        /// can carry persisted empties.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(displayName, forKey: .displayName)
+            if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !slug.isEmpty
+            {
+                try c.encode(slug, forKey: .canonicalSlug)
+            }
+            if let amount = amountText?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !amount.isEmpty
+            {
+                try c.encode(amount, forKey: .amountText)
+            }
+        }
     }
 
     struct PantryItemLite: Encodable, Sendable {
@@ -961,6 +988,20 @@ struct GroceryGenerateRequest: Encodable, Sendable {
         enum CodingKeys: String, CodingKey {
             case displayName = "display_name"
             case canonicalSlug = "canonical_slug"
+        }
+
+        /// Same blank-drop pattern as `Ingredient` above — pantry rows
+        /// can carry persisted `""` for canonical_slug, which Zod's
+        /// `.min(1).optional()` rejects. Drop when empty so the
+        /// optional-field-absent path runs.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(displayName, forKey: .displayName)
+            if let slug = canonicalSlug?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !slug.isEmpty
+            {
+                try c.encode(slug, forKey: .canonicalSlug)
+            }
         }
     }
 }
