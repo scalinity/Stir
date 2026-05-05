@@ -1039,18 +1039,22 @@ final class RootCoordinator {
 
     // MARK: - Tutorial replay (SCA-5)
 
-    /// Reset the named in-app tutorial and route the user to the tab
-    /// where it presents. Called from Settings → "Show tutorial again".
-    /// Settings used to mutate `selectedTab` directly; centralizing the
-    /// reset+route here keeps the replay sequence in one owner so a
-    /// future tutorial added on a non-Tonight surface only changes this
-    /// switch, not every Settings call site.
-    func replayTutorial(_ key: TutorialKey, manager: TutorialManager = .shared) {
-        manager.reset(key)
-        switch key {
-        case .tonightTour:
-            selectedTab = .tonight
-        }
+    /// Reset every in-app tutorial (full-screen + coach-mark) and
+    /// route the user to Tonight Home, which is where the first
+    /// reachable tutorial (`tonightTour`) auto-presents. Contextual
+    /// tutorials (`scanCapture`, `cookModeTap`, etc.) re-arm the
+    /// next time the user reaches their host surface — that includes
+    /// Cook + Voice tours, which only present inside an active
+    /// cooking session. The Settings copy is honest about that.
+    ///
+    /// Atomicity: writes go through a single `defaults.synchronize()`
+    /// after the loop so a force-quit mid-loop either leaves all 7
+    /// keys reset or none. Per-key writes still happen via
+    /// `manager.reset(_:)` to keep the in-memory observable mirror
+    /// in sync (otherwise SwiftUI wouldn't pick up the gate flips).
+    func replayAllTutorials(manager: TutorialManager = .shared) {
+        manager.resetAll()
+        selectedTab = .tonight
     }
 
     // MARK: - Paywall presentation

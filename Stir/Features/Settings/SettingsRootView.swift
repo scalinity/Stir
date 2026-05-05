@@ -106,6 +106,18 @@ struct SettingsRootView: View {
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .stirToast($restoreToast)
+        // SCA-13 Phase 1 — entry-point pantry coach mark. Anchors on
+        // the "Manage pantry" row inside `pantrySection`. Until
+        // `PantryListView` ships, only the entryOnly step (1 of 5)
+        // presents; the in-screen walkthrough (header / + / picker /
+        // first row) is dormant in `PantryCoachMarks.steps` and
+        // activates the moment the screen attaches the full
+        // `.coachMarks(key:.pantryManagement, steps:
+        // PantryCoachMarks.steps)` modifier.
+        .coachMarks(
+            key: .pantryManagement,
+            steps: PantryCoachMarks.entryOnly,
+        )
         .sheet(item: $coordinator.activeProComparison) { entry in
             // SwiftUI invokes this content closure once per `item`
             // identity change (i.e., per presentation), not per
@@ -459,18 +471,22 @@ struct SettingsRootView: View {
 
     // MARK: - Help
 
-    /// Help section. v1: a single "Show tutorial again" entry that
-    /// hands off to `RootCoordinator.replayTutorial` — the coordinator
-    /// owns reset + tab routing in one place so Settings stays
-    /// decoupled from `selectedTab` mutation.
+    /// Help section. Single "Replay tutorials" entry resets every
+    /// in-app tutorial via `coordinator.replayAllTutorials()` and
+    /// routes the user to Tonight, where the first reachable tutorial
+    /// (`tonightTour`) auto-presents and the rest fire as the user
+    /// re-enters their host surfaces.
     private var helpSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
             sectionEyebrow("Help")
             settingsActionRow(
                 icon: Image.Stir.info,
-                title: "Show \(TutorialKey.tonightTour.displayName) again",
-                subtitle: TutorialKey.tonightTour.replaySubtitle,
-                action: { coordinator.replayTutorial(.tonightTour) },
+                title: "Replay tutorials",
+                // Honest copy: tours auto-arm next time you reach
+                // their host screen. Tonight tour fires immediately;
+                // Scan/Solve/Cook tours fire as you walk that path.
+                subtitle: "Tutorials will reappear next time you open each screen.",
+                action: { coordinator.replayAllTutorials() },
             )
             .stirCard()
         }
@@ -522,6 +538,16 @@ struct SettingsRootView: View {
 
     // MARK: - Pantry
 
+    /// Pantry section — entry to `PantryListView` (Settings →
+    /// Manage pantry). Tagged with
+    /// `.coachMarkAnchor(.settingsManagePantryRow)` so the entry-
+    /// point coach mark in `PantryCoachMarks.entryOnly` can
+    /// spotlight this row the first time the user reaches Settings
+    /// post-launch.
+    ///
+    /// Per ADR-0028, pantry is a low-frequency surface (users update
+    /// it after weekly scans, or to spot-check the grocery diff) so
+    /// it lives under Settings rather than as a top-level tab.
     private var pantrySection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
             sectionEyebrow("Pantry")
@@ -531,11 +557,13 @@ struct SettingsRootView: View {
                 settingsRowContent(
                     icon: Image.Stir.pantry,
                     title: "Manage pantry",
+                    subtitle: "View, edit, or remove ingredients Stir remembers.",
                     trailing: .chevron,
                 )
                 .stirCard()
             }
             .buttonStyle(.plain)
+            .coachMarkAnchor(.settingsManagePantryRow)
         }
     }
 

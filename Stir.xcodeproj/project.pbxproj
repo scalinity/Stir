@@ -298,7 +298,28 @@
 		FDCA0303383CF8045B4F7EE1 /* TimerActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */; };
 		FE10D712CCAA13E85A8DE71F /* HouseholdProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8E297F2934A70F8D80BEB7 /* HouseholdProfileRepository.swift */; };
 		FF707EDAE5ED2E58F3AF6183 /* TextButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79EEF31ED777951AF778AD00 /* TextButton.swift */; };
+		245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F920935AC9534472392B226 /* TutorialFlowContainer.swift */; };
+		A34FCF1DDFCF240B1B2357A3 /* TutorialStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E7F777CF42A785B340434EF /* TutorialStepView.swift */; };
+		679EF3AA3AEA60324302724C /* TutorialKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B11A7D6B290B77400145D9 /* TutorialKey.swift */; };
+		E606300A3573AEF1E1D89B01 /* TutorialManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F632D226D5E47ABABF2F31 /* TutorialManager.swift */; };
+		2D4B99E9E2697071F30AD8F7 /* TonightTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CAA8841B36E3DFB494292AD /* TonightTour.swift */; };
+		E7F81ECC934600580715EB8F /* TutorialManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D650B1A0AAF85589502AC5 /* TutorialManagerTests.swift */; };
+		D22183DFA06C7F6DF957027D /* TutorialPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7FB287126FE5B46FBE2F8D /* TutorialPresenter.swift */; };
+		A37B077DE660FD9C6B1D0705 /* CoachMarkAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08249F88A90473C7BFF7C44 /* CoachMarkAnchor.swift */; };
+		B3952716ADFE28E806C2530D /* CoachMarkStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20E0A192A5CBD06CE058408 /* CoachMarkStep.swift */; };
+		FE8C6DAEA94BCB04222DC841 /* CoachMarkController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86D3BB5D9D0467F09CC3D8F1 /* CoachMarkController.swift */; };
+		842FFFCF5FB758387DCB0CDB /* CoachMarkSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51ECA1C4826E19CE3D7BD04 /* CoachMarkSpotlight.swift */; };
+		B2C9F223C7F67308CA561A98 /* CoachMarkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFB0C41C5AA8DC8E759648E /* CoachMarkCard.swift */; };
+		C802BCA838EAA8B4E8A778B3 /* CoachMarkPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E6F76902C462AA50ED3EFD5 /* CoachMarkPresenter.swift */; };
+		D008F10F7B68FD64D6724BFA /* ScanCaptureCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D372E56F8CE14CD87A1E6CF /* ScanCaptureCoachMarks.swift */; };
+		1E76B044538085A66B9011E1 /* ScanReviewCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8214C9414256F8B52273C244 /* ScanReviewCoachMarks.swift */; };
+		7DA5B821544ED0BA12CB80B7 /* DinnerOptionsCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82012DACBD5F19ED5873387B /* DinnerOptionsCoachMarks.swift */; };
+		7CD8F5F04F3544F94E7EDCF1 /* DishPreviewCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = E82E627A0D6E39A26ABCC9DA /* DishPreviewCoachMarks.swift */; };
+		92F222CB69A30A6FB5492596 /* CookModeTapCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA76FDAFF7C28DFD00959397 /* CookModeTapCoachMarks.swift */; };
+		D99BCD3B9DB54230531643D9 /* VoiceModeCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 699EFFB5F61B992FD01869CF /* VoiceModeCoachMarks.swift */; };
+		B90AB86CB624FDD3B914E545 /* CoachMarkControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC673AB518B14E9CF90BDDE /* CoachMarkControllerTests.swift */; };
 		A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */; };
+		C483EAD3C38135449BFB39B8 /* PantryCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -594,7 +615,28 @@
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
 		"TEMP_25FC7C68-D3A9-4B34-A213-7B4A28DBF643" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		3F920935AC9534472392B226 /* TutorialFlowContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialFlowContainer.swift; sourceTree = "<group>"; };
+		5E7F777CF42A785B340434EF /* TutorialStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialStepView.swift; sourceTree = "<group>"; };
+		21B11A7D6B290B77400145D9 /* TutorialKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialKey.swift; sourceTree = "<group>"; };
+		42F632D226D5E47ABABF2F31 /* TutorialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialManager.swift; sourceTree = "<group>"; };
+		4CAA8841B36E3DFB494292AD /* TonightTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightTour.swift; sourceTree = "<group>"; };
+		D9D650B1A0AAF85589502AC5 /* TutorialManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialManagerTests.swift; sourceTree = "<group>"; };
+		0D7FB287126FE5B46FBE2F8D /* TutorialPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPresenter.swift; sourceTree = "<group>"; };
+		D08249F88A90473C7BFF7C44 /* CoachMarkAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkAnchor.swift; sourceTree = "<group>"; };
+		A20E0A192A5CBD06CE058408 /* CoachMarkStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkStep.swift; sourceTree = "<group>"; };
+		86D3BB5D9D0467F09CC3D8F1 /* CoachMarkController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkController.swift; sourceTree = "<group>"; };
+		E51ECA1C4826E19CE3D7BD04 /* CoachMarkSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkSpotlight.swift; sourceTree = "<group>"; };
+		FFFB0C41C5AA8DC8E759648E /* CoachMarkCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkCard.swift; sourceTree = "<group>"; };
+		4E6F76902C462AA50ED3EFD5 /* CoachMarkPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkPresenter.swift; sourceTree = "<group>"; };
+		2D372E56F8CE14CD87A1E6CF /* ScanCaptureCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureCoachMarks.swift; sourceTree = "<group>"; };
+		8214C9414256F8B52273C244 /* ScanReviewCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanReviewCoachMarks.swift; sourceTree = "<group>"; };
+		82012DACBD5F19ED5873387B /* DinnerOptionsCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DinnerOptionsCoachMarks.swift; sourceTree = "<group>"; };
+		E82E627A0D6E39A26ABCC9DA /* DishPreviewCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DishPreviewCoachMarks.swift; sourceTree = "<group>"; };
+		CA76FDAFF7C28DFD00959397 /* CookModeTapCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeTapCoachMarks.swift; sourceTree = "<group>"; };
+		699EFFB5F61B992FD01869CF /* VoiceModeCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeCoachMarks.swift; sourceTree = "<group>"; };
+		1DC673AB518B14E9CF90BDDE /* CoachMarkControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkControllerTests.swift; sourceTree = "<group>"; };
 		9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsFavoriteStickinessTests.swift; sourceTree = "<group>"; };
+		4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryCoachMarks.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -723,7 +765,9 @@
 				AFF0AB8E20B8FEEE5E1F06D2 /* VoiceSessionStateTests.swift */,
 				4300A920E84A19CD8F8AC1B3 /* VoiceTurnRepositoryTests.swift */,
 				8893F1B9DC617B40A8E19877 /* VoiceTurnUsageDTOTests.swift */,
-							9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */,
+							D9D650B1A0AAF85589502AC5 /* TutorialManagerTests.swift */,
+				1DC673AB518B14E9CF90BDDE /* CoachMarkControllerTests.swift */,
+				9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */,
 );
 			path = Unit;
 			sourceTree = "<group>";
@@ -799,7 +843,8 @@
 				FD8B4EC3DEAADA847949BC07 /* Solve */,
 				A3BE642BD3C982EA5A44CA91 /* Substitution */,
 				661AF668F203E2C75ECF4305 /* Tonight */,
-			);
+							31D6F0F03F53912DFF1192D0 /* Tutorial */,
+);
 			path = Features;
 			sourceTree = "<group>";
 		};
@@ -1242,7 +1287,16 @@
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
-			);
+							3F920935AC9534472392B226 /* TutorialFlowContainer.swift */,
+				5E7F777CF42A785B340434EF /* TutorialStepView.swift */,
+				0D7FB287126FE5B46FBE2F8D /* TutorialPresenter.swift */,
+				D08249F88A90473C7BFF7C44 /* CoachMarkAnchor.swift */,
+				A20E0A192A5CBD06CE058408 /* CoachMarkStep.swift */,
+				86D3BB5D9D0467F09CC3D8F1 /* CoachMarkController.swift */,
+				E51ECA1C4826E19CE3D7BD04 /* CoachMarkSpotlight.swift */,
+				FFFB0C41C5AA8DC8E759648E /* CoachMarkCard.swift */,
+				4E6F76902C462AA50ED3EFD5 /* CoachMarkPresenter.swift */,
+);
 			path = Components;
 			sourceTree = "<group>";
 		};
@@ -1273,6 +1327,23 @@
 				"TEMP_25FC7C68-D3A9-4B34-A213-7B4A28DBF643" /* Config.xcconfig */,
 			);
 			path = Stir;
+			sourceTree = "<group>";
+		};
+		31D6F0F03F53912DFF1192D0 /* Tutorial */ = {
+			isa = PBXGroup;
+			children = (
+				21B11A7D6B290B77400145D9 /* TutorialKey.swift */,
+				42F632D226D5E47ABABF2F31 /* TutorialManager.swift */,
+				4CAA8841B36E3DFB494292AD /* TonightTour.swift */,
+						2D372E56F8CE14CD87A1E6CF /* ScanCaptureCoachMarks.swift */,
+				8214C9414256F8B52273C244 /* ScanReviewCoachMarks.swift */,
+				82012DACBD5F19ED5873387B /* DinnerOptionsCoachMarks.swift */,
+				E82E627A0D6E39A26ABCC9DA /* DishPreviewCoachMarks.swift */,
+				CA76FDAFF7C28DFD00959397 /* CookModeTapCoachMarks.swift */,
+				699EFFB5F61B992FD01869CF /* VoiceModeCoachMarks.swift */,
+				4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */,
+);
+			path = Tutorial;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1549,7 +1620,9 @@
 				3334BAB679FB334A1FA1F52B /* VoiceSessionStateTests.swift in Sources */,
 				D8B040764AED517E1B242AE7 /* VoiceTurnRepositoryTests.swift in Sources */,
 				460628BDAA14878D2762AFB1 /* VoiceTurnUsageDTOTests.swift in Sources */,
-							A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */,
+							E7F81ECC934600580715EB8F /* TutorialManagerTests.swift in Sources */,
+				B90AB86CB624FDD3B914E545 /* CoachMarkControllerTests.swift in Sources */,
+				A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1728,7 +1801,26 @@
 				DE76C4B2F34B0ACF847D5161 /* VoiceTurnRepository.swift in Sources */,
 				F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */,
 				5E8F656515AC048F68C62633 /* WidgetReloadCoordinator.swift in Sources */,
-			);
+							245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */,
+				A34FCF1DDFCF240B1B2357A3 /* TutorialStepView.swift in Sources */,
+				679EF3AA3AEA60324302724C /* TutorialKey.swift in Sources */,
+				E606300A3573AEF1E1D89B01 /* TutorialManager.swift in Sources */,
+				2D4B99E9E2697071F30AD8F7 /* TonightTour.swift in Sources */,
+				D22183DFA06C7F6DF957027D /* TutorialPresenter.swift in Sources */,
+				A37B077DE660FD9C6B1D0705 /* CoachMarkAnchor.swift in Sources */,
+				B3952716ADFE28E806C2530D /* CoachMarkStep.swift in Sources */,
+				FE8C6DAEA94BCB04222DC841 /* CoachMarkController.swift in Sources */,
+				842FFFCF5FB758387DCB0CDB /* CoachMarkSpotlight.swift in Sources */,
+				B2C9F223C7F67308CA561A98 /* CoachMarkCard.swift in Sources */,
+				C802BCA838EAA8B4E8A778B3 /* CoachMarkPresenter.swift in Sources */,
+				D008F10F7B68FD64D6724BFA /* ScanCaptureCoachMarks.swift in Sources */,
+				1E76B044538085A66B9011E1 /* ScanReviewCoachMarks.swift in Sources */,
+				7DA5B821544ED0BA12CB80B7 /* DinnerOptionsCoachMarks.swift in Sources */,
+				7CD8F5F04F3544F94E7EDCF1 /* DishPreviewCoachMarks.swift in Sources */,
+				92F222CB69A30A6FB5492596 /* CookModeTapCoachMarks.swift in Sources */,
+				D99BCD3B9DB54230531643D9 /* VoiceModeCoachMarks.swift in Sources */,
+				C483EAD3C38135449BFB39B8 /* PantryCoachMarks.swift in Sources */,
+);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
@@ -1896,6 +1988,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scalinity.stir.tests;
 				PRODUCT_NAME = StirTests;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Stir.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Stir";
 			};
 			name = Debug;

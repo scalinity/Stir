@@ -17,6 +17,7 @@ struct DishPreviewView: View {
 
     @Environment(EntitlementService.self) private var entitlements
     @Environment(RootCoordinator.self) private var coordinator
+    @Environment(\.coachMarks) private var coachMarks
     /// Dismisses the enclosing ScanFlowRoot fullScreenCover. After
     /// it dismisses, TonightHome's `activeFreshCook` cover presents
     /// Cook Mode — sequential, no modal collision.
@@ -127,6 +128,7 @@ struct DishPreviewView: View {
             .background(Color.Stir.paper50)
         }
         .stirToast($errorToast)
+        .coachMarks(key: .dishPreview, steps: DishPreviewCoachMarks.steps)
         .onAppear {
             // Guard against re-capture on back-nav re-entry. NavigationStack
             // creates a fresh DishPreviewView on each push so @State resets,
@@ -156,11 +158,13 @@ struct DishPreviewView: View {
             }
             .foregroundStyle(Color.Stir.ink500)
             .accessibilityLabel("\(dish.totalTimeMinutes) minutes total, rank \(dish.rank)")
+            .coachMarkAnchor(.dishMeta)
 
             Text(dish.whyItFits)
                 .stirFont(.bodyLg)
                 .foregroundStyle(Color.Stir.ink900)
                 .fixedSize(horizontal: false, vertical: true)
+                .coachMarkAnchor(.dishWhyItFits)
 
             if !dish.reasoningSummary.isEmpty {
                 Text(dish.reasoningSummary)
@@ -328,6 +332,10 @@ struct DishPreviewView: View {
         // through silently — no Cook Mode presents, no crash. Upstream
         // error handling catches the UX gap.
         PrimaryButton(title: "Start Cooking") {
+            // Real Start Cooking tap fulfills the dish-preview
+            // tutorial's gated step in the same gesture; no extra
+            // tap required.
+            coachMarks?.completeAction(.startCookingTap)
             guard let plan = viewModel.persistedRecipePlan(for: dish),
                   let household = viewModel.currentHousehold
             else {
@@ -345,5 +353,6 @@ struct DishPreviewView: View {
             dismiss()
         }
         .accessibilityHint("Opens Cook Mode step-by-step with optional timers.")
+        .coachMarkAnchor(.dishStartCooking)
     }
 }

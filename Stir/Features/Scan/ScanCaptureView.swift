@@ -37,6 +37,11 @@ struct ScanCaptureView: View {
     /// user already navigated away from.
     @State private var captureTask: Task<Void, Never>?
 
+    /// Live binding from the presenter modifier — let real action
+    /// handlers (shutter tap) advance the coach-mark sequence without
+    /// prop-drilling.
+    @Environment(\.coachMarks) private var coachMarks
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -79,6 +84,16 @@ struct ScanCaptureView: View {
             captureTask = nil
             Task { await cameraService.stop() }
         }
+        // First-time scan tutorial: framing tip + shutter prompt.
+        // Suppressed during the parsing phase (the shutter is gone +
+        // the screen is the "looking at your kitchen" banner; the
+        // tutorial's targeting logic would highlight an offscreen
+        // anchor). Re-arms when the user comes back into capturing.
+        .coachMarks(
+            key: .scanCapture,
+            steps: ScanCaptureCoachMarks.steps,
+            shouldPresent: viewModel.phase != .parsing && !isReviewingCapture,
+        )
     }
 
     // MARK: - Overlay
@@ -133,6 +148,11 @@ struct ScanCaptureView: View {
 
     private var captureButton: some View {
         Button {
+            // Advance the scan tutorial's "tap shutter" gated step
+            // BEFORE kicking off the capture task — the user's real
+            // shutter tap counts as the tutorial step's required
+            // action, so no second tap is ever needed.
+            coachMarks?.completeAction(.shutterTap)
             captureTask = Task { await capture() }
         } label: {
             ZStack {
@@ -152,6 +172,7 @@ struct ScanCaptureView: View {
         }
         .disabled(isCapturing || viewModel.phase == .parsing)
         .accessibilityLabel("Capture photo")
+        .coachMarkAnchor(.scanShutter)
     }
 
     private func capture() async {

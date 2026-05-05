@@ -25,7 +25,7 @@
 // .modelSpeaking → .ready before .userSpeaking). Building full-duplex
 // barge-in here would be wasted plumbing.
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import os
 import OSLog

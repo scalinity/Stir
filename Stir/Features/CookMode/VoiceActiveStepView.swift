@@ -35,6 +35,8 @@ import SwiftUI
 struct VoiceActiveStepView: View {
     @Bindable var viewModel: CookModeViewModel
 
+    @Environment(\.coachMarks) private var coachMarks
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -147,6 +149,7 @@ struct VoiceActiveStepView: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Exit Cook Mode")
+            .coachMarkAnchor(.voiceExitButton)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             voicePremiumPill
@@ -320,6 +323,13 @@ struct VoiceActiveStepView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(pillAccessibilityLabel)
         .accessibilityHint(pillAccessibilityHint)
+        // Both voice tutorial steps (intro + mic-states) anchor on the
+        // listening pill — the mic circle is rendered inside it, so
+        // the user's eye lands on the mic regardless of which step is
+        // active. A separate `.voiceMicCircle` anchor was removed (it
+        // resolved to the same frame, just via a fragile stacked-
+        // background GeometryReader).
+        .coachMarkAnchor(.voiceListeningPill)
     }
 
     // MARK: - Pill state mapping

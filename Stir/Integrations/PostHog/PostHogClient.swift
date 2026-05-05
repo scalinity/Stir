@@ -219,6 +219,17 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case widgetAdded = "widget_added"
     case shortcutRun = "shortcut_run"
     case groceryListExported = "grocery_list_exported"
+    // SCA-5 — in-app feature tutorials. Fired once per tutorial-key
+    // lifecycle: started on first appear, then exactly one of
+    // {completed, skipped} on resolution. `tutorial_step_advanced`
+    // fires on every advance for funnel-drop-off analysis. Properties
+    // are minimal: `tutorial_id` (TutorialKey.telemetryID) plus
+    // `from_step`/`to_step` for the step event. Not yet in spec §15 —
+    // tracked as a follow-up; see CLAUDE.md telemetry list.
+    case tutorialStarted = "tutorial_started"
+    case tutorialCompleted = "tutorial_completed"
+    case tutorialSkipped = "tutorial_skipped"
+    case tutorialStepAdvanced = "tutorial_step_advanced"
 }
 
 /// Typed property-bag helpers for step-7 events. Keeping properties

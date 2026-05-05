@@ -38,6 +38,10 @@ struct ScanReviewView: View {
     @State private var addBuffer: String = ""
     @State private var confirmedExpanded: Bool = false
 
+    /// Coach-mark controller injected by the presenter modifier. Used
+    /// to advance the action-gated Solve step.
+    @Environment(\.coachMarks) private var coachMarks
+
     /// First N confirmed chips render inline; the rest fold behind a
     /// "+ X more" overflow chip until the user expands the section.
     /// 9 keeps the section roughly three rows on iPhone 15 Pro.
@@ -113,6 +117,16 @@ struct ScanReviewView: View {
                 addBuffer = ""
             }
         }
+        // First-time scan-review tutorial. Suppressed during the
+        // initial parse phase + the error state — the anchored
+        // sections don't render in those phases, so the spotlight
+        // would target a missing frame.
+        .coachMarks(
+            key: .scanReview,
+            steps: ScanReviewCoachMarks.steps,
+            shouldPresent: viewModel.phase != .parsing
+                && !viewModel.ingredients.isEmpty,
+        )
     }
 
     // MARK: - Bucketing
@@ -196,6 +210,7 @@ struct ScanReviewView: View {
                     }
                 }
             }
+            .coachMarkAnchor(.scanConfirmedSection)
         }
     }
 
@@ -215,6 +230,7 @@ struct ScanReviewView: View {
                     addChip
                 }
             }
+            .coachMarkAnchor(.scanNeedsReviewSection)
         }
     }
 
@@ -370,6 +386,7 @@ struct ScanReviewView: View {
         .frame(minHeight: 44)
         .accessibilityLabel("Add ingredient")
         .accessibilityHint("Opens a prompt to add a missing item")
+        .coachMarkAnchor(.scanAddChip)
     }
 
     // MARK: - CTA
@@ -379,9 +396,16 @@ struct ScanReviewView: View {
             title: "Solve dinner",
             trailingIcon: Image(systemName: "arrow.right"),
             isDisabled: viewModel.ingredients.isEmpty,
-            action: onConfirm,
+            action: {
+                // Advance the scan-review tutorial's terminal step
+                // BEFORE invoking the real solve handler — the user's
+                // tap fulfills both contracts simultaneously.
+                coachMarks?.completeAction(.solveTap)
+                onConfirm()
+            },
         )
         .padding(.top, CGFloat.Stir.space3)
+        .coachMarkAnchor(.scanSolveButton)
     }
 
     // MARK: - Loading & error

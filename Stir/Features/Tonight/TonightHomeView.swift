@@ -107,7 +107,41 @@ struct TonightHomeView: View {
             get: { coordinator.activeOtherOptions },
             set: { coordinator.activeOtherOptions = $0 },
         ), content: otherOptionsCoverContent)
+        // SCA-5 — first-run feature tour. See `tonightTourShouldPresent`
+        // for the gating contract.
+        .tutorial(key: .tonightTour, shouldPresent: tonightTourShouldPresent) {
+            TonightTour()
+        }
         .task { await refreshState() }
+    }
+
+    // MARK: - Tutorial gating (SCA-5)
+
+    /// `true` when the Tonight feature-tour cover is allowed to present.
+    /// Combines:
+    ///   - `phase == .ready` so PostHog is initialized + entitlement
+    ///     state has hydrated (telemetry won't drop on cold launch).
+    ///   - `household.profile.onboardingCompleted` so the setup-
+    ///     onboarding flow has run to completion (defense-in-depth;
+    ///     the bootstrap router already prevents the un-onboarded
+    ///     `.ready` path).
+    ///   - All other modal/cover signals are clear, so the tutorial
+    ///     never races a deep-link scan, cook launch, solve-again,
+    ///     other-options, or paywall trigger for the single-cover
+    ///     slot SwiftUI provides per host.
+    /// `TutorialManager.isCompleted` is checked inside the presenter
+    /// modifier against an `@Observable` source of truth, so a
+    /// Settings → "Show tour again" reset re-opens the gate without
+    /// needing a host-side observer here.
+    private var tonightTourShouldPresent: Bool {
+        guard coordinator.phase == .ready else { return false }
+        guard coordinator.household.profile?.onboardingCompleted == true else { return false }
+        guard activeModal == nil else { return false }
+        guard coordinator.activeCookLaunch == nil else { return false }
+        guard coordinator.activeSolveAgain == nil else { return false }
+        guard coordinator.activeOtherOptions == nil else { return false }
+        guard coordinator.activePaywallTrigger == nil else { return false }
+        return true
     }
 
     // MARK: - Cover content (extracted)

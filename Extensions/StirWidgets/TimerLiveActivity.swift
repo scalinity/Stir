@@ -31,7 +31,11 @@ struct TimerLiveActivity: Widget {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             LockScreenView(context: context)
                 .activityBackgroundTint(Color.black.opacity(0.12))
-                .activitySystemActionForegroundColor(Color.Stir.ember600)
+                // Tints iOS-rendered chrome only — most visibly the
+                // "Continue Live Activities from Stir?" permission alert.
+                // Ember failed contrast on the alert's translucent material;
+                // `Color.primary` resolves to UIColor.label (adaptive).
+                .activitySystemActionForegroundColor(Color.primary)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
