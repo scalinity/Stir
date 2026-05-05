@@ -352,3 +352,21 @@ final class EntitlementService {
         return decision
     }
 }
+
+extension EntitlementService {
+    /// Standing-pantry-item cap per tier (CLAUDE.md authoritative):
+    ///   Free    25
+    ///   Premium 250
+    ///   Pro     1000
+    /// Used by `PantryListViewModel` for client-side quota gating on
+    /// manual adds (the cap is not enforced server-side because user
+    /// content is CloudKit-only — no server visibility into pantry
+    /// state).
+    var rememberedPantryCap: Int {
+        switch tier {
+        case .free: return 25
+        case .premium: return 250
+        case .pro: return 1000
+        }
+    }
+}
