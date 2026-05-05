@@ -276,6 +276,9 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Network ok | `wifi` | `.networkOk` |
 | Network unreachable (`NET-01`) | `wifi.slash` | `.networkOff` |
 | Pantry | `basket` | `.pantry` |
+| Pantry row — manual entry source glyph | `pencil` | `.pantryManualEntry` |
+| Pantry row — staple source glyph | `star` | `.pantryStaple` |
+| Pantry row — imported source glyph | `rectangle.stack` | `.pantryImported` |
 | Cookbook / recipe source | `book.closed` | `.cookbook` |
 | Spiciness / heat | `flame` | `.heat` |
 | Quick action | `bolt.fill` | `.quick` |

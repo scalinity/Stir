@@ -108,6 +108,13 @@ extension Image.Stir {
     /// Remove item.
     static let minus = Image(systemName: "minus")
 
+    /// Pantry-row glyph for items entered manually by the user
+    /// (PantryRow source-glyph column). The base `pencil` symbol
+    /// `.edit` is already taken for nav-bar edit affordances; this
+    /// token is the row-decoration alias so future replacements
+    /// don't touch every callsite.
+    static let pantryManualEntry = Image(systemName: "pencil")
+
     // MARK: - Share + reminders + grocery
 
     /// Share.
@@ -191,6 +198,15 @@ extension Image.Stir {
     static let savedTray = Image(systemName: "tray")
     /// Pantry basket.
     static let pantry = Image(systemName: "basket")
+    /// Pantry-row glyph for "staple" items (always-stocked
+    /// ingredients the user marks as standing). Uses an asterisk-
+    /// like symbol for "starred staple" — distinct from the
+    /// `.sparkles`/`.premium` alias which is contractually scoped
+    /// to paywall + tier badges.
+    static let pantryStaple = Image(systemName: "star")
+    /// Pantry-row glyph for items imported from a recipe parse
+    /// or share-extension (source = .import).
+    static let pantryImported = Image(systemName: "rectangle.stack")
     /// Cookbook / recipe source.
     static let cookbook = Image(systemName: "book.closed")
     /// Heat / spiciness indicator.
