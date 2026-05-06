@@ -20,7 +20,6 @@ struct DinnerOptionsView: View {
     /// presentation state; we just signal it.
     let onTune: () -> Void
 
-    @Environment(\.coachMarks) private var coachMarks
 
     var body: some View {
         ScrollView {
@@ -49,12 +48,12 @@ struct DinnerOptionsView: View {
                 viewModel.startSolve()
             }
         }
-        // First-time dinner-options tutorial. Suppressed until at least
-        // one slot has resolved a dish, so the spotlight never targets
-        // a skeleton placeholder.
-        .coachMarks(
+        // SCA-19 — full-screen dinner-options tutorial. Suppressed
+        // until at least one slot has resolved a dish so the cover
+        // doesn't slide up over a screen full of skeletons.
+        .tutorial(
             key: .dinnerOptions,
-            steps: DinnerOptionsCoachMarks.steps,
+            content: { DinnerOptionsTutorial() },
             shouldPresent: viewModel.slots.contains { $0.dish != nil },
         )
     }
@@ -79,22 +78,6 @@ struct DinnerOptionsView: View {
                 )
             }
             .buttonStyle(DishOptionCardStyle())
-            // Anchor the rank-1 card for the dinner-options coach-mark
-            // sequence. Optional-overload: rank 2 / 3 pass nil so no
-            // preference is written for them. The fit-label step
-            // re-uses the same anchor (the FitLabel renders inside
-            // the card; user's eye lands there regardless).
-            .coachMarkAnchor(slot.rank == 1 ? .dinnerCardRank1 : nil)
-            .simultaneousGesture(
-                TapGesture().onEnded { _ in
-                    if slot.rank == 1 {
-                        // Tutorial's "tap any card" gated step
-                        // resolves on the same gesture that pushes
-                        // the preview screen.
-                        coachMarks?.completeAction(.cardTap)
-                    }
-                },
-            )
         } else if slot.errorCode != nil {
             // Error code is intentionally not surfaced in the slot's
             // copy — users don't need the VAL-01 / AI-02 string. The

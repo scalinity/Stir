@@ -36,33 +36,30 @@ DS_FILES = [
     "TutorialFlowContainer.swift",
     "TutorialStepView.swift",
     "TutorialPresenter.swift",
-    # SCA-5b — coach-mark infrastructure (flat in Components/, mirroring
-    # the same pattern as the existing tutorial files).
-    "CoachMarkAnchor.swift",
-    "CoachMarkStep.swift",
-    "CoachMarkController.swift",
-    "CoachMarkSpotlight.swift",
-    "CoachMarkCard.swift",
-    "CoachMarkPresenter.swift",
+    # SCA-19 — animation modifiers (`.staggeredReveal`, `.tutorialPulsing`)
+    # used across the per-feature tutorial step miniatures.
+    "TutorialAnimations.swift",
 ]
 FEATURE_FILES = [
     "TutorialKey.swift",
     "TutorialManager.swift",
     "TonightTour.swift",
-    # SCA-5b — per-feature coach-mark sequences. Flat in Tutorial/
-    # since the existing subgroup is already wired into the project.
-    "ScanCaptureCoachMarks.swift",
-    "ScanReviewCoachMarks.swift",
-    "DinnerOptionsCoachMarks.swift",
-    "DishPreviewCoachMarks.swift",
-    "CookModeTapCoachMarks.swift",
-    "VoiceModeCoachMarks.swift",
-    "PantryCoachMarks.swift",
     "TutorialReplayView.swift",
+    # SCA-19 — per-feature full-screen tutorials (replaces the
+    # coach-mark sequences). Each owns its Step enum + interactive
+    # animated miniatures.
+    "ScanCaptureTutorial.swift",
+    "ScanReviewTutorial.swift",
+    "DinnerOptionsTutorial.swift",
+    "DishPreviewTutorial.swift",
+    "CookModeTapTutorial.swift",
+    "VoiceModeTutorial.swift",
+    "PantryManagementTutorial.swift",
+    "PantryInListTutorial.swift",
 ]
 TEST_FILES = [
     "TutorialManagerTests.swift",
-    "CoachMarkControllerTests.swift",
+    "TutorialFlowContainerTests.swift",
 ]
 
 

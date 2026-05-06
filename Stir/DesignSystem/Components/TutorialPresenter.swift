@@ -1,33 +1,19 @@
 // TutorialPresenter
 //
-// Generic first-run-tutorial presenter modifier.
+// Universal first-run-tutorial presenter modifier. Mounts a full-screen
+// `fullScreenCover` with multi-step page-dot UI (TutorialFlowContainer
+// + TutorialStepView) the first time `manager.isCompleted(key)` is
+// false and `shouldPresent` evaluates true. SCA-19 promoted this to
+// the only tutorial-presentation primitive — every per-feature tour
+// now mounts via `.tutorial(key:content:)`. The earlier coach-mark/
+// spotlight presenter is gone; tutorials always own the screen so
+// they can host interactive animated miniatures of the feature
+// they're introducing.
 //
-// ====================================================================
-// CHOOSING A PRESENTER (SCA-17 W10)
-// ====================================================================
-// Two presenter shapes ship under `Stir/DesignSystem/Components/`:
-//
-//   • **TutorialPresenter** (this file) — full-screen `fullScreenCover`
-//     with multi-step page-dot UI built around `TutorialFlowContainer`
-//     + `TutorialStepView`. Used for first-run welcome / orientation
-//     tours where the user is NOT mid-task and the tour OWNS the
-//     screen. v1: `tonightTour` only.
-//
-//   • **CoachMarkPresenter** (sibling file) — anchored spotlight +
-//     floating card overlaid on the live screen. The user IS mid-task
-//     and may be expected to perform the gated action (shutter tap,
-//     Solve tap, etc.) AS the tour advances. v1: 8 sequences (scan,
-//     dinner, dish, cook, voice, pantry x2 variants, etc.).
-//
-// Pick by the user's posture, not by step count:
-//   - "First-run welcome, before any task" → TutorialPresenter
-//   - "Contextual tip on a real surface" → CoachMarkPresenter
-//
-// Both presenters share `tutorialPresentationSettleDelay` (350ms) and
-// observe the same `TutorialManager`; replay surfaces work identically
-// across both via `RootCoordinator.replayAllTutorials()` /
-// `manager.reset(_:)` and the new per-key `TutorialReplayView`.
-// ====================================================================
+// Replay surfaces (Settings → Replay tutorials) iterate
+// `TutorialKey.allCases` and call `manager.reset(_:)`; the host
+// view's `.tutorial(...)` modifier observes the manager and re-arms
+// next time the user lands on that surface.
 //
 // Replaces the prior `TutorialPresenterModifier` (formerly co-located
 // with `TonightWelcomeTutorial.swift`). Rewritten to address the
@@ -133,9 +119,6 @@ extension View {
     /// value-propagation handles re-evaluation. Pass any expression that
     /// evaluates to `true` once the host's preconditions are satisfied —
     /// e.g. `phase == .ready && profile?.onboardingCompleted == true`.
-    /// Argument order matches `coachMarks(key:steps:shouldPresent:manager:)`
-    /// so contributors switching between the two presenters get
-    /// uniform muscle memory (SCA-17 W11).
     func tutorial<Inner: View>(
         key: TutorialKey,
         @ViewBuilder content: @escaping () -> Inner,

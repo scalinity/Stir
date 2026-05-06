@@ -107,9 +107,8 @@ struct TonightHomeView: View {
             get: { coordinator.activeOtherOptions },
             set: { coordinator.activeOtherOptions = $0 },
         ), content: otherOptionsCoverContent)
-        // SCA-5 — first-run feature tour. See `tonightTourShouldPresent`
-        // for the gating contract. Argument order matches
-        // `coachMarks(...)` per SCA-17 W11.
+        // SCA-5 / SCA-19 — first-run feature tour. See
+        // `tonightTourShouldPresent` for the gating contract.
         .tutorial(
             key: .tonightTour,
             content: { TonightTour() },

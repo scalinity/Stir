@@ -40,10 +40,9 @@ struct PantryListView: View {
     @State private var errorToast: StirToastPayload?
 
     /// Hoisted as a positive boolean (vs the triple-negative
-    /// `viewModel?.items.isEmpty == false`). Drives both the
-    /// `.coachMarks(steps:)` variant pick and the `.id(...)` re-mount
-    /// trigger that fixes the stale-variant bug across pantry
-    /// transitions.
+    /// `viewModel?.items.isEmpty == false`). Picks the in-list
+    /// pantry tutorial variant — populated vs empty — so the right
+    /// `PantryInListTutorial` mounts via the matching TutorialKey.
     private var pantryHasItems: Bool {
         viewModel?.items.isEmpty == false
     }
@@ -91,49 +90,32 @@ struct PantryListView: View {
                 }
                 .disabled(viewModel == nil)
                 .accessibilityLabel("Add item")
-                // SCA-14 — toolbar + is the third step of the in-list
-                // tour (`PantryCoachMarks.inListTour.populated_add`).
-                // The 44pt min-tap-target frame above doubles as the
-                // spotlight anchor frame, so the halo covers the
-                // visible chrome even though the SF Symbol is smaller.
-                //
-                // The anchor frame is registered while `viewModel == nil`
-                // (the disabled cold-launch state) too, but the
-                // `shouldPresent: viewModel?.didCompleteInitialLoad`
-                // gate above defers the tour until the first load
-                // completes — by which point the button is enabled.
-                // No race window in practice.
-                .coachMarkAnchor(.pantryAddButton)
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        // SCA-14 — in-list pantry walkthrough. Variant chosen on
-        // whether the pantry has rows: the populated 5-step tour
-        // anchors on the header strip, toolbar +, first row, and
-        // source glyph. The 3-step empty variant collapses to welcome
-        // / context / empty-state Add CTA so the spotlight never
-        // targets a missing row.
-        //
-        // **Distinct-key design (SCA-17 C4):** the populated and
-        // empty variants now use different TutorialKey cases
-        // (`pantryInListTour` vs `pantryInListTourEmpty`). Each key
-        // owns its own UserDefaults flag, so completing the empty-
-        // pantry tour does NOT silently burn the populated-tour bit
-        // — the most natural new-user trajectory (empty pantry →
-        // tour → first add → populated list) gets BOTH tours over
-        // its lifetime instead of just the empty one. Earlier
-        // `.id(pantryHasItems)` re-mount design is gone — the key
-        // change itself drives controller identity, and SwiftUI sees
-        // a fresh modifier when the key flips. Also gates only on
-        // search-empty so non-matching filters don't fire the
-        // populated tour with no first-row anchor (SCA-17 W5).
-        .coachMarks(
-            key: pantryHasItems ? .pantryInListTour : .pantryInListTourEmpty,
-            steps: pantryHasItems
-                ? PantryCoachMarks.inListTour
-                : PantryCoachMarks.inListTourEmpty,
-            shouldPresent: viewModel?.didCompleteInitialLoad == true
+        // SCA-19 — full-screen in-list Pantry walkthrough. Variant
+        // chosen on whether the pantry has rows; we mount one
+        // `.tutorial(...)` modifier per variant so each TutorialKey
+        // owns its own UserDefaults flag and replay gating. Distinct-
+        // key design (SCA-17 C4) is preserved — completing the
+        // empty-pantry tour does not silently burn the populated-tour
+        // bit, so the natural new-user trajectory (empty → first
+        // add → populated) gets BOTH tours over its lifetime. Search-
+        // empty gating prevents firing the populated tour while the
+        // user is filtering with a query that hides every row.
+        .tutorial(
+            key: .pantryInListTour,
+            content: { PantryInListTutorial(variant: .populated) },
+            shouldPresent: pantryHasItems
+                && viewModel?.didCompleteInitialLoad == true
+                && (viewModel?.searchText.isEmpty ?? true),
+        )
+        .tutorial(
+            key: .pantryInListTourEmpty,
+            content: { PantryInListTutorial(variant: .empty) },
+            shouldPresent: !pantryHasItems
+                && viewModel?.didCompleteInitialLoad == true
                 && (viewModel?.searchText.isEmpty ?? true),
         )
         // AddSheet hoisted to outer Group so it survives empty→populated
@@ -227,22 +209,10 @@ struct PantryListView: View {
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
             .padding(.bottom, CGFloat.Stir.space2)
-            // SCA-14 — the cap-headroom strip is step 2 of the in-list
-            // tour. Tagged at the outer HStack so the spotlight covers
-            // the count + "of N saved" together.
-            .coachMarkAnchor(.pantryHeaderStrip)
 
-            // Hoist the first-row identity once per body re-eval so
-            // each ForEach iteration is one optional-equality check
-            // rather than the per-row `Array(...enumerated())` tuple
-            // allocation that landed initially. The list re-renders on
-            // every search keystroke (typeahead) and every Core Data
-            // mutation; for pantries near the Pro 1000-item cap, the
-            // allocation cost was non-trivial.
-            let firstItemID = vm.filteredItems.first?.objectID
             List {
                 ForEach(vm.filteredItems, id: \.objectID) { item in
-                    PantryRow(item: item, isFirstRow: item.objectID == firstItemID)
+                    PantryRow(item: item)
                         .listRowBackground(Color.Stir.paper100)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = item }
@@ -260,11 +230,6 @@ struct PantryListView: View {
                                 }
                             }
                         }
-                        // SCA-14 — only the first row registers as the
-                        // tour's row-tap/swipe anchor. Optional-overload
-                        // means the others write nothing to the
-                        // anchor-frames map.
-                        .coachMarkAnchor(item.objectID == firstItemID ? .pantryFirstRow : nil)
                 }
             }
             .listStyle(.plain)
@@ -329,9 +294,6 @@ struct PantryListView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            // SCA-14 — terminal anchor for `inListTourEmpty` so the
-            // tour has a real CTA to spotlight when there are no rows.
-            .coachMarkAnchor(.pantryListEmptyAdd)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

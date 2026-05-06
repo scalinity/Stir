@@ -106,15 +106,15 @@ struct SettingsRootView: View {
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .stirToast($restoreToast)
-        // SCA-13 Phase 1 — entry-point pantry coach mark. Anchors on
-        // the "Manage pantry" row inside `pantrySection`. The in-list
-        // walkthrough lives on PantryListView under a separate
-        // `pantryInListTour` key (SCA-14) so each surface owns its own
-        // replay loop.
-        .coachMarks(
-            key: .pantryManagement,
-            steps: PantryCoachMarks.steps,
-        )
+        // SCA-19 — full-screen Pantry Management tutorial. Mounts on
+        // the Settings root so the cover slides up the first time the
+        // user lands on Settings (typical path: post-onboarding
+        // exploration of the tabs). The in-list walkthrough lives on
+        // PantryListView under a separate `pantryInListTour` key so
+        // each surface owns its own replay loop.
+        .tutorial(key: .pantryManagement) {
+            PantryManagementTutorial()
+        }
         .sheet(item: $coordinator.activeProComparison) { entry in
             // SwiftUI invokes this content closure once per `item`
             // identity change (i.e., per presentation), not per
@@ -539,10 +539,7 @@ struct SettingsRootView: View {
     // MARK: - Pantry
 
     /// Pantry section — entry to `PantryListView` (Settings →
-    /// Manage pantry). Tagged with
-    /// `.coachMarkAnchor(.settingsManagePantryRow)` so the entry-
-    /// point coach mark in `PantryCoachMarks.steps` can spotlight
-    /// this row the first time the user reaches Settings post-launch.
+    /// Manage pantry).
     ///
     /// Per ADR-0028, pantry is a low-frequency surface (users update
     /// it after weekly scans, or to spot-check the grocery diff) so
@@ -562,7 +559,6 @@ struct SettingsRootView: View {
                 .stirCard()
             }
             .buttonStyle(.plain)
-            .coachMarkAnchor(.settingsManagePantryRow)
         }
     }
 

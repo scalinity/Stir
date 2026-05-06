@@ -40,7 +40,6 @@ struct ScanCaptureView: View {
     /// Live binding from the presenter modifier — let real action
     /// handlers (shutter tap) advance the coach-mark sequence without
     /// prop-drilling.
-    @Environment(\.coachMarks) private var coachMarks
 
     var body: some View {
         ZStack {
@@ -84,14 +83,13 @@ struct ScanCaptureView: View {
             captureTask = nil
             Task { await cameraService.stop() }
         }
-        // First-time scan tutorial: framing tip + shutter prompt.
-        // Suppressed during the parsing phase (the shutter is gone +
-        // the screen is the "looking at your kitchen" banner; the
-        // tutorial's targeting logic would highlight an offscreen
-        // anchor). Re-arms when the user comes back into capturing.
-        .coachMarks(
+        // SCA-19 — full-screen scan-capture tutorial. Suppressed during
+        // the parsing phase + while reviewing a capture so the cover
+        // doesn't fight the in-progress task UI. Tutorial's interactive
+        // miniatures stand in for the live camera surface.
+        .tutorial(
             key: .scanCapture,
-            steps: ScanCaptureCoachMarks.steps,
+            content: { ScanCaptureTutorial() },
             shouldPresent: viewModel.phase != .parsing && !isReviewingCapture,
         )
     }
@@ -148,11 +146,6 @@ struct ScanCaptureView: View {
 
     private var captureButton: some View {
         Button {
-            // Advance the scan tutorial's "tap shutter" gated step
-            // BEFORE kicking off the capture task — the user's real
-            // shutter tap counts as the tutorial step's required
-            // action, so no second tap is ever needed.
-            coachMarks?.completeAction(.shutterTap)
             captureTask = Task { await capture() }
         } label: {
             ZStack {
@@ -172,7 +165,6 @@ struct ScanCaptureView: View {
         }
         .disabled(isCapturing || viewModel.phase == .parsing)
         .accessibilityLabel("Capture photo")
-        .coachMarkAnchor(.scanShutter)
     }
 
     private func capture() async {

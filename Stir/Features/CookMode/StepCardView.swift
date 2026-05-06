@@ -31,7 +31,6 @@ import SwiftUI
 struct StepCardView: View {
     @Bindable var viewModel: CookModeViewModel
 
-    @Environment(\.coachMarks) private var coachMarks
 
     var body: some View {
         Group {
@@ -43,26 +42,20 @@ struct StepCardView: View {
                 // automatically when the session terminates and
                 // `isVoiceActive` flips false.
                 VoiceActiveStepView(viewModel: viewModel)
-                    // First-time voice-mode coach-marks. Gated on
-                    // `isVoiceActive` (the same predicate that decided
-                    // to render this branch) so the tutorial only
-                    // arms once the listening pill is actually visible.
-                    // The earlier `voiceState != .idle` gate was
-                    // accidentally true for the cold-launch nil state
-                    // (`nil != .idle` evaluates true) — masked by the
-                    // outer `if` but a latent footgun.
-                    .coachMarks(
+                    // SCA-19 — full-screen voice-mode tutorial. Gated
+                    // on `isVoiceActive` (the same predicate that
+                    // decided to render this branch) so the cover
+                    // mounts only once the user is actually in a voice
+                    // session.
+                    .tutorial(
                         key: .voiceMode,
-                        steps: VoiceModeCoachMarks.steps,
+                        content: { VoiceModeTutorial() },
                         shouldPresent: viewModel.isVoiceActive,
                     )
             } else {
                 tapModeBody
-                    // First-time tap-mode coach-marks.
-                    .coachMarks(
-                        key: .cookModeTap,
-                        steps: CookModeTapCoachMarks.steps,
-                    )
+                    // SCA-19 — full-screen tap Cook Mode tutorial.
+                    .tutorial(key: .cookModeTap) { CookModeTapTutorial() }
             }
         }
         .confirmationDialog(
@@ -96,9 +89,7 @@ struct StepCardView: View {
                     stepHeader
                     swapBadgeRow
                     instructionBody
-                        .coachMarkAnchor(.cookStepCard)
                     timerSection
-                        .coachMarkAnchor(.cookTimerPill)
                 }
                 .padding(.horizontal, CGFloat.Stir.screenMarginHero)
                 .padding(.top, CGFloat.Stir.space5)
@@ -441,7 +432,6 @@ struct StepCardView: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel("Substitute a missing ingredient")
-        .coachMarkAnchor(.cookSubstituteButton)
     }
 
     private var navigationRow: some View {
@@ -456,10 +446,6 @@ struct StepCardView: View {
             PrimaryButton(
                 title: viewModel.isLastStep ? "Finish" : "Next",
                 action: {
-                    // Real Next tap fulfills the cook-mode tutorial's
-                    // gated final step on the same gesture; tutorial
-                    // dismisses and the step advances together.
-                    coachMarks?.completeAction(.nextStepTap)
                     if viewModel.isLastStep {
                         viewModel.finish()
                     } else {
@@ -468,7 +454,6 @@ struct StepCardView: View {
                 },
             )
             .accessibilityLabel(viewModel.isLastStep ? "Finish cooking" : "Next step")
-            .coachMarkAnchor(.cookNextButton)
         }
     }
 
