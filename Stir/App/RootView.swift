@@ -234,8 +234,11 @@ private struct StirTabRoot: View {
 ///
 /// Visual grammar (mirrors the user-provided screenshot reference;
 /// supersedes the earlier floating-pill draft after design review):
-///   - Full-width `paper.50` background with a 1pt `divider` hairline
-///     across the top edge (matches mockup-03 §StirTabBar JSX exactly).
+///   - Full-width `paper.50` background with NO top divider. Mockup-03
+///     specified `border-top: 1px solid ink100`, but design review
+///     2026-05-06 (SCA-20) preferred a clean tab bar — the bar reads
+///     as a distinct surface via the `paper.50` fill against the
+///     content area's own background, no hairline needed.
 ///   - Three equal-width cells inside (`maxWidth: .infinity`). Each
 ///     cell stacks an SF Symbol (~22pt) over a `.labelMd` label, both
 ///     in the same color so the active state reads as a clean color
@@ -281,14 +284,6 @@ private struct StirCustomTabBar: View {
         // non-paper-50 background (Saved's List, Settings's grouped
         // List) doesn't show a colored seam below the bar.
         .background(Color.Stir.paper50, ignoresSafeAreaEdges: .bottom)
-        .overlay(alignment: .top) {
-            // 1pt hairline matches mockup-03 (`borderTop: 1px solid
-            // ink100`) and also gives the bar a definite top edge when
-            // the content above is also `paper.50` (no fill contrast).
-            Rectangle()
-                .fill(Color.Stir.divider)
-                .frame(height: 1)
-        }
         .accessibilityElement(children: .contain)
     }
 

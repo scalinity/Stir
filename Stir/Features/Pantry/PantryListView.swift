@@ -70,7 +70,6 @@ struct PantryListView: View {
                     .background(Color.Stir.paper50)
             }
         }
-        .navigationTitle("Pantry")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -202,23 +201,24 @@ struct PantryListView: View {
     private func populatedList(vm: PantryListViewModel) -> some View {
         @Bindable var bindable = vm
         return VStack(spacing: 0) {
-            // Header strip — REMEMBERED count vs cap. The previous
-            // `vm.items.count` lied: a user with 5 ephemeral + 22
-            // remembered would see "27 of 25 saved" because items
-            // includes ephemeral rows that don't count against the
-            // cap (review C2). `rememberedCount` mirrors the
-            // repository's `countRemembered` predicate.
+            // Header strip — total active (non-deleted) items in the
+            // pantry. We previously displayed `vm.rememberedCount`
+            // against the standing-pantry cap (e.g. "2 of 1,000 saved")
+            // which lied to the user when most rows were `.ephemeral`
+            // TODAY items: 6 visible rows + "2 saved" was indistinguish-
+            // able from a bug (SCA-20). The cap is still enforced at
+            // insert path via `PantryItemRepository.insertManual`'s
+            // `usedRemembered`/`cap` plumbing — surfacing it in the
+            // header is informational at best and misleading at worst.
+            // `vm.items` is repository-filtered to `deletedAt == nil`,
+            // so `count` is honest.
             HStack(alignment: .firstTextBaseline) {
-                Text("\(vm.rememberedCount)")
+                Text("\(vm.items.count)")
                     .stirFont(.displayMd)
                     .foregroundStyle(Color.Stir.ink900)
-                Text("of \(entitlements.rememberedPantryCap) saved")
+                Text(vm.items.count == 1 ? "item" : "items")
                     .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.ink500)
-                    // Dynamic Type protection: at AX3+ on iPhone SE
-                    // (320pt content), the displayMd count + bodySm
-                    // trailing text would clip without scaling
-                    // (review W12).
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
@@ -270,6 +270,13 @@ struct PantryListView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.Stir.paper50)
+            // StirCustomTabBar uses `padding(.bottom, -.space3Half)`
+            // (-14pt) to encroach into the home-indicator inset, so
+            // `safeAreaInset` reserves 14pt LESS than the bar's visual
+            // extent. Without this margin, the last row visibly clips
+            // under the bar (SCA-20). Coupled with the bar's negative
+            // bottom padding — change one, recheck the other.
+            .contentMargins(.bottom, CGFloat.Stir.space3Half, for: .scrollContent)
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
