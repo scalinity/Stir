@@ -144,7 +144,17 @@ final class CameraService: NSObject {
         } else {
             settings = AVCapturePhotoSettings()
         }
-        settings.flashMode = .auto
+        // SCA-39: kill shutter latency. .auto flash triggers a metering
+        // pre-flash before the actual capture (~100-500 ms in mixed
+        // kitchen lighting), and the default `.balanced` quality
+        // prioritization waits for an N-frame burst to fuse via Smart
+        // HDR / Deep Fusion (~100-300 ms). Combined, the press → shutter
+        // gap was 300-700 ms — long enough that phone movement during
+        // the click visibly skewed the captured frame. .off + .speed
+        // brings it under ~150 ms with no fidelity hit on the kitchen-
+        // scan pantry-parse pipeline.
+        settings.flashMode = .off
+        settings.photoQualityPrioritization = .speed
 
         return try await withCheckedThrowingContinuation { continuation in
             self.captureContinuation = continuation
@@ -181,7 +191,11 @@ final class CameraService: NSObject {
             throw CaptureError.configurationFailed("cannot add photo output")
         }
         captureSession.addOutput(output)
-        output.maxPhotoQualityPrioritization = .balanced
+        // SCA-39: cap the output's max prioritization at .speed so a
+        // future per-shot settings tweak can't accidentally re-opt-in
+        // to .balanced fusion processing. Per-shot
+        // `photoQualityPrioritization` may not exceed this max.
+        output.maxPhotoQualityPrioritization = .speed
 
         captureSession.commitConfiguration()
         self.session = captureSession
