@@ -661,15 +661,16 @@ widget_added, shortcut_run,
 ai_request_completed, ai_request_failed,
 screen_error_shown, sync_state_changed,
 
-# SCA-5 / 5b / 12 / 13 / 14 / 19 / 28 — in-app tutorials. SCA-19
+# SCA-5 / 5b / 12 / 13 / 14 / 19 / 28 / 30 — in-app tutorials. SCA-19
 # replaced the coach-mark/spotlight system with full-screen animated
 # walkthroughs; SCA-28 promoted lifecycle scaffolding into
 # `TutorialFlowHost` and split the variant-aware pantry tour into two
-# files. All events carry `tutorial_id` (snake_case TutorialKey
-# .rawValue: tonight_tour [4 steps], scan_capture [3], scan_review [3],
-# dinner_options [2], dish_preview [2], cook_mode_tap [3],
-# voice_mode [3], pantry_management [2], pantry_in_list_tour [3 —
-# populated], pantry_in_list_tour_empty [2 — empty]). step_advanced
+# files; SCA-30 added the missing Saved tab tutorial. All events
+# carry `tutorial_id` (snake_case TutorialKey.rawValue: tonight_tour
+# [4 steps], scan_capture [3], scan_review [3], dinner_options [2],
+# dish_preview [2], cook_mode_tap [3], voice_mode [3], saved_meals [3],
+# pantry_management [2], pantry_in_list_tour [3 — populated],
+# pantry_in_list_tour_empty [2 — empty]). step_advanced
 # adds `from_step` + `to_step` (snake_case step IDs; variant-prefixed
 # `populated_*`/`empty_*` keep PantryInList cohorts split under their
 # distinct TutorialKey rawValues). Lifecycle invariant:

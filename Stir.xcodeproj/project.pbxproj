@@ -320,6 +320,7 @@
 		1C80A17A686471C2C65CB708 /* TutorialFlowHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */; };
 		0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */; };
 		ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */; };
+		9432C4F5502844E82680B82D /* SavedMealsTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -637,6 +638,7 @@
 		3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialFlowHost.swift; sourceTree = "<group>"; };
 		A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListPopulatedTutorial.swift; sourceTree = "<group>"; };
 		56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListEmptyTutorial.swift; sourceTree = "<group>"; };
+		022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsTutorial.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1342,6 +1344,7 @@
 				C65B2EAC25694486DDB13D50 /* PantryManagementTutorial.swift */,
 				A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */,
 				56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */,
+				022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */,
 );
 			path = Tutorial;
 			sourceTree = "<group>";
@@ -1820,6 +1823,7 @@
 				1C80A17A686471C2C65CB708 /* TutorialFlowHost.swift in Sources */,
 				0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */,
 				ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */,
+				9432C4F5502844E82680B82D /* SavedMealsTutorial.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};

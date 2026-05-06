@@ -61,6 +61,8 @@ FEATURE_FILES = [
     "DishPreviewTutorial.swift",
     "CookModeTapTutorial.swift",
     "VoiceModeTutorial.swift",
+    # SCA-30 — Saved tab tutorial (gap from SCA-19's 8-surface set).
+    "SavedMealsTutorial.swift",
     "PantryManagementTutorial.swift",
     # SCA-28 — split out of `PantryInListTutorial.swift` so each variant
     # is its own focused file (was: single Variant-routed view).

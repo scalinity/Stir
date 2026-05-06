@@ -181,6 +181,10 @@ struct SavedMealsView: View {
                 },
             )
         }
+        // SCA-30 — full-screen Saved tab tutorial. Mounts on first
+        // visit explaining how meals end up saved, the search/sort/
+        // favorites filter, and the Cook Again CTA.
+        .tutorial(key: .savedMeals) { SavedMealsTutorial() }
     }
 
     // MARK: - Filter bar

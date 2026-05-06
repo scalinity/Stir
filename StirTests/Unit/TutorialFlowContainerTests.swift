@@ -28,6 +28,7 @@ final class TutorialFlowContainerTests: XCTestCase {
         XCTAssertEqual(DishPreviewTutorial.Step.allCases.first?.rawValue, 0)
         XCTAssertEqual(CookModeTapTutorial.Step.allCases.first?.rawValue, 0)
         XCTAssertEqual(VoiceModeTutorial.Step.allCases.first?.rawValue, 0)
+        XCTAssertEqual(SavedMealsTutorial.Step.allCases.first?.rawValue, 0)
         XCTAssertEqual(PantryManagementTutorial.Step.allCases.first?.rawValue, 0)
         XCTAssertEqual(PantryInListPopulatedTutorial.Step.allCases.first?.rawValue, 0)
         XCTAssertEqual(PantryInListEmptyTutorial.Step.allCases.first?.rawValue, 0)
@@ -45,6 +46,7 @@ final class TutorialFlowContainerTests: XCTestCase {
         assertContiguous(DishPreviewTutorial.Step.allCases, label: "DishPreview")
         assertContiguous(CookModeTapTutorial.Step.allCases, label: "CookModeTap")
         assertContiguous(VoiceModeTutorial.Step.allCases, label: "VoiceMode")
+        assertContiguous(SavedMealsTutorial.Step.allCases, label: "SavedMeals")
         assertContiguous(PantryManagementTutorial.Step.allCases, label: "PantryManagement")
         assertContiguous(PantryInListPopulatedTutorial.Step.allCases, label: "PantryInListPopulated")
         assertContiguous(PantryInListEmptyTutorial.Step.allCases, label: "PantryInListEmpty")
@@ -93,6 +95,7 @@ final class TutorialFlowContainerTests: XCTestCase {
         validateTelemetryIDs(DishPreviewTutorial.Step.allCases)
         validateTelemetryIDs(CookModeTapTutorial.Step.allCases)
         validateTelemetryIDs(VoiceModeTutorial.Step.allCases)
+        validateTelemetryIDs(SavedMealsTutorial.Step.allCases)
         validateTelemetryIDs(PantryManagementTutorial.Step.allCases)
         validateTelemetryIDs(PantryInListPopulatedTutorial.Step.allCases)
         validateTelemetryIDs(PantryInListEmptyTutorial.Step.allCases)
@@ -174,6 +177,7 @@ final class TutorialFlowContainerTests: XCTestCase {
             case .dishPreview:           expectedStepCount = DishPreviewTutorial.Step.allCases.count
             case .cookModeTap:           expectedStepCount = CookModeTapTutorial.Step.allCases.count
             case .voiceMode:             expectedStepCount = VoiceModeTutorial.Step.allCases.count
+            case .savedMeals:            expectedStepCount = SavedMealsTutorial.Step.allCases.count
             case .pantryManagement:      expectedStepCount = PantryManagementTutorial.Step.allCases.count
             case .pantryInListTour:      expectedStepCount = PantryInListPopulatedTutorial.Step.allCases.count
             case .pantryInListTourEmpty: expectedStepCount = PantryInListEmptyTutorial.Step.allCases.count

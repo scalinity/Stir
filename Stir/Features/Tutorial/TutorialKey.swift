@@ -44,6 +44,13 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     /// "set timer" / "help"), exit affordance.
     case voiceMode = "voice_mode"
 
+    /// Saved Meals — top-level tab landing for already-cooked recipes.
+    /// Three steps: how meals end up saved (favorite-star demo),
+    /// search/filter/sort (interactive pill row), Cook Again CTA on a
+    /// pulsing saved-meal row. Fires the first time the user lands on
+    /// the Saved tab. SCA-30 — gap from SCA-19's 8-surface set.
+    case savedMeals = "saved_meals"
+
     /// Pantry — first-run tutorial mounted on the Settings root
     /// (`SettingsRootView`). Two steps: why-the-pantry-matters
     /// (animated items filling a basket) → how-to-edit (drag-to-
@@ -79,6 +86,7 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
         case .dishPreview:    return "Dish preview tutorial"
         case .cookModeTap:    return "Cook Mode tutorial"
         case .voiceMode:      return "Voice Mode tutorial"
+        case .savedMeals:     return "Saved meals tutorial"
         case .pantryManagement: return "Pantry tutorial"
         case .pantryInListTour: return "Pantry walkthrough"
         case .pantryInListTourEmpty: return "Pantry empty-state walkthrough"
@@ -103,6 +111,8 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
             return "Replay the Cook Mode walkthrough next time you cook."
         case .voiceMode:
             return "Replay the Voice Mode walkthrough next time you go hands-free."
+        case .savedMeals:
+            return "Re-explain the Saved tab next time you open it."
         case .pantryManagement:
             return "Re-explain the pantry the next time you open Settings."
         case .pantryInListTour:
