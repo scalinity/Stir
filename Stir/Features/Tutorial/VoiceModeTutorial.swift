@@ -5,25 +5,12 @@
 //   2. What — cycling voice-command examples
 //   3. When — Premium+ entitlement context
 //
-// Mounted on `VoiceActiveStepView` via `.tutorial(key: .voiceMode, ...)`.
+// Mounted on `StepCardView`'s voice-active branch (which wraps
+// `VoiceActiveStepView`) via `.tutorial(key: .voiceMode, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct VoiceModeTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case how = 0
         case what = 1
@@ -38,30 +25,9 @@ struct VoiceModeTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.how,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.voiceMode.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .voiceMode, initialStep: Step.how) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.voiceMode.telemetryID,
-            ])
         }
     }
 
@@ -104,40 +70,41 @@ struct VoiceModeTutorial: View {
             }
         }
     }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.voiceMode)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.voiceMode.telemetryID,
-        ])
-        Logger.ui.info(
-            "voice_mode_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
-    }
 }
 
 // MARK: - Step miniatures
 
 private struct ListeningPillMiniature: View {
-    @State private var t: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let bars = 9
+    private let cycleSeconds: TimeInterval = 1.6
 
     var body: some View {
         VStack(spacing: 18) {
-            HStack(spacing: 4) {
-                ForEach(0..<bars, id: \.self) { i in
-                    Capsule()
-                        .fill(Color.Stir.ember600)
-                        .frame(width: 4, height: barHeight(at: i))
+            // SCA-28 C3 — drive the bars from a `TimelineView(.animation)`
+            // so each frame reads the current time and recomputes
+            // heights. The previous `withAnimation(.repeatForever)` +
+            // `@State t` approach was visually static because
+            // `barHeight` uses `sin(phase + t·2π)`, so SwiftUI snapshot
+            // heights at `t=0` and `t=1` (which differ by exactly one
+            // sine period — equal values) and interpolated between
+            // them. Reduce-motion collapses to a static snapshot.
+            TimelineView(.animation(paused: reduceMotion)) { context in
+                let phase: Double = reduceMotion
+                    ? 0
+                    : context.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: cycleSeconds)
+                        / cycleSeconds
+                HStack(spacing: 4) {
+                    ForEach(0..<bars, id: \.self) { i in
+                        Capsule()
+                            .fill(Color.Stir.ember600)
+                            .frame(width: 4, height: barHeight(at: i, phase: phase))
+                    }
                 }
+                .frame(height: 52)
             }
-            .frame(height: 52)
 
             HStack(spacing: 10) {
                 Image.Stir.micActive
@@ -154,28 +121,24 @@ private struct ListeningPillMiniature: View {
             )
             .tutorialPulsing(scale: 1.04, duration: 1.0)
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.Stir.paper100),
         )
-        .onAppear {
-            withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
-                t = 1
-            }
-        }
         .accessibilityHidden(true)
     }
 
     /// Synthesized waveform — sine-shifted heights per bar so the row
     /// reads as a live audio meter without driving an actual capture
-    /// pipeline.
-    private func barHeight(at index: Int) -> CGFloat {
-        let phase = (CGFloat(index) / CGFloat(bars)) * .pi * 2
-        let wave = sin(phase + t * .pi * 2)
+    /// pipeline. `phase` is the [0, 1) cycle position from the
+    /// TimelineView; bars are offset by their index.
+    private func barHeight(at index: Int, phase: Double) -> CGFloat {
+        let perBarOffset = (Double(index) / Double(bars)) * .pi * 2
+        let wave = sin(perBarOffset + phase * .pi * 2)
         let normalized = (wave + 1) / 2
-        return 14 + normalized * 32
+        return 14 + CGFloat(normalized) * 32
     }
 }
 
@@ -205,7 +168,7 @@ private struct VoiceCommandsMiniature: View {
                 .staggeredReveal(index: index, isVisible: visible)
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -227,15 +190,14 @@ private struct EntitlementMiniature: View {
                 tierBadge(tier: "Pro", glyph: Image.Stir.tierCrown, accent: Color.Stir.ember600.opacity(0.18), value: "27", caption: "voice / mo")
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.Stir.paper100),
         )
-        .opacity(visible ? 1 : 0)
+        .tutorialFadeIn(isVisible: visible)
         .onAppear { visible = true }
-        .animation(.easeOut(duration: 0.4), value: visible)
         .accessibilityHidden(true)
     }
 

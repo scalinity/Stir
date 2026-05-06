@@ -8,23 +8,9 @@
 //
 // Mounted on `ScanCaptureView` via `.tutorial(key: .scanCapture, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct ScanCaptureTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case aim = 0
         case snap = 1
@@ -39,30 +25,9 @@ struct ScanCaptureTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.aim,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.scanCapture.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .scanCapture, initialStep: Step.aim) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.scanCapture.telemetryID,
-            ])
         }
     }
 
@@ -105,21 +70,6 @@ struct ScanCaptureTutorial: View {
             }
         }
     }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.scanCapture)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.scanCapture.telemetryID,
-        ])
-        Logger.ui.info(
-            "scan_capture_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
-    }
 }
 
 // MARK: - Step miniatures
@@ -148,9 +98,8 @@ private struct ViewfinderMiniature: View {
                 .frame(width: 6, height: 6)
         }
         .frame(maxWidth: .infinity)
-        .opacity(visible ? 1 : 0)
+        .tutorialFadeIn(isVisible: visible)
         .onAppear { visible = true }
-        .animation(.easeOut(duration: 0.4), value: visible)
         .accessibilityHidden(true)
     }
 }
@@ -217,9 +166,8 @@ private struct ShutterMiniature: View {
                     .foregroundStyle(Color.white)
             }
         }
-        .opacity(visible ? 1 : 0)
+        .tutorialFadeIn(isVisible: visible)
         .onAppear { visible = true }
-        .animation(.easeOut(duration: 0.4), value: visible)
         .accessibilityHidden(true)
     }
 }
@@ -245,7 +193,7 @@ private struct IngredientChipsMiniature: View {
                     .foregroundStyle(Color.Stir.ink700)
             }
 
-            FlowLayout(spacing: 8) {
+            ChipFlowLayout(spacing: 8) {
                 ForEach(Array(chips.enumerated()), id: \.element.label) { index, chip in
                     HStack(spacing: 6) {
                         chip.icon
@@ -263,7 +211,7 @@ private struct IngredientChipsMiniature: View {
                 }
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -271,48 +219,6 @@ private struct IngredientChipsMiniature: View {
         )
         .onAppear { visible = true }
         .accessibilityHidden(true)
-    }
-}
-
-/// Lightweight wrap-flow layout for the chips miniature. SwiftUI's
-/// built-in `Layout` so SwiftUI handles measurement / placement —
-/// avoids a hand-rolled `GeometryReader` measurement pass.
-private struct FlowLayout: Layout {
-    var spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 320
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        for sv in subviews {
-            let size = sv.sizeThatFits(.unspecified)
-            if x + size.width > width {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return CGSize(width: width, height: y + rowHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x: CGFloat = bounds.minX
-        var y: CGFloat = bounds.minY
-        var rowHeight: CGFloat = 0
-        for sv in subviews {
-            let size = sv.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            sv.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
     }
 }
 

@@ -42,22 +42,29 @@ struct StepCardView: View {
                 // automatically when the session terminates and
                 // `isVoiceActive` flips false.
                 VoiceActiveStepView(viewModel: viewModel)
-                    // SCA-19 — full-screen voice-mode tutorial. Gated
-                    // on `isVoiceActive` (the same predicate that
-                    // decided to render this branch) so the cover
-                    // mounts only once the user is actually in a voice
-                    // session.
-                    .tutorial(
-                        key: .voiceMode,
-                        content: { VoiceModeTutorial() },
-                        shouldPresent: viewModel.isVoiceActive,
-                    )
             } else {
                 tapModeBody
                     // SCA-19 — full-screen tap Cook Mode tutorial.
                     .tutorial(key: .cookModeTap) { CookModeTapTutorial() }
             }
         }
+        // SCA-19 / SCA-28 W9 — full-screen voice-mode tutorial mounted
+        // on the OUTER Group rather than inside the `if isVoiceActive`
+        // branch. Mounting on the inner branch tore down the modifier
+        // (and its `isPresenting` state) when `isVoiceActive` flipped
+        // false mid-tutorial — model error / mic permission revoked /
+        // refresh failure. The cover would dismiss WITHOUT
+        // `markCompleted(.voiceMode)`, the next voice session would
+        // re-fire the tour, and PostHog would see two
+        // `tutorial_started` events for one resolution. Mounting on
+        // the parent Group lets the modifier survive the branch flip;
+        // the cover stays presented while the inner tap-mode body
+        // renders silently behind it (cover is full-screen).
+        .tutorial(
+            key: .voiceMode,
+            content: { VoiceModeTutorial() },
+            shouldPresent: viewModel.isVoiceActive,
+        )
         .confirmationDialog(
             "Leave Cook Mode?",
             isPresented: $viewModel.exitConfirmRequested,

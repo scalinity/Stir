@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""SCA-19 one-shot — remove deleted coach-mark / sequence file references
-from `Stir.xcodeproj/project.pbxproj`.
-
-The full-screen tutorial migration (SCA-19) deletes every CoachMark*
-file from the DS layer and every *CoachMarks.swift sequence from
-Features/Tutorial/. Their pbxproj references must go too — Xcode would
-otherwise fail at build with "file not found" for each phantom path.
+"""SCA-19 / SCA-28 — remove deleted Swift file references from
+`Stir.xcodeproj/project.pbxproj`.
 
 Mirrors `register_tutorial_files.py` but in reverse: removes
 PBXBuildFile, PBXFileReference, group children, and sources-phase
 entries for the named filenames. Idempotent — running twice on a
 cleaned project is a no-op.
+
+SCA-28 W11 — the matcher now anchors on the pbxproj's literal
+delimiters (`/* <filename> */` and `path = <filename>;`) instead of
+bare-substring containment. The earlier matcher accidentally scrubbed
+unrelated files whose names contained a removed name as a substring
+(e.g., `CoachMarkController` matched lines for
+`CoachMarkControllerTests`). Per-file removal counts in the printed
+output now reflect the actual delimiter-anchored matches.
 
 Run from repo root:
     python3 scripts/unregister_coach_mark_files.py
@@ -27,14 +30,14 @@ PBXPROJ = pathlib.Path("Stir.xcodeproj/project.pbxproj")
 # per-feature sequence files + the no-longer-relevant
 # CoachMarkControllerTests.
 FILES_TO_REMOVE = [
-    # DS components — Stir/DesignSystem/Components/
+    # SCA-19 — DS components, Stir/DesignSystem/Components/
     "CoachMarkAnchor.swift",
     "CoachMarkStep.swift",
     "CoachMarkController.swift",
     "CoachMarkSpotlight.swift",
     "CoachMarkCard.swift",
     "CoachMarkPresenter.swift",
-    # Per-feature sequences — Stir/Features/Tutorial/
+    # SCA-19 — per-feature sequences, Stir/Features/Tutorial/
     "ScanCaptureCoachMarks.swift",
     "ScanReviewCoachMarks.swift",
     "DinnerOptionsCoachMarks.swift",
@@ -42,8 +45,12 @@ FILES_TO_REMOVE = [
     "CookModeTapCoachMarks.swift",
     "VoiceModeCoachMarks.swift",
     "PantryCoachMarks.swift",
-    # Test — replaced by TutorialFlowContainerTests
+    # SCA-19 — test, replaced by TutorialFlowContainerTests
     "CoachMarkControllerTests.swift",
+    # SCA-28 — split into PantryInListPopulatedTutorial /
+    # PantryInListEmptyTutorial (sibling files) so each variant is its
+    # own focused View instead of two flows routed through one struct.
+    "PantryInListTutorial.swift",
 ]
 
 
@@ -60,20 +67,32 @@ def remove_lines_containing(text: str, needle: str) -> tuple[str, int]:
 
 
 def remove_filename(text: str, filename: str) -> tuple[str, int]:
-    """Remove every pbxproj line that mentions `<filename>`.
+    """Remove every pbxproj line that references `<filename>`.
 
-    pbxproj entries reference a filename in four places (PBXBuildFile,
-    PBXFileReference, PBXGroup children, PBXSourcesBuildPhase files).
-    Each entry is exactly one line and contains `/* <filename> */` or
-    `path = <filename>;` — both contain the literal filename, so a
-    line-containment scrub catches all four without parsing the
-    structure.
+    pbxproj entries reference a filename in four places, with three
+    distinct delimiter forms:
+      • PBXFileReference + PBXGroup child:   `/* <filename> */`
+      • PBXSourcesBuildPhase entry:          `/* <filename> in Sources */`
+      • PBXFileReference path attribute:     `path = <filename>;`
+    The PBXBuildFile line contains both `/* <filename> in Sources */`
+    AND `/* <filename> */` — matching either form catches it once.
 
-    A false-positive risk would be a comment somewhere mentioning
-    the filename — pbxproj has no user comments, only auto-generated
-    `/* ... */` annotations, so this is safe.
+    Match all three so a filename like `CoachMarkController` doesn't
+    accidentally scrub `CoachMarkControllerTests` lines (SCA-28 W11).
+    Idempotent: a clean tree matches zero lines for every entry on a
+    second run.
     """
-    return remove_lines_containing(text, filename)
+    annotation = f"/* {filename} */"
+    sources_marker = f"/* {filename} in Sources */"
+    path_attr = f"path = {filename};"
+    out_lines = []
+    removed = 0
+    for line in text.splitlines(keepends=True):
+        if annotation in line or sources_marker in line or path_attr in line:
+            removed += 1
+            continue
+        out_lines.append(line)
+    return "".join(out_lines), removed
 
 
 def main() -> int:

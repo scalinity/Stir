@@ -66,4 +66,14 @@ extension CGFloat.Stir {
     static let controlVerticalPadding: CGFloat = 14
     /// Default vertical padding on secondary (bordered) controls.
     static let controlVerticalPaddingSecondary: CGFloat = 12
+
+    // MARK: - Tutorial layout dimensions
+
+    /// 320pt — max width for the interactive miniatures inside the
+    /// `*Tutorial` step content slot. Mirrors the body-copy clamp on
+    /// `TutorialStepView.copyBlock` (line-length cap on iPhone widths,
+    /// keeps the miniature visually contained on iPad). Promoted to a
+    /// token from a dozen-plus `frame(maxWidth: 320)` literals across
+    /// the SCA-19 tutorial files. SCA-28 S7.
+    static let tutorialMiniatureMaxWidth: CGFloat = 320
 }

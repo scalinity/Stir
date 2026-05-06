@@ -6,23 +6,9 @@
 //
 // Mounted on `DinnerOptionsView` via `.tutorial(key: .dinnerOptions, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct DinnerOptionsTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case choose = 0
         case why = 1
@@ -35,30 +21,9 @@ struct DinnerOptionsTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.choose,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.dinnerOptions.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .dinnerOptions, initialStep: Step.choose) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.dinnerOptions.telemetryID,
-            ])
         }
     }
 
@@ -90,21 +55,6 @@ struct DinnerOptionsTutorial: View {
                 WhyItFitsMiniature()
             }
         }
-    }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.dinnerOptions)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.dinnerOptions.telemetryID,
-        ])
-        Logger.ui.info(
-            "dinner_options_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
     }
 }
 
@@ -158,7 +108,7 @@ private struct DishCardsMiniature: View {
                 .staggeredReveal(index: index, isVisible: visible)
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .onAppear { visible = true }
         .accessibilityHidden(true)
     }
@@ -221,7 +171,7 @@ private struct WhyItFitsMiniature: View {
                     .foregroundStyle(Color.Stir.ink700)
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
     }
 
     private func reasonRow(icon: Image, text: String) -> some View {

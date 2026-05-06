@@ -1,35 +1,15 @@
 // TonightTour
 //
 // Four-step Tonight Home feature tour. Presented once per install via
-// `TutorialPresenterModifier` (see DesignSystem/Components/TutorialPresenter)
-// after the setup-onboarding flow completes.
-//
-// Steps: intro → solve → saved → settings. Skip + Done both terminate
-// via `manager.markCompleted(.tonightTour)` and `dismiss()` — never
-// silently abandon a presented tour.
-//
-// Resolution latch (`isAdvancing`) follows the OnboardingRoot precedent
-// for double-tap defense. Started-event latch (`didFireStarted`) keeps
-// telemetry in sync across `onAppear` retries within a single
-// presentation.
+// `.tutorial(key:content:shouldPresent:manager:)` after the
+// setup-onboarding flow completes. Lifecycle scaffolding (started/
+// step/completed/skipped telemetry, `markCompleted`, dismiss) lives
+// in `TutorialFlowHost` — see `Stir/DesignSystem/Components/
+// TutorialFlowHost.swift`. Steps: intro → solve → saved → settings.
 
-import OSLog
 import SwiftUI
 
 struct TonightTour: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case intro = 0
         case solve = 1
@@ -49,36 +29,9 @@ struct TonightTour: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.intro,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.tonightTour.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .tonightTour, initialStep: Step.intro) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            // `onAppear` may fire multiple times for the same view
-            // instance (system overlays, re-attachment); we want
-            // exactly one `tutorial_started` per presentation. The
-            // cover content is torn down + rebuilt across each
-            // present cycle, so this `@State` resets correctly when
-            // the user replays from Settings.
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.tonightTour.telemetryID,
-            ])
         }
     }
 
@@ -123,24 +76,7 @@ struct TonightTour: View {
             )
         }
     }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.tonightTour)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.tonightTour.telemetryID,
-        ])
-        Logger.ui.info(
-            "tonight_tour_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
-    }
 }
-
-// MARK: - Previews
 
 #Preview("TonightTour") {
     TonightTour()

@@ -6,23 +6,9 @@
 //
 // Mounted on `SettingsRootView` via `.tutorial(key: .pantryManagement, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct PantryManagementTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case why = 0
         case how = 1
@@ -35,30 +21,9 @@ struct PantryManagementTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.why,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.pantryManagement.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .pantryManagement, initialStep: Step.why) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.pantryManagement.telemetryID,
-            ])
         }
     }
 
@@ -90,21 +55,6 @@ struct PantryManagementTutorial: View {
                 PantryRowEditMiniature()
             }
         }
-    }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.pantryManagement)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.pantryManagement.telemetryID,
-        ])
-        Logger.ui.info(
-            "pantry_management_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
     }
 }
 
@@ -161,7 +111,7 @@ private struct PantryFillingMiniature: View {
                 }
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -224,7 +174,7 @@ private struct PantryRowEditMiniature: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)

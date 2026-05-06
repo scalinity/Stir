@@ -661,14 +661,18 @@ widget_added, shortcut_run,
 ai_request_completed, ai_request_failed,
 screen_error_shown, sync_state_changed,
 
-# SCA-5 / 5b / 12 / 13 / 14 — in-app tutorials (full-screen Tonight
-# tour + contextual coach-mark sequences). All events carry
-# `tutorial_id` (snake_case TutorialKey.rawValue: tonight_tour,
-# scan_capture, scan_review, dinner_options, dish_preview,
-# cook_mode_tap, voice_mode, pantry_management, pantry_in_list_tour).
-# step_advanced adds `from_step` + `to_step` (snake_case step IDs;
-# variant-prefixed `populated_*`/`empty_*` for pantry_in_list_tour to
-# split cohorts under the same tutorial_id). Lifecycle invariant:
+# SCA-5 / 5b / 12 / 13 / 14 / 19 / 28 — in-app tutorials. SCA-19
+# replaced the coach-mark/spotlight system with full-screen animated
+# walkthroughs; SCA-28 promoted lifecycle scaffolding into
+# `TutorialFlowHost` and split the variant-aware pantry tour into two
+# files. All events carry `tutorial_id` (snake_case TutorialKey
+# .rawValue: tonight_tour [4 steps], scan_capture [3], scan_review [3],
+# dinner_options [2], dish_preview [2], cook_mode_tap [3],
+# voice_mode [3], pantry_management [2], pantry_in_list_tour [3 —
+# populated], pantry_in_list_tour_empty [2 — empty]). step_advanced
+# adds `from_step` + `to_step` (snake_case step IDs; variant-prefixed
+# `populated_*`/`empty_*` keep PantryInList cohorts split under their
+# distinct TutorialKey rawValues). Lifecycle invariant:
 # exactly one of {completed, skipped} per started. **Disappear is
 # non-terminal** — suspend() emits NO telemetry; tour re-arms when
 # host re-appears. Backgrounding/app-kill mid-tour without explicit

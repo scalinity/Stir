@@ -4,9 +4,10 @@
 // flag — finishing one doesn't dismiss others.
 //
 // Naming: `tonightTour` is the four-step Tonight Home intro shipped in
-// SCA-5. The rest are contextual coach-mark sequences attached to
-// specific feature surfaces; they fire the first time the user lands
-// on that surface, not at app launch.
+// SCA-5. The rest are full-screen interactive walkthroughs (SCA-19)
+// mounted on specific feature surfaces via `.tutorial(key:content:)`;
+// they fire the first time the user lands on that surface, not at app
+// launch.
 
 import Foundation
 
@@ -17,7 +18,8 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     case tonightTour = "tonight_tour"
 
     /// Scan Mode — first time the user opens the camera capture
-    /// screen. Two coach-mark steps: framing tip + shutter prompt.
+    /// screen. Three steps: aim → snap → wait, each with an
+    /// interactive miniature of the camera workflow.
     case scanCapture = "scan_capture"
 
     /// Scan Review — first time the user lands on the parsed-
@@ -42,15 +44,17 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     /// "set timer" / "help"), exit affordance.
     case voiceMode = "voice_mode"
 
-    /// Pantry — entry-point coach mark on the Settings → Manage
-    /// pantry row. Phase 1 of the pantry tutorial. Tells the user
-    /// what the row does and why kitchen-state matters for solves.
+    /// Pantry — first-run tutorial mounted on the Settings root
+    /// (`SettingsRootView`). Two steps: why-the-pantry-matters
+    /// (animated items filling a basket) → how-to-edit (drag-to-
+    /// reveal demo). Tells the user what the Manage pantry row does
+    /// and why kitchen-state matters for solves.
     case pantryManagement = "pantry_management"
 
     /// Pantry — populated in-list walkthrough fired the first time
-    /// the user opens `PantryListView` with at least one item.
-    /// Anchors on the header strip, toolbar +, first row, and source
-    /// glyph (5-step `inListTour`).
+    /// the user opens `PantryListView` with at least one item. Three
+    /// steps: search-cycle demo → memory-state row reveals →
+    /// pantry-impact stat blocks. View: `PantryInListPopulatedTutorial`.
     case pantryInListTour = "pantry_in_list_tour"
 
     /// Pantry — empty-state in-list walkthrough fired the first time

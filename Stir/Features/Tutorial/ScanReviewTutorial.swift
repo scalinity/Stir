@@ -6,23 +6,9 @@
 //
 // Mounted on `ScanReviewView` via `.tutorial(key: .scanReview, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct ScanReviewTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case confidence = 0
         case edit = 1
@@ -37,30 +23,9 @@ struct ScanReviewTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.confidence,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.scanReview.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .scanReview, initialStep: Step.confidence) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.scanReview.telemetryID,
-            ])
         }
     }
 
@@ -103,21 +68,6 @@ struct ScanReviewTutorial: View {
             }
         }
     }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.scanReview)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.scanReview.telemetryID,
-        ])
-        Logger.ui.info(
-            "scan_review_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
-    }
 }
 
 // MARK: - Step miniatures
@@ -142,7 +92,7 @@ private struct ConfidenceMiniature: View {
                 startIndex: 3,
             )
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -234,7 +184,7 @@ private struct EditChipMiniature: View {
                 Color.clear.frame(height: 1)
             }
         }
-        .frame(maxWidth: 320, minHeight: 140)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth, minHeight: 140)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -277,15 +227,14 @@ private struct SolveCTAMiniature: View {
             )
             .tutorialPulsing(scale: 1.05, duration: 1.0)
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.Stir.paper100),
         )
-        .opacity(visible ? 1 : 0)
+        .tutorialFadeIn(isVisible: visible)
         .onAppear { visible = true }
-        .animation(.easeOut(duration: 0.4), value: visible)
         .accessibilityHidden(true)
     }
 }

@@ -429,70 +429,9 @@ private struct AddDislikePill: View {
     }
 }
 
-// MARK: - ChipFlowLayout
-
-/// Lightweight flowing layout for chips — wraps onto new lines as
-/// horizontal space runs out. Originally introduced for onboarding
-/// (Step-2 OnboardingOptions.swift used a bespoke `FlowLayout`); now
-/// shared with `Stir/Features/Scan/ScanReviewView.swift`. Lives here
-/// rather than `Stir/DesignSystem/Components/` only because adding a
-/// new file would need a pbxproj edit; pull this out into the design
-/// system the next time we touch the project file for any reason.
-struct ChipFlowLayout: Layout {
-    let spacing: CGFloat
-
-    init(spacing: CGFloat = 8) { self.spacing = spacing }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout (),
-    ) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var currentX: CGFloat = 0
-        var currentY: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var totalHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentX + size.width > width, currentX > 0 {
-                currentY += lineHeight + spacing
-                currentX = 0
-                lineHeight = 0
-            }
-            currentX += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-            totalHeight = currentY + lineHeight
-        }
-        return CGSize(
-            width: width == .infinity ? currentX : width,
-            height: totalHeight,
-        )
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize,
-        subviews: Subviews, cache: inout (),
-    ) {
-        var currentX: CGFloat = bounds.minX
-        var currentY: CGFloat = bounds.minY
-        var lineHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentX + size.width > bounds.maxX, currentX > bounds.minX {
-                currentY += lineHeight + spacing
-                currentX = bounds.minX
-                lineHeight = 0
-            }
-            subview.place(
-                at: CGPoint(x: currentX, y: currentY),
-                proposal: ProposedViewSize(size),
-            )
-            currentX += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-    }
-}
+// `ChipFlowLayout` was hosted here pre-SCA-28; promoted to
+// `Stir/DesignSystem/Components/ChipFlowLayout.swift` once the SCA-19
+// pbxproj touch satisfied its own deferred-promotion trigger.
 
 // Previews omitted — OnboardingViewModel requires a HouseholdProfile
 // attached to a live NSPersistentCloudKitContainer, and no preview

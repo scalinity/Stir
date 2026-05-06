@@ -40,11 +40,24 @@ struct PantryListView: View {
     @State private var errorToast: StirToastPayload?
 
     /// Hoisted as a positive boolean (vs the triple-negative
-    /// `viewModel?.items.isEmpty == false`). Picks the in-list
-    /// pantry tutorial variant — populated vs empty — so the right
-    /// `PantryInListTutorial` mounts via the matching TutorialKey.
+    /// `viewModel?.items.isEmpty == false`). Picks which in-list
+    /// pantry tutorial variant fires — see `inListTutorialKey`.
     private var pantryHasItems: Bool {
         viewModel?.items.isEmpty == false
+    }
+
+    /// Single TutorialKey for the in-list walkthrough; flips between
+    /// the populated and empty variants based on `pantryHasItems`.
+    /// Mounting one `.tutorial(key: ...)` keyed off this selector
+    /// (rather than two siblings each gated on opposite polarity of
+    /// `pantryHasItems`) prevents the SCA-28 C2 race where a
+    /// CloudKit sync mid-presentation would trigger a concurrent
+    /// fullScreenCover and corrupt the funnel. The host's
+    /// `TutorialPresenterModifier` re-mounts the cover when this
+    /// key changes, which preserves the distinct-keys SCA-17 C4
+    /// design (each variant owns its own UserDefaults flag).
+    private var inListTutorialKey: TutorialKey {
+        pantryHasItems ? .pantryInListTour : .pantryInListTourEmpty
     }
 
     var body: some View {
@@ -94,28 +107,31 @@ struct PantryListView: View {
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        // SCA-19 — full-screen in-list Pantry walkthrough. Variant
-        // chosen on whether the pantry has rows; we mount one
-        // `.tutorial(...)` modifier per variant so each TutorialKey
-        // owns its own UserDefaults flag and replay gating. Distinct-
-        // key design (SCA-17 C4) is preserved — completing the
-        // empty-pantry tour does not silently burn the populated-tour
-        // bit, so the natural new-user trajectory (empty → first
-        // add → populated) gets BOTH tours over its lifetime. Search-
-        // empty gating prevents firing the populated tour while the
-        // user is filtering with a query that hides every row.
+        // SCA-19 / SCA-28 — full-screen in-list Pantry walkthrough.
+        // SCA-28 C2 collapsed the prior two-`.tutorial(...)` mount
+        // into a single modifier keyed off `inListTutorialKey`. Two
+        // siblings could otherwise fire concurrent fullScreenCovers
+        // when a CloudKit sync flipped `pantryHasItems` mid-tour:
+        // the empty cover would dismiss without `markCompleted` and
+        // the populated cover would replace it, corrupting the
+        // PostHog funnel (`tutorial_started` without a matching
+        // resolution). Distinct-key design (SCA-17 C4) is preserved
+        // because each variant still owns its own `TutorialKey` /
+        // UserDefaults flag — completing one does NOT burn the other.
+        // Cross-variant `!isCompleted(otherKey)` belt-and-suspenders
+        // ensures an in-flight resolution can't trigger the alternate.
         .tutorial(
-            key: .pantryInListTour,
-            content: { PantryInListTutorial(variant: .populated) },
-            shouldPresent: pantryHasItems
-                && viewModel?.didCompleteInitialLoad == true
-                && (viewModel?.searchText.isEmpty ?? true),
-        )
-        .tutorial(
-            key: .pantryInListTourEmpty,
-            content: { PantryInListTutorial(variant: .empty) },
-            shouldPresent: !pantryHasItems
-                && viewModel?.didCompleteInitialLoad == true
+            key: inListTutorialKey,
+            content: {
+                Group {
+                    if pantryHasItems {
+                        PantryInListPopulatedTutorial()
+                    } else {
+                        PantryInListEmptyTutorial()
+                    }
+                }
+            },
+            shouldPresent: viewModel?.didCompleteInitialLoad == true
                 && (viewModel?.searchText.isEmpty ?? true),
         )
         // AddSheet hoisted to outer Group so it survives empty→populated

@@ -39,6 +39,13 @@ DS_FILES = [
     # SCA-19 — animation modifiers (`.staggeredReveal`, `.tutorialPulsing`)
     # used across the per-feature tutorial step miniatures.
     "TutorialAnimations.swift",
+    # SCA-28 — promoted out of SetupPreferencesView (per its own deferred-
+    # work note). Shared chip-row wrap layout used by onboarding, scan
+    # review, and the scan-capture tutorial's IngredientChipsMiniature.
+    "ChipFlowLayout.swift",
+    # SCA-28 — Tutorial-host abstraction owning lifecycle latches +
+    # telemetry. Replaces the per-tutorial copy-paste pattern.
+    "TutorialFlowHost.swift",
 ]
 FEATURE_FILES = [
     "TutorialKey.swift",
@@ -55,7 +62,10 @@ FEATURE_FILES = [
     "CookModeTapTutorial.swift",
     "VoiceModeTutorial.swift",
     "PantryManagementTutorial.swift",
-    "PantryInListTutorial.swift",
+    # SCA-28 — split out of `PantryInListTutorial.swift` so each variant
+    # is its own focused file (was: single Variant-routed view).
+    "PantryInListPopulatedTutorial.swift",
+    "PantryInListEmptyTutorial.swift",
 ]
 TEST_FILES = [
     "TutorialManagerTests.swift",

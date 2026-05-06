@@ -7,23 +7,9 @@
 //
 // Mounted on `StepCardView` via `.tutorial(key: .cookModeTap, ...)`.
 
-import OSLog
 import SwiftUI
 
 struct CookModeTapTutorial: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let manager: TutorialManager
-    private let posthog: PostHogClient
-
-    init(
-        manager: TutorialManager = .shared,
-        posthog: PostHogClient = .shared,
-    ) {
-        self.manager = manager
-        self.posthog = posthog
-    }
-
     enum Step: Int, TutorialStep {
         case step = 0
         case advance = 1
@@ -38,30 +24,9 @@ struct CookModeTapTutorial: View {
         }
     }
 
-    @State private var isAdvancing = false
-    @State private var didFireStarted = false
-
     var body: some View {
-        TutorialFlowContainer(
-            initialStep: Step.step,
-            onComplete: { resolve(skipped: false) },
-            onSkip: { resolve(skipped: true) },
-            onStepAdvance: { from, to in
-                posthog.capture(.tutorialStepAdvanced, properties: [
-                    "tutorial_id": TutorialKey.cookModeTap.telemetryID,
-                    "from_step": from.telemetryID,
-                    "to_step": to.telemetryID,
-                ])
-            },
-        ) { step, advance, skip in
+        TutorialFlowHost(key: .cookModeTap, initialStep: Step.step) { step, advance, skip in
             stepContent(step, advance: advance, skip: skip)
-        }
-        .onAppear {
-            guard !didFireStarted else { return }
-            didFireStarted = true
-            posthog.capture(.tutorialStarted, properties: [
-                "tutorial_id": TutorialKey.cookModeTap.telemetryID,
-            ])
         }
     }
 
@@ -104,21 +69,6 @@ struct CookModeTapTutorial: View {
             }
         }
     }
-
-    @MainActor
-    private func resolve(skipped: Bool) {
-        guard !isAdvancing else { return }
-        isAdvancing = true
-        manager.markCompleted(.cookModeTap)
-        let event: TelemetryEvent = skipped ? .tutorialSkipped : .tutorialCompleted
-        posthog.capture(event, properties: [
-            "tutorial_id": TutorialKey.cookModeTap.telemetryID,
-        ])
-        Logger.ui.info(
-            "cook_mode_tap_tutorial_resolved skipped=\(skipped, privacy: .public)",
-        )
-        dismiss()
-    }
 }
 
 // MARK: - Step miniatures
@@ -146,7 +96,7 @@ private struct StepCardMiniature: View {
             }
             .staggeredReveal(index: 2, isVisible: visible)
         }
-        .frame(maxWidth: 320, alignment: .leading)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth, alignment: .leading)
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -196,7 +146,7 @@ private struct AdvanceMiniature: View {
                 .tutorialPulsing(scale: 1.04, duration: 1.0)
             }
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -259,15 +209,14 @@ private struct TimerMiniature: View {
             }
             Spacer()
         }
-        .frame(maxWidth: 320)
+        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.Stir.paper100),
         )
-        .opacity(visible ? 1 : 0)
+        .tutorialFadeIn(isVisible: visible)
         .onAppear { visible = true }
-        .animation(.easeOut(duration: 0.4), value: visible)
         .accessibilityHidden(true)
     }
 }

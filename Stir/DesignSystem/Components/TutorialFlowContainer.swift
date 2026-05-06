@@ -11,7 +11,20 @@
 
 import SwiftUI
 
-protocol TutorialStep: RawRepresentable, CaseIterable, Hashable where RawValue == Int {}
+/// Step enum contract for `TutorialFlowContainer` / `TutorialFlowHost`.
+///
+/// `RawValue == Int` so the container can use `0..<count` and
+/// `Step(rawValue: current + 1)` for the dot indicator and advance
+/// lookup; `CaseIterable` so the dot indicator has a count.
+///
+/// `telemetryID` is required (SCA-28 W4) so a generic host can pull the
+/// snake_case PostHog string off any step without an ad-hoc protocol-
+/// witness extension dance. Keep IDs lowercase + underscored;
+/// `TutorialFlowContainerTests.test_telemetryIDs_areSnakeCase` enforces.
+protocol TutorialStep: RawRepresentable, CaseIterable, Hashable where RawValue == Int {
+    /// PostHog `from_step` / `to_step` property — snake_case lowercase.
+    var telemetryID: String { get }
+}
 
 extension TutorialStep {
     /// 1-indexed completion ratio — current step is rendered as
@@ -39,7 +52,14 @@ struct TutorialFlowContainer<Step: TutorialStep, Content: View>: View {
     ) -> Content
 
     @State private var currentStep: Step
+    @State private var isTransitioning = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Step count — hoisted off `Step.allCases.count` so it isn't
+    /// recomputed on every body re-eval. `CaseIterable.allCases`
+    /// allocates a fresh Array each call on synthesized enums; the
+    /// dot indicator + animation duration both read this. SCA-28 W13.
+    private let stepCount: Int = Step.allCases.count
 
     init(
         initialStep: Step,
@@ -85,9 +105,8 @@ struct TutorialFlowContainer<Step: TutorialStep, Content: View>: View {
         // align without materializing an Array. Single .animation
         // modifier on the parent already covers dot transitions; no
         // per-dot .animation here.
-        let count = Step.allCases.count
-        return HStack(spacing: CGFloat.Stir.space2) {
-            ForEach(0..<count, id: \.self) { idx in
+        HStack(spacing: CGFloat.Stir.space2) {
+            ForEach(0..<stepCount, id: \.self) { idx in
                 Capsule()
                     // 20pt active / 8pt inactive — page-dot indicator
                     // sized matching the Welcome screen's bowl-rim
@@ -98,7 +117,7 @@ struct TutorialFlowContainer<Step: TutorialStep, Content: View>: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(currentStep.rawValue + 1) of \(count)")
+        .accessibilityLabel("Step \(currentStep.rawValue + 1) of \(stepCount)")
     }
 
     // MARK: - Step transitions
@@ -114,11 +133,26 @@ struct TutorialFlowContainer<Step: TutorialStep, Content: View>: View {
     // MARK: - Step machinery
 
     private func advance() {
+        // Block re-entry while a step transition is in flight so a
+        // tap-spam doesn't fire `tutorial_step_advanced` N times in
+        // <250ms. The 0.25s window matches the parent `.animation`
+        // duration; clears via Task.sleep so an ill-timed cover
+        // dismiss doesn't strand the flag. SCA-28 W14.
+        guard !isTransitioning else { return }
         if let next = Step(rawValue: currentStep.rawValue + 1) {
+            isTransitioning = true
             let from = currentStep
             currentStep = next
             onStepAdvance?(from, next)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                isTransitioning = false
+            }
         } else {
+            // Final-step "complete" tap: routes to onComplete (which
+            // fires `tutorial_completed`) and not onStepAdvance — the
+            // documented carve-out (SCA-28 W12 pinned by test). No
+            // re-entry guard here because onComplete dismisses.
             onComplete()
         }
     }

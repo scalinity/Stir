@@ -315,8 +315,11 @@
 		B9B2EC99FC776B259930858F /* CookModeTapTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08697D7D74EF2AAFD040D10A /* CookModeTapTutorial.swift */; };
 		7D11F09921B0A5C119A97AD5 /* VoiceModeTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39F14937C8F618DA91A355ED /* VoiceModeTutorial.swift */; };
 		6B2CDDEE33D50A880E0F22F4 /* PantryManagementTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = C65B2EAC25694486DDB13D50 /* PantryManagementTutorial.swift */; };
-		F440BAFB9C674C9C21FB37AC /* PantryInListTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4311C08BAA09804CCF2748DA /* PantryInListTutorial.swift */; };
 		95AC5D1E59281992F89082CC /* TutorialFlowContainerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 064213D47697047E68123325 /* TutorialFlowContainerTests.swift */; };
+		6C4BB283382A72FA9E154C2F /* ChipFlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BAD13E307EF27815805EA2 /* ChipFlowLayout.swift */; };
+		1C80A17A686471C2C65CB708 /* TutorialFlowHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */; };
+		0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */; };
+		ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -629,8 +632,11 @@
 		08697D7D74EF2AAFD040D10A /* CookModeTapTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeTapTutorial.swift; sourceTree = "<group>"; };
 		39F14937C8F618DA91A355ED /* VoiceModeTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModeTutorial.swift; sourceTree = "<group>"; };
 		C65B2EAC25694486DDB13D50 /* PantryManagementTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryManagementTutorial.swift; sourceTree = "<group>"; };
-		4311C08BAA09804CCF2748DA /* PantryInListTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListTutorial.swift; sourceTree = "<group>"; };
 		064213D47697047E68123325 /* TutorialFlowContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialFlowContainerTests.swift; sourceTree = "<group>"; };
+		69BAD13E307EF27815805EA2 /* ChipFlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChipFlowLayout.swift; sourceTree = "<group>"; };
+		3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialFlowHost.swift; sourceTree = "<group>"; };
+		A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListPopulatedTutorial.swift; sourceTree = "<group>"; };
+		56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListEmptyTutorial.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1285,6 +1291,8 @@
 				5E7F777CF42A785B340434EF /* TutorialStepView.swift */,
 				0D7FB287126FE5B46FBE2F8D /* TutorialPresenter.swift */,
 				0DD635A75C6527D6DC491481 /* TutorialAnimations.swift */,
+				69BAD13E307EF27815805EA2 /* ChipFlowLayout.swift */,
+				3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */,
 );
 			path = Components;
 			sourceTree = "<group>";
@@ -1332,7 +1340,8 @@
 				08697D7D74EF2AAFD040D10A /* CookModeTapTutorial.swift */,
 				39F14937C8F618DA91A355ED /* VoiceModeTutorial.swift */,
 				C65B2EAC25694486DDB13D50 /* PantryManagementTutorial.swift */,
-				4311C08BAA09804CCF2748DA /* PantryInListTutorial.swift */,
+				A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */,
+				56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */,
 );
 			path = Tutorial;
 			sourceTree = "<group>";
@@ -1807,7 +1816,10 @@
 				B9B2EC99FC776B259930858F /* CookModeTapTutorial.swift in Sources */,
 				7D11F09921B0A5C119A97AD5 /* VoiceModeTutorial.swift in Sources */,
 				6B2CDDEE33D50A880E0F22F4 /* PantryManagementTutorial.swift in Sources */,
-				F440BAFB9C674C9C21FB37AC /* PantryInListTutorial.swift in Sources */,
+				6C4BB283382A72FA9E154C2F /* ChipFlowLayout.swift in Sources */,
+				1C80A17A686471C2C65CB708 /* TutorialFlowHost.swift in Sources */,
+				0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */,
+				ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
