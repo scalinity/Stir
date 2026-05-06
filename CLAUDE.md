@@ -679,7 +679,7 @@ screen_error_shown, sync_state_changed,
 # files; SCA-30 added the missing Saved tab tutorial. All events
 # carry `tutorial_id` (snake_case TutorialKey.rawValue: tonight_tour
 # [4 steps], scan_capture [3], scan_review [3], dinner_options [2],
-# dish_preview [2], cook_mode_tap [3], voice_mode [3], saved_meals [3],
+# dish_preview [2], cook_mode_tap [3], voice_mode [2], saved_meals [3],
 # pantry_management [2], pantry_in_list_tour [3 — populated],
 # pantry_in_list_tour_empty [2 — empty]). step_advanced
 # adds `from_step` + `to_step` (snake_case step IDs; variant-prefixed
