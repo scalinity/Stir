@@ -245,6 +245,12 @@ struct PantryListView: View {
                                     Image.Stir.delete
                                 }
                             }
+                            // ember700 mirrors SavedMealsView swipe
+                            // convention — destructive intent in the
+                            // warm palette without the system .red pop,
+                            // keeps the Settings → Manage pantry surface
+                            // continuous with the Saved tab.
+                            .tint(Color.Stir.ember700)
                         }
                 }
             }

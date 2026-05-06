@@ -204,7 +204,12 @@ struct PantryEditSheet: View {
             .padding(.vertical, CGFloat.Stir.space2)
         }
         .buttonStyle(.bordered)
-        .tint(Color.Stir.rust600)
+        // ember700 is the canonical destructive-action tint in the
+        // warm palette — matches SavedMealsView's swipe-to-delete and
+        // the swipe action on `PantryListView`'s rows. Was rust600
+        // (an error/warning text color), which read as "soft warning"
+        // rather than "destructive action".
+        .tint(Color.Stir.ember700)
     }
 
     // MARK: - Helpers
