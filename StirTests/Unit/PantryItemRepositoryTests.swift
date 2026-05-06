@@ -405,4 +405,212 @@ final class PantryItemRepositoryTests: XCTestCase {
         try pc.viewContext.save()
         return row
     }
+
+    // MARK: - consumeForRecipe (SCA-21)
+
+    func test_consumeForRecipe_softDeletesEphemeralMatch() throws {
+        let row = try seedItem(name: "fresh basil", slug: "fresh_basil", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "fresh basil", slug: "fresh_basil", optional: false)])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [row.objectID])
+        XCTAssertTrue(outcome.rememberedBumped.isEmpty)
+        XCTAssertEqual(outcome.unmatched, 0)
+        XCTAssertNotNil(row.deletedAt, "ephemeral row should be soft-deleted by consume")
+    }
+
+    func test_consumeForRecipe_bumpsRememberedMatch_doesNotDelete() throws {
+        let row = try seedItem(
+            name: "olive oil",
+            slug: "olive_oil",
+            memoryState: .remembered,
+            lastSeenAt: Date(timeIntervalSinceNow: -86_400),
+        )
+        let originalLastSeen = row.lastSeenAt
+        let plan = try makeRecipePlan(ingredients: [(name: "olive oil", slug: "olive_oil", optional: false)])
+        let now = Date()
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household, now: now)
+
+        XCTAssertEqual(outcome.rememberedBumped.map(\.objectID), [row.objectID])
+        XCTAssertTrue(outcome.ephemeralDeleted.isEmpty)
+        XCTAssertNil(row.deletedAt, "remembered row must NOT be deleted by a single cook")
+        XCTAssertEqual(row.lastSeenAt, now)
+        XCTAssertNotEqual(row.lastSeenAt, originalLastSeen)
+    }
+
+    func test_consumeForRecipe_skipsOptionalIngredients() throws {
+        let req = try seedItem(name: "tomato", slug: "tomato", memoryState: .ephemeral)
+        let opt = try seedItem(name: "parsley", slug: "parsley", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "tomato", slug: "tomato", optional: false),
+            (name: "parsley", slug: "parsley", optional: true),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [req.objectID])
+        XCTAssertEqual(outcome.optionalSkipped, 1)
+        XCTAssertNotNil(req.deletedAt)
+        XCTAssertNil(opt.deletedAt, "optional ingredient must not consume the matching pantry row")
+    }
+
+    func test_consumeForRecipe_unmatchedIngredient_increments_count_no_pantry_mutation() throws {
+        let row = try seedItem(name: "carrot", slug: "carrot", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "saffron", slug: "saffron", optional: false)])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.unmatched, 1)
+        XCTAssertTrue(outcome.ephemeralDeleted.isEmpty)
+        XCTAssertNil(row.deletedAt, "unrelated pantry row must be untouched")
+    }
+
+    func test_consumeForRecipe_appliesSubstitutionSwap_consumesSwapInLeavesOriginalAlone() throws {
+        // User has both olive oil (the original recipe ingredient) and butter (the swap).
+        // Recipe says olive oil, the user accepted "use butter instead", so consume should:
+        //   - leave olive oil alone (user chose not to use it; might still have it)
+        //   - consume butter (the swap; matches an ephemeral row)
+        let oliveOil = try seedItem(name: "olive oil", slug: "olive_oil", memoryState: .remembered)
+        let butter = try seedItem(name: "butter", slug: "butter", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "olive oil", slug: "olive_oil", optional: false)])
+        // Note: applyAcceptedSwap (in the substitution feature path) mutates
+        // recipeIngredient.displayName to the swap text. The consume routine
+        // doesn't depend on that — it reads the swap from the event itself
+        // — so the fixture leaves displayName as the original.
+        let event = try makeSubstitutionEvent(
+            for: plan.ingredientArray[0],
+            acceptedSwap: "butter",
+        )
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [event], on: household)
+
+        XCTAssertEqual(outcome.substitutedCount, 1)
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [butter.objectID])
+        XCTAssertTrue(outcome.rememberedBumped.isEmpty, "olive oil must not be bumped — user swapped it out, not in")
+        XCTAssertNil(oliveOil.deletedAt)
+        XCTAssertNotNil(butter.deletedAt)
+    }
+
+    func test_consumeForRecipe_rejectedSubstitution_falls_through_to_original() throws {
+        // Substitution proposed but user REJECTED it (kept the original).
+        // Consume should treat this as if no swap happened.
+        let oliveOil = try seedItem(name: "olive oil", slug: "olive_oil", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "olive oil", slug: "olive_oil", optional: false)])
+        let event = try makeSubstitutionEvent(
+            for: plan.ingredientArray[0],
+            acceptedSwap: nil, // rejected
+        )
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [event], on: household)
+
+        XCTAssertEqual(outcome.substitutedCount, 0, "rejected events don't count as substitutions")
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [oliveOil.objectID])
+    }
+
+    func test_consumeForRecipe_expiredAndUnknownState_noOp() throws {
+        let expired = try seedItem(name: "old herbs", slug: "old_herbs", memoryState: .expired)
+        let unknown = try seedItem(name: "mystery jar", slug: "mystery_jar", memoryState: .unknown)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "old herbs", slug: "old_herbs", optional: false),
+            (name: "mystery jar", slug: "mystery_jar", optional: false),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertTrue(outcome.ephemeralDeleted.isEmpty)
+        XCTAssertTrue(outcome.rememberedBumped.isEmpty)
+        XCTAssertNil(expired.deletedAt, ".expired state must not be auto-mutated by consume — SCA-22 owns those transitions")
+        XCTAssertNil(unknown.deletedAt)
+    }
+
+    func test_consumeForRecipe_mixedOutcome_telemetryPropertiesAreAccurate() throws {
+        // 4 ingredients: one delete, one bump, one optional, one no-match.
+        let toDelete = try seedItem(name: "tomato", slug: "tomato", memoryState: .ephemeral)
+        let toBump = try seedItem(name: "salt", slug: "salt", memoryState: .remembered)
+        try seedItem(name: "ignored", slug: "ignored", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "tomato", slug: "tomato", optional: false),
+            (name: "salt", slug: "salt", optional: false),
+            (name: "parsley", slug: "parsley", optional: true), // optional → skipped
+            (name: "saffron", slug: "saffron", optional: false), // unmatched
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [toDelete.objectID])
+        XCTAssertEqual(outcome.rememberedBumped.map(\.objectID), [toBump.objectID])
+        XCTAssertEqual(outcome.unmatched, 1)
+        XCTAssertEqual(outcome.optionalSkipped, 1)
+        XCTAssertEqual(outcome.substitutedCount, 0)
+        XCTAssertEqual(outcome.telemetryProperties["ephemeral_deleted"] as? Int, 1)
+        XCTAssertEqual(outcome.telemetryProperties["remembered_bumped"] as? Int, 1)
+        XCTAssertEqual(outcome.telemetryProperties["unmatched"] as? Int, 1)
+        XCTAssertEqual(outcome.telemetryProperties["optional_skipped"] as? Int, 1)
+        XCTAssertEqual(outcome.telemetryProperties["substituted_count"] as? Int, 0)
+    }
+
+    func test_consumeForRecipe_emptyRecipe_returnsAllZeroOutcome() throws {
+        let plan = try makeRecipePlan(ingredients: [])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertTrue(outcome.ephemeralDeleted.isEmpty)
+        XCTAssertTrue(outcome.rememberedBumped.isEmpty)
+        XCTAssertEqual(outcome.unmatched, 0)
+        XCTAssertEqual(outcome.optionalSkipped, 0)
+        XCTAssertEqual(outcome.substitutedCount, 0)
+    }
+
+    // MARK: - Test fixtures for consumeForRecipe
+
+    @discardableResult
+    private func makeRecipePlan(
+        ingredients: [(name: String, slug: String?, optional: Bool)],
+    ) throws -> RecipePlan {
+        let ctx = pc.viewContext
+        let plan = RecipePlan(context: ctx)
+        plan.id = UUID()
+        plan.title = "Test recipe"
+        plan.createdAt = Date()
+        plan.updatedAt = Date()
+        plan.household = household
+        for (idx, ing) in ingredients.enumerated() {
+            let row = RecipeIngredient(context: ctx)
+            row.id = UUID()
+            row.recipePlan = plan
+            row.displayName = ing.name
+            row.canonicalIngredientSlug = ing.slug
+            row.isOptional = ing.optional
+            row.sortOrder = Int16(idx)
+            row.amountText = ""
+            row.source = "ai"
+        }
+        try ctx.save()
+        return plan
+    }
+
+    @discardableResult
+    private func makeSubstitutionEvent(
+        for ingredient: RecipeIngredient,
+        acceptedSwap: String?,
+    ) throws -> SubstitutionEvent {
+        let ctx = pc.viewContext
+        let event = SubstitutionEvent(context: ctx)
+        event.id = UUID()
+        event.createdAt = Date()
+        event.recipeIngredient = ingredient
+        event.missingIngredientDisplayName = ingredient.displayName
+        event.modelSuggestionText = acceptedSwap ?? ""
+        if let swap = acceptedSwap {
+            event.typedAcceptance = .accepted
+            event.acceptedAlternativeText = swap
+        } else {
+            event.typedAcceptance = .rejected
+            event.acceptedAlternativeText = nil
+        }
+        try ctx.save()
+        return event
+    }
 }

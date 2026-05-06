@@ -171,6 +171,16 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case substitutionRequested = "substitution_requested"
     case substitutionAccepted = "substitution_accepted"
     case cookSessionCompleted = "cook_session_completed"
+    /// Fires once per `cook_session_completed`, immediately after
+    /// `PantryItemRepository.consumeForRecipe` runs (ADR 0029 /
+    /// SCA-21). The auto-consume rule is memory-state-aware:
+    /// matched-and-`.ephemeral` rows soft-delete, matched-and-
+    /// `.remembered` rows bump `lastSeenAt`, others no-op. Properties
+    /// are counts only — never ingredient names — to satisfy ADR 0009's
+    /// privacy invariant. Emitted unconditionally (even on an all-
+    /// zeros outcome) so the event time-series stays continuous and
+    /// missing emissions flag a wiring regression.
+    case pantryAutoConsumeResolved = "pantry_auto_consume_resolved"
     case mealRated = "meal_rated"
     /// Fires when the user dismisses the outcome feedback sheet via Skip
     /// without submitting a rating. Complement to `meal_rated` — the pair

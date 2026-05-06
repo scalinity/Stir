@@ -174,6 +174,7 @@ struct CookModeRoot: View {
                     recipePlan: recipePlan,
                     household: household,
                     source: source,
+                    pantryItemRepository: coordinator.pantryItemRepository,
                     entitlements: entitlements,
                     voiceDriver: driverForVM,
                     disableCookRealtime: killSwitch,

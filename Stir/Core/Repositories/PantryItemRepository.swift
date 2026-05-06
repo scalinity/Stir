@@ -139,6 +139,191 @@ final class PantryItemRepository {
         try controller.save()
     }
 
+    /// Outcome of `consumeForRecipe`. Carries the affected rows so
+    /// callers can surface a "Pantry updated · N items used" toast or
+    /// drive a future undo affordance (deferred to SCA-27), and a
+    /// count summary suitable for `pantry_auto_consume_resolved`
+    /// telemetry. Counts are derived from the array lengths plus the
+    /// pre-walked `unmatched` / `optionalSkipped` / `substitutedCount`
+    /// fields so the caller doesn't re-traverse to emit telemetry.
+    struct ConsumeOutcome: Equatable, Sendable {
+        let ephemeralDeleted: [PantryItem]
+        let rememberedBumped: [PantryItem]
+        /// Effective ingredients (post-substitution, post-optional-skip)
+        /// that produced no pantry-row match.
+        let unmatched: Int
+        /// Recipe ingredients skipped because `isOptional == true`.
+        let optionalSkipped: Int
+        /// Effective ingredients that came from an accepted
+        /// `SubstitutionEvent` rather than the original recipe row.
+        let substitutedCount: Int
+
+        /// Telemetry projection — feed straight into PostHog.
+        var telemetryProperties: [String: Any] {
+            [
+                "ephemeral_deleted": ephemeralDeleted.count,
+                "remembered_bumped": rememberedBumped.count,
+                "unmatched": unmatched,
+                "optional_skipped": optionalSkipped,
+                "substituted_count": substitutedCount,
+            ]
+        }
+    }
+
+    /// Auto-consume pantry items based on a completed recipe + the
+    /// session's accepted substitutions. ADR 0029 spells out the rule;
+    /// summary:
+    ///
+    /// - For each `RecipeIngredient` on the plan, skip if `isOptional`.
+    /// - If an accepted `SubstitutionEvent` exists for the ingredient,
+    ///   use the swap (`acceptedAlternativeText`, slug=nil) as the
+    ///   "what was consumed" name. The original ingredient is left
+    ///   alone — we don't infer "user has X" from "user chose not to
+    ///   use X".
+    /// - Look up via the existing `fetchExisting(slug:displayName:)`
+    ///   so manual rows (slug=`""`) remain matchable through the name
+    ///   fallback.
+    /// - Apply by `typedMemoryState`:
+    ///   * `.ephemeral` → soft-delete (recipe consumed a today-only thing)
+    ///   * `.remembered` → bump `lastSeenAt = now` (standing items
+    ///     aren't depleted by one cook; recency improves voice prompt
+    ///     prioritization)
+    ///   * `.expired` / `.unknown` → no-op (state is suspect; SCA-22's
+    ///     `expiresAt` sweep is the only writer for those transitions)
+    ///   * no match → no-op
+    ///
+    /// The `.ephemeral`-only delete rule is the safety mechanism that
+    /// lets us skip both the upfront "mark items used" prompt and the
+    /// v1 undo (SCA-27): standing pantry items are never destructively
+    /// touched, so worst case is one ephemeral row deleted that the
+    /// user actually still has — bounded recovery cost.
+    ///
+    /// All mutations land in a single `controller.save()`. Returns
+    /// `ConsumeOutcome` carrying the affected rows + the count summary
+    /// for telemetry. A no-op call (empty recipe, all optional, no
+    /// matches) returns an all-zeros outcome and still requires a save
+    /// only if there are bumps; the save is gated on actual mutations
+    /// to avoid spurious CloudKit notifications.
+    func consumeForRecipe(
+        _ plan: RecipePlan,
+        substitutions: [SubstitutionEvent],
+        on household: HouseholdProfile,
+        now: Date = Date(),
+    ) throws -> ConsumeOutcome {
+        let context = controller.viewContext
+
+        // Build a lookup from RecipeIngredient → acceptedAlternativeText
+        // so the per-ingredient walk doesn't repeatedly scan the
+        // substitutions array. Only `.accepted` events count; pending
+        // and rejected leave the original ingredient in place.
+        var swapByIngredientID: [NSManagedObjectID: String] = [:]
+        for event in substitutions where event.typedAcceptance == .accepted {
+            guard
+                let ingredient = event.recipeIngredient,
+                let swap = event.acceptedAlternativeText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !swap.isEmpty
+            else { continue }
+            swapByIngredientID[ingredient.objectID] = swap
+        }
+
+        var ephemeralDeleted: [PantryItem] = []
+        var rememberedBumped: [PantryItem] = []
+        var unmatched = 0
+        var optionalSkipped = 0
+        var substitutedCount = 0
+
+        for ingredient in plan.ingredientArray {
+            if ingredient.isOptional {
+                optionalSkipped += 1
+                continue
+            }
+
+            // Effective name + slug. Substitution swaps drop the slug
+            // because `acceptedAlternativeText` is free-form user/model
+            // text with no canonical mapping — the name fallback in
+            // `fetchExisting` is the only viable match path.
+            let effectiveName: String
+            let effectiveSlug: String?
+            if let swap = swapByIngredientID[ingredient.objectID] {
+                effectiveName = swap
+                effectiveSlug = nil
+                substitutedCount += 1
+            } else {
+                effectiveName = ingredient.displayName ?? ""
+                effectiveSlug = ingredient.canonicalIngredientSlug
+            }
+
+            guard !effectiveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                // Defensive: a recipe with a blank ingredient row is a
+                // data-quality issue, not a consume target. Skip
+                // without counting — counting it as `unmatched` would
+                // pollute the telemetry signal.
+                continue
+            }
+
+            let match: PantryItem?
+            do {
+                match = try fetchExisting(
+                    slug: effectiveSlug,
+                    displayName: effectiveName,
+                    on: household,
+                    context: context,
+                )
+            } catch {
+                // A fetch failure on one ingredient shouldn't sink the
+                // whole consume — log and treat as unmatched. The
+                // session is already complete; partial pantry mutation
+                // is better than reverting the whole batch.
+                Logger.coreData.warning(
+                    "consumeForRecipe fetchExisting failed for one ingredient: \(error.localizedDescription, privacy: .private)",
+                )
+                unmatched += 1
+                continue
+            }
+
+            guard let row = match, row.deletedAt == nil else {
+                unmatched += 1
+                continue
+            }
+
+            switch row.typedMemoryState {
+            case .ephemeral:
+                row.deletedAt = now
+                row.updatedAt = now
+                ephemeralDeleted.append(row)
+            case .remembered:
+                row.lastSeenAt = now
+                row.updatedAt = now
+                rememberedBumped.append(row)
+            case .expired, .unknown:
+                // Don't auto-mutate suspect states — SCA-22's
+                // `expiresAt` sweep is the only writer for `.expired`
+                // transitions; `.unknown` should never appear in
+                // practice but is left untouched as a defensive
+                // default.
+                break
+            }
+        }
+
+        // Gate the save on actual mutations so a no-op call doesn't
+        // emit a spurious CloudKit change notification.
+        if !ephemeralDeleted.isEmpty || !rememberedBumped.isEmpty {
+            try controller.save()
+        }
+
+        Logger.coreData.info(
+            "consumeForRecipe: \(ephemeralDeleted.count, privacy: .public) deleted, \(rememberedBumped.count, privacy: .public) bumped, \(unmatched, privacy: .public) unmatched, \(optionalSkipped, privacy: .public) optional, \(substitutedCount, privacy: .public) substituted",
+        )
+
+        return ConsumeOutcome(
+            ephemeralDeleted: ephemeralDeleted,
+            rememberedBumped: rememberedBumped,
+            unmatched: unmatched,
+            optionalSkipped: optionalSkipped,
+            substitutedCount: substitutedCount,
+        )
+    }
+
     /// Read all PantryItem rows scoped to a household, sorted by
     /// `lastSeenAt` descending (most-recently-seen first). Soft-deleted
     /// rows are filtered by default; pass `includeSoftDeleted: true` for

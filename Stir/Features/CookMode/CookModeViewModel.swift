@@ -241,6 +241,11 @@ final class CookModeViewModel {
     private let cookingSessionRepository: CookingSessionRepository
     private let cookTimerRepository: CookTimerRepository
     private let substitutionRepository: SubstitutionRepository
+    /// Used by `performFinish` to auto-consume pantry items per ADR 0029
+    /// (SCA-21). Memory-state-aware: ephemeral matches soft-delete,
+    /// remembered matches bump `lastSeenAt`. No confirmation prompt;
+    /// the conservative match rule is the safety mechanism.
+    private let pantryItemRepository: PantryItemRepository
     private let timerService: TimerService
     private let liveActivityManager: LiveActivityManager
     private let analytics: PostHogClient
@@ -351,6 +356,7 @@ final class CookModeViewModel {
         cookingSessionRepository: CookingSessionRepository? = nil,
         cookTimerRepository: CookTimerRepository? = nil,
         substitutionRepository: SubstitutionRepository? = nil,
+        pantryItemRepository: PantryItemRepository? = nil,
         timerService: TimerService? = nil,
         liveActivityManager: LiveActivityManager? = nil,
         analytics: PostHogClient = .shared,
@@ -368,6 +374,7 @@ final class CookModeViewModel {
         self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository()
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository()
         self.substitutionRepository = substitutionRepository ?? SubstitutionRepository()
+        self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository()
         // Resolve LiveActivityManager FIRST so the same instance can be
         // injected into TimerService below. Without sharing, VM-side
         // `startLiveActivity()` populated dict A while TimerService's
@@ -1122,6 +1129,33 @@ final class CookModeViewModel {
         } catch {
             Logger.ui.error("markCompleted failed: \(error.localizedDescription, privacy: .public)")
         }
+        // SCA-21 / ADR 0029: auto-consume pantry items reflecting the
+        // recipe the user just cooked. Memory-state-aware rule lives
+        // in `PantryItemRepository.consumeForRecipe`. Emit the
+        // telemetry event unconditionally — even on an all-zeros
+        // outcome — so the time-series stays continuous and a missing
+        // emission flags a wiring regression. Failure to consume is
+        // logged but not surfaced — the cook session is already
+        // complete, and dropping the pantry mutation is strictly
+        // less harmful than crashing or rolling back the completion.
+        let consumeOutcome: PantryItemRepository.ConsumeOutcome
+        do {
+            consumeOutcome = try pantryItemRepository.consumeForRecipe(
+                recipePlan,
+                substitutions: session.substitutionArray,
+                on: household,
+            )
+        } catch {
+            Logger.coreData.error("pantry consumeForRecipe failed: \(error.localizedDescription, privacy: .private)")
+            consumeOutcome = PantryItemRepository.ConsumeOutcome(
+                ephemeralDeleted: [],
+                rememberedBumped: [],
+                unmatched: 0,
+                optionalSkipped: 0,
+                substitutedCount: 0,
+            )
+        }
+        analytics.capture(.pantryAutoConsumeResolved, properties: consumeOutcome.telemetryProperties)
         let durationMinutes = Int(Date().timeIntervalSince(startedAtWallClock) / 60)
         analytics.capture(.cookSessionCompleted, properties: [
             "duration_min": max(0, durationMinutes),
