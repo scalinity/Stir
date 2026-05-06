@@ -211,8 +211,14 @@ Deno.serve(async (req) => {
 
   // ---------------------------------------------------------------------
   // 5. Entitlement check: multi-image requires Pro
+  //
+  // SCA-35: derive image count from actual payload shape. `body.images` is
+  // the multi-image array (length 2..4, Zod-enforced); when absent, the
+  // request is single-image. The legacy `body.image_count` field is a
+  // checksum already validated against the actual count in Zod's
+  // superRefine, so we don't re-read it here.
   // ---------------------------------------------------------------------
-  const imageCount = body.image_count ?? 1;
+  const imageCount = body.images?.length ?? 1;
   if (imageCount > 1 && claims.tier !== 'pro') {
     userLog.warn('multi_image_denied', { tier: claims.tier, image_count: imageCount });
     return jsonError(
@@ -227,41 +233,42 @@ Deno.serve(async (req) => {
     );
   }
 
-  // TODO(step-7): remove this block when multi-image UX ships. Step 3 is
-  // single-image only even for Pro — the tier gate above is the stable
-  // backend surface; this block only fails safe until the UI catches up.
-  if (imageCount > 1) {
-    userLog.warn('multi_image_not_yet_supported', { image_count: imageCount });
-    return jsonError(
-      ErrorCode.VAL_01,
-      400,
-      {
-        message: 'Multi-image scan is not yet implemented in the backend. Send image_count=1.',
-        field_errors: [{ field: 'image_count', issue: 'Only image_count=1 accepted in step 3.' }],
-      },
-      requestId,
-    );
-  }
-
   // ---------------------------------------------------------------------
   // 5a. Image bytes: decode + magic-byte validation (SA1-003)
   // Before this check we trusted the client-declared mime_type. A request
   // with image_mime_type="image/png" and SVG bytes would flow to Gemini
   // verbatim, opening a narrow OCR-based prompt-injection channel and
   // wasting Gemini quota on broken inputs.
+  //
+  // SCA-35: validate every image part (singular OR multi) the same way.
+  // Build a normalized array of `{ base64, mime_type }` so the rest of
+  // the handler doesn't care which payload shape arrived.
   // ---------------------------------------------------------------------
-  const imageBytes = decodeAndValidateImage(body.image_base64, body.image_mime_type);
-  if (imageBytes.kind === 'error') {
-    userLog.warn('image_validation_failed', { reason: imageBytes.reason });
-    return jsonError(
-      ErrorCode.VAL_01,
-      400,
-      {
-        message: 'Image bytes failed validation.',
-        field_errors: [{ field: imageBytes.field, issue: imageBytes.reason }],
-      },
-      requestId,
-    );
+  type IncomingImage = { base64: string; mime_type: 'image/jpeg' | 'image/png' | 'image/heic' | 'image/webp' };
+  const incomingImages: IncomingImage[] = body.images
+    ? body.images.map((img: IncomingImage): IncomingImage => ({ base64: img.base64, mime_type: img.mime_type }))
+    : [{ base64: body.image_base64!, mime_type: body.image_mime_type! }];
+
+  for (let i = 0; i < incomingImages.length; i++) {
+    const part = incomingImages[i]!;
+    const result = decodeAndValidateImage(part.base64, part.mime_type);
+    if (result.kind === 'error') {
+      // Translate field path to the actual payload location so client
+      // dashboards point at the bad image, not just "image_base64".
+      const fieldPath = body.images
+        ? `images[${i}].${result.field === 'image_base64' ? 'base64' : 'mime_type'}`
+        : result.field;
+      userLog.warn('image_validation_failed', { index: i, reason: result.reason });
+      return jsonError(
+        ErrorCode.VAL_01,
+        400,
+        {
+          message: 'Image bytes failed validation.',
+          field_errors: [{ field: fieldPath, issue: result.reason }],
+        },
+        requestId,
+      );
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -310,19 +317,31 @@ Deno.serve(async (req) => {
   let totalLatency = 0;
   let lastErr: unknown;
 
+  // SCA-35: build the image part(s) once outside the retry loop.
+  const isMultiImage = imageCount > 1;
+  const userText = isMultiImage
+    ? `Identify cooking-relevant ingredients across these ${imageCount} photos of the same kitchen. Merge across photos, dedupe, and respond with JSON matching the schema.`
+    : 'Identify cooking-relevant ingredients in this image. Respond with JSON matching the schema.';
+  const geminiImages = incomingImages.map((p) => ({
+    mimeType: p.mime_type,
+    dataBase64: p.base64,
+  }));
+
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
       const result = await geminiGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
-        userText: 'Identify cooking-relevant ingredients in this image. Respond with JSON matching the schema.',
-        image: {
-          mimeType: body.image_mime_type,
-          dataBase64: body.image_base64,
-        },
+        userText,
+        ...(isMultiImage
+          ? { images: geminiImages }
+          : { image: geminiImages[0]! }),
         thinkingLevel: 'minimal',
         responseSchema: GEMINI_RESPONSE_SCHEMA,
-        maxOutputTokens: 2048,
+        // Multi-image scans need slightly more headroom — 4 photos can
+        // surface 80+ ingredients easily, and truncation here would force
+        // a retry-then-fail. Single-image keeps the existing 2048 budget.
+        maxOutputTokens: isMultiImage ? 4096 : 2048,
         promptVersion: activePrompt.version,
       });
       totalInputTokens += result.inputTokens;
@@ -454,6 +473,7 @@ Deno.serve(async (req) => {
     status: 200,
     latency_ms: wire.latency_ms,
     ingredient_count: parsedOutput.ingredients.length,
+    image_count: imageCount,
     retry_count: retryCount,
     cost_usd: costUsd,
   });

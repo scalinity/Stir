@@ -68,8 +68,14 @@ export interface GeminiGenerateArgs {
   systemInstruction: string;
   /** Plain-text user content. Rendered as the first part of a user message. */
   userText: string;
-  /** Optional inline image appended after userText. */
+  /** Optional inline image appended after userText. Mutually exclusive with `images`. */
   image?: InlineImagePart;
+  /**
+   * Optional multi-image input — appended in order after `userText`. Mutually
+   * exclusive with `image`. Used by SCA-35 multi-image pantry-parse (Pro).
+   * Caller is responsible for caps; this layer just forwards the parts.
+   */
+  images?: InlineImagePart[];
   thinkingLevel?: GeminiThinkingLevel;
   /** JSON schema for structured output. When set, response_mime_type=application/json. */
   responseSchema?: Record<string, unknown>;
@@ -132,11 +138,20 @@ export async function geminiGenerate(args: GeminiGenerateArgs): Promise<GeminiGe
 
   const url = `${GEMINI_BASE_URL}/v1beta/models/${encodeURIComponent(args.model)}:generateContent`;
 
+  if (args.image && args.images) {
+    throw new Error('geminiGenerate: pass either `image` or `images`, not both.');
+  }
   const parts: ApiPart[] = [{ text: args.userText }];
   if (args.image) {
     parts.push({
       inline_data: { mime_type: args.image.mimeType, data: args.image.dataBase64 },
     });
+  } else if (args.images) {
+    for (const img of args.images) {
+      parts.push({
+        inline_data: { mime_type: img.mimeType, data: img.dataBase64 },
+      });
+    }
   }
 
   interface GenerationConfig {

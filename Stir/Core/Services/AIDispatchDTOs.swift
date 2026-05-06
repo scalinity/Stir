@@ -12,9 +12,25 @@ import Foundation
 // MARK: - Pantry Parse
 
 struct PantryParseRequest: Encodable, Sendable, Equatable {
+    /// Cap on photos per multi-image request. Mirrors Zod
+    /// `images.max(4)` and `image_count.max(4)` in
+    /// `Backend/supabase/functions/_shared/validation.ts` (SCA-35).
+    /// Bump both sides together if the cap ever changes.
+    static let multiImageMax = 4
+
     let clientRequestID: UUID
-    let imageBase64: String
-    let imageMimeType: String
+    /// Singular path: present iff `images` is nil. Mutually exclusive
+    /// with `images` per backend Zod superRefine — exactly one must be
+    /// populated. See `singleImage(...)` / `multiImage(...)` factories.
+    let imageBase64: String?
+    let imageMimeType: String?
+    /// Multi-image path: 2..4 photos of the same kitchen, merged
+    /// server-side via the v1.1.0 prompt. Pro-only — backend returns
+    /// ENT-MULTI-IMAGE-01 for non-Pro callers.
+    let images: [ImagePart]?
+    /// Redundant checksum on `images?.count ?? 1`. Backend Zod refines
+    /// it to match the actual payload — sent for clarity in logs and
+    /// dashboards, not authoritative.
     let imageCount: Int?
     let householdProfileHash: String?
 
@@ -22,8 +38,76 @@ struct PantryParseRequest: Encodable, Sendable, Equatable {
         case clientRequestID = "client_request_id"
         case imageBase64 = "image_base64"
         case imageMimeType = "image_mime_type"
+        case images
         case imageCount = "image_count"
         case householdProfileHash = "household_profile_hash"
+    }
+
+    struct ImagePart: Encodable, Sendable, Equatable {
+        let base64: String
+        let mimeType: String
+
+        enum CodingKeys: String, CodingKey {
+            case base64
+            case mimeType = "mime_type"
+        }
+    }
+
+    /// Single-image factory — the back-compat path used for every Free
+    /// and Premium scan, and the first-photo scan for Pro.
+    static func singleImage(
+        clientRequestID: UUID,
+        imageData: Data,
+        mimeType: String,
+        householdProfileHash: String?,
+    ) -> PantryParseRequest {
+        PantryParseRequest(
+            clientRequestID: clientRequestID,
+            imageBase64: imageData.base64EncodedString(),
+            imageMimeType: mimeType,
+            images: nil,
+            imageCount: 1,
+            householdProfileHash: householdProfileHash,
+        )
+    }
+
+    /// Multi-image factory (Pro-only). `images.count` must be in 2...4 —
+    /// enforced via precondition because a 1-image multi-call is a
+    /// caller bug, not a runtime error. Use `singleImage` for 1 photo.
+    static func multiImage(
+        clientRequestID: UUID,
+        images: [(data: Data, mimeType: String)],
+        householdProfileHash: String?,
+    ) -> PantryParseRequest {
+        precondition(
+            images.count >= 2 && images.count <= multiImageMax,
+            "PantryParseRequest.multiImage requires 2...\(multiImageMax) images, got \(images.count)",
+        )
+        let parts = images.map { ImagePart(base64: $0.data.base64EncodedString(), mimeType: $0.mimeType) }
+        return PantryParseRequest(
+            clientRequestID: clientRequestID,
+            imageBase64: nil,
+            imageMimeType: nil,
+            images: parts,
+            imageCount: parts.count,
+            householdProfileHash: householdProfileHash,
+        )
+    }
+
+    /// Custom encoder skips nil keys instead of emitting `null`. Backend
+    /// Zod superRefine treats `image_base64=null` and `images=null` as
+    /// "both fields populated" (failing mutual-exclusivity); omitting
+    /// the unused branch keeps the wire shape cleanly one-or-the-other.
+    /// Same pattern used by SubstitutionRequest.MissingIngredient and
+    /// other DTOs in this file.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(clientRequestID, forKey: .clientRequestID)
+        try c.encodeIfPresent(imageBase64, forKey: .imageBase64)
+        try c.encodeIfPresent(imageMimeType, forKey: .imageMimeType)
+        try c.encodeIfPresent(images, forKey: .images)
+        try c.encodeIfPresent(imageCount, forKey: .imageCount)
+        try c.encodeIfPresent(householdProfileHash, forKey: .householdProfileHash)
     }
 }
 

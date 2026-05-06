@@ -151,15 +151,25 @@ struct ScanReviewView: View {
         // "this is what we looked at" — so retake-vs-edit is an obvious
         // call. UIImage(data:) is lazy: the JPEG is decoded once at
         // first paint and the wrapper costs ~nothing on body re-eval.
+        //
+        // SCA-35: when the user submitted multiple photos, the primary
+        // thumbnail shows the first capture and a "+N" badge surfaces
+        // the additional photos so the user knows they're reviewing a
+        // merged result.
         HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
-            if let data = viewModel.capturedImageData,
+            if let data = viewModel.primaryCapturedImageData,
                let image = UIImage(data: data) {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous))
-                    .accessibilityLabel("Captured kitchen photo")
+                ZStack(alignment: .bottomTrailing) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous))
+                    if viewModel.capturedImages.count > 1 {
+                        extraPhotoBadge
+                    }
+                }
+                .accessibilityLabel(thumbnailA11yLabel)
             }
             VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
                 Text("Scan review")
@@ -173,10 +183,32 @@ struct ScanReviewView: View {
         }
     }
 
+    private var extraPhotoBadge: some View {
+        let extraCount = viewModel.capturedImages.count - 1
+        return Text("+\(extraCount)")
+            .stirFont(.labelMd)
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.Stir.ink900.opacity(0.85), in: Capsule())
+            .padding(4)
+            .accessibilityHidden(true)
+    }
+
+    private var thumbnailA11yLabel: String {
+        let count = viewModel.capturedImages.count
+        if count <= 1 { return "Captured kitchen photo" }
+        return "Captured \(count) kitchen photos"
+    }
+
     private var headerSubtitle: String {
-        let count = viewModel.ingredients.count
-        let noun = count == 1 ? "ingredient" : "ingredients"
-        return "\(count) \(noun) found · tap to fix any miss"
+        let ingredientCount = viewModel.ingredients.count
+        let ingredientNoun = ingredientCount == 1 ? "ingredient" : "ingredients"
+        let imageCount = viewModel.capturedImages.count
+        if imageCount > 1 {
+            return "\(imageCount) photos · \(ingredientCount) \(ingredientNoun) found · tap to fix any miss"
+        }
+        return "\(ingredientCount) \(ingredientNoun) found · tap to fix any miss"
     }
 
     @ViewBuilder

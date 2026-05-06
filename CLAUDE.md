@@ -643,6 +643,9 @@ Canonical list. Don't invent new names without updating spec §15 AND this file.
 ```
 app_opened, onboarding_started, onboarding_completed,
 camera_permission_result, scan_started, scan_submitted, scan_parse_completed,
+# SCA-35: scan_submitted + scan_parse_completed carry `image_count` (1..4).
+# 1 = singular wire path (Free/Premium/Pro single-photo); 2..4 = Pro
+# multi-image scan via `images[]` plural payload. See spec §15.
 ingredient_corrected, constraints_set,
 dinner_solve_requested, dinner_solve_completed, suggested_dish_selected,
 cook_mode_started, cook_step_advanced, timer_started,

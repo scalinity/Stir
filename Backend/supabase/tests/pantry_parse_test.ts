@@ -94,18 +94,72 @@ Deno.test('pantry-parse: VAL-01 on unsupported MIME', async () => {
   assertEquals(res.body.error, 'VAL-01');
 });
 
-Deno.test('pantry-parse: ENT-MULTI-IMAGE-01 when image_count>1 on Free tier', async () => {
+Deno.test('pantry-parse: ENT-MULTI-IMAGE-01 on Free tier when sending images[]', async () => {
   const boot = await quickBootstrap({ installation_id: testInstallId() });
-  // Fresh user is Free tier; image_count=2 should be blocked.
+  // Fresh user is Free tier; multi-image array should be blocked at the
+  // entitlement gate BEFORE any image-byte validation runs.
   const res = await callPantryParse({
     client_request_id: crypto.randomUUID(),
-    image_base64: 'A'.repeat(200),
-    image_mime_type: 'image/jpeg',
-    image_count: 2,
+    images: [
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+    ],
   }, boot.session_jwt);
   assertEquals(res.status, 403);
   assertEquals(res.body.error, 'ENT-MULTI-IMAGE-01');
   assertEquals(res.body.current_tier, 'free');
+});
+
+Deno.test('pantry-parse: VAL-01 when neither image_base64 nor images[] is provided', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callPantryParse({
+    client_request_id: crypto.randomUUID(),
+  }, boot.session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('pantry-parse: VAL-01 when both image_base64 AND images[] are provided', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callPantryParse({
+    client_request_id: crypto.randomUUID(),
+    image_base64: 'A'.repeat(200),
+    image_mime_type: 'image/jpeg',
+    images: [
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+    ],
+  }, boot.session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('pantry-parse: VAL-01 when images.length exceeds the 4-photo cap', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callPantryParse({
+    client_request_id: crypto.randomUUID(),
+    images: Array.from({ length: 5 }, () => ({
+      base64: 'A'.repeat(200),
+      mime_type: 'image/jpeg',
+    })),
+  }, boot.session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('pantry-parse: VAL-01 when image_count disagrees with payload length', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  // images.length=2 but image_count=3 — checksum mismatch surfaces as VAL-01.
+  const res = await callPantryParse({
+    client_request_id: crypto.randomUUID(),
+    images: [
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+      { base64: 'A'.repeat(200), mime_type: 'image/jpeg' },
+    ],
+    image_count: 3,
+  }, boot.session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
 });
 
 Deno.test('pantry-parse: VAL-01 on invalid JSON body', async () => {

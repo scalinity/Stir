@@ -51,15 +51,31 @@ export type SessionBootstrapRequest = z.infer<typeof SessionBootstrapRequest>;
 // to trim the payload. Step 1 returns everything unconditionally.
 
 // ---------------------------------------------------------------------------
-// /v1/ai/pantry-parse (step 3)
+// /v1/ai/pantry-parse (step 3 + SCA-35 multi-image, step 7)
 // ---------------------------------------------------------------------------
 //
-// image_base64: JPEG/HEIC/PNG/WebP image, ≤ ~6MB decoded. Zod validates
-//   length; the handler validates decoded MIME + byte size after base64
-//   decode (cheaper to let Zod catch obviously-oversized strings first).
+// Two payload shapes accepted, mutually exclusive:
+//
+// (a) Single-image (Free/Premium/Pro):
+//     image_base64        + image_mime_type
+//
+// (b) Multi-image (Pro-only at handler level — gated by ENT-MULTI-IMAGE-01):
+//     images: [{base64, mime_type}, ...]   length 2..4
+//
+// The schema accepts EITHER but never both, enforced via superRefine. The
+// `image_count` field is retained for back-compat with single-image clients
+// that send it as a redundant checksum (legacy iOS DTO), but is no longer
+// authoritative — the handler computes actual count from the array.
+//
 // client_request_id: idempotency key; 10-min cache.
-// image_count: step-3 supports only 1. Multi-image is Pro-tier and
-//   returns ENT-MULTI-IMAGE-01 when >1 on non-Pro; UI lands in step 7.
+// image_base64 / image_mime_type: JPEG/HEIC/PNG/WebP image, ≤ ~6MB decoded.
+//   Zod validates length; the handler validates decoded MIME + byte size
+//   after base64 decode (cheaper to let Zod catch obviously-oversized
+//   strings first).
+// images: same per-image bounds as singular. Min 2 (single-image path
+//   exists), max 4 (CLAUDE.md SCA-35 cap — covers fridge + 2 pantry
+//   shelves + counter; per-image Gemini cost grows linearly so 4 is the
+//   defensible v1 ceiling).
 // household_profile_hash: optional — if present, a cache miss is also
 //   forced when the caller's household changed between requests. Not
 //   used in step 3 cache lookup (keyed on request_id only); future-proofs
@@ -68,13 +84,60 @@ export type SessionBootstrapRequest = z.infer<typeof SessionBootstrapRequest>;
 // ~6MB raw → ~8MB base64. Cap at 10MB of base64 as a hard ceiling.
 const IMAGE_BASE64_MAX = 10 * 1024 * 1024;
 
+const PantryParseImagePart = z.object({
+  base64: z.string().min(100).max(IMAGE_BASE64_MAX),
+  mime_type: z.enum(['image/jpeg', 'image/png', 'image/heic', 'image/webp']),
+}).strict();
+
+export const PANTRY_PARSE_MULTI_IMAGE_MAX = 4;
+
 export const PantryParseRequest = z.object({
   client_request_id: z.string().uuid(),
-  image_base64: z.string().min(100).max(IMAGE_BASE64_MAX),
-  image_mime_type: z.enum(['image/jpeg', 'image/png', 'image/heic', 'image/webp']),
-  image_count: z.number().int().min(1).max(8).optional(),
+  // Singular fields are optional now — required when `images` is absent.
+  image_base64: z.string().min(100).max(IMAGE_BASE64_MAX).optional(),
+  image_mime_type: z.enum(['image/jpeg', 'image/png', 'image/heic', 'image/webp']).optional(),
+  // Multi-image array. min(2) so a 1-image request must use the singular
+  // fields — keeps the back-compat path unambiguous and matches the iOS
+  // back-compat behaviour (single capture continues to send singular).
+  images: z.array(PantryParseImagePart).min(2).max(PANTRY_PARSE_MULTI_IMAGE_MAX).optional(),
+  // Legacy/informational. Range tightened to 1..4 (was 1..8). The handler
+  // derives actual count from `images?.length ?? 1`; this value, when sent,
+  // must agree with that count or VAL-01 fires.
+  image_count: z.number().int().min(1).max(PANTRY_PARSE_MULTI_IMAGE_MAX).optional(),
   household_profile_hash: z.string().min(1).max(128).optional(),
-}).strict();
+}).strict().superRefine((body, ctx) => {
+  const hasSingle = body.image_base64 !== undefined && body.image_mime_type !== undefined;
+  const hasMulti = body.images !== undefined && body.images.length >= 2;
+  if (!hasSingle && !hasMulti) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['images'],
+      message: 'must provide image_base64+image_mime_type or images[2..4]',
+    });
+    return; // Skip downstream checks once root invariant fails.
+  }
+  if (hasSingle && hasMulti) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['images'],
+      message: 'cannot provide both image_base64 and images[]; choose one',
+    });
+    return;
+  }
+  // image_count, when sent, is a checksum on the actual payload shape.
+  // Mismatch indicates a buggy client and surfaces clearly rather than
+  // silently disagreeing with the entitlement gate downstream.
+  if (body.image_count !== undefined) {
+    const actual = body.images?.length ?? 1;
+    if (actual !== body.image_count) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['image_count'],
+        message: `image_count=${body.image_count} but payload contains ${actual} image(s)`,
+      });
+    }
+  }
+});
 
 export type PantryParseRequest = z.infer<typeof PantryParseRequest>;
 

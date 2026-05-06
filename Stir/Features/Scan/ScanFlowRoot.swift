@@ -34,6 +34,7 @@ struct ScanFlowRoot: View {
             pantryRepo: pantryRepo,
             householdStore: householdStore,
             entitlements: entitlements,
+            presentPaywall: presentPaywall,
         ))
         self._solveViewModel = State(wrappedValue: SolveViewModel(
             aiDispatch: aiDispatch,

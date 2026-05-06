@@ -57,32 +57,73 @@ final class ScanViewModel {
         }
     }
 
+    /// One captured photo in the in-flow accumulator. SCA-35 multi-image
+    /// scan accepts up to `maxImagesPerScan` photos before submission.
+    /// `data` is the compressed JPEG bytes ready for wire submission;
+    /// `mimeType` is "image/jpeg" today but the field future-proofs for
+    /// PNG/HEIC paths if Apple's HEIF compression flips back on.
+    struct CapturedImage: Identifiable, Sendable, Equatable {
+        let id: UUID
+        let data: Data
+        let mimeType: String
+
+        init(id: UUID = UUID(), data: Data, mimeType: String) {
+            self.id = id
+            self.data = data
+            self.mimeType = mimeType
+        }
+    }
+
+    /// Outcome of `appendCapturedImage`. View consumes this to decide
+    /// whether to keep the live preview (success), bounce silently
+    /// (already capped), or stand back (paywall presented).
+    enum AppendResult: Equatable, Sendable {
+        case appended
+        case capped
+        case blockedByEntitlement
+    }
+
+    /// Hard ceiling on photos per scan. Mirrors the backend Zod cap
+    /// (`PANTRY_PARSE_MULTI_IMAGE_MAX = 4`) and the cost-economics call
+    /// in SCA-35 — covers fridge + 2 pantry shelves + counter without
+    /// pushing per-scan Gemini cost into a problematic range.
+    static let maxImagesPerScan = PantryParseRequest.multiImageMax
+
     private(set) var phase: Phase = .idle
     private(set) var ingredients: [Ingredient] = []
     private(set) var parseID: UUID?
     private(set) var lastLatencyMS: Int?
     private(set) var overallConfidence: Double?
-    /// JPEG bytes of the most recent capture. Held here so the review
-    /// screen can render a thumbnail of "what we looked at" without
-    /// duplicating capture-side state. UIImage decoding happens in the
-    /// view; this is just the wire data. Cleared on `resetToPrimer`.
-    private(set) var capturedImageData: Data?
+    /// Compressed JPEGs accumulated in the capture phase. The first
+    /// element is the "primary" thumbnail rendered in review; the
+    /// review header may also render the rest as a strip when count >
+    /// 1. Cleared on `resetToPrimer`.
+    private(set) var capturedImages: [CapturedImage] = []
+
+    /// Back-compat thumbnail accessor used by the review header.
+    var primaryCapturedImageData: Data? { capturedImages.first?.data }
 
     private let aiDispatch: AIDispatch
     private let pantryRepo: PantryItemRepository
     private let householdStore: CurrentHouseholdStore
     private let entitlements: EntitlementService
+    /// Injected by ScanFlowRoot so the VM can present the multi-image
+    /// scan paywall when a non-Pro user attempts a 2nd photo. Optional
+    /// because tests construct the VM without a paywall surface.
+    private let presentPaywall: (@MainActor (PaywallTrigger) -> Void)?
 
     init(
         aiDispatch: AIDispatch,
         pantryRepo: PantryItemRepository,
         householdStore: CurrentHouseholdStore,
         entitlements: EntitlementService,
+        presentPaywall: (@MainActor (PaywallTrigger) -> Void)? = nil,
     ) {
         self.aiDispatch = aiDispatch
         self.pantryRepo = pantryRepo
         self.householdStore = householdStore
         self.entitlements = entitlements
+        self.presentPaywall = presentPaywall
     }
 
     // MARK: - Phase transitions
@@ -91,32 +132,81 @@ final class ScanViewModel {
         phase = .capturing
     }
 
-    /// Stash the captured JPEG so the review screen can render a
-    /// thumbnail. Caller passes `nil` to clear (e.g. retake flow).
-    func setCapturedImageData(_ data: Data?) {
-        capturedImageData = data
+    /// Append a captured photo to the in-flow accumulator (SCA-35).
+    ///
+    /// Returns:
+    ///   - `.appended` — photo was added; caller can render the new
+    ///     thumbnail and restart the live preview for another shot.
+    ///   - `.capped` — already at `maxImagesPerScan`. Caller should
+    ///     keep the shutter disabled and surface the cap message.
+    ///   - `.blockedByEntitlement` — caller is non-Pro and is trying
+    ///     to add a 2nd+ photo. The paywall is fired via the injected
+    ///     `presentPaywall` handler before this returns; the caller
+    ///     should bail back to live preview without appending.
+    @discardableResult
+    func appendCapturedImage(_ data: Data, mimeType: String) -> AppendResult {
+        if capturedImages.count >= Self.maxImagesPerScan {
+            return .capped
+        }
+        // First photo is unmetered for every tier — multi-image is what
+        // costs more on Gemini. The paywall fires only when the user
+        // tries to add a 2nd+ photo.
+        if !capturedImages.isEmpty,
+           entitlements.canAccess(.multiImageScan) != .allowed
+        {
+            presentPaywall?(.multiImageScanGate)
+            return .blockedByEntitlement
+        }
+        capturedImages.append(CapturedImage(data: data, mimeType: mimeType))
+        return .appended
     }
 
-    /// Submit a captured image for AI parsing.
-    func submitCapturedImage(_ data: Data, mimeType: String) async {
+    /// Remove a captured photo by id. Used by the thumbnail strip's
+    /// per-photo delete affordance.
+    func removeCapturedImage(id: UUID) {
+        capturedImages.removeAll { $0.id == id }
+    }
+
+    /// Submit the accumulated captures for AI parsing. Routes to the
+    /// singular wire shape when count == 1 (back-compat path used by
+    /// every Free/Premium scan and Pro single-photo scan), and to the
+    /// plural wire shape when count >= 2 (Pro multi-image).
+    func submitCapturedImages() async {
+        guard !capturedImages.isEmpty else {
+            Logger.scanFeature.warning("submitCapturedImages called with empty buffer — dropping")
+            return
+        }
         phase = .parsing
         let clientRequestID = UUID()
+        let imageCount = capturedImages.count
+        let totalBytes = capturedImages.reduce(0) { $0 + $1.data.count }
 
         PostHogClient.shared.capture(.scanSubmitted, properties: [
             "client_request_id": clientRequestID.uuidString,
-            "image_bytes": data.count,
+            "image_count": imageCount,
+            "image_bytes": totalBytes,
         ])
 
         do {
             let started = Date()
-            let response = try await aiDispatch.pantryParse(
-                clientRequestID: clientRequestID,
-                imageData: data,
-                mimeType: mimeType,
-                // TODO(step-4): compute household hash so cache invalidates
-                // when DietaryRule/KitchenEquipment changes mid-session.
-                householdProfileHash: nil,
-            )
+            let response: PantryParseResponse
+            if imageCount == 1 {
+                let primary = capturedImages[0]
+                response = try await aiDispatch.pantryParse(
+                    clientRequestID: clientRequestID,
+                    imageData: primary.data,
+                    mimeType: primary.mimeType,
+                    // TODO(step-4): compute household hash so cache invalidates
+                    // when DietaryRule/KitchenEquipment changes mid-session.
+                    householdProfileHash: nil,
+                )
+            } else {
+                response = try await aiDispatch.pantryParseMulti(
+                    clientRequestID: clientRequestID,
+                    images: capturedImages.map { ($0.data, $0.mimeType) },
+                    householdProfileHash: nil,
+                )
+            }
             let latency = Int(Date().timeIntervalSince(started) * 1000)
 
             self.ingredients = response.ingredients.map(Ingredient.init(from:))
@@ -133,6 +223,7 @@ final class ScanViewModel {
             PostHogClient.shared.capture(.scanParseCompleted, properties: [
                 "parse_id": response.parseID.uuidString,
                 "ingredient_count": response.ingredients.count,
+                "image_count": imageCount,
                 "overall_confidence": response.overallConfidence,
                 "parse_confidence_avg": avgConfidence,
                 "latency_ms": latency,
@@ -288,7 +379,7 @@ final class ScanViewModel {
         parseID = nil
         lastLatencyMS = nil
         overallConfidence = nil
-        capturedImageData = nil
+        capturedImages = []
     }
 
     #if DEBUG

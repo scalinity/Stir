@@ -1650,7 +1650,7 @@ See §12.3. In addition:
 | `camera_permission_result`         | status, context                                                                                | permission funnel          | Onboarding              |
 | `scan_started`                     | source=live/sample                                                                             | core funnel start          | Core Loop               |
 | `scan_submitted`                   | image_count, source                                                                            | usage volume               | Core Loop               |
-| `scan_parse_completed`             | parsed_count, low_confidence_count, latency_ms                                                 | scan quality               | Core Loop               |
+| `scan_parse_completed`             | parsed_count, low_confidence_count, latency_ms, image_count                                    | scan quality               | Core Loop               |
 | `ingredient_corrected`             | action=add/remove/rename, count                                                                | flywheel capture           | Flywheel                |
 | `constraints_set`                  | time_bucket, goal, use_first_flag                                                              | solve context              | Core Loop               |
 | `dinner_solve_requested`           | pantry_count, constraint_count                                                                 | solve attempt count        | Core Loop               |

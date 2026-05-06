@@ -32,13 +32,42 @@ actor AIDispatch {
         mimeType: String,
         householdProfileHash: String?,
     ) async throws -> PantryParseResponse {
-        let body = PantryParseRequest(
+        let body = PantryParseRequest.singleImage(
             clientRequestID: clientRequestID,
-            imageBase64: imageData.base64EncodedString(),
-            imageMimeType: mimeType,
-            imageCount: 1,
+            imageData: imageData,
+            mimeType: mimeType,
             householdProfileHash: householdProfileHash,
         )
+        return try await sendPantryParse(body, clientRequestID: clientRequestID, imageCount: 1)
+    }
+
+    /// SCA-35 multi-image scan. `images.count` must be in 2...4 — enforced
+    /// at DTO construction. Pro-only — backend returns ENT-MULTI-IMAGE-01
+    /// (mapped to `StirError.entitlementRequired`) for non-Pro callers, so
+    /// iOS callers should gate the call site through
+    /// `EntitlementService.canAccess(.multiImageScan)` and surface the
+    /// paywall before invoking.
+    func pantryParseMulti(
+        clientRequestID: UUID,
+        images: [(data: Data, mimeType: String)],
+        householdProfileHash: String?,
+    ) async throws -> PantryParseResponse {
+        let body = PantryParseRequest.multiImage(
+            clientRequestID: clientRequestID,
+            images: images,
+            householdProfileHash: householdProfileHash,
+        )
+        return try await sendPantryParse(body, clientRequestID: clientRequestID, imageCount: images.count)
+    }
+
+    /// Shared HTTP path for the singular and multi-image flows. Centralised
+    /// so wire-level concerns (timeout, encoding, logging) don't drift
+    /// between the two.
+    private func sendPantryParse(
+        _ body: PantryParseRequest,
+        clientRequestID: UUID,
+        imageCount: Int,
+    ) async throws -> PantryParseResponse {
         let url = config.supabase.url.appendingPathComponent("/functions/v1/pantry-parse")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -50,10 +79,12 @@ actor AIDispatch {
             throw StirError.validation(fieldErrors: [], message: "failed to encode pantry-parse body: \(error.localizedDescription)")
         }
 
-        Logger.aiDispatch.info("pantry_parse_dispatch request_id=\(clientRequestID.uuidString, privacy: .public)")
+        Logger.aiDispatch.info(
+            "pantry_parse_dispatch request_id=\(clientRequestID.uuidString, privacy: .public) image_count=\(imageCount, privacy: .public)",
+        )
         let response: PantryParseResponse = try await session.performAuthenticated(request)
         Logger.aiDispatch.info(
-            "pantry_parse_complete ingredients=\(response.ingredients.count, privacy: .public) retry_count=\(response.retryCount, privacy: .public)",
+            "pantry_parse_complete ingredients=\(response.ingredients.count, privacy: .public) retry_count=\(response.retryCount, privacy: .public) image_count=\(imageCount, privacy: .public)",
         )
         return response
     }

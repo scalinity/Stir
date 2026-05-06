@@ -27,7 +27,10 @@ final class ScanViewModelTests: XCTestCase {
         household = try repo.ensureHouseholdProfile(for: "install:test-\(UUID().uuidString)")
     }
 
-    private func makeVM() -> ScanViewModel {
+    private func makeVM(
+        tier: Tier = .free,
+        presentPaywall: (@MainActor (PaywallTrigger) -> Void)? = nil,
+    ) -> ScanViewModel {
         // Use a placeholder AppConfig-free AIDispatch by wiring through a
         // real SupabaseSessionClient. None of the tests below call the
         // network path; we only need a non-nil reference.
@@ -49,11 +52,23 @@ final class ScanViewModelTests: XCTestCase {
         let store = CurrentHouseholdStore()
         store.set(household)
         let entitlements = EntitlementService(keychain: MockKeychain())
+        if tier != .free {
+            entitlements.hydrate(from: BootstrapResponse.Entitlements(
+                tier: tier,
+                billingState: .active,
+                isTrial: false,
+                expiresAt: nil,
+                voiceEnabled: tier != .free,
+                billingRetryBanner: false,
+                quotas: [],
+            ))
+        }
         return ScanViewModel(
             aiDispatch: ai,
             pantryRepo: PantryItemRepository(controller: controller),
             householdStore: store,
             entitlements: entitlements,
+            presentPaywall: presentPaywall,
         )
     }
 
@@ -105,6 +120,94 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(vm.phase, .idle)
         XCTAssertNil(vm.parseID)
     }
+
+    // MARK: - SCA-35 multi-image accumulator
+
+    /// Synthetic JPEG bytes — magic bytes only, plus filler. Real
+    /// validation happens server-side; the VM doesn't decode these.
+    private func fakeJPEG(byte: UInt8 = 0xAA) -> Data {
+        var bytes: [UInt8] = [0xFF, 0xD8, 0xFF]
+        bytes.append(contentsOf: Array(repeating: byte, count: 256))
+        return Data(bytes)
+    }
+
+    func test_appendCapturedImage_firstShotAppendsForFreeTier() {
+        let vm = makeVM(tier: .free)
+        let result = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        XCTAssertEqual(result, .appended)
+        XCTAssertEqual(vm.capturedImages.count, 1)
+    }
+
+    func test_appendCapturedImage_secondShotBlockedForFreeTier_firesPaywall() {
+        var paywallTriggers: [PaywallTrigger] = []
+        let vm = makeVM(tier: .free, presentPaywall: { trigger in
+            paywallTriggers.append(trigger)
+        })
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0xAA), mimeType: "image/jpeg")
+        let result = vm.appendCapturedImage(fakeJPEG(byte: 0xBB), mimeType: "image/jpeg")
+        XCTAssertEqual(result, .blockedByEntitlement)
+        XCTAssertEqual(vm.capturedImages.count, 1, "blocked append should not mutate the buffer")
+        XCTAssertEqual(paywallTriggers, [.multiImageScanGate])
+    }
+
+    func test_appendCapturedImage_secondShotBlockedForPremiumTier() {
+        var paywallTriggers: [PaywallTrigger] = []
+        let vm = makeVM(tier: .premium, presentPaywall: { trigger in
+            paywallTriggers.append(trigger)
+        })
+        _ = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        let result = vm.appendCapturedImage(fakeJPEG(byte: 0xBB), mimeType: "image/jpeg")
+        XCTAssertEqual(result, .blockedByEntitlement)
+        XCTAssertEqual(paywallTriggers, [.multiImageScanGate])
+    }
+
+    func test_appendCapturedImage_proTierAppendsUpToMax() {
+        let vm = makeVM(tier: .pro)
+        for i in 0 ..< ScanViewModel.maxImagesPerScan {
+            let result = vm.appendCapturedImage(fakeJPEG(byte: UInt8(i)), mimeType: "image/jpeg")
+            XCTAssertEqual(result, .appended, "shot \(i + 1) should append")
+        }
+        XCTAssertEqual(vm.capturedImages.count, ScanViewModel.maxImagesPerScan)
+    }
+
+    func test_appendCapturedImage_proTierCappedAtMax() {
+        let vm = makeVM(tier: .pro)
+        for _ in 0 ..< ScanViewModel.maxImagesPerScan {
+            _ = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        }
+        let result = vm.appendCapturedImage(fakeJPEG(byte: 0xFF), mimeType: "image/jpeg")
+        XCTAssertEqual(result, .capped)
+        XCTAssertEqual(vm.capturedImages.count, ScanViewModel.maxImagesPerScan)
+    }
+
+    func test_removeCapturedImage_removesById() {
+        let vm = makeVM(tier: .pro)
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x11), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x22), mimeType: "image/jpeg")
+        let secondID = vm.capturedImages[1].id
+        vm.removeCapturedImage(id: secondID)
+        XCTAssertEqual(vm.capturedImages.count, 1)
+        XCTAssertNotEqual(vm.capturedImages.first?.id, secondID)
+    }
+
+    func test_resetToPrimer_clearsCapturedImages() {
+        let vm = makeVM(tier: .pro)
+        _ = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0xBB), mimeType: "image/jpeg")
+        vm.resetToPrimer()
+        XCTAssertTrue(vm.capturedImages.isEmpty)
+        XCTAssertNil(vm.primaryCapturedImageData)
+    }
+
+    func test_primaryCapturedImageData_returnsFirstAppendedImage() {
+        let vm = makeVM(tier: .pro)
+        let firstData = fakeJPEG(byte: 0x11)
+        _ = vm.appendCapturedImage(firstData, mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x22), mimeType: "image/jpeg")
+        XCTAssertEqual(vm.primaryCapturedImageData, firstData)
+    }
+
+    // MARK: - Confirm
 
     func test_confirmFromReview_persistsPantryItemsAndReturnsLite() async throws {
         let vm = makeVM()
