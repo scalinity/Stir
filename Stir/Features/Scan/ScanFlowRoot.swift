@@ -18,6 +18,19 @@ struct ScanFlowRoot: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// Needed for the `activeCookLaunch` observer below — when
+    /// `DishPreviewView`'s Start Cooking handler flips that property,
+    /// we MUST drop this cover so iOS can present TonightHome's Cook
+    /// Mode cover (concurrent `.fullScreenCover`s queue the second
+    /// silently otherwise — see RootCoordinator.activeCookLaunch
+    /// doc-comment + the matching observers in SolveAgainRoot /
+    /// OtherOptionsRoot). DishPreviewView's own `dismiss()` resolves
+    /// inside the navigationDestination and pops the nav stack one
+    /// level (back to DinnerOptionsView) instead of dismissing this
+    /// cover; observing the launch signal at the body root, where
+    /// `dismiss()` does map to the cover, is the reliable path.
+    @Environment(RootCoordinator.self) private var coordinator
+
     private let cameraService: CameraService
 
     init(
@@ -107,6 +120,15 @@ struct ScanFlowRoot: View {
                 .interactiveDismissDisabled(false)
             }
             .interactiveDismissDisabled(path.contains(.capture))
+        }
+        // Cook Mode handoff — mirrors SolveAgainRoot / OtherOptionsRoot.
+        // When DishPreviewView's Start Cooking sets activeCookLaunch,
+        // drop this cover so TonightHome's `.fullScreenCover(item:
+        // $activeCookLaunch)` can present unobstructed.
+        .onChange(of: coordinator.activeCookLaunch) { _, new in
+            if new != nil {
+                dismiss()
+            }
         }
     }
 
