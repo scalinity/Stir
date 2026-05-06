@@ -12,16 +12,21 @@
 -- canary is unnecessary because single-image traffic is the dominant
 -- path and the new instruction is additive (one extra paragraph).
 --
--- Idempotency: ON CONFLICT (feature_key, version) DO NOTHING.
-
--- ---------------------------------------------------------------------------
--- Retire v1.0.0 default — exactly one is_default per feature_key.
--- ---------------------------------------------------------------------------
-
-UPDATE prompt_versions
-   SET is_default = FALSE
- WHERE feature_key = 'pantry_parse'
-   AND version = '1.0.0';
+-- ATOMICITY (SCA-36 W1, hardened post-deploy):
+--   The original draft of this migration ran `UPDATE … is_default=FALSE`
+--   BEFORE `INSERT … ON CONFLICT DO NOTHING`. If v1.1.0 already existed
+--   (e.g. a rollback state where v1.1.0 was demoted), the INSERT would
+--   no-op and the feature_key would be left with NO default — every
+--   pantry-parse request would die with AI-01. The hardened pattern is:
+--     1. INSERT v1.1.0 with whatever defaults; ON CONFLICT DO NOTHING.
+--     2. UPDATE: set is_default = (version = '1.1.0') across all rows
+--        for feature_key='pantry_parse'. This unconditionally promotes
+--        v1.1.0 and demotes everything else in one atomic statement.
+--   The migration is now idempotent under any prior state — re-runs are
+--   safe and always converge to "exactly one is_default=TRUE for v1.1.0".
+--
+-- Idempotency: ON CONFLICT (feature_key, version) DO NOTHING + the
+-- final UPDATE re-asserts the desired final state.
 
 -- ---------------------------------------------------------------------------
 -- v1.1.0 — pantry_parse with multi-image merge instruction
@@ -69,3 +74,13 @@ $TEMPLATE$,
   100
 )
 ON CONFLICT (feature_key, version) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Promote v1.1.0 + demote all other versions atomically. Re-asserts the
+-- "exactly one is_default per feature_key" invariant regardless of prior
+-- state. See ATOMICITY note in the header.
+-- ---------------------------------------------------------------------------
+
+UPDATE prompt_versions
+   SET is_default = (version = '1.1.0')
+ WHERE feature_key = 'pantry_parse';

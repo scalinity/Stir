@@ -38,41 +38,67 @@ actor AIDispatch {
             mimeType: mimeType,
             householdProfileHash: householdProfileHash,
         )
-        return try await sendPantryParse(body, clientRequestID: clientRequestID, imageCount: 1)
+        return try await sendPantryParse(body, clientRequestID: clientRequestID)
     }
 
     /// SCA-35 multi-image scan. `images.count` must be in 2...4 — enforced
-    /// at DTO construction. Pro-only — backend returns ENT-MULTI-IMAGE-01
-    /// (mapped to `StirError.entitlementRequired`) for non-Pro callers, so
-    /// iOS callers should gate the call site through
-    /// `EntitlementService.canAccess(.multiImageScan)` and surface the
-    /// paywall before invoking.
+    /// at DTO construction (throws `StirError.validation` if violated;
+    /// in DEBUG it also asserts). Pro-only — backend returns
+    /// ENT-MULTI-IMAGE-01 (mapped to `StirError.entitlementRequired`)
+    /// for non-Pro callers, so iOS callers should gate the call site
+    /// through `EntitlementService.canAccess(.multiImageScan)` and
+    /// surface the paywall before invoking.
     func pantryParseMulti(
         clientRequestID: UUID,
         images: [(data: Data, mimeType: String)],
         householdProfileHash: String?,
     ) async throws -> PantryParseResponse {
-        let body = PantryParseRequest.multiImage(
+        let body = try PantryParseRequest.multiImage(
             clientRequestID: clientRequestID,
             images: images,
             householdProfileHash: householdProfileHash,
         )
-        return try await sendPantryParse(body, clientRequestID: clientRequestID, imageCount: images.count)
+        return try await sendPantryParse(body, clientRequestID: clientRequestID)
     }
 
     /// Shared HTTP path for the singular and multi-image flows. Centralised
     /// so wire-level concerns (timeout, encoding, logging) don't drift
-    /// between the two.
+    /// between the two. SCA-36 W11: image count derived from the body
+    /// rather than passed separately so there's a single source of truth.
     private func sendPantryParse(
         _ body: PantryParseRequest,
         clientRequestID: UUID,
-        imageCount: Int,
     ) async throws -> PantryParseResponse {
+        // SCA-36 W11: image count is whatever the body says it is.
+        // Either `images.count` (multi) or 1 (singular path always
+        // sets `imageBase64`). Anything else is a malformed body and
+        // would fail Zod server-side anyway — log 0 to surface the
+        // anomaly.
+        let imageCount: Int
+        if let images = body.images {
+            imageCount = images.count
+        } else if body.imageBase64 != nil {
+            imageCount = 1
+        } else {
+            imageCount = 0
+        }
+
         let url = config.supabase.url.appendingPathComponent("/functions/v1/pantry-parse")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "content-type")
         request.addValue("application/json", forHTTPHeaderField: "accept")
+        // SCA-36 W3: explicit timeout. Other AIDispatch endpoints set
+        // 10-20s; pantry-parse needs a wider budget because (a) multi-
+        // image upload of ~1.5-2.5 MB on cellular can take 3-8s, and
+        // (b) backend retries Gemini once on schema-validation drift,
+        // each Gemini attempt up to 30s. 90s covers worst-case
+        // single-image (cellular + retry) and multi-image (no retry —
+        // see W4 — but larger upload). URLSession's 60s default would
+        // truncate the 2nd Gemini attempt + return NSURLErrorTimedOut
+        // before the cache write landed, leading to retry-with-fresh-id
+        // and 2× billing.
+        request.timeoutInterval = 90
         do {
             request.httpBody = try JSONEncoder.stir.encode(body)
         } catch {

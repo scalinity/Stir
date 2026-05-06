@@ -3,19 +3,32 @@
 //
 // Flow (happy path):
 //   1. Auth: session JWT (AUTH-01 on failure)
+//   1a. Body-size pre-check (SCA-36 W2): non-Pro callers above ~12MiB
+//       short-circuit to ENT-MULTI-IMAGE-01 BEFORE we accept the body.
 //   2. Body: Zod parse (VAL-01 on failure)
 //   3. Idempotency: ai_response_cache replay if client_request_id known
 //   4. Rate limit: ip:pantry_parse_daily (RATE-01)
 //   5. Entitlement: multi-image requires Pro (ENT-MULTI-IMAGE-01)
+//   5a. Image bytes: decode + magic-byte validation per image
 //   6. Kill switch: disable_scan_parse → AI-01 with degraded copy
-//   7. Prompt: read active v1.0.0 for pantry_parse
-//   8. Call Gemini 3 Flash with image + JSON schema
-//   9. Validate output: schema + confidence enum; retry ONCE on failure
+//   7. Prompt: read active v1.1.0 for pantry_parse
+//   8. Call Gemini 3 Flash with image(s) + JSON schema
+//   9. Validate output: schema + confidence enum;
+//      retry ONCE on single-image failure, NO retry on multi-image
+//      (SCA-36 W4 — multi-image retry doubles a $0.02 call).
 //  10. Log ai_request_log; cache response; return.
 //
 // Scan is unmetered across tiers — cost is tracked in ai_request_log but
 // no per-user quota row is decremented (per CLAUDE.md §usage_counters).
 // IP rate limit stops abuse.
+//
+// SCA-36 S19 — memory envelope (4-image Pro request):
+//   (a) raw req.text() ~40 MB        (b) Zod-parsed body keeping images[] ~40 MB
+//   (c) incomingImages[] reshape ~40 MB references (no copy, same backing)
+//   (d) per-image Uint8Array decode × 4 = ~24 MB
+//   peak isolate heap: ~150 MB. Supabase Edge Function default tier is
+//   256 MB. A future bump to 8 photos would push peak to ~300 MB and is
+//   NOT safe on the default tier — would need a memory-tier upgrade.
 
 import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
@@ -142,6 +155,44 @@ Deno.serve(async (req) => {
   }
 
   const userLog = await createLogger(requestId, endpoint, claims.canonical_user_key);
+
+  // ---------------------------------------------------------------------
+  // 1a. Body-size pre-check (SCA-36 W2).
+  //
+  // A non-Pro caller sending `images: [4 × 10MB-base64]` would force
+  // the Edge Function to buffer + Zod-parse ~40 MB before being told
+  // ENT-MULTI-IMAGE-01 by the entitlement gate downstream. Read
+  // Content-Length and short-circuit non-Pro callers above the
+  // single-image budget BEFORE we accept the body. Pro callers retain
+  // the full 40 MB ceiling (Zod still bounds each image at 10 MB
+  // base64 and total max 4 images = 40 MB).
+  //
+  // Cap: ~12 MiB — a single image at the 10 MB base64 cap plus JSON
+  // overhead and headroom for client-side encoding variance.
+  // ---------------------------------------------------------------------
+  const NON_PRO_BODY_CAP = 12 * 1024 * 1024;
+  const contentLengthHeader = req.headers.get('content-length');
+  const declaredContentLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : NaN;
+  if (
+    claims.tier !== 'pro'
+    && Number.isFinite(declaredContentLength)
+    && declaredContentLength > NON_PRO_BODY_CAP
+  ) {
+    userLog.warn('non_pro_oversized_body', {
+      tier: claims.tier,
+      content_length: declaredContentLength,
+    });
+    return jsonError(
+      ErrorCode.ENT_MULTI_IMAGE_01,
+      403,
+      {
+        message: 'Multi-image scan is available on Pro.',
+        required_tier: 'pro',
+        current_tier: claims.tier,
+      },
+      requestId,
+    );
+  }
 
   // ---------------------------------------------------------------------
   // 2. Body validation
@@ -327,7 +378,17 @@ Deno.serve(async (req) => {
     dataBase64: p.base64,
   }));
 
-  for (let attempt = 0; attempt <= 1; attempt++) {
+  // SCA-36 W4: bound retries on multi-image. The retry-once loop
+  // helps single-image scans recover from the rare schema-validation
+  // drift; on multi-image the cost of re-sending 4 images doubles a
+  // ~$0.02 call to ~$0.04, which is meaningful at the per-IP daily cap
+  // budget. Schema-validation failures on Gemini 3 Flash with
+  // `responseSchema` enforcement are uncommon enough that a single
+  // attempt + AI-02 surfaced to the user is the right tradeoff at the
+  // higher cost-per-call.
+  const maxAttempts = isMultiImage ? 1 : 2;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const result = await geminiGenerate({
         model: MODEL,
@@ -360,7 +421,7 @@ Deno.serve(async (req) => {
           finish_reason: result.finishReason,
           err: String(schemaErr),
         });
-        if (attempt === 0) {
+        if (attempt < maxAttempts - 1) {
           retryCount++;
           continue;
         }
@@ -369,7 +430,7 @@ Deno.serve(async (req) => {
       lastErr = err;
       if (err instanceof GeminiError && err.status >= 500) {
         userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
-        if (attempt === 0) {
+        if (attempt < maxAttempts - 1) {
           retryCount++;
           continue;
         }
@@ -385,7 +446,12 @@ Deno.serve(async (req) => {
     // distinction would be useful (upstream vs model drift), but not
     // different enough to warrant separate status codes in step 3.
     const status = 502;
-    userLog.error('pantry_parse_failed_after_retry', lastErr, { retry_count: retryCount });
+    // SCA-36 S6: include image_count so PostHog cost-attribution
+    // distinguishes 1-image vs 4-image failures.
+    userLog.error('pantry_parse_failed_after_retry', lastErr, {
+      retry_count: retryCount,
+      image_count: imageCount,
+    });
 
     // Log failed attempt for cost observability.
     const failedCostUsd = computeCostUSD(MODEL, {

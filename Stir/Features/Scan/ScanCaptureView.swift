@@ -6,14 +6,19 @@
 // by default".
 //
 // SCA-35: in-flow accumulator. Each shutter tap captures, freezes the
-// still briefly, appends to ScanViewModel.capturedImages, and restarts
-// the live preview for the next shot. The user can capture up to
-// `ScanViewModel.maxImagesPerScan` photos (Pro: 4; Free/Premium: 1
-// before paywall fires) then taps "Done · N photos" to submit. A
-// thumbnail strip below the live preview shows what's been captured
-// and lets the user delete a shot.
+// still briefly (~350 ms — see `freezeDurationNanos`), appends to
+// ScanViewModel.capturedImages, and restarts the live preview for the
+// next shot. The user can capture up to `ScanViewModel.maxImagesPerScan`
+// photos (Pro: 4; Free/Premium: 1 before paywall fires) then taps
+// "Done · N photos" to submit.
+//
+// SCA-36 W13: bottom chrome is a 2-track layout — thumbnail strip and
+// Done button on their own rows ABOVE the centered shutter circle.
+// The earlier overlay-trailing layout collided with the 74pt shutter
+// on regular-width iPhones once "Done · N photos" passed ~5 chars.
 
 import AVFoundation
+import OSLog
 import SwiftUI
 
 struct ScanCaptureView: View {
@@ -21,11 +26,17 @@ struct ScanCaptureView: View {
     let cameraService: CameraService
     let onCaptured: () -> Void
 
+    /// Freeze duration after a successful shutter — visual confirmation
+    /// the shot landed before the live preview restarts. 350 ms
+    /// registers without dragging the multi-shot cadence.
+    private static let freezeDurationNanos: UInt64 = 350_000_000
+
     @State private var isCapturing = false
-    /// Most recent capture, frozen on screen for ~400ms after the
-    /// shutter resolves so the user gets visual confirmation that the
-    /// shot landed before the live preview restarts. Cleared on
-    /// re-entry and after the freeze-and-append cycle completes.
+    /// Most recent capture, frozen on screen for `freezeDurationNanos`
+    /// after the shutter resolves. Cleared on re-entry, after the
+    /// freeze-and-append cycle completes, and before navigation away
+    /// from the capture screen so the decoded UIImage isn't retained
+    /// alongside the next screen's hosted thumbnail (SCA-36 W20).
     @State private var freezeImage: UIImage?
     /// True while we are actively running an AI parse on the
     /// accumulated captures. Banner copy + button disablement read
@@ -34,8 +45,7 @@ struct ScanCaptureView: View {
     @State private var isSubmitting = false
     /// Holds the capture-flow Task so we can cancel it on view dismiss.
     /// Without this, a back-swipe during AI parse would let the task
-    /// run to completion and push the review screen onto a stack the
-    /// user already navigated away from.
+    /// run to completion and push the review screen onto a popped stack.
     @State private var captureTask: Task<Void, Never>?
     @State private var submitTask: Task<Void, Never>?
 
@@ -63,10 +73,15 @@ struct ScanCaptureView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .task {
-            // Re-entry from a swipe-back: discard prior capture state
-            // and restart the live session.
+            // SCA-36 C2: re-entry from a swipe-back means a fresh
+            // scan, not a continuation. Clear the prior buffer so a
+            // non-Pro user can't trigger the multi-image paywall on
+            // what they perceive as their first shutter, and so a
+            // Pro user doesn't silently submit a stale photo merged
+            // with newly-captured ones.
             freezeImage = nil
             isSubmitting = false
+            viewModel.clearCapturedImages()
             viewModel.enterCapturing()
             do {
                 try await cameraService.start()
@@ -75,8 +90,11 @@ struct ScanCaptureView: View {
             }
         }
         .onDisappear {
-            // Cancel any in-flight capture/submit so a pending parse doesn't
-            // resolve and push the review screen onto a popped stack.
+            // Cancel any in-flight capture/submit. `submit()` checks
+            // `Task.isCancelled` after the AI request returns and
+            // bails before navigating, which is the SCA-36 C1 fix —
+            // without that, a back-swipe-mid-parse would push the
+            // review screen onto a popped stack.
             captureTask?.cancel()
             captureTask = nil
             submitTask?.cancel()
@@ -84,15 +102,14 @@ struct ScanCaptureView: View {
             Task { await cameraService.stop() }
         }
         // SCA-19 — full-screen scan-capture tutorial. Suppressed during
-        // submission and while the freeze still is up so the cover
-        // doesn't fight the in-progress task UI. Tutorial's interactive
-        // miniatures stand in for the live camera surface.
+        // the parsing phase + while the freeze still is up. SCA-36 W14:
+        // `isSubmitting` previously gated this in addition to phase,
+        // but `submitCapturedImages` flips phase to .parsing, so the
+        // phase check already covers submit; redundant clause dropped.
         .tutorial(
             key: .scanCapture,
             content: { ScanCaptureTutorial() },
-            shouldPresent: viewModel.phase != .parsing
-                && !isSubmitting
-                && freezeImage == nil,
+            shouldPresent: viewModel.phase != .parsing && freezeImage == nil,
         )
     }
 
@@ -154,23 +171,32 @@ struct ScanCaptureView: View {
         .accessibilityLabel("Looking at your kitchen")
     }
 
+    // MARK: - Bottom chrome
+    //
+    // SCA-36 W13: 2-track layout. The thumbnail strip + Done button
+    // sit ABOVE the shutter on their own rows so the Done button
+    // (which scales with photo-count copy length — "Done · 4 photos"
+    // is ~140pt wide) can never collide with the centered 74pt
+    // shutter circle. The earlier overlay-trailing layout collided
+    // visibly on iPhone 17-class screens (~390pt wide) once a single
+    // photo had been captured.
+
     @ViewBuilder
     private var bottomChrome: some View {
         VStack(spacing: 16) {
             if !viewModel.capturedImages.isEmpty {
                 thumbnailStrip
+                doneButtonRow
             }
-            HStack(alignment: .center) {
-                Spacer()
-                captureButton
-                Spacer()
-            }
-            .overlay(alignment: .trailing) {
-                if !viewModel.capturedImages.isEmpty {
-                    doneButton
-                        .padding(.trailing, 24)
-                }
-            }
+            captureButton
+        }
+    }
+
+    private var doneButtonRow: some View {
+        HStack {
+            Spacer()
+            doneButton
+                .padding(.trailing, 24)
         }
     }
 
@@ -202,6 +228,13 @@ struct ScanCaptureView: View {
 
     private func thumbnailCell(_ captured: ScanViewModel.CapturedImage) -> some View {
         ZStack(alignment: .topTrailing) {
+            // SCA-36 S21 (deferred): `UIImage(data:)` decodes lazily;
+            // the decoded bitmap is only retained while the View is
+            // realized. With the strip rendering 1-4 thumbnails of
+            // 1600pt-long-edge JPEGs (~250 KB each), redraws on
+            // unrelated state changes (capture phase, freeze toggle)
+            // re-decode at <50ms total. Future opt: cache the decoded
+            // UIImage on `CapturedImage` at append time.
             if let image = UIImage(data: captured.data) {
                 Image(uiImage: image)
                     .resizable()
@@ -253,6 +286,14 @@ struct ScanCaptureView: View {
         .accessibilityLabel("Capture photo")
     }
 
+    /// Shutter disabled when:
+    ///   - capture in flight (would race),
+    ///   - submit in flight (multi-image AI parse running),
+    ///   - VM phase is .parsing,
+    ///   - buffer is at the photo cap.
+    /// Tier check is intentionally NOT here — SCA-36 W5 puts the
+    /// pre-shutter entitlement gate inside `capture()` so the paywall
+    /// fires BEFORE the camera runs through stop+freeze+restart.
     private var shutterDisabled: Bool {
         isCapturing
             || isSubmitting
@@ -286,6 +327,23 @@ struct ScanCaptureView: View {
 
     private func capture() async {
         guard !isCapturing else { return }
+
+        // SCA-36 W5: pre-shutter entitlement gate. Without this, a
+        // non-Pro user attempting their 2nd shot would watch the
+        // camera capture, freeze for 350 ms, stop, then surface the
+        // paywall — burning ~500 ms of confusion. Surface the paywall
+        // BEFORE the capture cycle so the camera never stops.
+        switch viewModel.canAppendCapturedImage() {
+        case .appended:
+            break
+        case .capped:
+            // Shutter should be disabled at the cap; defensive bail.
+            return
+        case .blockedByEntitlement:
+            viewModel.firePaywallForMultiImageGate()
+            return
+        }
+
         isCapturing = true
         defer { isCapturing = false }
 
@@ -297,9 +355,7 @@ struct ScanCaptureView: View {
 
             // Two parallel detached tasks: one rasterizes the display
             // image (fast — needed for the on-screen freeze); one
-            // resizes + re-encodes for the AI submit (heavier). The
-            // display task usually wins by ~100-200ms so the still
-            // appears well before the append+restart cycle.
+            // resizes + re-encodes for the AI submit (heavier).
             async let displayResult: UIImage? = Task.detached(priority: .userInitiated) {
                 UIImage(data: fullData)?.preparingForDisplay()
             }.value
@@ -309,8 +365,6 @@ struct ScanCaptureView: View {
             }.value
 
             // Stop the live session while we render the freeze + append.
-            // We restart it after appending — the user is still in the
-            // capture phase and may shoot another photo.
             await cameraService.stop()
 
             if let display = await displayResult {
@@ -327,34 +381,24 @@ struct ScanCaptureView: View {
             try Task.checkCancellation()
 
             // Hold the freeze briefly so the user sees confirmation.
-            // 350ms is enough to register without dragging the
-            // multi-shot cadence.
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            try? await Task.sleep(nanoseconds: Self.freezeDurationNanos)
             try Task.checkCancellation()
 
             let result = viewModel.appendCapturedImage(compressed, mimeType: "image/jpeg")
             freezeImage = nil
 
-            switch result {
-            case .appended:
-                // Restart camera for the next shot (unless we're capped,
-                // in which case the shutter is disabled anyway).
-                if viewModel.capturedImages.count < ScanViewModel.maxImagesPerScan {
-                    try? await cameraService.start()
-                } else {
-                    // At cap: keep the live preview running so the user
-                    // can re-frame for retake-via-X-then-add. The Done
-                    // button is the dominant CTA here.
-                    try? await cameraService.start()
-                }
-            case .capped:
-                // Defensive — shutter should be disabled before this fires.
-                try? await cameraService.start()
-            case .blockedByEntitlement:
-                // Paywall fired by the VM. Restart camera so the user
-                // sees live preview when they dismiss the paywall.
-                try? await cameraService.start()
+            // SCA-36 W5/W6/W9: pre-shutter gate (above) means
+            // `.appended` is the only expected post-capture result.
+            // The other arms are defensive for SwiftUI re-render
+            // races. All three branches just restart the camera —
+            // paywall is NOT fired here (already handled at the pre-
+            // shutter site, or shutter was disabled).
+            if result != .appended {
+                Logger.scanFeature.warning(
+                    "appendCapturedImage post-capture race: \(String(describing: result), privacy: .public)",
+                )
             }
+            try? await cameraService.start()
         } catch is CancellationError {
             // View was dismissed mid-capture; nothing to do. The
             // .onDisappear handler already stopped the camera.
@@ -372,24 +416,37 @@ struct ScanCaptureView: View {
         // Stop the live session — the user is done capturing.
         await cameraService.stop()
 
-        // Render the most recent capture as the freeze surface so the
-        // parsing banner has a stable photo behind it instead of a
-        // black void or stale preview frame.
-        if let primary = viewModel.capturedImages.first?.data,
-           let image = UIImage(data: primary)?.preparingForDisplay()
-        {
-            freezeImage = image
+        // SCA-36 W7: rasterize off-main. preparingForDisplay() does a
+        // CG decode that would otherwise block the main actor (~50ms
+        // on a 1600pt JPEG). Other capture-path detached tasks already
+        // use this pattern.
+        if let primary = viewModel.capturedImages.first?.data {
+            let prepared = await Task.detached(priority: .userInitiated) {
+                UIImage(data: primary)?.preparingForDisplay()
+            }.value
+            freezeImage = prepared
         }
 
         await viewModel.submitCapturedImages()
 
-        // Always navigate to review on a terminal phase — the
-        // review screen owns both the success-chip path and the
-        // error-card path. Avoids leaving the user staring at a
-        // restarted live preview after a parse error with no
-        // explanation.
+        // SCA-36 C1: bail cleanly if the view was dismissed mid-submit.
+        // Without this, a back-swipe-during-parse cancels the URLSession
+        // call (URLError(.cancelled)), the VM's catch detects
+        // Task.isCancelled and returns without flipping phase, control
+        // returns here with phase still .parsing → switch falls into
+        // the default arm. The .review/.error guard below would have
+        // pushed the review screen onto a popped stack otherwise.
+        if Task.isCancelled {
+            freezeImage = nil
+            return
+        }
+
+        // SCA-36 W20: clear the decoded UIImage before navigation so
+        // the ~3-5MB RGBA buffer isn't retained alongside the next
+        // screen's hosted thumbnail during the transition.
         switch viewModel.phase {
         case .review, .error:
+            freezeImage = nil
             onCaptured()
         default:
             // Shouldn't happen — defensive reset back to live preview

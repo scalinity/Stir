@@ -150,6 +150,73 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(paywallTriggers, [.multiImageScanGate])
     }
 
+    func test_appendCapturedImage_paywallFiresPerTap_notDebounced() {
+        // SCA-36 W15: pin the "every 2nd-shot tap fires a fresh paywall
+        // trigger" semantic. The capture-view's pre-shutter gate
+        // (canAppendCapturedImage) makes rapid taps unlikely in
+        // practice — the paywall presentation itself blocks the camera —
+        // but the VM-level invariant is that each call to
+        // appendCapturedImage is a distinct user intent and gets its
+        // own trigger emit. Changing this to "fire once per session"
+        // would require explicit debounce state and should land via a
+        // deliberate spec change.
+        var paywallTriggers: [PaywallTrigger] = []
+        let vm = makeVM(tier: .free, presentPaywall: { trigger in
+            paywallTriggers.append(trigger)
+        })
+        _ = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x11), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x22), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x33), mimeType: "image/jpeg")
+        XCTAssertEqual(
+            paywallTriggers,
+            [.multiImageScanGate, .multiImageScanGate, .multiImageScanGate],
+            "3 blocked taps should produce 3 paywall presentations",
+        )
+        XCTAssertEqual(vm.capturedImages.count, 1)
+    }
+
+    func test_canAppendCapturedImage_doesNotMutateOrFirePaywall() {
+        // SCA-36 W5: pre-shutter probe is non-mutating and does NOT
+        // fire the paywall — the capture view fires it explicitly via
+        // firePaywallForMultiImageGate() on the shutter path, BEFORE
+        // running the camera through stop+freeze+restart.
+        var paywallTriggers: [PaywallTrigger] = []
+        let vm = makeVM(tier: .free, presentPaywall: { trigger in
+            paywallTriggers.append(trigger)
+        })
+        _ = vm.appendCapturedImage(fakeJPEG(), mimeType: "image/jpeg")
+        let pre = vm.canAppendCapturedImage()
+        XCTAssertEqual(pre, .blockedByEntitlement)
+        XCTAssertEqual(vm.capturedImages.count, 1, "probe must not mutate the buffer")
+        XCTAssertTrue(paywallTriggers.isEmpty, "probe must not fire the paywall")
+    }
+
+    func test_firePaywallForMultiImageGate_emitsTrigger() {
+        var paywallTriggers: [PaywallTrigger] = []
+        let vm = makeVM(tier: .pro, presentPaywall: { trigger in
+            paywallTriggers.append(trigger)
+        })
+        vm.firePaywallForMultiImageGate()
+        XCTAssertEqual(paywallTriggers, [.multiImageScanGate])
+    }
+
+    func test_clearCapturedImages_emptiesBufferWithoutTouchingParse() {
+        // SCA-36 C2: capture-view's .task re-entry calls this to start
+        // a fresh scan without wiping prior parse output (which the
+        // user might still want surfaced if they navigate forward
+        // again).
+        let vm = makeVM(tier: .pro)
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x11), mimeType: "image/jpeg")
+        _ = vm.appendCapturedImage(fakeJPEG(byte: 0x22), mimeType: "image/jpeg")
+        vm.__injectForTests(ingredients: [
+            .init(id: UUID(), displayName: "tomato", confidence: .confirmed),
+        ])
+        vm.clearCapturedImages()
+        XCTAssertTrue(vm.capturedImages.isEmpty)
+        XCTAssertEqual(vm.ingredients.count, 1, "clearCapturedImages must not touch parse output")
+    }
+
     func test_appendCapturedImage_secondShotBlockedForPremiumTier() {
         var paywallTriggers: [PaywallTrigger] = []
         let vm = makeVM(tier: .premium, presentPaywall: { trigger in

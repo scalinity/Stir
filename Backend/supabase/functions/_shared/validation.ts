@@ -62,10 +62,11 @@ export type SessionBootstrapRequest = z.infer<typeof SessionBootstrapRequest>;
 // (b) Multi-image (Pro-only at handler level — gated by ENT-MULTI-IMAGE-01):
 //     images: [{base64, mime_type}, ...]   length 2..4
 //
-// The schema accepts EITHER but never both, enforced via superRefine. The
-// `image_count` field is retained for back-compat with single-image clients
-// that send it as a redundant checksum (legacy iOS DTO), but is no longer
-// authoritative — the handler computes actual count from the array.
+// The schema accepts EITHER but never both, enforced via superRefine.
+// The image count is derived from the payload shape (`images?.length
+// ?? 1`); there is no separate count field on the wire — SCA-36 W8
+// dropped the redundant `image_count` checksum that lived in three
+// layers of the stack and added zero value.
 //
 // client_request_id: idempotency key; 10-min cache.
 // image_base64 / image_mime_type: JPEG/HEIC/PNG/WebP image, ≤ ~6MB decoded.
@@ -100,14 +101,15 @@ export const PantryParseRequest = z.object({
   // fields — keeps the back-compat path unambiguous and matches the iOS
   // back-compat behaviour (single capture continues to send singular).
   images: z.array(PantryParseImagePart).min(2).max(PANTRY_PARSE_MULTI_IMAGE_MAX).optional(),
-  // Legacy/informational. Range tightened to 1..4 (was 1..8). The handler
-  // derives actual count from `images?.length ?? 1`; this value, when sent,
-  // must agree with that count or VAL-01 fires.
-  image_count: z.number().int().min(1).max(PANTRY_PARSE_MULTI_IMAGE_MAX).optional(),
   household_profile_hash: z.string().min(1).max(128).optional(),
 }).strict().superRefine((body, ctx) => {
   const hasSingle = body.image_base64 !== undefined && body.image_mime_type !== undefined;
-  const hasMulti = body.images !== undefined && body.images.length >= 2;
+  // SCA-36 W19: rely on Zod's `.array(...).min(2)` for "is this a
+  // multi-image request" rather than re-checking length here. A
+  // 1-element `images[]` would have already been rejected; the
+  // simpler boolean `images !== undefined` keeps a single source of
+  // truth for the multi-image discriminator.
+  const hasMulti = body.images !== undefined;
   if (!hasSingle && !hasMulti) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -122,20 +124,6 @@ export const PantryParseRequest = z.object({
       path: ['images'],
       message: 'cannot provide both image_base64 and images[]; choose one',
     });
-    return;
-  }
-  // image_count, when sent, is a checksum on the actual payload shape.
-  // Mismatch indicates a buggy client and surfaces clearly rather than
-  // silently disagreeing with the entitlement gate downstream.
-  if (body.image_count !== undefined) {
-    const actual = body.images?.length ?? 1;
-    if (actual !== body.image_count) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['image_count'],
-        message: `image_count=${body.image_count} but payload contains ${actual} image(s)`,
-      });
-    }
   }
 });
 

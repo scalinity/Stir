@@ -102,6 +102,8 @@ Measured from 9+ turn device sessions, cadence N=4 refresh + pre-mint, 22% tool-
 - Premium AI / mo target: **$1.89** (22.27% of $8.49 net ARPU); at **13-session × 15-turn cap: ~$1.69–$2.08**.
 - Pro AI / mo target: **$3.69**; at **27-session cap: ~$3.51–$4.32**.
 - Free AI / mo target: **$0.075** (no voice quota).
+- Pantry scan (single-image): **~$0.005** (~258 image-input tokens + ~150 text-out tokens).
+- Pantry scan (multi-image, Pro-only, 4-photo): **~$0.018–$0.024** (4× image-input + larger text-out at `maxOutputTokens=4096`). Retry-once intentionally disabled on multi-image (SCA-36 W4) so a schema-validation failure costs 1× rather than 2× — surfaces as AI-02 to the user. `pantry_parse` is unmetered per-user (CLAUDE.md §usage_counters); cost is bounded by `ip:pantry_parse_daily=100`. With multi-image at the upper end, a single IP can soak ~$2.40/day before being rate-limited. **If 95th-percentile per-IP daily pantry-parse cost crosses $0.50, file an ADR to revisit the IP cap or add a `user:pantry_parse_daily` policy at the Pro tier.**
 
 Cost ranges assume 75/25–60/40 text:audio split; PostHog LLM Observability has the per-request breakdown.
 
@@ -646,6 +648,12 @@ camera_permission_result, scan_started, scan_submitted, scan_parse_completed,
 # SCA-35: scan_submitted + scan_parse_completed carry `image_count` (1..4).
 # 1 = singular wire path (Free/Premium/Pro single-photo); 2..4 = Pro
 # multi-image scan via `images[]` plural payload. See spec §15.
+# SCA-36 W8/W16: the `image_count` *wire* field was dropped from
+# `PantryParseRequest` (iOS DTO + Zod). The `image_count` *telemetry
+# property* on these events stays (1..4 — derived from `images.count`
+# or 1 for singular). Backend computes the count from `images?.length
+# ?? 1`; do NOT add a wire field "to be safe" — the redundancy was
+# the bug.
 ingredient_corrected, constraints_set,
 dinner_solve_requested, dinner_solve_completed, suggested_dish_selected,
 cook_mode_started, cook_step_advanced, timer_started,

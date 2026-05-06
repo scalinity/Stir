@@ -134,6 +134,15 @@ final class ScanViewModel {
 
     /// Append a captured photo to the in-flow accumulator (SCA-35).
     ///
+    /// Cap-precedes-entitlement is intentional: at the maximum photo
+    /// count the action is genuinely unavailable (no upgrade path
+    /// helps), so we surface `.capped` without firing a paywall. Only
+    /// when capacity exists AND the user is non-Pro on a 2nd+ shot does
+    /// the gate fire — the paywall is reserved for "you could pay to
+    /// unlock this," never for "you've already done the maximum." This
+    /// also preserves the invariant that the paywall fires only on a
+    /// new attempted action, never on already-accumulated buffer state.
+    ///
     /// Returns:
     ///   - `.appended` — photo was added; caller can render the new
     ///     thumbnail and restart the live preview for another shot.
@@ -146,6 +155,10 @@ final class ScanViewModel {
     @discardableResult
     func appendCapturedImage(_ data: Data, mimeType: String) -> AppendResult {
         if capturedImages.count >= Self.maxImagesPerScan {
+            // SCA-36 S11: defensive breadcrumb. Shutter should be disabled
+            // before this fires; if it does, a SwiftUI re-render race
+            // happened between buffer mutation and view diffing.
+            Logger.scanFeature.warning("appendCapturedImage hit cap — shutter race?")
             return .capped
         }
         // First photo is unmetered for every tier — multi-image is what
@@ -161,10 +174,51 @@ final class ScanViewModel {
         return .appended
     }
 
+    /// True if a new shutter tap would land cleanly. Used by the capture
+    /// view to pre-check at the shutter site BEFORE running the
+    /// ~500ms freeze→stop→restart cycle, so a non-Pro user attempting
+    /// a 2nd shot doesn't watch the camera spin up only to land on a
+    /// paywall (SCA-36 W5).
+    ///
+    /// This DOES NOT mutate state and DOES NOT fire the paywall —
+    /// callers that get `.blockedByEntitlement` should call
+    /// `firePaywallForMultiImageGate()` to surface the trigger.
+    func canAppendCapturedImage() -> AppendResult {
+        if capturedImages.count >= Self.maxImagesPerScan {
+            return .capped
+        }
+        if !capturedImages.isEmpty,
+           entitlements.canAccess(.multiImageScan) != .allowed
+        {
+            return .blockedByEntitlement
+        }
+        return .appended
+    }
+
+    /// Fire the multi-image-scan paywall trigger via the injected
+    /// presenter. Used by the capture view's pre-shutter gate (W5).
+    func firePaywallForMultiImageGate() {
+        presentPaywall?(.multiImageScanGate)
+    }
+
     /// Remove a captured photo by id. Used by the thumbnail strip's
     /// per-photo delete affordance.
     func removeCapturedImage(id: UUID) {
+        let prior = capturedImages.count
         capturedImages.removeAll { $0.id == id }
+        if capturedImages.count == prior {
+            // SCA-36 S20-companion: log if a phantom-tap fires (e.g.
+            // SwiftUI re-render lag between buffer mutation and view
+            // diffing). No-op functionally; observability only.
+            Logger.scanFeature.debug("removeCapturedImage: id not found in buffer")
+        }
+    }
+
+    /// Drop accumulated captures without resetting parse outputs. Used
+    /// by the capture view to start a fresh scan when the user re-
+    /// enters the capture screen via swipe-back (SCA-36 C2).
+    func clearCapturedImages() {
+        capturedImages.removeAll()
     }
 
     /// Submit the accumulated captures for AI parsing. Routes to the
@@ -240,9 +294,28 @@ final class ScanViewModel {
             self.phase = .error(message: message, recoverable: code != .val01)
             PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": code.rawValue, "feature": "pantry_parse"])
         } catch StirError.validation(_, let message) {
-            self.phase = .error(message: "Something went wrong scanning. Try again.", recoverable: false)
+            // SCA-36 S6: surface VAL-01 with image-specific copy when
+            // we have multi-image context — the field path on the wire
+            // (e.g. images[2].base64) tells us a specific photo failed.
+            // We don't parse the field path here (the wire shape isn't
+            // exposed through StirError), but bias the copy toward
+            // "retake" framing for multi-image submits where one bad
+            // photo is the most likely cause.
+            let errorCopy = imageCount > 1
+                ? "We couldn't process one of your photos. Try retaking the affected angle."
+                : "Something went wrong scanning. Try again."
+            self.phase = .error(message: errorCopy, recoverable: false)
             Logger.scanFeature.error("VAL-01 on pantry-parse: \(message, privacy: .public)")
         } catch {
+            // SCA-36 C1: bail without flipping phase or emitting NET-01
+            // telemetry when the view was dismissed mid-submit.
+            // URLSession surfaces this as URLError(.cancelled) on iOS;
+            // the swift-concurrency layer surfaces it as
+            // CancellationError. Either way `Task.isCancelled` is true.
+            if Task.isCancelled {
+                Logger.scanFeature.debug("submitCapturedImages cancelled mid-flight")
+                return
+            }
             self.phase = .error(message: "Couldn't reach Stir right now. Check your connection and try again.", recoverable: true)
             Logger.scanFeature.error("scan submit failed: \(error.localizedDescription, privacy: .public)")
             PostHogClient.shared.capture(.aiRequestFailed, properties: ["code": "NET-01", "feature": "pantry_parse"])
