@@ -604,23 +604,32 @@ final class PantryItemRepository {
 
     // MARK: - Private
 
-    /// Look up an existing PantryItem to dedupe against. Match strategy:
+    /// Look up an existing PantryItem to dedupe against. Three-tier
+    /// match strategy, cheapest first:
     ///
-    /// - If a non-empty `slug` is provided: try slug match FIRST, then
-    ///   fall back to case-insensitive `displayName` match. Without the
-    ///   name fallback, a manually-added "olive oil" (always stored
-    ///   with `slug = ""` because manual entries don't carry a
-    ///   canonical slug) is invisible to a later scan with
-    ///   `canonicalSlug = "olive_oil"`, producing duplicate pantry
-    ///   rows. The fallback closes that hole — review C5.
-    /// - If no slug is provided: name match only. Manual `insertManual`
-    ///   uses this path.
+    /// **Tier 1 — slug match.** If a non-empty `slug` is provided,
+    /// fetch by `canonicalIngredientSlug` first. Scan-vs-scan dedupes
+    /// reliably here when both calls came from the same canonical
+    /// vocabulary.
+    /// **Tier 2 — exact case-insensitive name match.** Falls back to
+    /// `displayName ==[c]`. Catches manual rows (slug = `""`) that a
+    /// scan with a slug would otherwise miss, and round-trips two
+    /// scans of the same ingredient that produced different slugs.
+    /// **Tier 3 — tokenized normalized match (SCA-26).** Only runs
+    /// when both prior tiers miss. Fetches all non-deleted rows
+    /// scoped to the household and walks them in memory comparing
+    /// `pantryMatchTokens()` for sorted-set equality. Catches
+    /// "Red Onion" ↔ "red onions" ↔ "Red-Onion!" without false-
+    /// matching "olive oil" ↔ "olive oil spray" (different token
+    /// counts → set inequality). The O(N) walk is bounded — only
+    /// the failure path of Tiers 1+2 — and N is capped by tier:
+    /// Free 25, Premium 250, Pro 1000.
     ///
-    /// Slug-first means a scan with a known slug will match a previous
-    /// scan row (same slug) ahead of a name-shadowed manual row, which
-    /// is the desired ordering: scan-vs-scan dedupes through the
-    /// canonical key; scan-vs-manual falls through to name as the
-    /// least-bad alternative.
+    /// Without Tier 3, ADR 0029's auto-consume routinely missed
+    /// matches when dinner-solve's recipe ingredient names diverged
+    /// from pantry-parse's stored names (different plural form,
+    /// different modifier order, hyphenation differences). Trigger
+    /// fired in the field 2026-05-06 — see SCA-26.
     private func fetchExisting(
         slug: String?,
         displayName: String,
@@ -635,7 +644,7 @@ final class PantryItemRepository {
         let byName = NSPredicate(format: "displayName ==[c] %@", displayName)
 
         if let slug, !slug.isEmpty {
-            // Try slug first.
+            // Tier 1: slug match.
             let bySlug = NSPredicate(format: "canonicalIngredientSlug == %@", slug)
             request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [byHousehold, notDeleted, bySlug])
             do {
@@ -645,14 +654,35 @@ final class PantryItemRepository {
             } catch {
                 throw StirError.coreData(underlying: error)
             }
-            // Fall back to name — see doc-comment on this function for why.
+            // Tier 2 (after slug miss): exact case-insensitive name.
             request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [byHousehold, notDeleted, byName])
         } else {
+            // Tier 2 only: name match — slug-less inputs (manual add,
+            // substitution swap with empty slug).
             request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [byHousehold, notDeleted, byName])
         }
 
         do {
-            return try context.fetch(request).first
+            if let match = try context.fetch(request).first {
+                return match
+            }
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+
+        // Tier 3: tokenized normalized match. Only reached when slug
+        // (if any) and exact-name both missed.
+        let lookupTokens = displayName.pantryMatchTokens()
+        guard !lookupTokens.isEmpty else { return nil }
+
+        let allRequest = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        allRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [byHousehold, notDeleted])
+        do {
+            let allRows = try context.fetch(allRequest)
+            return allRows.first { row in
+                guard let name = row.displayName else { return false }
+                return name.pantryMatchTokens() == lookupTokens
+            }
         } catch {
             throw StirError.coreData(underlying: error)
         }

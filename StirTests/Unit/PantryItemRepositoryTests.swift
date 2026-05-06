@@ -681,6 +681,67 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(outcome.optionalSkipped, 0)
     }
 
+    // SCA-26 — Tier-3 normalized name match in fetchExisting catches the
+    // real-world divergence between pantry-parse stored names and
+    // dinner-solve recipe ingredient names. Without these, the auto-
+    // consume on cook completion routinely missed in production.
+
+    func test_consumeForRecipe_tier3_matchesPlural() throws {
+        // Pantry has "Red onion" (singular, scanned). Recipe says
+        // "Red onions" (plural, AI-generated). Slug match: pantry
+        // slug differs from recipe slug (or both null). Exact name
+        // match: differs. Tier-3 normalized: "red onion" == "red
+        // onions" via plural strip → match.
+        let row = try seedItem(name: "Red onion", slug: nil, memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "Red onions", slug: nil, optional: false),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [row.objectID],
+                       "Tier-3 normalized match should catch plural divergence")
+        XCTAssertEqual(outcome.unmatched, 0)
+    }
+
+    func test_consumeForRecipe_tier3_matchesCaseAndPunctuation() throws {
+        // "Cilantro" pantry, "fresh CILANTRO" recipe. Wait — that's a
+        // modifier addition that SHOULD NOT match (set inequality).
+        // The case-difference scenario is "Cilantro" pantry, "cilantro"
+        // recipe — but Tier-2 already catches that. Use a real
+        // case+punctuation case: "Olive Oil" pantry, "olive-oil"
+        // recipe. Tier-2 (case-insensitive) misses on the hyphen;
+        // Tier-3 normalizes to ["oil", "olive"] both sides → match.
+        let row = try seedItem(name: "Olive Oil", slug: nil, memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "olive-oil", slug: nil, optional: false),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [row.objectID],
+                       "Tier-3 should normalize hyphenation past Tier-2 exact-match")
+    }
+
+    func test_consumeForRecipe_tier3_doesNot_overMatch_oliveOilVsSpray() throws {
+        // Critical false-positive defense. Pantry has plain olive oil;
+        // recipe asks for olive oil spray. Different products. If
+        // Tier-3 used subset-matching, the bare-oil row would be
+        // wrongly soft-deleted. Sorted-set equality catches the
+        // mismatched token count.
+        let row = try seedItem(name: "olive oil", slug: nil, memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "olive oil spray", slug: nil, optional: false),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertTrue(outcome.ephemeralDeleted.isEmpty,
+                      "olive oil pantry row must not be consumed by an olive-oil-SPRAY recipe ingredient")
+        XCTAssertEqual(outcome.unmatched, 1)
+        XCTAssertNil(row.deletedAt)
+    }
+
     // MARK: - Test fixtures for consumeForRecipe
 
     @discardableResult
