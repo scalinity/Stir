@@ -757,7 +757,7 @@ When changing an AI feature, run its eval before committing. When changing a pro
 
 | Step | What | When |
 | --- | --- | --- |
-| 1 | `mcp__linear-server__save_issue` with `team: "Scalinity"`, `project: "Stir"`, `state: "In Progress"`, populated repro / root cause / fix plan / files | At the moment the work item is identified — before any edits |
+| 1 | `mcp__linear-server__save_issue` with `team: "Scalinity"`, `project: "Stir"`, `assignee: "@scalinity"`, `state: "In Progress"`, populated repro / root cause / fix plan / files | At the moment the work item is identified — before any edits |
 | 2 | Implement the fix; run the relevant test/eval; verify the original repro is gone | Same session |
 | 3 | `mcp__linear-server__save_issue` with `id: "SCA-N"`, `state: "Done"` | The instant the fix lands locally and tests pass |
 | 4 | Stage the changed files, commit (Conventional Commits — `fix(scope): subject (SCA-N)` or `feat(scope): …`), and **push to `origin/<branch>`** | Same session, after marking the issue Done |
