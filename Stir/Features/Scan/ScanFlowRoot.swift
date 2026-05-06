@@ -53,6 +53,7 @@ struct ScanFlowRoot: View {
             aiDispatch: aiDispatch,
             solveRepo: solveRepo,
             householdStore: householdStore,
+            entitlements: entitlements,
             presentPaywall: presentPaywall,
         ))
         self.cameraService = cameraService

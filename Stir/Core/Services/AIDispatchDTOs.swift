@@ -210,6 +210,13 @@ struct DinnerSolveRequest: Encodable, Sendable {
     // invariant before POSTing.
     let contextHint: ContextHint?
     let leftoversItems: [LeftoversItem]?
+    /// SCA-44 preference-memory loop. On-device digest of recent
+    /// OutcomeFeedback rows windowed by tier (free 30d / premium 90d /
+    /// pro 365d). Nil when there's nothing in the window — JSON encoder
+    /// omits the key so backend `.strict()` Zod sees the field as
+    /// absent rather than null. See PreferenceMemoryService for the
+    /// builder + ADR 0029 for the on-device-digest rationale.
+    let feedbackSummary: FeedbackSummary?
 
     enum ContextHint: String, Encodable, Sendable {
         case standard
@@ -224,6 +231,27 @@ struct DinnerSolveRequest: Encodable, Sendable {
         case householdContext = "household_context"
         case contextHint = "context_hint"
         case leftoversItems = "leftovers_items"
+        case feedbackSummary = "feedback_summary"
+    }
+
+    /// Skip encoding `feedback_summary` and `leftovers_items` when nil
+    /// rather than emitting `null`. Backend Zod schema is `.strict()` —
+    /// declares both fields `.optional()`, so absent + null are
+    /// equivalent at the schema level, but emitting `null` for
+    /// `feedbackSummary` would fail `.refine` checks that test
+    /// `feedback_summary !== undefined`. Same wire-mutex rationale as
+    /// `PantryParseRequest.encode(to:)` for the imageBase64/images
+    /// branches.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(solveRequestID, forKey: .solveRequestID)
+        try c.encodeIfPresent(parseID, forKey: .parseID)
+        try c.encode(ingredients, forKey: .ingredients)
+        try c.encodeIfPresent(constraints, forKey: .constraints)
+        try c.encode(householdContext, forKey: .householdContext)
+        try c.encodeIfPresent(contextHint, forKey: .contextHint)
+        try c.encodeIfPresent(leftoversItems, forKey: .leftoversItems)
+        try c.encodeIfPresent(feedbackSummary, forKey: .feedbackSummary)
     }
 
     struct LeftoversItem: Encodable, Sendable {
@@ -287,6 +315,83 @@ struct DinnerSolveRequest: Encodable, Sendable {
         let kind: String
         let value: String
         let severity: String
+    }
+
+    /// SCA-44 preference-memory digest. Bounded payload (~600 prompt
+    /// tokens) projecting recent OutcomeFeedback rows from CloudKit
+    /// into a shape the dinner-solve prompt can use to break ties
+    /// between similarly-ranked options. NEVER overrides hard rules —
+    /// the prompt template is explicit about that.
+    ///
+    /// Wire shape pinned here; backend Zod (`Backend/supabase/
+    /// functions/_shared/validation.ts`) MUST stay in lockstep. New
+    /// optional fields are safe to add either side independently;
+    /// breaking changes need a version bump.
+    struct FeedbackSummary: Encodable, Sendable, Equatable {
+        let recentMealCount: Int
+        let windowDays: Int
+        let recentMeals: [MealEntry]
+        let aggregates: Aggregates?
+        let dislikedMeals: [String]
+        let highlightNotes: [NoteSnippet]
+
+        enum CodingKeys: String, CodingKey {
+            case recentMealCount = "recent_meal_count"
+            case windowDays = "window_days"
+            case recentMeals = "recent_meals"
+            case aggregates
+            case dislikedMeals = "disliked_meals"
+            case highlightNotes = "highlight_notes"
+        }
+
+        struct MealEntry: Encodable, Sendable, Equatable {
+            let title: String
+            let rating: Int
+            let workload: String
+            let taste: String
+            let spiceLevel: String
+            let wouldRepeat: Bool
+            let cookedDaysAgo: Int
+
+            enum CodingKeys: String, CodingKey {
+                case title
+                case rating
+                case workload
+                case taste
+                case spiceLevel = "spice_level"
+                case wouldRepeat = "would_repeat"
+                case cookedDaysAgo = "cooked_days_ago"
+            }
+        }
+
+        struct Aggregates: Encodable, Sendable, Equatable {
+            let averageRating: Double
+            let dominantTaste: String
+            let dominantSpiceLevel: String
+            let dominantWorkload: String
+            /// Fraction (0.0–1.0) of meals in the window rated ≥4★.
+            let highRatedRate: Double
+            /// Fraction (0.0–1.0) of meals in the window where
+            /// wouldRepeat == true.
+            let wouldRepeatRate: Double
+
+            enum CodingKeys: String, CodingKey {
+                case averageRating = "average_rating"
+                case dominantTaste = "dominant_taste"
+                case dominantSpiceLevel = "dominant_spice_level"
+                case dominantWorkload = "dominant_workload"
+                case highRatedRate = "high_rated_rate"
+                case wouldRepeatRate = "would_repeat_rate"
+            }
+        }
+
+        struct NoteSnippet: Encodable, Sendable, Equatable {
+            let title: String
+            let rating: Int
+            /// Sanitized to ≤100 chars, fence-markers stripped, single-
+            /// line. See `PreferenceMemoryService.sanitizeNote`.
+            let note: String
+        }
     }
 }
 

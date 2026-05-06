@@ -127,6 +127,7 @@
 		616D0F1FDAD72EC8FC0F7496 /* VoiceSessionDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CB787B7AC60304704C39E1 /* VoiceSessionDriver.swift */; };
 		63CAE82D1AC92EC0A569CE12 /* StirGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF8D946132AFBD4013A90040 /* StirGlyph.swift */; };
 		69B7CA85BE35658ED8A3282D /* EntitlementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3A2CACA16214E11B7E592C /* EntitlementService.swift */; };
+		3A10712010073429FCA9030A /* PreferenceMemoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22395776E7CB32CA5D45FA4 /* PreferenceMemoryService.swift */; };
 		6A6503B5B5511FCEB41712A8 /* TimerActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */; };
 		6ADA59C2305666FD29D964AE /* OnboardingRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41441DCBBD753CD51933B94 /* OnboardingRoot.swift */; };
 		6B2A90AEA49B5200168D0E3D /* RealtimeSessionPreMintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B9101EC521BDF3B6C3FF08B /* RealtimeSessionPreMintTests.swift */; };
@@ -204,6 +205,7 @@
 		AE031573175A0E54D3E1F03B /* GroceryRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECE43357ACB78ADDBD0FD49 /* GroceryRepositoryTests.swift */; };
 		AF0B8C6261E20029E87FC56E /* DietaryRule+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1331AE612069CDE2E4FCC533 /* DietaryRule+Extensions.swift */; };
 		AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */; };
+		F1158A993CE98C45F369F12C /* PreferenceMemoryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */; };
 		AFEB4BBD169B34228F3DB241 /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */; };
 		B1015880FB5F79E327B016C9 /* OCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C51E7946D3EE174EBA42A7 /* OCRService.swift */; };
 		B1B78F0829332F798B0F8A1A /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2434E80AC9763FDEBBF0EE82 /* Motion.swift */; };
@@ -531,6 +533,7 @@
 		A0FA03961F19A69E7FD4B995 /* ImportViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportViewModel.swift; sourceTree = "<group>"; };
 		A126ED8CE06FC62D54163207 /* SharedTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedTier.swift; sourceTree = "<group>"; };
 		A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackRepositoryTests.swift; sourceTree = "<group>"; };
+		F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferenceMemoryServiceTests.swift; sourceTree = "<group>"; };
 		A890092C463C0BD2AC269186 /* SubstitutionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionRepository.swift; sourceTree = "<group>"; };
 		A8BFEBB31097C1FCA950EB7A /* StepCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepCard.swift; sourceTree = "<group>"; };
 		A8E5A7309F3C04509CE21E8D /* SubstitutionSheetViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionSheetViewModel.swift; sourceTree = "<group>"; };
@@ -613,6 +616,7 @@
 		F8C926703C86621AD1B481E6 /* CookingSession+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookingSession+Extensions.swift"; sourceTree = "<group>"; };
 		F91E50133C48D87663B85ECA /* Icons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Icons.swift; sourceTree = "<group>"; };
 		FA3A2CACA16214E11B7E592C /* EntitlementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntitlementService.swift; sourceTree = "<group>"; };
+		E22395776E7CB32CA5D45FA4 /* PreferenceMemoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferenceMemoryService.swift; sourceTree = "<group>"; };
 		FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Extensions.swift"; sourceTree = "<group>"; };
 		FACE2715888F255B098BF1CF /* StirAppShortcutsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirAppShortcutsProvider.swift; sourceTree = "<group>"; };
 		FC62FC656E734BA0343A7A00 /* GroceryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepository.swift; sourceTree = "<group>"; };
@@ -690,6 +694,7 @@
 				3C15A8E3297F5D551917C473 /* CloudKitAvailabilityStore.swift */,
 				0432D79929D678AC31305110 /* CurrentHouseholdStore.swift */,
 				FA3A2CACA16214E11B7E592C /* EntitlementService.swift */,
+				E22395776E7CB32CA5D45FA4 /* PreferenceMemoryService.swift */,
 				4E08691E5929D6EC5471010B /* EntitlementService+Display.swift */,
 				5BB069F9AB0F5873B4D83159 /* EntitlementTypes.swift */,
 				75142E3132B7B96CBE374625 /* FlagOutputService.swift */,
@@ -741,6 +746,7 @@
 				8B826DCA6393D026CC51F15B /* NotificationPreferencesStoreTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
+				F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */,
 				D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */,
 				EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */,
 				44F858F8920DDE3FF02BC6EA /* RealtimeSessionIdentityTests.swift */,
@@ -1589,6 +1595,7 @@
 				C99910CC8EC77949382366AE /* NotificationPreferencesStoreTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
+				F1158A993CE98C45F369F12C /* PreferenceMemoryServiceTests.swift in Sources */,
 				3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */,
 				C3554305F7809FD347ADDCFC /* PaywallViewModelTests.swift in Sources */,
 				4B08729ECB7E8C9860338363 /* PendingImport.swift in Sources */,
@@ -1676,6 +1683,7 @@
 				2280B176BF8235AD65DE3309 /* EmptyState.swift in Sources */,
 				276C68E53441F93E89E9B52A /* EntitlementService+Display.swift in Sources */,
 				69B7CA85BE35658ED8A3282D /* EntitlementService.swift in Sources */,
+				3A10712010073429FCA9030A /* PreferenceMemoryService.swift in Sources */,
 				B364F24CB12337EA93DC300A /* EntitlementTypes.swift in Sources */,
 				DE50817978E45481E9A901ED /* ErrorCode.swift in Sources */,
 				13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */,

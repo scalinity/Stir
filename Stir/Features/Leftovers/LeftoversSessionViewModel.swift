@@ -195,6 +195,9 @@ final class LeftoversSessionViewModel {
                     approximateAmountText: e.approximateAmountText,
                 )
             },
+            // SCA-44 / ADR 0030: leftovers path doesn't consume preference
+            // memory in v1 — fans out in a follow-up alongside substitution.
+            feedbackSummary: nil,
         )
 
         var returned: [DishCard] = []

@@ -47,6 +47,7 @@ struct SolveAgainRoot: View {
         aiDispatch: AIDispatch,
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
+        entitlements: EntitlementService,
         presentPaywall: ((PaywallTrigger) -> Void)?,
         onDismiss: @escaping () -> Void,
     ) {
@@ -54,6 +55,7 @@ struct SolveAgainRoot: View {
             aiDispatch: aiDispatch,
             solveRepo: solveRepo,
             householdStore: householdStore,
+            entitlements: entitlements,
             presentPaywall: presentPaywall,
         )
         // `parseID: nil` is intentional — this entry doesn't originate

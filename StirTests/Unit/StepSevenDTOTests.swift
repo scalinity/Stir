@@ -193,6 +193,7 @@ final class StepSevenDTOTests: XCTestCase {
             householdContext: .init(servings: 2, dietaryRules: [], availableEquipment: ["stovetop"]),
             contextHint: .leftovers,
             leftoversItems: [.init(displayName: "chili", canonicalSlug: nil, approximateAmountText: "2 cups")],
+            feedbackSummary: nil,
         )
         let json = try encoder.encode(body)
         let str = String(data: json, encoding: .utf8) ?? ""
@@ -215,6 +216,7 @@ final class StepSevenDTOTests: XCTestCase {
             householdContext: .init(servings: 2, dietaryRules: [], availableEquipment: ["stovetop"]),
             contextHint: nil,
             leftoversItems: nil,
+            feedbackSummary: nil,
         )
         let json = try encoder.encode(body)
         let str = String(data: json, encoding: .utf8) ?? ""

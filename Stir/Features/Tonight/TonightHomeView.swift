@@ -185,6 +185,7 @@ struct TonightHomeView: View {
             aiDispatch: coordinator.aiDispatch,
             solveRepo: coordinator.solveRepository,
             householdStore: coordinator.household,
+            entitlements: entitlements,
             presentPaywall: { trigger in
                 capturedCoordinator.presentPaywall(trigger)
             },
@@ -205,6 +206,7 @@ struct TonightHomeView: View {
             aiDispatch: coordinator.aiDispatch,
             solveRepo: coordinator.solveRepository,
             householdStore: coordinator.household,
+            entitlements: entitlements,
             presentPaywall: { trigger in
                 capturedCoordinator.presentPaywall(trigger)
             },

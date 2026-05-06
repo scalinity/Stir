@@ -73,6 +73,14 @@ final class SolveViewModel {
     let aiDispatch: AIDispatch
     private let solveRepo: SolveRepository
     private let householdStore: CurrentHouseholdStore
+    /// SCA-44: builder for the on-device preference-memory digest sent
+    /// as `feedback_summary` on the dinner-solve request body. Best-
+    /// effort — `buildDigest(for:)` returns nil on CoreData read
+    /// failure or when no rated meals fall within the tier window, and
+    /// the solve proceeds without feedback context (the prompt
+    /// template treats missing feedback as "no signal" rather than
+    /// "negative signal").
+    private let preferenceMemoryService: PreferenceMemoryService
     /// Paywall presentation hook injected at construction by ScanFlowRoot.
     /// Invoked on RATE-01 so the Dinner-Solve-quota-exhausted user sees
     /// the paywall instead of a silent error screen — and so
@@ -85,11 +93,15 @@ final class SolveViewModel {
         aiDispatch: AIDispatch,
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
+        entitlements: EntitlementService,
         presentPaywall: ((PaywallTrigger) -> Void)? = nil,
+        preferenceMemoryService: PreferenceMemoryService? = nil,
     ) {
         self.aiDispatch = aiDispatch
         self.solveRepo = solveRepo
         self.householdStore = householdStore
+        self.preferenceMemoryService = preferenceMemoryService
+            ?? PreferenceMemoryService(entitlementService: entitlements)
         self.presentPaywall = presentPaywall
     }
 
@@ -187,12 +199,17 @@ final class SolveViewModel {
         // presence only, never the raw string. Mirrors the
         // `has_cuisine: Bool` shape already used at
         // ConstraintsSheet.commit() for the `constraints_set` event.
+        // SCA-44: `feedback_summary_present` + `recent_meal_count` so
+        // the funnel can split conversion by whether the preference-
+        // memory loop actually had data to feed in. Spec §15.
         PostHogClient.shared.capture(.dinnerSolveRequested, properties: [
             "constraints_max_time": constraints.maxTimeMinutes ?? -1,
             "has_cuisine": constraints.cuisineLeaning != nil,
             "constraints_use_first_count": constraints.useFirst.count,
             "ingredient_count": ingredientsForSolve.count,
             "dietary_rule_count": request.householdContext.dietaryRules.count,
+            "feedback_summary_present": request.feedbackSummary != nil,
+            "recent_meal_count": request.feedbackSummary?.recentMealCount ?? 0,
         ])
 
         phase = .solving
@@ -459,6 +476,11 @@ final class SolveViewModel {
             constraintsWire = nil
         }
 
+        // SCA-44: best-effort preference-memory digest. Nil on cold-
+        // start (no rated meals in window) OR CoreData read failure;
+        // either way the solve proceeds without feedback context.
+        let feedbackSummary = preferenceMemoryService.buildDigest(for: household)
+
         return DinnerSolveRequest(
             solveRequestID: UUID(),
             parseID: parseIDForSolve,
@@ -471,6 +493,7 @@ final class SolveViewModel {
             ),
             contextHint: nil,
             leftoversItems: nil,
+            feedbackSummary: feedbackSummary,
         )
     }
 

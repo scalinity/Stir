@@ -39,6 +39,11 @@ export const flagRegistry: Readonly<Record<string, { schema: z.ZodType; defaultV
   disable_imports:                { schema: KillSwitch, defaultValue: false },
   force_saved_meals_only:         { schema: KillSwitch, defaultValue: false },
   priority_queue_pro_enabled:     { schema: KillSwitch, defaultValue: false },
+  // SCA-44 preference-memory loop. Default true — when set to false,
+  // dinner-solve renders feedback_json as null even when iOS sent a
+  // populated feedback_summary in the request body. Cheap rip-cord
+  // for an unexpected prompt regression without an iOS rev.
+  preference_memory_enabled:      { schema: KillSwitch, defaultValue: true },
   cook_voice_thinking_level:      {
     schema: z.enum(['minimal', 'low']),
     defaultValue: 'minimal',

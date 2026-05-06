@@ -188,6 +188,41 @@ export const DinnerSolveRequest = z.object({
     })).max(50),
     available_equipment: z.array(z.string().min(1).max(64)).max(50),
   }).strict(),
+  // SCA-44 preference-memory digest. Optional — old clients that never
+  // build the digest, AND new clients that have no rated meals in the
+  // tier window, both omit the field entirely. Sizes here MUST mirror
+  // the iOS PreferenceMemoryService caps (recentMealsCap=10,
+  // dislikedMealsCap=5, highlightNotesCap=3, noteCharCap=100, title
+  // 80 chars). A drift on either side is a wire-contract bug, not a
+  // hot-path failure mode — the .strict() refine catches it as
+  // VAL-01 with field-level detail.
+  feedback_summary: z.object({
+    recent_meal_count: z.number().int().min(0).max(1000),
+    window_days: z.number().int().min(1).max(366),
+    recent_meals: z.array(z.object({
+      title: z.string().min(1).max(80),
+      rating: z.number().int().min(1).max(5),
+      workload: z.enum(['easy', 'medium', 'hard']),
+      taste: z.enum(['loved', 'good', 'ok', 'bad']),
+      spice_level: z.enum(['mild', 'medium', 'hot', 'too_hot']),
+      would_repeat: z.boolean(),
+      cooked_days_ago: z.number().int().min(0).max(366),
+    }).strict()).max(10),
+    aggregates: z.object({
+      average_rating: z.number().min(1).max(5),
+      dominant_taste: z.enum(['loved', 'good', 'ok', 'bad']),
+      dominant_spice_level: z.enum(['mild', 'medium', 'hot', 'too_hot']),
+      dominant_workload: z.enum(['easy', 'medium', 'hard']),
+      high_rated_rate: z.number().min(0).max(1),
+      would_repeat_rate: z.number().min(0).max(1),
+    }).strict().nullable(),
+    disliked_meals: z.array(z.string().min(1).max(80)).max(5),
+    highlight_notes: z.array(z.object({
+      title: z.string().min(1).max(80),
+      rating: z.number().int().min(1).max(5),
+      note: z.string().min(1).max(100),
+    }).strict()).max(3),
+  }).strict().optional(),
 }).strict().refine(
   // Guard rails: leftovers mode must carry items; standard mode must not.
   (b) => {

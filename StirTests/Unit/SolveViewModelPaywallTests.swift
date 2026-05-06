@@ -139,11 +139,18 @@ final class SolveViewModelPaywallTests: XCTestCase {
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
         let solveRepo = SolveRepository(controller: controller)
+        let entitlements = EntitlementService()
+        let preferenceMemoryService = PreferenceMemoryService(
+            sessionRepo: CookingSessionRepository(controller: controller),
+            entitlementService: entitlements,
+        )
         return SolveViewModel(
             aiDispatch: aiDispatch,
             solveRepo: solveRepo,
             householdStore: householdStore,
+            entitlements: entitlements,
             presentPaywall: presentPaywall,
+            preferenceMemoryService: preferenceMemoryService,
         )
     }
 

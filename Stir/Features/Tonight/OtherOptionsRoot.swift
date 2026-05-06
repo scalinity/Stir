@@ -51,6 +51,7 @@ struct OtherOptionsRoot: View {
         aiDispatch: AIDispatch,
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
+        entitlements: EntitlementService,
         presentPaywall: ((PaywallTrigger) -> Void)?,
         onDismiss: @escaping () -> Void,
     ) {
@@ -86,6 +87,7 @@ struct OtherOptionsRoot: View {
             aiDispatch: aiDispatch,
             solveRepo: solveRepo,
             householdStore: householdStore,
+            entitlements: entitlements,
             presentPaywall: presentPaywall,
         )
         vm.seedFromPersistedSolve(inputs: seedInputs)

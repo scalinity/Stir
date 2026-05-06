@@ -166,3 +166,82 @@ Deno.test('dinner-solve: AUTH-01 when user_row missing (broken JWT with phantom 
   assertNotEquals(res.body?.error, 'VAL-01', 'missing user should surface as AUTH-01 not VAL-01');
   assertEquals(res.body?.error, 'AUTH-01');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-44 — feedback_summary (preference-memory digest)
+// ---------------------------------------------------------------------------
+//
+// .strict() Zod on DinnerSolveRequest means the field MUST be declared
+// or new clients sending it 400. These tests pin the schema contract
+// from the wire side so an iOS DTO drift surfaces as a backend test
+// failure, not a runtime VAL-01 dashboard alert.
+
+function validFeedbackSummary() {
+  return {
+    recent_meal_count: 1,
+    window_days: 30,
+    recent_meals: [{
+      title: 'Tomato Pasta',
+      rating: 4,
+      workload: 'easy',
+      taste: 'good',
+      spice_level: 'medium',
+      would_repeat: true,
+      cooked_days_ago: 3,
+    }],
+    aggregates: null,
+    disliked_meals: [],
+    highlight_notes: [],
+  };
+}
+
+Deno.test('dinner-solve: well-formed feedback_summary parses (RATE-01 not VAL-01)', async () => {
+  // Cap the quota so the request progresses past validation but stops
+  // before the Gemini call. RATE-01 proves the body shape parsed.
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+  const client = serviceClient();
+  const { error } = await client
+    .from('usage_counters')
+    .update({ used_count: 6 })
+    .eq('canonical_user_key', boot.canonical_user_key)
+    .eq('feature_key', 'dinner_solve');
+  if (error) throw error;
+
+  const res = await callDinnerSolve(
+    { ...validBody(), feedback_summary: validFeedbackSummary() },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 429);
+  assertEquals(res.body?.error, 'RATE-01', 'feedback_summary should NOT trip VAL-01');
+});
+
+Deno.test('dinner-solve: VAL-01 when feedback_summary.recent_meals[].taste is unknown enum', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const fs = validFeedbackSummary();
+  // 'hated' is not in the enum (loved | good | ok | bad).
+  fs.recent_meals[0].taste = 'hated';
+  const res = await callDinnerSolve(
+    { ...validBody(), feedback_summary: fs },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});
+
+Deno.test('dinner-solve: VAL-01 when feedback_summary.recent_meals exceeds 10 entries', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const fs = validFeedbackSummary();
+  // Pad to 11 entries — schema max is 10 (mirrors iOS recentMealsCap=10).
+  const oneEntry = fs.recent_meals[0];
+  fs.recent_meals = Array.from({ length: 11 }, (_, i) => ({
+    ...oneEntry,
+    title: `Meal ${i}`,
+  }));
+  const res = await callDinnerSolve(
+    { ...validBody(), feedback_summary: fs },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});

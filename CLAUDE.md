@@ -145,6 +145,8 @@ Subscription group: `stir.subscriptions`. Family Sharing: **off** on all SKUs.
 | Priority inference queue | no | no | yes |
 | Preference memory window | 30 days | 90 days | 365 days |
 
+**Preference memory window** is wired via ADR 0030. iOS `PreferenceMemoryService` reads `OutcomeFeedback` from CloudKit, projects into a bounded digest (≤600 prompt tokens), sends as `feedback_summary` on the `/v1/ai/dinner-solve` request body. Server-side kill switch: `feature_flags.preference_memory_enabled` (default true). Tier window is enforced on iOS only — out-of-window ratings never leave the device. North-star #3 holds.
+
 ### Gemini Live session constants
 
 ```swift
@@ -434,6 +436,7 @@ Server (Supabase `feature_flags`):
 - `disable_cook_voice` / `disable_cook_realtime` (alias)
 - `disable_imports`
 - `force_saved_meals_only`
+- `preference_memory_enabled` — SCA-44 / ADR 0030. Default true. When false, dinner-solve renders `feedback_json` as null even when iOS sent a populated `feedback_summary` in the request body. Failing-open on flag-read errors.
 
 ### Expected environment variables
 
@@ -501,7 +504,7 @@ docs/deferred-work.md            # tracked tech debt + triggered refactors
 | Feature | Endpoint | Model | Streaming | Guardrail |
 | --- | --- | --- | --- | --- |
 | Pantry scan parse | `/v1/ai/pantry-parse` | gemini-3-flash-preview | no | schema + confidence threshold |
-| Dinner solve | `/v1/ai/dinner-solve` | gemini-3-flash-preview | yes (card-by-card) | hard-rule validator, retry on violation |
+| Dinner solve | `/v1/ai/dinner-solve` | gemini-3-flash-preview | yes (card-by-card) | hard-rule validator, retry on violation. Consumes optional on-device `feedback_summary` digest (ADR 0030); v2.0.0 prompt at 5% canary via `pickStandardPrompt`, v1.0.0 default. |
 | Cook Mode voice turn | Live WS via `/v1/ai/realtime-session` token | gemini-3.1-flash-live-preview (minimal) | native bidi audio | system prompt, max_output_tokens, refresh-bounded growth |
 | Cook Mode substitution (voice path) | Live function call → `/v1/ai/substitution` | gemini-3-flash-preview | no | hard-rule validator (same engine) |
 | Cook Mode Q&A fallback | `/v1/ai/cook-turn` | gemini-3-flash-preview (text) | no | schema |
@@ -655,6 +658,12 @@ camera_permission_result, scan_started, scan_submitted, scan_parse_completed,
 # ?? 1`; do NOT add a wire field "to be safe" — the redundancy was
 # the bug.
 ingredient_corrected, constraints_set,
+# SCA-44: dinner_solve_requested gains `feedback_summary_present: bool` +
+# `recent_meal_count: int` (ADR 0030). True iff iOS sent a non-nil
+# preference-memory digest (depends on rated meals existing inside the
+# tier window — Free 30d / Premium 90d / Pro 365d). recent_meal_count is
+# the un-capped total in the window (recent_meals[] on the wire is
+# capped at 10). See spec §15 dinner_solve_requested clarification.
 dinner_solve_requested, dinner_solve_completed, suggested_dish_selected,
 cook_mode_started, cook_step_advanced, timer_started,
 voice_affordance_tapped, cook_turn_submitted, cook_turn_resolved,
