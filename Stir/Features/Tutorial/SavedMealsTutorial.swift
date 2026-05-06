@@ -137,15 +137,24 @@ private struct SavedFilterMiniature: View {
     @State private var favoritesOnly = false
 
     enum Sort: String, CaseIterable {
-        case recent = "Recently"
+        case recent = "Recent"
         case rating = "Top rated"
         case alpha = "A–Z"
     }
 
-    private let meals: [(title: String, fav: Bool, when: String)] = [
-        ("Lemon garlic pasta",  true,  "2 days ago"),
-        ("Sheet-pan chicken",   false, "Last week"),
-        ("Veggie stir-fry",     true,  "3 weeks ago"),
+    private struct Meal: Hashable {
+        let title: String
+        let fav: Bool
+        let rating: Int
+    }
+
+    /// Demo meals — input order represents "recently cooked" (newest
+    /// first). Ratings spread so .rating reordering is visually
+    /// distinct from .alpha and .recent. SCA-31.
+    private let meals: [Meal] = [
+        Meal(title: "Lemon garlic pasta", fav: true,  rating: 5),
+        Meal(title: "Sheet-pan chicken",  fav: false, rating: 3),
+        Meal(title: "Veggie stir-fry",    fav: true,  rating: 4),
     ]
 
     var body: some View {
@@ -164,46 +173,21 @@ private struct SavedFilterMiniature: View {
                 Capsule().fill(Color.Stir.paper200),
             )
 
-            HStack(spacing: 8) {
+            // SCA-31 — `ChipFlowLayout` so pills wrap to a second row
+            // rather than truncate. The earlier `HStack + Spacer()`
+            // forced all four pills into a single row width-bounded
+            // by the miniature card, which truncated "Recently" /
+            // "Top rated" / "Favorites" with ellipses on iPhone-class
+            // screens.
+            ChipFlowLayout(spacing: 8) {
                 ForEach(Sort.allCases, id: \.self) { option in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { sort = option }
-                    } label: {
-                        Text(option.rawValue)
-                            .stirFont(.bodySm)
-                            .foregroundStyle(sort == option ? Color.white : Color.Stir.ink700)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule().fill(sort == option ? Color.Stir.ember600 : Color.Stir.paper200),
-                            )
-                    }
-                    .buttonStyle(.plain)
+                    sortPill(option)
                 }
-                Spacer()
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { favoritesOnly.toggle() }
-                } label: {
-                    HStack(spacing: 4) {
-                        (favoritesOnly ? Image.Stir.favoriteFill : Image.Stir.favoriteOutline)
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Favorites")
-                            .stirFont(.bodySm)
-                    }
-                    .foregroundStyle(favoritesOnly ? Color.Stir.ember600 : Color.Stir.ink700)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule().fill(
-                            favoritesOnly ? Color.Stir.ember100 : Color.Stir.paper200,
-                        ),
-                    )
-                }
-                .buttonStyle(.plain)
+                favoritesPill
             }
 
             VStack(spacing: 6) {
-                ForEach(Array(filteredMeals.enumerated()), id: \.element.title) { idx, meal in
+                ForEach(Array(filteredMeals.enumerated()), id: \.element) { idx, meal in
                     HStack(spacing: 8) {
                         Image.Stir.cook
                             .foregroundStyle(Color.Stir.ember600)
@@ -212,7 +196,13 @@ private struct SavedFilterMiniature: View {
                         Text(meal.title)
                             .stirFont(.bodyMd)
                             .foregroundStyle(Color.Stir.ink900)
+                            .lineLimit(1)
                         Spacer()
+                        // Show rating subtly so the .rating sort
+                        // reordering is observable. SCA-31.
+                        Text("\(meal.rating)★")
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.ember600)
                         if meal.fav {
                             Image.Stir.favoriteFill
                                 .foregroundStyle(Color.Stir.ember600)
@@ -229,6 +219,7 @@ private struct SavedFilterMiniature: View {
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: favoritesOnly)
+            .animation(.easeInOut(duration: 0.25), value: sort)
         }
         .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(14)
@@ -240,8 +231,64 @@ private struct SavedFilterMiniature: View {
         .accessibilityHidden(true)
     }
 
-    private var filteredMeals: [(title: String, fav: Bool, when: String)] {
-        favoritesOnly ? meals.filter { $0.fav } : meals
+    private func sortPill(_ option: Sort) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { sort = option }
+        } label: {
+            Text(option.rawValue)
+                .stirFont(.bodySm)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(sort == option ? Color.white : Color.Stir.ink700)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(sort == option ? Color.Stir.ember600 : Color.Stir.paper200),
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var favoritesPill: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { favoritesOnly.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                (favoritesOnly ? Image.Stir.favoriteFill : Image.Stir.favoriteOutline)
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Favorites")
+                    .stirFont(.bodySm)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundStyle(favoritesOnly ? Color.Stir.ember600 : Color.Stir.ink700)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(
+                    favoritesOnly ? Color.Stir.ember100 : Color.Stir.paper200,
+                ),
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Filter (favoritesOnly) + sort (recent / rating / alpha).
+    /// `.recent` preserves input order — that's the "recently cooked"
+    /// chronology in this fake demo. SCA-31 — `sort` was previously
+    /// stored but never consumed; pills only changed appearance.
+    private var filteredMeals: [Meal] {
+        let base = favoritesOnly ? meals.filter(\.fav) : meals
+        switch sort {
+        case .recent:
+            return base
+        case .rating:
+            return base.sorted { $0.rating > $1.rating }
+        case .alpha:
+            return base.sorted {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        }
     }
 }
 
