@@ -103,11 +103,11 @@ private struct PantrySearchMiniature: View {
 
             VStack(spacing: 6) {
                 searchResultRow(name: "Spinach", icon: Image.Stir.leaf)
-                    .opacity(query.lowercased().contains("sp") ? 1 : 0.3)
+                    .opacity(matchOpacity(for: "Spinach"))
                 searchResultRow(name: "Spaghetti", icon: Image.Stir.cook)
-                    .opacity(query.lowercased().contains("sp") ? 1 : 0.3)
+                    .opacity(matchOpacity(for: "Spaghetti"))
                 searchResultRow(name: "Garlic", icon: Image.Stir.cook)
-                    .opacity(query.isEmpty ? 1 : 0.15)
+                    .opacity(matchOpacity(for: "Garlic"))
             }
             .animation(.easeInOut(duration: 0.25), value: query)
         }
@@ -132,6 +132,20 @@ private struct PantrySearchMiniature: View {
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// Per-row opacity for the search-cycle demo. Empty query → all
+    /// rows full opacity (the "no filter" baseline); non-empty query
+    /// → prefix-match per row, narrowing as the user types (s → sp →
+    /// spi singles out Spinach; spi+ excludes Spaghetti because
+    /// "Spaghetti" starts with "spa"). SCA-34 — earlier ad-hoc
+    /// `contains("sp")` predicates highlighted Spinach + Spaghetti
+    /// together for every "sp*" query AND left Spinach/Spaghetti dim
+    /// during the empty-query reset.
+    private func matchOpacity(for name: String) -> Double {
+        if query.isEmpty { return 1.0 }
+        let needle = query.lowercased()
+        return name.lowercased().hasPrefix(needle) ? 1.0 : 0.25
     }
 
     private func searchResultRow(name: String, icon: Image) -> some View {
