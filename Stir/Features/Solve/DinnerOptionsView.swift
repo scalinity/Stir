@@ -110,7 +110,7 @@ struct DinnerOptionsView: View {
                 .foregroundStyle(Color.Stir.ink300)
                 .padding(.horizontal, CGFloat.Stir.space4)
                 .padding(.vertical, CGFloat.Stir.space3Half)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(minHeight: 116)
         .stirCard(radius: CGFloat.Stir.radiusLg)
