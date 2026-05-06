@@ -38,6 +38,7 @@ struct PantryListView: View {
     @State private var editingItem: PantryItem?
     @State private var initError: String?
     @State private var errorToast: StirToastPayload?
+    @State private var showingDeleteAllConfirmation = false
 
     /// Hoisted as a positive boolean (vs the triple-negative
     /// `viewModel?.items.isEmpty == false`). Picks which in-list
@@ -253,6 +254,36 @@ struct PantryListView: View {
                             .tint(Color.Stir.ember700)
                         }
                 }
+
+                // Delete-all footer. Lives inside the List as its own
+                // Section so it scrolls with the content (user must
+                // reach the end to find it — discoverable but not
+                // accident-prone). Confirmation dialog at the view
+                // root provides the destructive-action safety net per
+                // the global "executing actions with care" guidance.
+                // Hidden when the search filter narrows results so
+                // the user isn't tempted to clear the pantry while
+                // looking at a subset.
+                if vm.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section {
+                        Button(role: .destructive) {
+                            showingDeleteAllConfirmation = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Delete all items")
+                                    .stirFont(.bodyMd)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Color.Stir.ember700)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .listRowBackground(Color.Stir.paper100)
+                        .accessibilityLabel("Delete all items from pantry")
+                        .accessibilityHint("Removes every pantry item. Confirmation required.")
+                    }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -273,6 +304,26 @@ struct PantryListView: View {
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
+        // Destructive bulk-delete confirmation. Lives at the
+        // populatedList root (not on the button itself) so the
+        // dialog stays attached even if the button scrolls out of
+        // view between tap and confirm. Item count is computed at
+        // present-time so a CloudKit-merge that lands while the
+        // dialog is up doesn't lie about what's being deleted —
+        // the dialog text reads against the snapshot at tap; the
+        // actual delete walks the live count via softDeleteAll.
+        .confirmationDialog(
+            "Delete all \(vm.items.count) items?",
+            isPresented: $showingDeleteAllConfirmation,
+            titleVisibility: .visible,
+        ) {
+            Button("Delete all items", role: .destructive) {
+                vm.deleteAllItems()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
+        }
         // Edit sheet stays here (rather than hoisted to outer Group)
         // because it's `.sheet(item:)` driven by a row tap and only
         // makes sense when the populated list is on screen. The

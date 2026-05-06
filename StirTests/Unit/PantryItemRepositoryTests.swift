@@ -406,6 +406,61 @@ final class PantryItemRepositoryTests: XCTestCase {
         return row
     }
 
+    // MARK: - softDeleteAll
+
+    func test_softDeleteAll_softDeletesEveryNonDeletedRow() throws {
+        let a = try seedItem(name: "olive oil", memoryState: .remembered)
+        let b = try seedItem(name: "fresh basil", memoryState: .ephemeral)
+        let c = try seedItem(name: "garlic", memoryState: .remembered)
+        let count = try repo.softDeleteAll(for: household)
+        XCTAssertEqual(count, 3)
+        XCTAssertNotNil(a.deletedAt)
+        XCTAssertNotNil(b.deletedAt)
+        XCTAssertNotNil(c.deletedAt)
+        XCTAssertTrue(try repo.fetchAll(for: household).isEmpty)
+    }
+
+    func test_softDeleteAll_isIdempotent_returns_zero_on_second_call() throws {
+        try seedItem(name: "olive oil")
+        try seedItem(name: "garlic")
+        let first = try repo.softDeleteAll(for: household)
+        let second = try repo.softDeleteAll(for: household)
+        XCTAssertEqual(first, 2)
+        XCTAssertEqual(second, 0, "re-call after all rows deleted must return 0 — fetch predicate filters deletedAt == nil")
+    }
+
+    func test_softDeleteAll_emptyPantry_returnsZero() throws {
+        let count = try repo.softDeleteAll(for: household)
+        XCTAssertEqual(count, 0)
+    }
+
+    func test_softDeleteAll_isolatesByHousehold() throws {
+        let other = HouseholdProfile(context: pc.viewContext)
+        other.id = UUID()
+        other.createdAt = Date()
+        try pc.viewContext.save()
+
+        let theirRow = PantryItem(context: pc.viewContext)
+        theirRow.id = UUID()
+        theirRow.household = other
+        theirRow.displayName = "theirs"
+        theirRow.canonicalIngredientSlug = ""
+        theirRow.typedSource = .manual
+        theirRow.typedMemoryState = .remembered
+        theirRow.userConfirmed = true
+        theirRow.createdAt = Date()
+        theirRow.updatedAt = Date()
+        theirRow.lastSeenAt = Date()
+        try pc.viewContext.save()
+
+        try seedItem(name: "ours")
+
+        let count = try repo.softDeleteAll(for: household)
+        XCTAssertEqual(count, 1, "softDeleteAll must scope to the supplied household only")
+        XCTAssertNil(theirRow.deletedAt, "other household's rows must remain untouched")
+        XCTAssertEqual(try repo.fetchAll(for: other).count, 1)
+    }
+
     // MARK: - consumeForRecipe (SCA-21)
 
     func test_consumeForRecipe_softDeletesEphemeralMatch() throws {

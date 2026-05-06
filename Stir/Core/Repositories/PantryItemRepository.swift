@@ -138,6 +138,40 @@ final class PantryItemRepository {
         try controller.save()
     }
 
+    /// Bulk soft-delete every non-deleted PantryItem scoped to the
+    /// household. Used by the "Delete all items" affordance on
+    /// `PantryListView` (PantryListViewModel.deleteAllItems). Routes
+    /// through `applySoftDeleteFields` for contract-consistency with
+    /// single-row `softDelete` and the consume-time delete path —
+    /// future side-effects on soft-delete (audit log, CloudKit hint)
+    /// inherit on this path too. Single save at end so the entire
+    /// batch lands as one CloudKit propagation unit (vs N individual
+    /// tombstones flooding the sync queue). Idempotent: re-calling
+    /// after all rows are deleted returns 0 because the fetch
+    /// predicate filters `deletedAt == nil`.
+    @discardableResult
+    func softDeleteAll(for household: HouseholdProfile, now: Date = Date()) throws -> Int {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt == nil"),
+        ])
+        let context = controller.viewContext
+        let rows: [PantryItem]
+        do {
+            rows = try context.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+        guard !rows.isEmpty else { return 0 }
+        for row in rows {
+            applySoftDeleteFields(row, at: now)
+        }
+        try controller.save()
+        Logger.coreData.info("PantryItemRepository softDeleteAll: \(rows.count, privacy: .public) rows soft-deleted")
+        return rows.count
+    }
+
     /// Apply soft-delete fields without saving. Shared between
     /// `softDelete(_:)` (which saves immediately) and the ephemeral-
     /// delete branch in `consumeForRecipe` (which batches saves at the

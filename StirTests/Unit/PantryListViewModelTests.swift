@@ -195,6 +195,19 @@ final class PantryListViewModelTests: XCTestCase {
         XCTAssertTrue(vm.items.isEmpty, "empty-state fallback triggers when last row removed")
     }
 
+    // MARK: - deleteAllItems
+
+    func test_deleteAllItems_successReturnsCountAndClears() async throws {
+        try seedManual("olive oil")
+        try seedManual("flour")
+        let vm = makeVM()
+        vm.load()
+        XCTAssertEqual(vm.items.count, 2)
+        let count = vm.deleteAllItems()
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(vm.items.count, 0)
+    }
+
     // MARK: - rememberedCount projection
 
     func test_rememberedCount_excludesEphemeralAndExpiredFromHeader() async throws {

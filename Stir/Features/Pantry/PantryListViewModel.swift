@@ -261,6 +261,29 @@ final class PantryListViewModel {
         }
     }
 
+    /// Bulk-clear the entire pantry. Wired to the "Delete all items"
+    /// footer on `PantryListView`, gated by a confirmation dialog at
+    /// the view layer. Returns the count of soft-deleted rows on
+    /// success, `nil` on failure (paired with an error toast). The
+    /// caller's confirmation dialog is the only safety net — there's
+    /// no in-app undo, but soft-delete keeps the rows recoverable via
+    /// CloudKit if needed.
+    @discardableResult
+    func deleteAllItems() -> Int? {
+        clearError()
+        do {
+            let count = try repo.softDeleteAll(for: household)
+            load()
+            return count
+        } catch {
+            Logger.coreData.error(
+                "deleteAllItems failed: \(error.localizedDescription, privacy: .private)",
+            )
+            surfaceError("Couldn't clear your pantry. Try again.")
+            return nil
+        }
+    }
+
     /// View invokes this when it observes `editingItem.deletedAt != nil`
     /// while the edit sheet is presented (CloudKit-tombstone race).
     /// Triggers a typed toast separate from the generic error message.
