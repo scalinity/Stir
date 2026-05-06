@@ -69,6 +69,8 @@ struct SelectableChip: View {
                     .stirFont(.labelLg)
                     .fontWeight(isSelected ? .bold : .medium)
                     .foregroundStyle(foregroundColor)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, CGFloat.Stir.space3Half) // 14pt
             .padding(.vertical, CGFloat.Stir.space2 + 1)   // 9pt
