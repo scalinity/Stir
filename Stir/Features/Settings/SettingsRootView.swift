@@ -468,24 +468,27 @@ struct SettingsRootView: View {
 
     // MARK: - Help
 
-    /// Help section. Single "Replay tutorials" entry resets every
-    /// in-app tutorial via `coordinator.replayAllTutorials()` and
-    /// routes the user to Tonight, where the first reachable tutorial
-    /// (`tonightTour`) auto-presents and the rest fire as the user
-    /// re-enters their host surfaces.
+    /// Help section. Pushes into `TutorialReplayView` for per-tutorial
+    /// replay (SCA-17 W9). With 9 distinct tours shipped, the prior
+    /// all-or-nothing reset was high-friction enough that users who
+    /// wanted to re-see one specific tour wouldn't bother. The
+    /// per-key surface preserves the bulk-reset path as a button
+    /// inside the sub-screen for the new-user-experience case.
     private var helpSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
             sectionEyebrow("Help")
-            settingsActionRow(
-                icon: Image.Stir.info,
-                title: "Replay tutorials",
-                // Honest copy: tours auto-arm next time you reach
-                // their host screen. Tonight tour fires immediately;
-                // Scan/Solve/Cook tours fire as you walk that path.
-                subtitle: "Tutorials will reappear next time you open each screen.",
-                action: { coordinator.replayAllTutorials() },
-            )
-            .stirCard()
+            NavigationLink {
+                TutorialReplayView()
+            } label: {
+                settingsRowContent(
+                    icon: Image.Stir.info,
+                    title: "Replay tutorials",
+                    subtitle: "Pick a tour to walk through again.",
+                    trailing: .chevron,
+                )
+                .stirCard()
+            }
+            .buttonStyle(.plain)
         }
     }
 

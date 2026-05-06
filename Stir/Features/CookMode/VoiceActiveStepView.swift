@@ -35,8 +35,6 @@ import SwiftUI
 struct VoiceActiveStepView: View {
     @Bindable var viewModel: CookModeViewModel
 
-    @Environment(\.coachMarks) private var coachMarks
-
     var body: some View {
         VStack(spacing: 0) {
             topBar

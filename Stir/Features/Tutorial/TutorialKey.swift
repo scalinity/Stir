@@ -47,13 +47,23 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     /// what the row does and why kitchen-state matters for solves.
     case pantryManagement = "pantry_management"
 
-    /// Pantry — in-list walkthrough fired the first time the user
-    /// opens `PantryListView`. Phase 2 of the pantry tutorial.
+    /// Pantry — populated in-list walkthrough fired the first time
+    /// the user opens `PantryListView` with at least one item.
     /// Anchors on the header strip, toolbar +, first row, and source
-    /// glyph (5-step `inListTour`) — or on welcome / header context
-    /// / empty-state Add CTA when the pantry is empty (3-step
-    /// `inListTourEmpty`).
+    /// glyph (5-step `inListTour`).
     case pantryInListTour = "pantry_in_list_tour"
+
+    /// Pantry — empty-state in-list walkthrough fired the first time
+    /// the user opens `PantryListView` with NO items. Welcome →
+    /// context primer → empty-state Add CTA (3-step
+    /// `inListTourEmpty`). Distinct key from `pantryInListTour` so
+    /// completing the empty tour (taps "Got it" → adds first item)
+    /// does NOT burn the populated-tour bit; the populated variant
+    /// fires fresh on the user's next visit. (SCA-17 C4 — earlier
+    /// design used a single key + `.id()` remount, which silently
+    /// suppressed the populated tour for the most natural new-user
+    /// trajectory.)
+    case pantryInListTourEmpty = "pantry_in_list_tour_empty"
 
     /// User-facing name surfaced in Settings replay copy.
     var displayName: String {
@@ -67,6 +77,7 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
         case .voiceMode:      return "Voice Mode tutorial"
         case .pantryManagement: return "Pantry tutorial"
         case .pantryInListTour: return "Pantry walkthrough"
+        case .pantryInListTourEmpty: return "Pantry empty-state walkthrough"
         }
     }
 
@@ -92,6 +103,8 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
             return "Re-explain the pantry the next time you open Settings."
         case .pantryInListTour:
             return "Walk through the pantry surface again next time you open it."
+        case .pantryInListTourEmpty:
+            return "Re-show the empty-pantry walkthrough next time the pantry is cleared."
         }
     }
 

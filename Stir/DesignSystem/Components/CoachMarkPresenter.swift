@@ -116,11 +116,19 @@ struct CoachMarkPresenterModifier: ViewModifier {
             // we explicitly suspend the controller so a stale overlay
             // pinned to last-known geometry doesn't linger when the
             // host's `shouldPresent` predicate flips false mid-tour.
-            .task(id: gateOpen) {
-                guard gateOpen else {
+            // Suspend serializes against `.task` cancellation in a
+            // separate `.onChange` so the SwiftUI mutation order is
+            // deterministic (SCA-17 W7). The earlier "suspend inside
+            // the task body" path could interleave with the new task's
+            // start under fast gate flips, leaving isPresenting=false
+            // even though the gate was open.
+            .onChange(of: gateOpen) { _, newValue in
+                if !newValue {
                     controller.suspend()
-                    return
                 }
+            }
+            .task(id: gateOpen) {
+                guard gateOpen else { return }
                 do {
                     try await Task.sleep(for: tutorialPresentationSettleDelay)
                 } catch is CancellationError {
@@ -164,8 +172,19 @@ struct CoachMarkPresenterModifier: ViewModifier {
             }
             cardLayer(step: step, targetFrame: target)
                 .transition(.opacity)
+                // SCA-17 W15 — card reads first so the user hears the
+                // step instructions before VoiceOver lands on the
+                // spotlit control (action-gated steps make the
+                // underlying control focusable via the spotlight's
+                // `.allowsHitTesting(false)`).
+                .accessibilitySortPriority(2)
         }
         .animation(.easeInOut(duration: 0.2), value: controller.currentIndex)
+        // SCA-17 W14 — flag the overlay as modal so VoiceOver
+        // communicates the modal scope to assistive-tech users.
+        // (Action-gated steps still let the spotlit control receive
+        // focus via `.allowsHitTesting(false)` on the spotlight.)
+        .accessibilityAddTraits(.isModal)
     }
 
     @ViewBuilder
@@ -215,18 +234,50 @@ struct CoachMarkPresenterModifier: ViewModifier {
         let center = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
         guard let target = targetFrame else { return center }
         let resolved = ResolvedPlacement.resolve(placement, target: target, screenSize: screenSize)
+
         switch resolved {
         case .center:
             return center
         case .below:
             let proposedY = target.maxY + cardCenterOffset
             let clampedY = min(proposedY, screenSize.height - cardEdgeClamp)
+            // **Behind-anchor fallback (SCA-17 W2):** if the safe-area
+            // clamp pulled the card up INTO its own spotlight target
+            // (typical on tall anchors near the bottom of the screen),
+            // flip to .above placement instead. Without this, the
+            // card overlays its own spotlight — bites
+            // `populated_edit_remove` and `dishMeta` on shorter
+            // devices.
+            if clampedY < target.maxY + cardEdgeClamp / 2 {
+                return positionAbove(target: target, screenSize: screenSize)
+            }
             return CGPoint(x: screenSize.width / 2, y: clampedY)
         case .above:
             let proposedY = target.minY - cardCenterOffset
             let clampedY = max(proposedY, cardEdgeClamp)
+            // Symmetric: if the top-edge clamp pulled the card down
+            // into its anchor, flip to .below.
+            if clampedY > target.minY - cardEdgeClamp / 2 {
+                return positionBelow(target: target, screenSize: screenSize)
+            }
             return CGPoint(x: screenSize.width / 2, y: clampedY)
         }
+    }
+
+    /// Direct .below positioning without the W2 fallback recursion —
+    /// used as the .above-failed escape hatch. Clamps to safe area
+    /// but does NOT re-check for behind-anchor (we already know
+    /// .above failed; .below is best-effort).
+    private func positionBelow(target: CGRect, screenSize: CGSize) -> CGPoint {
+        let proposedY = target.maxY + cardCenterOffset
+        let clampedY = min(proposedY, screenSize.height - cardEdgeClamp)
+        return CGPoint(x: screenSize.width / 2, y: clampedY)
+    }
+
+    private func positionAbove(target: CGRect, screenSize: CGSize) -> CGPoint {
+        let proposedY = target.minY - cardCenterOffset
+        let clampedY = max(proposedY, cardEdgeClamp)
+        return CGPoint(x: screenSize.width / 2, y: clampedY)
     }
 
     /// Auto-resolved placement. Distinct enum from `CoachMarkPlacement`

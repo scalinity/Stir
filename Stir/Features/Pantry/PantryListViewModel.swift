@@ -67,10 +67,19 @@ final class PantryListViewModel {
     /// against `cap` and visibly lied — e.g. "27 of 25 saved" with 5
     /// ephemeral + 22 remembered (review C2).
     var rememberedCount: Int {
+        // MUST match `PantryItemRepository.countRemembered`'s predicate
+        // exactly — this powers the "N of CAP saved" header strip and
+        // the repo's count is what gates manual adds against the cap.
+        // The repo does NOT filter on `isExpired` (an expired
+        // .remembered row still counts toward the cap; see
+        // PantryItem+Extensions: typedMemoryState stays `.remembered`,
+        // only `memoryStateLabel` reads "Expired"). Without this
+        // alignment, a paid user with one expired item sees
+        // "N-1 of 250" but hits the paywall on the next add — review
+        // SCA-17 C1.
         items.filter { item in
             item.deletedAt == nil
                 && item.typedMemoryState == .remembered
-                && !item.isExpired
         }.count
     }
 

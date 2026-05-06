@@ -44,8 +44,21 @@ struct CoachMarkSpotlight: View {
         }
         .ignoresSafeArea()
         .overlay {
-            if let target = targetFrame {
-                halo(target: target)
+            // **Off-screen-anchor guard (SCA-17 W3):** if the anchor
+            // has scrolled out of bounds, `expandedTarget(for: full-
+            // screen-bounds)` returns nil (intersection collapses to
+            // .null/.isEmpty). Halo MUST honor the same guard or it
+            // renders at the off-screen position while the dim layer
+            // covers the whole screen — locking the user out of
+            // action-gated steps.
+            //
+            // We compose the halo against the visible-bounds-clamped
+            // target so the halo only renders when there's a sane
+            // on-screen rect to spotlight.
+            GeometryReader { proxy in
+                if let target = visibleTarget(in: proxy.size) {
+                    halo(target: target)
+                }
             }
         }
         .accessibilityHidden(true)
@@ -54,40 +67,73 @@ struct CoachMarkSpotlight: View {
             if newValue {
                 startPulse()
             } else {
-                // Wrap in a zero-duration animation so SwiftUI cleanly
-                // commits the off-state instead of snapping mid-cycle
-                // from the prior `repeatForever` keyframe — visible
-                // stutter at step transitions otherwise.
-                withAnimation(.linear(duration: 0)) {
+                // Reset OUTSIDE any animation context so the value
+                // commits without a transaction (`withAnimation
+                // (.linear(duration: 0))` does NOT cancel a
+                // `repeatForever` curve — SwiftUI's implicit-animation
+                // API has no stop affordance once `repeatForever` is
+                // attached). The visible "stop" is owed to the halo
+                // modifier reading `isPulsing` directly (see `halo()`
+                // below) and snapping to the static frame when
+                // `isPulsing` flips false. SCA-17 W1.
+                var txn = Transaction()
+                txn.disablesAnimations = true
+                withTransaction(txn) {
                     pulse = false
                 }
             }
         }
     }
 
+    /// Padded target rect clipped to drawing bounds. Returns nil if
+    /// the anchor is fully off-screen (intersection collapses to
+    /// `.null` or `.isEmpty`) so callers fall through to the
+    /// no-anchor path. Without this guard, an off-screen anchor would
+    /// `addRoundedRect(in: .null)` (undefined drawing) and the halo
+    /// overlay would render outside the visible area, leaving the dim
+    /// layer covering the whole screen with no dismissable target —
+    /// locking action-gated tours. SCA-17 W3.
     private func expandedTarget(for bounds: CGRect) -> CGRect? {
         guard let target = targetFrame else { return nil }
-        return target
+        let clipped = target
             .insetBy(dx: -padding, dy: -padding)
             .intersection(bounds)
+        guard !clipped.isNull, !clipped.isEmpty else { return nil }
+        return clipped
+    }
+
+    /// Halo-side helper: returns the anchor's expanded rect IFF it's
+    /// at least partially on screen. Mirrors `expandedTarget` but
+    /// uses the overlay's geometry size (the screen) rather than the
+    /// Canvas's drawing bounds.
+    private func visibleTarget(in size: CGSize) -> CGRect? {
+        guard let target = targetFrame else { return nil }
+        let bounds = CGRect(origin: .zero, size: size)
+        let clipped = target
+            .insetBy(dx: -padding, dy: -padding)
+            .intersection(bounds)
+        guard !clipped.isNull, !clipped.isEmpty else { return nil }
+        return clipped
     }
 
     /// Ember halo stroked just outside the cutout. Static at 100%, with
     /// an additive pulse-scale ring when `isPulsing`. Reduce-motion
     /// renders the pulse ring static (no scale animation).
+    ///
+    /// `target` is pre-expanded (passed in from `visibleTarget(in:)`)
+    /// so callers and Canvas dim layer agree on the on-screen rect.
     @ViewBuilder
     private func halo(target: CGRect) -> some View {
-        let expanded = target.insetBy(dx: -padding, dy: -padding)
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(Color.Stir.ember600, lineWidth: 2)
-                .frame(width: expanded.width, height: expanded.height)
-                .position(x: expanded.midX, y: expanded.midY)
+                .frame(width: target.width, height: target.height)
+                .position(x: target.midX, y: target.midY)
             if isPulsing {
                 RoundedRectangle(cornerRadius: cornerRadius + 4, style: .continuous)
                     .stroke(Color.Stir.ember600.opacity(0.45), lineWidth: 4)
-                    .frame(width: expanded.width, height: expanded.height)
-                    .position(x: expanded.midX, y: expanded.midY)
+                    .frame(width: target.width, height: target.height)
+                    .position(x: target.midX, y: target.midY)
                     .scaleEffect(reduceMotion ? 1.0 : (pulse ? 1.06 : 1.0))
                     .opacity(reduceMotion ? 0.7 : (pulse ? 0.0 : 0.7))
             }

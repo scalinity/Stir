@@ -30,6 +30,15 @@ final class TutorialManager {
     /// `@Observable`, so reads from views participate in invalidation.
     private(set) var completedKeys: Set<TutorialKey>
 
+    /// Generation counter incremented on every `reset(_:)` /
+    /// `resetAll()`. Coach-mark controllers snapshot this at `start()`
+    /// time and re-snapshot on every subsequent `start()`; if the
+    /// counter changed across a suspend, the controller treats the
+    /// next start as a replay (resets to step 0, re-fires
+    /// `tutorial_started`). Without this signal, a Settings replay
+    /// during a suspended tour silently resumed mid-step. SCA-17 C3.
+    private(set) var resetGeneration: Int = 0
+
     private let defaults: UserDefaults
     private let sentry: any SentryReporting
 
@@ -67,6 +76,7 @@ final class TutorialManager {
         completedKeys.remove(key)
         defaults.removeObject(forKey: key.defaultsKey)
         verifyWrite(key: key, expected: false)
+        resetGeneration &+= 1
     }
 
     /// Reset every known tutorial. Used by Settings → "Replay
@@ -79,11 +89,17 @@ final class TutorialManager {
         completedKeys.removeAll()
         for key in TutorialKey.allCases {
             defaults.removeObject(forKey: key.defaultsKey)
+            // Inherit the per-key verifyWrite Sentry breadcrumb so
+            // sandbox/low-disk silent-failures during bulk replay
+            // surface to triage. SCA-17 W4 — earlier path bypassed
+            // verifyWrite, masking dropped writes.
+            verifyWrite(key: key, expected: false)
         }
         // Best-effort durable flush. UserDefaults will sync on the
         // next backgrounding regardless; this just narrows the
         // crash window.
         defaults.synchronize()
+        resetGeneration &+= 1
     }
 
     /// Read back the UserDefaults state and breadcrumb a mismatch.

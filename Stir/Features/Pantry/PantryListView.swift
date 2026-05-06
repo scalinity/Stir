@@ -114,29 +114,29 @@ struct PantryListView: View {
         // anchors on the header strip, toolbar +, first row, and
         // source glyph. The 3-step empty variant collapses to welcome
         // / context / empty-state Add CTA so the spotlight never
-        // targets a missing row. Same `pantryInListTour` key backs
-        // both — completion is one bit per user, not per variant.
-        // Replay via Settings → Replay tutorials cycles whichever
-        // variant matches the current pantry state.
+        // targets a missing row.
         //
-        // **Stale-variant fix (review-5 SCA-14 Critical #1):** the
-        // presenter modifier captures `steps` at controller-init time;
-        // a body re-render with a different `steps` array doesn't
-        // reach the controller. Forcing the modifier to fully re-mount
-        // via `.id(pantryHasItems)` constructs a fresh controller with
-        // the correct variant whenever the pantry transitions
-        // empty↔populated mid-tour. The old controller's `suspend()`
-        // fires on its `.onDisappear`, leaving the durable completion
-        // flag untouched (lifecycle invariant) so the new variant
-        // re-arms naturally.
+        // **Distinct-key design (SCA-17 C4):** the populated and
+        // empty variants now use different TutorialKey cases
+        // (`pantryInListTour` vs `pantryInListTourEmpty`). Each key
+        // owns its own UserDefaults flag, so completing the empty-
+        // pantry tour does NOT silently burn the populated-tour bit
+        // — the most natural new-user trajectory (empty pantry →
+        // tour → first add → populated list) gets BOTH tours over
+        // its lifetime instead of just the empty one. Earlier
+        // `.id(pantryHasItems)` re-mount design is gone — the key
+        // change itself drives controller identity, and SwiftUI sees
+        // a fresh modifier when the key flips. Also gates only on
+        // search-empty so non-matching filters don't fire the
+        // populated tour with no first-row anchor (SCA-17 W5).
         .coachMarks(
-            key: .pantryInListTour,
+            key: pantryHasItems ? .pantryInListTour : .pantryInListTourEmpty,
             steps: pantryHasItems
                 ? PantryCoachMarks.inListTour
                 : PantryCoachMarks.inListTourEmpty,
-            shouldPresent: viewModel?.didCompleteInitialLoad == true,
+            shouldPresent: viewModel?.didCompleteInitialLoad == true
+                && (viewModel?.searchText.isEmpty ?? true),
         )
-        .id(pantryHasItems)
         // AddSheet hoisted to outer Group so it survives empty→populated
         // subtree swaps. Toolbar `+` is disabled while VM is nil so the
         // `if let` branch always lands. On `.failed` the sheet stays

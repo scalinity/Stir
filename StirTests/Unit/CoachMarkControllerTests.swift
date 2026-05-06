@@ -254,6 +254,44 @@ final class CoachMarkControllerTests: XCTestCase {
     }
 
     @MainActor
+    func test_replayWhileSuspended_resetsToStepZero() {
+        // SCA-17 C3 — Settings → Replay tutorials WHILE a tour was
+        // mid-flight on a different tab and got suspended on tab
+        // switch. The controller must detect "key was cleared while
+        // I was suspended" and re-fire as fresh-start, NOT resume
+        // mid-step. Without this fix, didFireStarted stayed true,
+        // currentIndex stayed mid-tour, and tutorial_started was
+        // suppressed → funnel pair broken.
+        let controller = CoachMarkController(
+            key: .scanCapture,
+            steps: ScanCaptureCoachMarks.steps,
+            manager: manager,
+        )
+        controller.start()
+        controller.advance() // mid-tour
+        XCTAssertGreaterThan(controller.currentIndex, 0)
+
+        // User switches to another tab — host disappears → suspend.
+        controller.suspend()
+        XCTAssertFalse(controller.isPresenting)
+        XCTAssertFalse(manager.isCompleted(.scanCapture))
+
+        // User taps Settings → Replay tutorials. resetAll clears
+        // the durable flag for every key, including the one this
+        // controller is suspended on.
+        manager.resetAll()
+        XCTAssertFalse(manager.isCompleted(.scanCapture))
+
+        // User returns to the host. presenter's gateOpen flips true,
+        // .task settles, controller.start() runs.
+        controller.start()
+
+        // Fresh-start: index back at 0, presenting again.
+        XCTAssertEqual(controller.currentIndex, 0)
+        XCTAssertTrue(controller.isPresenting)
+    }
+
+    @MainActor
     func test_replayCycle_completeThenReset_allowsFreshStart() {
         // Full completion → reset → fresh start. Verifies that
         // didFireStarted is reset in finish() so the replay is a

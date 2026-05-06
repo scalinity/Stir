@@ -185,9 +185,11 @@ final class TutorialManagerTests: XCTestCase {
         }
     }
 
-    // MARK: - DEBUG resetAll
+    // MARK: - resetAll (production-public via RootCoordinator.replayAllTutorials)
 
-    #if DEBUG
+    /// SCA-17 W13 — `resetAll()` was promoted out of `#if DEBUG` so
+    /// `RootCoordinator.replayAllTutorials()` can call it from
+    /// production. The test is no longer DEBUG-gated.
     @MainActor
     func test_resetAll_clearsAllKeys() {
         for key in TutorialKey.allCases {
@@ -201,5 +203,4 @@ final class TutorialManagerTests: XCTestCase {
             XCTAssertFalse(defaults.bool(forKey: key.defaultsKey))
         }
     }
-    #endif
 }

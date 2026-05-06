@@ -660,15 +660,22 @@ widget_added, shortcut_run,
 ai_request_completed, ai_request_failed,
 screen_error_shown, sync_state_changed,
 
-# SCA-5 / SCA-5b — in-app tutorials (full-screen Tonight tour +
-# contextual coach-mark sequences). All events carry `tutorial_id`
-# (snake_case TutorialKey.rawValue: tonight_tour, scan_capture,
-# scan_review, dinner_options, dish_preview, cook_mode_tap,
-# voice_mode). step_advanced adds `from_step` + `to_step` (snake_case
-# step IDs). skipped optionally adds `reason` ("navigated_away" when
-# the host view disappears mid-tour vs absent for explicit Skip).
-# Lifecycle invariant: exactly one of {completed, skipped} per
-# started; suspend() is non-terminal and does NOT emit an event.
+# SCA-5 / 5b / 12 / 13 / 14 — in-app tutorials (full-screen Tonight
+# tour + contextual coach-mark sequences). All events carry
+# `tutorial_id` (snake_case TutorialKey.rawValue: tonight_tour,
+# scan_capture, scan_review, dinner_options, dish_preview,
+# cook_mode_tap, voice_mode, pantry_management, pantry_in_list_tour).
+# step_advanced adds `from_step` + `to_step` (snake_case step IDs;
+# variant-prefixed `populated_*`/`empty_*` for pantry_in_list_tour to
+# split cohorts under the same tutorial_id). Lifecycle invariant:
+# exactly one of {completed, skipped} per started. **Disappear is
+# non-terminal** — suspend() emits NO telemetry; tour re-arms when
+# host re-appears. Backgrounding/app-kill mid-tour without explicit
+# resolution is a third state — funnel queries compute abandonment as
+# count(started) − count(completed) − count(skipped). No `reason`
+# property on tutorial_skipped (earlier drafts proposed
+# "navigated_away"; SCA-17 reverted to keep the lifecycle invariant
+# clean).
 tutorial_started, tutorial_step_advanced, tutorial_completed, tutorial_skipped
 ```
 

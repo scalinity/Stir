@@ -52,6 +52,14 @@ final class CoachMarkController {
     /// `finish()` so each replay gets a fresh started→completed funnel.
     private var didFireStarted: Bool = false
 
+    /// Snapshot of `manager.resetGeneration` taken at each `start()`.
+    /// Used by the SCA-17 C3 "replay during suspend" path: if the
+    /// counter advanced between two start() calls (e.g., Settings →
+    /// Replay tutorials fired while we were suspended on a different
+    /// tab), the next start treats the cycle as a fresh replay
+    /// (resets to step 0, re-fires `tutorial_started`).
+    private var lastSeenResetGeneration: Int = -1
+
     init(
         key: TutorialKey,
         steps: [CoachMarkStep],
@@ -100,13 +108,31 @@ final class CoachMarkController {
         //     Reset to step 0 and fire `tutorial_started`.
         //   - true → resume after a transient suspend. Preserve
         //     currentIndex; don't double-fire the started event.
-        if !didFireStarted {
+        //
+        // **Replay-while-suspended fix (SCA-17 C3):** if the manager's
+        // resetGeneration counter advanced between this start() and
+        // the previous one (e.g., Settings → Replay tutorials fired
+        // while we were suspended on a different tab), treat the
+        // cycle as a fresh replay even though `didFireStarted` is
+        // still true from the prior presentation. Without this
+        // signal, the user got a tour that resumed mid-step with no
+        // `tutorial_started` event paired against the eventual
+        // `tutorial_completed` — funnel pair broken. The counter
+        // cleanly distinguishes "transient suspend" from "manager
+        // mutated under us while suspended" without false-positives
+        // on a fresh setUp() (which leaves manager.isCompleted(key)
+        // false naturally).
+        let currentGeneration = manager.resetGeneration
+        let isReplay = didFireStarted
+            && currentGeneration != lastSeenResetGeneration
+        if !didFireStarted || isReplay {
             currentIndex = 0
             didFireStarted = true
             posthog.capture(.tutorialStarted, properties: [
                 "tutorial_id": key.telemetryID,
             ])
         }
+        lastSeenResetGeneration = currentGeneration
         isPresenting = true
     }
 

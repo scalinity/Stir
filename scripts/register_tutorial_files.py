@@ -58,6 +58,7 @@ FEATURE_FILES = [
     "CookModeTapCoachMarks.swift",
     "VoiceModeCoachMarks.swift",
     "PantryCoachMarks.swift",
+    "TutorialReplayView.swift",
 ]
 TEST_FILES = [
     "TutorialManagerTests.swift",

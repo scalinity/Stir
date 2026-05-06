@@ -30,10 +30,15 @@ enum VoiceModeCoachMarks {
             message: "Ember pulse means Stir is listening. Voice-tinted pulse means Stir is talking back. The waveform shows when your voice lands.",
         ),
         CoachMarkStep(
+            // SCA-17 W8: copy softened from "Try saying any of these"
+            // → "These are the commands Stir understands". The
+            // tutorial deliberately doesn't listen (file header
+            // comment), so an active "try saying" invitation set the
+            // user up to speak into a tutorial that ignored them.
             id: "commands",
             placement: .center,
-            title: "Try saying any of these",
-            message: "Speak naturally — no wake word. Anytime Stir is listening you can say:",
+            title: "What Stir understands",
+            message: "Speak naturally — no wake word. Once you're back in the conversation, you can say things like:",
             voiceExamples: [
                 .init("next", "advance to the next step"),
                 .init("repeat", "hear the current step again"),

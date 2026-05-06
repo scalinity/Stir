@@ -320,6 +320,7 @@
 		B90AB86CB624FDD3B914E545 /* CoachMarkControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC673AB518B14E9CF90BDDE /* CoachMarkControllerTests.swift */; };
 		A7BBBEA97A3847E5AC95FC45 /* SavedMealsFavoriteStickinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */; };
 		C483EAD3C38135449BFB39B8 /* PantryCoachMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */; };
+		D67ED9F1583A1367CAFA9157 /* TutorialReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E6A424037406E396C1F781A /* TutorialReplayView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -637,6 +638,7 @@
 		1DC673AB518B14E9CF90BDDE /* CoachMarkControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkControllerTests.swift; sourceTree = "<group>"; };
 		9DAD29B270668908EF08C4BD /* SavedMealsFavoriteStickinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsFavoriteStickinessTests.swift; sourceTree = "<group>"; };
 		4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryCoachMarks.swift; sourceTree = "<group>"; };
+		5E6A424037406E396C1F781A /* TutorialReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialReplayView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1342,6 +1344,7 @@
 				CA76FDAFF7C28DFD00959397 /* CookModeTapCoachMarks.swift */,
 				699EFFB5F61B992FD01869CF /* VoiceModeCoachMarks.swift */,
 				4549F42EE9A836291B1221F7 /* PantryCoachMarks.swift */,
+				5E6A424037406E396C1F781A /* TutorialReplayView.swift */,
 );
 			path = Tutorial;
 			sourceTree = "<group>";
@@ -1820,6 +1823,7 @@
 				92F222CB69A30A6FB5492596 /* CookModeTapCoachMarks.swift in Sources */,
 				D99BCD3B9DB54230531643D9 /* VoiceModeCoachMarks.swift in Sources */,
 				C483EAD3C38135449BFB39B8 /* PantryCoachMarks.swift in Sources */,
+				D67ED9F1583A1367CAFA9157 /* TutorialReplayView.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};

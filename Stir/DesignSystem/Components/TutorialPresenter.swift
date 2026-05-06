@@ -2,6 +2,33 @@
 //
 // Generic first-run-tutorial presenter modifier.
 //
+// ====================================================================
+// CHOOSING A PRESENTER (SCA-17 W10)
+// ====================================================================
+// Two presenter shapes ship under `Stir/DesignSystem/Components/`:
+//
+//   • **TutorialPresenter** (this file) — full-screen `fullScreenCover`
+//     with multi-step page-dot UI built around `TutorialFlowContainer`
+//     + `TutorialStepView`. Used for first-run welcome / orientation
+//     tours where the user is NOT mid-task and the tour OWNS the
+//     screen. v1: `tonightTour` only.
+//
+//   • **CoachMarkPresenter** (sibling file) — anchored spotlight +
+//     floating card overlaid on the live screen. The user IS mid-task
+//     and may be expected to perform the gated action (shutter tap,
+//     Solve tap, etc.) AS the tour advances. v1: 8 sequences (scan,
+//     dinner, dish, cook, voice, pantry x2 variants, etc.).
+//
+// Pick by the user's posture, not by step count:
+//   - "First-run welcome, before any task" → TutorialPresenter
+//   - "Contextual tip on a real surface" → CoachMarkPresenter
+//
+// Both presenters share `tutorialPresentationSettleDelay` (350ms) and
+// observe the same `TutorialManager`; replay surfaces work identically
+// across both via `RootCoordinator.replayAllTutorials()` /
+// `manager.reset(_:)` and the new per-key `TutorialReplayView`.
+// ====================================================================
+//
 // Replaces the prior `TutorialPresenterModifier` (formerly co-located
 // with `TonightWelcomeTutorial.swift`). Rewritten to address the
 // review-5 critical findings:
@@ -106,11 +133,14 @@ extension View {
     /// value-propagation handles re-evaluation. Pass any expression that
     /// evaluates to `true` once the host's preconditions are satisfied —
     /// e.g. `phase == .ready && profile?.onboardingCompleted == true`.
+    /// Argument order matches `coachMarks(key:steps:shouldPresent:manager:)`
+    /// so contributors switching between the two presenters get
+    /// uniform muscle memory (SCA-17 W11).
     func tutorial<Inner: View>(
         key: TutorialKey,
-        manager: TutorialManager = .shared,
-        shouldPresent: Bool = true,
         @ViewBuilder content: @escaping () -> Inner,
+        shouldPresent: Bool = true,
+        manager: TutorialManager = .shared,
     ) -> some View {
         modifier(
             TutorialPresenterModifier(
