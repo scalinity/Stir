@@ -57,10 +57,29 @@ The conservative `.ephemeral`-only delete rule is the safety mechanism that lets
 
 ## Trigger to revisit (Deferred only)
 
-N/A — Accepted. Trigger to **escalate** the matching rule (not the decision itself): if `pantry_auto_consume_resolved.unmatched / (ephemeral_deleted + remembered_bumped + unmatched) > 0.5` for a two-week window, the matcher needs hardening — likely SCA-26's name normalization (singular/plural, lowercase) or a tie-in to the IngredientCanonical bundled asset.
+N/A — Accepted. Trigger to **escalate** the matching rule (not the decision itself): if `pantry_auto_consume_resolved.unmatched / (ephemeral_deleted + remembered_bumped + unmatched) > 0.5` over a 14-day window aggregated across all users at the event-level (not per-user, not per-session), the matcher needs hardening — likely SCA-26's name normalization (singular/plural, lowercase) or a tie-in to the IngredientCanonical bundled asset.
+
+PostHog query sketch (paste into a HogQL Insight or saved query):
+
+```sql
+SELECT
+  toStartOfWeek(timestamp) AS wk,
+  sum(properties.unmatched) AS unmatched_total,
+  sum(properties.ephemeral_deleted + properties.remembered_bumped + properties.unmatched) AS denominator,
+  unmatched_total / nullIf(denominator, 0) AS unmatched_ratio
+FROM events
+WHERE event = 'pantry_auto_consume_resolved'
+  AND timestamp >= now() - INTERVAL 14 DAY
+GROUP BY wk
+HAVING unmatched_ratio > 0.5
+```
+
+Per-user variants are deliberately not the trigger grain — single-user noise (one cook with all imported-recipe ingredients and an empty pantry) would otherwise tip the threshold. Aggregate event-level is the correct denominator.
 
 ## Notes
 
+- **`substituted_count` is informational, not deducted from the action buckets.** A recipe with 3 ingredients all substituted, all matching ephemeral pantry rows, emits `{ephemeral_deleted: 3, substituted_count: 3, unmatched: 0, ...}` — the deletes still reflect the actual rows mutated; `substituted_count` is a side-channel signal for "how often did the user lean on substitution" without changing the primary ratio math.
+- **`unmatched` is the catch-all bucket** for "no pantry-row match" regardless of cause: malformed/blank ingredient name, repository fetch failure, or genuine no-match. This keeps `(ephemeral_deleted + remembered_bumped + unmatched + optional_skipped)` summing to `ingredients_walked`, which the trigger ratio depends on.
 - **Telemetry registration** lands in the same PR as the implementation: `pantry_auto_consume_resolved` is added to spec §15 + CLAUDE.md §Telemetry events.
 - **Voice Cook Mode** uses the same `performFinish` exit path, so the consume fires for both tap and voice sessions without separate wiring.
 - **Abandon-vs-finish discrimination** is already handled: `exit(markAbandoned:)` and `performFinish` are distinct paths in `CookModeViewModel`. The consume hook only fires from `performFinish`.

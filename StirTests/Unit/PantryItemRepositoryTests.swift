@@ -563,6 +563,69 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(outcome.substitutedCount, 0)
     }
 
+    func test_consumeForRecipe_whitespaceOnlySwap_fallsThroughToOriginal() throws {
+        // SubstitutionEvent recorded `acceptedAlternativeText = "   "`
+        // — the trim+isEmpty guard in `consumeForRecipe` rejects this
+        // as a real substitution and falls back to the original
+        // ingredient, mirroring the rejected-event path.
+        let oliveOil = try seedItem(name: "olive oil", slug: "olive_oil", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "olive oil", slug: "olive_oil", optional: false)])
+        let event = SubstitutionEvent(context: pc.viewContext)
+        event.id = UUID()
+        event.createdAt = Date()
+        event.recipeIngredient = plan.ingredientArray[0]
+        event.typedAcceptance = .accepted
+        event.acceptedAlternativeText = "   "
+        try pc.viewContext.save()
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [event], on: household)
+
+        XCTAssertEqual(outcome.substitutedCount, 0, "whitespace-only swap is not a real substitution")
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [oliveOil.objectID])
+    }
+
+    func test_consumeForRecipe_eventWithNilIngredientFK_isIgnored() throws {
+        // Defensive: SubstitutionEvent → RecipeIngredient is `Nullify`-
+        // cascaded in the schema, so a deleted ingredient leaves the
+        // event's FK nil. The consume routine must not crash and must
+        // not count such an event as a substitution. The original
+        // recipe ingredient is still consumed via its normal path.
+        let tomato = try seedItem(name: "tomato", slug: "tomato", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [(name: "tomato", slug: "tomato", optional: false)])
+        let orphanedEvent = SubstitutionEvent(context: pc.viewContext)
+        orphanedEvent.id = UUID()
+        orphanedEvent.createdAt = Date()
+        orphanedEvent.typedAcceptance = .accepted
+        orphanedEvent.acceptedAlternativeText = "butter"
+        // recipeIngredient deliberately left nil
+        try pc.viewContext.save()
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [orphanedEvent], on: household)
+
+        XCTAssertEqual(outcome.substitutedCount, 0, "FK-less event must not count as substitution")
+        XCTAssertEqual(outcome.ephemeralDeleted.map(\.objectID), [tomato.objectID])
+    }
+
+    func test_consumeForRecipe_blankIngredientName_countsAsUnmatched() throws {
+        // W1 regression test: a recipe row with a blank effective name
+        // (model hallucination / malformed import) used to silently
+        // skip without counting, breaking the four-counters-sum-to-
+        // ingredients-walked invariant the ADR 0029 trigger relies on.
+        // Now counted as `unmatched` since "no pantry-row match"
+        // describes the situation regardless of cause.
+        try seedItem(name: "tomato", slug: "tomato", memoryState: .ephemeral)
+        let plan = try makeRecipePlan(ingredients: [
+            (name: "tomato", slug: "tomato", optional: false),
+            (name: "", slug: nil, optional: false),
+        ])
+
+        let outcome = try repo.consumeForRecipe(plan, substitutions: [], on: household)
+
+        XCTAssertEqual(outcome.ephemeralDeleted.count, 1)
+        XCTAssertEqual(outcome.unmatched, 1, "blank-name ingredient must count as unmatched (W1)")
+        XCTAssertEqual(outcome.optionalSkipped, 0)
+    }
+
     // MARK: - Test fixtures for consumeForRecipe
 
     @discardableResult

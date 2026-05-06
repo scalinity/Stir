@@ -134,9 +134,19 @@ final class PantryItemRepository {
 
     /// Soft-delete a pantry item.
     func softDelete(_ item: PantryItem) throws {
-        item.deletedAt = Date()
-        item.updatedAt = Date()
+        applySoftDeleteFields(item, at: Date())
         try controller.save()
+    }
+
+    /// Apply soft-delete fields without saving. Shared between
+    /// `softDelete(_:)` (which saves immediately) and the ephemeral-
+    /// delete branch in `consumeForRecipe` (which batches saves at the
+    /// end of a multi-row mutation). Centralizing the field writes
+    /// keeps the soft-delete contract in one place — if we ever add
+    /// audit logging or a CloudKit hint, both paths inherit it.
+    private func applySoftDeleteFields(_ item: PantryItem, at when: Date) {
+        item.deletedAt = when
+        item.updatedAt = when
     }
 
     /// Outcome of `consumeForRecipe`. Carries the affected rows so
@@ -254,10 +264,16 @@ final class PantryItemRepository {
             }
 
             guard !effectiveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                // Defensive: a recipe with a blank ingredient row is a
-                // data-quality issue, not a consume target. Skip
-                // without counting — counting it as `unmatched` would
-                // pollute the telemetry signal.
+                // A recipe row with a blank effective name (model
+                // hallucination, malformed import, or rejected swap
+                // with empty original) can't be matched against the
+                // pantry. Count as `unmatched` so the four counters
+                // sum to the ingredients walked — keeps the dashboard
+                // ratio in ADR 0029's "Trigger to revisit" honest.
+                // The unmatched bucket is the catch-all for "no
+                // pantry-row match" regardless of cause: malformed
+                // input, fetch failure, or genuine no-match.
+                unmatched += 1
                 continue
             }
 
@@ -288,8 +304,7 @@ final class PantryItemRepository {
 
             switch row.typedMemoryState {
             case .ephemeral:
-                row.deletedAt = now
-                row.updatedAt = now
+                applySoftDeleteFields(row, at: now)
                 ephemeralDeleted.append(row)
             case .remembered:
                 row.lastSeenAt = now
