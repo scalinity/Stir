@@ -53,15 +53,25 @@ enum CoachMarkAnchorID: Hashable {
     // Pantry management.
     //   - `settingsManagePantryRow`: entry-point coach mark on the
     //     Settings row that pushes PantryListView. Lives in
-    //     SettingsRootView; available now.
-    //   - The other four anchors live inside PantryListView and its
-    //     sheets. They're reserved here so the in-screen sequence
-    //     compiles the moment that view ships.
+    //     SettingsRootView.
+    //   - `pantryHeaderStrip` / `pantryAddButton` / `pantryFirstRow` /
+    //     `pantryMemoryStatePicker`: in-screen anchors for
+    //     `PantryCoachMarks.inListTour` (SCA-14).
+    //   - `pantryListSourceGlyph`: the leading source-of-origin
+    //     glyph inside a `PantryRow`. Final step of the in-list tour
+    //     legend (camera = scanned, pencil = manual, star = staple,
+    //     stack = imported).
+    //   - `pantryListEmptyAdd`: the "Add an item" PrimaryButton
+    //     inside the empty-state — terminal anchor for
+    //     `PantryCoachMarks.inListTourEmpty` so the tour has a real
+    //     CTA to spotlight when there are no rows.
     case settingsManagePantryRow
     case pantryAddButton
     case pantryHeaderStrip
     case pantryMemoryStatePicker
     case pantryFirstRow
+    case pantryListSourceGlyph
+    case pantryListEmptyAdd
 }
 
 /// Per-screen registry of anchor frames. Frames are stored in the

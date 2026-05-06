@@ -83,10 +83,32 @@ struct PantryListView: View {
                 }
                 .disabled(viewModel == nil)
                 .accessibilityLabel("Add item")
+                // SCA-14 — toolbar + is the third step of the in-list
+                // tour (`PantryCoachMarks.inListTour.add`). The 44pt
+                // min-tap-target frame above doubles as the spotlight
+                // anchor frame, so the halo covers the visible chrome
+                // even though the SF Symbol is smaller.
+                .coachMarkAnchor(.pantryAddButton)
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        // SCA-14 — in-list pantry walkthrough. Variant chosen at attach
+        // time based on whether the pantry has rows: the populated 5-
+        // step tour anchors on the header strip, toolbar +, first row,
+        // and source glyph. The 3-step empty variant collapses to
+        // welcome / context / empty-state Add CTA so the spotlight
+        // never targets a missing row. Same `pantryInListTour` key
+        // backs both — completion is one bit per user, not per
+        // variant. Replay via Settings → Replay tutorials cycles
+        // whichever variant matches the current pantry state.
+        .coachMarks(
+            key: .pantryInListTour,
+            steps: viewModel?.items.isEmpty == false
+                ? PantryCoachMarks.inListTour
+                : PantryCoachMarks.inListTourEmpty,
+            shouldPresent: viewModel != nil,
+        )
         // AddSheet hoisted to outer Group so it survives empty→populated
         // subtree swaps. Toolbar `+` is disabled while VM is nil so the
         // `if let` branch always lands. On `.failed` the sheet stays
@@ -177,10 +199,14 @@ struct PantryListView: View {
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
             .padding(.bottom, CGFloat.Stir.space2)
+            // SCA-14 — the cap-headroom strip is step 2 of the in-list
+            // tour. Tagged at the outer HStack so the spotlight covers
+            // the count + "of N saved" together.
+            .coachMarkAnchor(.pantryHeaderStrip)
 
             List {
-                ForEach(vm.filteredItems, id: \.objectID) { item in
-                    PantryRow(item: item)
+                ForEach(Array(vm.filteredItems.enumerated()), id: \.element.objectID) { index, item in
+                    PantryRow(item: item, isFirstRow: index == 0)
                         .listRowBackground(Color.Stir.paper100)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = item }
@@ -198,6 +224,11 @@ struct PantryListView: View {
                                 }
                             }
                         }
+                        // SCA-14 — only the first row registers as the
+                        // tour's row-tap/swipe anchor. Optional-overload
+                        // means the others write nothing to the
+                        // anchor-frames map.
+                        .coachMarkAnchor(index == 0 ? .pantryFirstRow : nil)
                 }
             }
             .listStyle(.plain)
@@ -255,6 +286,9 @@ struct PantryListView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
+            // SCA-14 — terminal anchor for `inListTourEmpty` so the
+            // tour has a real CTA to spotlight when there are no rows.
+            .coachMarkAnchor(.pantryListEmptyAdd)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

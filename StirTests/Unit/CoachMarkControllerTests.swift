@@ -289,6 +289,11 @@ final class CoachMarkControllerTests: XCTestCase {
             (.cookModeTap, CookModeTapCoachMarks.steps),
             (.voiceMode, VoiceModeCoachMarks.steps),
             (.pantryManagement, PantryCoachMarks.steps),
+            // SCA-14 — both pantry in-list variants share the same
+            // TutorialKey but each is its own sequence; assert ID
+            // uniqueness within each independently.
+            (.pantryInListTour, PantryCoachMarks.inListTour),
+            (.pantryInListTour, PantryCoachMarks.inListTourEmpty),
         ]
         for (key, steps) in sequences {
             XCTAssertFalse(steps.isEmpty, "\(key) has no steps")

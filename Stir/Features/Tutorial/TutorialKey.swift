@@ -42,12 +42,18 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     /// "set timer" / "help"), exit affordance.
     case voiceMode = "voice_mode"
 
-    /// Pantry — first time the user reaches Settings post-pantry-
-    /// launch. Entry-point coach mark on the "Manage pantry" row
-    /// explains what the pantry is for; the in-screen walkthrough
-    /// (Today vs Standing, cap headroom, swipe-to-remove) presents
-    /// inside `PantryListView` once it ships.
+    /// Pantry — entry-point coach mark on the Settings → Manage
+    /// pantry row. Phase 1 of the pantry tutorial. Tells the user
+    /// what the row does and why kitchen-state matters for solves.
     case pantryManagement = "pantry_management"
+
+    /// Pantry — in-list walkthrough fired the first time the user
+    /// opens `PantryListView`. Phase 2 of the pantry tutorial.
+    /// Anchors on the header strip, toolbar +, first row, and source
+    /// glyph (5-step `inListTour`) — or on welcome / header context
+    /// / empty-state Add CTA when the pantry is empty (3-step
+    /// `inListTourEmpty`).
+    case pantryInListTour = "pantry_in_list_tour"
 
     /// User-facing name surfaced in Settings replay copy.
     var displayName: String {
@@ -60,6 +66,7 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
         case .cookModeTap:    return "Cook Mode tutorial"
         case .voiceMode:      return "Voice Mode tutorial"
         case .pantryManagement: return "Pantry tutorial"
+        case .pantryInListTour: return "Pantry walkthrough"
         }
     }
 
@@ -83,6 +90,8 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
             return "Replay the Voice Mode walkthrough next time you go hands-free."
         case .pantryManagement:
             return "Re-explain the pantry the next time you open Settings."
+        case .pantryInListTour:
+            return "Walk through the pantry surface again next time you open it."
         }
     }
 

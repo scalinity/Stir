@@ -73,8 +73,85 @@ enum PantryCoachMarks {
     ]
 
     /// Convenience accessor for the entry-point step alone. Settings
-    /// hosts this single step until `PantryListView` ships, at which
-    /// point the full sequence (`steps` above) replaces it on the
-    /// pantry screen and Settings drops the standalone wiring.
+    /// hosts this single step under `TutorialKey.pantryManagement`.
+    /// SCA-14 (in-list tour) lives under `pantryInListTour` with its
+    /// own sequences (`inListTour` / `inListTourEmpty`) below.
     static let entryOnly: [CoachMarkStep] = Array(steps.prefix(1))
+
+    // MARK: - SCA-14 — In-list walkthrough
+    //
+    // Two variants under `TutorialKey.pantryInListTour`:
+    //
+    //   `inListTour` (5 steps) — populated pantry. welcome → header
+    //     strip → toolbar `+` → row tap/swipe → source-glyph legend.
+    //
+    //   `inListTourEmpty` (3 steps) — empty pantry. welcome → header
+    //     context (so the user knows what the cap means before they
+    //     fill it) → empty-state Add CTA. Skips the row-anchored
+    //     steps because there's no row to spotlight.
+    //
+    // The presenter modifier chooses between them at attach time
+    // based on `vm.items.isEmpty`. Same TutorialKey backs both —
+    // resolution writes the same UserDefaults flag, so a user who
+    // saw the empty variant doesn't get the full variant later
+    // (and vice-versa). If you want both, replay from Settings.
+
+    static let inListTour: [CoachMarkStep] = [
+        CoachMarkStep(
+            id: "welcome",
+            placement: .center,
+            title: "Welcome to your pantry",
+            message: "Stir uses what's in here to suggest dinners you can actually make. The list updates every time you scan or add an item.",
+        ),
+        CoachMarkStep(
+            id: "header",
+            anchor: .pantryHeaderStrip,
+            placement: .below,
+            title: "How much room you've got",
+            message: "Standing items count toward your cap. Today items don't — they're for one-night ingredients you don't want to keep around.",
+        ),
+        CoachMarkStep(
+            id: "add",
+            anchor: .pantryAddButton,
+            placement: .below,
+            title: "Tap + to add by hand",
+            message: "Most items get added by scan. Use + when Stir misses something — or for a one-off you bought today.",
+        ),
+        CoachMarkStep(
+            id: "edit_remove",
+            anchor: .pantryFirstRow,
+            placement: .below,
+            title: "Tap to edit, swipe to remove",
+            message: "Tap any row to change its name, amount, or memory state. Swipe left to remove it.",
+        ),
+        CoachMarkStep(
+            id: "source_glyph",
+            anchor: .pantryListSourceGlyph,
+            placement: .below,
+            title: "Where each item came from",
+            message: "Camera = scanned. Pencil = typed. Star = staple. Stack = imported from a recipe.",
+        ),
+    ]
+
+    static let inListTourEmpty: [CoachMarkStep] = [
+        CoachMarkStep(
+            id: "welcome",
+            placement: .center,
+            title: "Welcome to your pantry",
+            message: "Stir uses what's in here to suggest dinners you can actually make. Right now it's empty — let's fix that.",
+        ),
+        CoachMarkStep(
+            id: "header_context",
+            placement: .center,
+            title: "How the pantry fills up",
+            message: "Scanning your fridge or pantry is the fastest way to populate the list. You can also add items by hand below.",
+        ),
+        CoachMarkStep(
+            id: "empty_add",
+            anchor: .pantryListEmptyAdd,
+            placement: .above,
+            title: "Add your first item",
+            message: "Tap Add an item to type one in, then come back here whenever you want to manage what Stir knows about your kitchen.",
+        ),
+    ]
 }
