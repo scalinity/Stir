@@ -25,10 +25,14 @@ struct CoachMarkSpotlight: View {
 
     var body: some View {
         Canvas { context, size in
-            // Full-screen dim — ink900 at 55% alpha clears WCAG AAA on
-            // paper100 cards above. Resolved at draw time so light /
-            // dark trait changes propagate without a State refresh.
-            let dim = context.resolve(.color(Color.Stir.ink900.opacity(0.55)))
+            // Full-screen scrim — fixed dark dim, theme-INDEPENDENT.
+            // SCA-18: previously used `Color.Stir.ink900.opacity(0.55)`
+            // which inverts in dark mode (ink900 dark = 0xF5F0E8 cream),
+            // producing a WHITE wash over the dark Stir background. A
+            // scrim is by definition a darkening layer regardless of
+            // theme, so use a fixed `Color.black` here. If a second
+            // scrim site appears, promote to `Color.Stir.scrim`.
+            let dim = context.resolve(.color(Color.black.opacity(0.55)))
             let bounds = CGRect(origin: .zero, size: size)
             var dimPath = Path(bounds)
             if let target = expandedTarget(for: bounds) {
