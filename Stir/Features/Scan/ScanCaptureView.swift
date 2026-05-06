@@ -9,13 +9,15 @@
 // still briefly (~350 ms — see `freezeDurationNanos`), appends to
 // ScanViewModel.capturedImages, and restarts the live preview for the
 // next shot. The user can capture up to `ScanViewModel.maxImagesPerScan`
-// photos (Pro: 4; Free/Premium: 1 before paywall fires) then taps
-// "Done · N photos" to submit.
+// photos (Pro: 4; Free/Premium: 1 before paywall fires) then taps the
+// ember "Done →" pill to submit.
 //
-// SCA-36 W13: bottom chrome is a 2-track layout — thumbnail strip and
-// Done button on their own rows ABOVE the centered shutter circle.
-// The earlier overlay-trailing layout collided with the 74pt shutter
-// on regular-width iPhones once "Done · N photos" passed ~5 chars.
+// SCA-43: bottom chrome restored to the mockup's design — thumbnail
+// strip on its own row above, then a shutter row that's a centered
+// 74pt capture circle with a compact ember Done pill anchored on the
+// trailing edge. The earlier SCA-36 W13 stacked layout was a defensive
+// response to a long "Done · N photos" label; trimming the label
+// removed the collision risk that justified the stacking.
 
 import AVFoundation
 import OSLog
@@ -177,30 +179,37 @@ struct ScanCaptureView: View {
 
     // MARK: - Bottom chrome
     //
-    // SCA-36 W13: 2-track layout. The thumbnail strip + Done button
-    // sit ABOVE the shutter on their own rows so the Done button
-    // (which scales with photo-count copy length — "Done · 4 photos"
-    // is ~140pt wide) can never collide with the centered 74pt
-    // shutter circle. The earlier overlay-trailing layout collided
-    // visibly on iPhone 17-class screens (~390pt wide) once a single
-    // photo had been captured.
+    // SCA-43: restored the mockup's 3-column row
+    // (`stir-app-design/.../04_scan_flow.html` line 147). Thumbnail
+    // strip lives on its own row above so 1-4 thumbs + slot
+    // placeholders never crowd the shutter; the shutter row is a
+    // ZStack with the 74pt capture circle centered and the Done pill
+    // overlaid on the trailing edge. Trimming the label to "Done →"
+    // (count is already visible in the strip) keeps the pill ~70pt
+    // wide so it can never collide with the centered shutter — which
+    // was the real reason SCA-36 W13 had stacked Done above shutter
+    // on its own row in the first place.
 
     @ViewBuilder
     private var bottomChrome: some View {
         VStack(spacing: 16) {
             if !viewModel.capturedImages.isEmpty {
                 thumbnailStrip
-                doneButtonRow
             }
-            captureButton
+            shutterRow
         }
     }
 
-    private var doneButtonRow: some View {
-        HStack {
-            Spacer()
-            doneButton
-                .padding(.trailing, 24)
+    private var shutterRow: some View {
+        ZStack {
+            captureButton
+            if !viewModel.capturedImages.isEmpty {
+                HStack {
+                    Spacer()
+                    doneButton
+                        .padding(.trailing, 24)
+                }
+            }
         }
     }
 
@@ -309,22 +318,20 @@ struct ScanCaptureView: View {
         Button {
             submitTask = Task { await submit() }
         } label: {
-            Text(doneButtonTitle)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.white, in: Capsule())
+            HStack(spacing: 6) {
+                Text("Done")
+                    .font(.callout.weight(.semibold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.Stir.ember600, in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(viewModel.capturedImages.isEmpty || isSubmitting)
         .accessibilityLabel("Scan with \(viewModel.capturedImages.count) \(viewModel.capturedImages.count == 1 ? "photo" : "photos")")
-    }
-
-    private var doneButtonTitle: String {
-        let count = viewModel.capturedImages.count
-        let noun = count == 1 ? "photo" : "photos"
-        return "Done · \(count) \(noun)"
     }
 
     // MARK: - Capture + submit
