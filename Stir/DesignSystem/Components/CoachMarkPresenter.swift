@@ -171,7 +171,12 @@ struct CoachMarkPresenterModifier: ViewModifier {
     @ViewBuilder
     private func cardLayer(step: CoachMarkStep, targetFrame: CGRect?) -> some View {
         GeometryReader { proxy in
-            let card = CoachMarkCard(
+            // The CoachMarkCard MUST be the closure's trailing expression
+            // — a `let card = …` binding here renders nothing because
+            // ViewBuilder/GeometryReader content emits only the last
+            // expression in the block, never a discarded binding. SCA-15
+            // shipped with `let card =` and showed dim+spotlight only.
+            CoachMarkCard(
                 step: step,
                 stepNumber: controller.currentIndex + 1,
                 totalSteps: steps.count,
