@@ -257,13 +257,19 @@ struct PantryListView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.Stir.paper50)
-            // StirCustomTabBar uses `padding(.bottom, -.space3Half)`
-            // (-14pt) to encroach into the home-indicator inset, so
-            // `safeAreaInset` reserves 14pt LESS than the bar's visual
-            // extent. Without this margin, the last row visibly clips
-            // under the bar (SCA-20). Coupled with the bar's negative
-            // bottom padding — change one, recheck the other.
-            .contentMargins(.bottom, CGFloat.Stir.space3Half, for: .scrollContent)
+            // Tab-bar bottom-clearance compensation. StirCustomTabBar
+            // uses `padding(.bottom, -.space3Half)` (-14pt) to encroach
+            // into the home-indicator inset, AND its measured frame
+            // (icon + label + top padding) sits above that — so the
+            // safeAreaInset reservation is shorter than the bar's
+            // visible extent by ~50pt total. The .space3Half attempt
+            // only covered the negative-padding portion and left the
+            // last row visibly clipped (SCA-20 bug returned). 64pt
+            // matches Tonight's `padding(.bottom, .space7 + .space4)`
+            // — the documented mitigation in `StirCustomTabBar.body`.
+            // Coupled with the bar's chrome — change one, recheck the
+            // other.
+            .contentMargins(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4, for: .scrollContent)
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
