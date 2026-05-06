@@ -56,7 +56,11 @@ struct ScanCaptureView: View {
             if let image = freezeImage {
                 Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    // SCA-40: match the live preview's `.resizeAspect`
+                    // gravity. Was `.fill` (centered crop) which created
+                    // a visual jump between the cropped preview and the
+                    // un-cropped captured photo at shutter time.
+                    .aspectRatio(contentMode: .fit)
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
             } else if let session = cameraService.session {
@@ -465,7 +469,21 @@ private struct CameraPreview: UIViewRepresentable {
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.videoPreviewLayer.session = session
-        view.videoPreviewLayer.videoGravity = .resizeAspectFill
+        // SCA-40: `.resizeAspect` (letterbox) — was `.resizeAspectFill`
+        // which cropped the 3:4 sensor's left+right edges to fill the
+        // ~9:19.5 screen aspect. The preview now shows the full sensor
+        // field with black bars on the sides, so what the user sees is
+        // exactly the rectangle that gets captured.
+        view.videoPreviewLayer.videoGravity = .resizeAspect
+        // SCA-40: pin portrait rotation. iOS 17+ deprecated
+        // `videoOrientation` in favor of `videoRotationAngle` and the
+        // default rotation between preview and photo-output connections
+        // can drift across releases / device classes. Pin 90° on both
+        // sides (CameraService does the same on the photo output).
+        if let connection = view.videoPreviewLayer.connection,
+           connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
         return view
     }
 

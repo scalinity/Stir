@@ -196,6 +196,16 @@ final class CameraService: NSObject {
         // to .balanced fusion processing. Per-shot
         // `photoQualityPrioritization` may not exceed this max.
         output.maxPhotoQualityPrioritization = .speed
+        // SCA-40: pin portrait rotation so the captured photo's framing
+        // matches the preview connection's framing. Without this, iOS
+        // 17+ leaves the photo output's connection at the sensor-native
+        // landscape angle while the preview layer auto-tracks portrait —
+        // the two get out of sync and the captured image is shifted
+        // horizontally relative to what the preview showed.
+        if let connection = output.connection(with: .video),
+           connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
 
         captureSession.commitConfiguration()
         self.session = captureSession

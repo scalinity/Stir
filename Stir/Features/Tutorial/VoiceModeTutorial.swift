@@ -1,12 +1,19 @@
 // VoiceModeTutorial
 //
-// First-run tutorial for hands-free voice cooking. Three steps:
+// First-run tutorial for hands-free voice cooking. Two steps:
 //   1. How  — animated waveform with mic pill
 //   2. What — cycling voice-command examples
-//   3. When — Premium+ entitlement context
 //
 // Mounted on `StepCardView`'s voice-active branch (which wraps
 // `VoiceActiveStepView`) via `.tutorial(key: .voiceMode, ...)`.
+//
+// SCA-41 — the prior third step ("Voice is Premium+", a static
+// Free/Premium/Pro cap table) was dropped because the same context
+// already lands on the user via the `voiceAffordanceTapped` paywall
+// (Free user taps the voice affordance → fullScreenCover with live
+// pricing, Premium trial CTA, and an unconditional "Compare plans"
+// button that opens the Pro comparison sheet). The tutorial step
+// duplicated information without the live pricing or purchase CTA.
 
 import SwiftUI
 
@@ -14,13 +21,11 @@ struct VoiceModeTutorial: View {
     enum Step: Int, TutorialStep {
         case how = 0
         case what = 1
-        case when = 2
 
         var telemetryID: String {
             switch self {
             case .how:  return "how"
             case .what: return "what"
-            case .when: return "when"
             }
         }
     }
@@ -53,20 +58,10 @@ struct VoiceModeTutorial: View {
                 icon: Image.Stir.voiceWave,
                 headline: "What Stir understands",
                 message: "Reference, not invitation — keep cooking. These are the kinds of things Stir picks up.",
-                primaryAction: advance,
-                skipAction: skip,
-            ) {
-                VoiceCommandsMiniature()
-            }
-        case .when:
-            TutorialStepView(
-                icon: Image.Stir.tierCrown,
-                headline: "Voice is Premium+",
-                message: "Tap Cook Mode is unlimited and free. Voice sessions live on Premium and Pro — 13/mo and 27/mo.",
                 primaryLabel: "Got it",
                 primaryAction: advance,
             ) {
-                EntitlementMiniature()
+                VoiceCommandsMiniature()
             }
         }
     }
@@ -176,56 +171,6 @@ private struct VoiceCommandsMiniature: View {
         )
         .onAppear { visible = true }
         .accessibilityHidden(true)
-    }
-}
-
-private struct EntitlementMiniature: View {
-    @State private var visible = false
-
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                tierBadge(tier: "Free", glyph: nil, accent: Color.Stir.paper200, value: "0", caption: "voice / mo")
-                tierBadge(tier: "Premium", glyph: Image.Stir.premium, accent: Color.Stir.ember100, value: "13", caption: "voice / mo")
-                tierBadge(tier: "Pro", glyph: Image.Stir.tierCrown, accent: Color.Stir.ember600.opacity(0.18), value: "27", caption: "voice / mo")
-            }
-        }
-        .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.Stir.paper100),
-        )
-        .tutorialFadeIn(isVisible: visible)
-        .onAppear { visible = true }
-        .accessibilityHidden(true)
-    }
-
-    private func tierBadge(tier: String, glyph: Image?, accent: Color, value: String, caption: String) -> some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 4) {
-                if let glyph {
-                    glyph
-                        .foregroundStyle(Color.Stir.ember600)
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                Text(tier)
-                    .stirFont(.labelMd)
-                    .foregroundStyle(Color.Stir.ink900)
-            }
-            Text(value)
-                .stirFont(.displaySm)
-                .foregroundStyle(Color.Stir.ink900)
-            Text(caption)
-                .stirFont(.bodySm)
-                .foregroundStyle(Color.Stir.ink700)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(accent),
-        )
     }
 }
 

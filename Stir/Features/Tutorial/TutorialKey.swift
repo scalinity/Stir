@@ -39,9 +39,13 @@ enum TutorialKey: String, CaseIterable, Hashable, Sendable {
     /// timer, substitution, advance gesture.
     case cookModeTap = "cook_mode_tap"
 
-    /// Voice Mode — first voice session. Hands-free intro: listening
-    /// pill, mic states, voice-command catalog ("next" / "repeat" /
-    /// "set timer" / "help"), exit affordance.
+    /// Voice Mode — first voice session. Two steps: animated waveform
+    /// + listening pill, then a voice-command catalog ("next" /
+    /// "repeat" / "set timer" / "help"). Tier-cap context is NOT
+    /// duplicated here — Free users tapping the voice affordance
+    /// route through `presentPaywall(.voiceAffordanceTapped)` which
+    /// already shows live Premium pricing + a "Compare plans" link
+    /// to the Pro tier (SCA-41).
     case voiceMode = "voice_mode"
 
     /// Saved Meals — top-level tab landing for already-cooked recipes.
