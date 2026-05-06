@@ -40,8 +40,10 @@ struct PantryRow: View {
     /// First-row marker. SCA-14 in-list tour anchors its source-glyph
     /// step on the first row's leading glyph; non-first rows pass nil
     /// to the optional `coachMarkAnchor` overload so they don't
-    /// register competing frames.
-    var isFirstRow: Bool = false
+    /// register competing frames. No default — every call site (incl.
+    /// previews) must be explicit so the source-glyph spotlight
+    /// contract is visible at construction.
+    let isFirstRow: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: CGFloat.Stir.space3) {

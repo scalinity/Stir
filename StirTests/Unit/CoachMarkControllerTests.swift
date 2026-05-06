@@ -281,29 +281,51 @@ final class CoachMarkControllerTests: XCTestCase {
 
     @MainActor
     func test_allSequencesHaveStepsAndStableIDs() {
-        let sequences: [(TutorialKey, [CoachMarkStep])] = [
-            (.scanCapture, ScanCaptureCoachMarks.steps),
-            (.scanReview, ScanReviewCoachMarks.steps),
-            (.dinnerOptions, DinnerOptionsCoachMarks.steps),
-            (.dishPreview, DishPreviewCoachMarks.steps),
-            (.cookModeTap, CookModeTapCoachMarks.steps),
-            (.voiceMode, VoiceModeCoachMarks.steps),
-            (.pantryManagement, PantryCoachMarks.steps),
-            // SCA-14 — both pantry in-list variants share the same
-            // TutorialKey but each is its own sequence; assert ID
-            // uniqueness within each independently.
-            (.pantryInListTour, PantryCoachMarks.inListTour),
-            (.pantryInListTour, PantryCoachMarks.inListTourEmpty),
+        // (key, variant-tag, steps) tuples — variant-tag distinguishes
+        // multi-sequence keys (currently `.pantryInListTour`) in
+        // failure diagnostics so an operator sees which variant
+        // duplicated rather than just "pantryInListTour has duplicate
+        // step IDs".
+        let sequences: [(TutorialKey, String, [CoachMarkStep])] = [
+            (.scanCapture, "default", ScanCaptureCoachMarks.steps),
+            (.scanReview, "default", ScanReviewCoachMarks.steps),
+            (.dinnerOptions, "default", DinnerOptionsCoachMarks.steps),
+            (.dishPreview, "default", DishPreviewCoachMarks.steps),
+            (.cookModeTap, "default", CookModeTapCoachMarks.steps),
+            (.voiceMode, "default", VoiceModeCoachMarks.steps),
+            (.pantryManagement, "default", PantryCoachMarks.steps),
+            (.pantryInListTour, "populated", PantryCoachMarks.inListTour),
+            (.pantryInListTour, "empty", PantryCoachMarks.inListTourEmpty),
         ]
-        for (key, steps) in sequences {
-            XCTAssertFalse(steps.isEmpty, "\(key) has no steps")
+        for (key, variant, steps) in sequences {
+            XCTAssertFalse(steps.isEmpty, "\(key)[\(variant)] has no steps")
             // IDs must be unique within a sequence — duplicates would
             // break SwiftUI transition diffing AND PostHog funnel
             // grouping. telemetryID is now an alias for id, so the
             // same uniqueness check covers both.
             let ids = steps.map(\.id)
-            XCTAssertEqual(Set(ids).count, ids.count, "\(key) has duplicate step IDs")
+            XCTAssertEqual(
+                Set(ids).count, ids.count,
+                "\(key)[\(variant)] has duplicate step IDs",
+            )
         }
+    }
+
+    @MainActor
+    func test_pantryInListTour_variantsHaveDistinctStepIDs() {
+        // Cross-variant uniqueness — both `inListTour` and
+        // `inListTourEmpty` emit telemetry under the same
+        // `tutorial_id="pantry_in_list_tour"`, so a step ID shared
+        // between them would silently conflate two different cohort
+        // events. Variant-prefixed IDs (`populated_*` / `empty_*`)
+        // enforce the contract; this test pins it.
+        let populatedIDs = Set(PantryCoachMarks.inListTour.map(\.id))
+        let emptyIDs = Set(PantryCoachMarks.inListTourEmpty.map(\.id))
+        let overlap = populatedIDs.intersection(emptyIDs)
+        XCTAssertTrue(
+            overlap.isEmpty,
+            "pantryInListTour variants share step IDs (\(overlap.sorted().joined(separator: ", "))) — funnel attribution would conflate the cohorts",
+        )
     }
 
     @MainActor

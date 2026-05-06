@@ -39,6 +39,15 @@ struct PantryListView: View {
     @State private var initError: String?
     @State private var errorToast: StirToastPayload?
 
+    /// Hoisted as a positive boolean (vs the triple-negative
+    /// `viewModel?.items.isEmpty == false`). Drives both the
+    /// `.coachMarks(steps:)` variant pick and the `.id(...)` re-mount
+    /// trigger that fixes the stale-variant bug across pantry
+    /// transitions.
+    private var pantryHasItems: Bool {
+        viewModel?.items.isEmpty == false
+    }
+
     var body: some View {
         Group {
             if let viewModel {
@@ -84,31 +93,50 @@ struct PantryListView: View {
                 .disabled(viewModel == nil)
                 .accessibilityLabel("Add item")
                 // SCA-14 — toolbar + is the third step of the in-list
-                // tour (`PantryCoachMarks.inListTour.add`). The 44pt
-                // min-tap-target frame above doubles as the spotlight
-                // anchor frame, so the halo covers the visible chrome
-                // even though the SF Symbol is smaller.
+                // tour (`PantryCoachMarks.inListTour.populated_add`).
+                // The 44pt min-tap-target frame above doubles as the
+                // spotlight anchor frame, so the halo covers the
+                // visible chrome even though the SF Symbol is smaller.
+                //
+                // The anchor frame is registered while `viewModel == nil`
+                // (the disabled cold-launch state) too, but the
+                // `shouldPresent: viewModel?.didCompleteInitialLoad`
+                // gate above defers the tour until the first load
+                // completes — by which point the button is enabled.
+                // No race window in practice.
                 .coachMarkAnchor(.pantryAddButton)
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        // SCA-14 — in-list pantry walkthrough. Variant chosen at attach
-        // time based on whether the pantry has rows: the populated 5-
-        // step tour anchors on the header strip, toolbar +, first row,
-        // and source glyph. The 3-step empty variant collapses to
-        // welcome / context / empty-state Add CTA so the spotlight
-        // never targets a missing row. Same `pantryInListTour` key
-        // backs both — completion is one bit per user, not per
-        // variant. Replay via Settings → Replay tutorials cycles
-        // whichever variant matches the current pantry state.
+        // SCA-14 — in-list pantry walkthrough. Variant chosen on
+        // whether the pantry has rows: the populated 5-step tour
+        // anchors on the header strip, toolbar +, first row, and
+        // source glyph. The 3-step empty variant collapses to welcome
+        // / context / empty-state Add CTA so the spotlight never
+        // targets a missing row. Same `pantryInListTour` key backs
+        // both — completion is one bit per user, not per variant.
+        // Replay via Settings → Replay tutorials cycles whichever
+        // variant matches the current pantry state.
+        //
+        // **Stale-variant fix (review-5 SCA-14 Critical #1):** the
+        // presenter modifier captures `steps` at controller-init time;
+        // a body re-render with a different `steps` array doesn't
+        // reach the controller. Forcing the modifier to fully re-mount
+        // via `.id(pantryHasItems)` constructs a fresh controller with
+        // the correct variant whenever the pantry transitions
+        // empty↔populated mid-tour. The old controller's `suspend()`
+        // fires on its `.onDisappear`, leaving the durable completion
+        // flag untouched (lifecycle invariant) so the new variant
+        // re-arms naturally.
         .coachMarks(
             key: .pantryInListTour,
-            steps: viewModel?.items.isEmpty == false
+            steps: pantryHasItems
                 ? PantryCoachMarks.inListTour
                 : PantryCoachMarks.inListTourEmpty,
-            shouldPresent: viewModel != nil,
+            shouldPresent: viewModel?.didCompleteInitialLoad == true,
         )
+        .id(pantryHasItems)
         // AddSheet hoisted to outer Group so it survives empty→populated
         // subtree swaps. Toolbar `+` is disabled while VM is nil so the
         // `if let` branch always lands. On `.failed` the sheet stays
@@ -204,9 +232,17 @@ struct PantryListView: View {
             // the count + "of N saved" together.
             .coachMarkAnchor(.pantryHeaderStrip)
 
+            // Hoist the first-row identity once per body re-eval so
+            // each ForEach iteration is one optional-equality check
+            // rather than the per-row `Array(...enumerated())` tuple
+            // allocation that landed initially. The list re-renders on
+            // every search keystroke (typeahead) and every Core Data
+            // mutation; for pantries near the Pro 1000-item cap, the
+            // allocation cost was non-trivial.
+            let firstItemID = vm.filteredItems.first?.objectID
             List {
-                ForEach(Array(vm.filteredItems.enumerated()), id: \.element.objectID) { index, item in
-                    PantryRow(item: item, isFirstRow: index == 0)
+                ForEach(vm.filteredItems, id: \.objectID) { item in
+                    PantryRow(item: item, isFirstRow: item.objectID == firstItemID)
                         .listRowBackground(Color.Stir.paper100)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = item }
@@ -228,7 +264,7 @@ struct PantryListView: View {
                         // tour's row-tap/swipe anchor. Optional-overload
                         // means the others write nothing to the
                         // anchor-frames map.
-                        .coachMarkAnchor(index == 0 ? .pantryFirstRow : nil)
+                        .coachMarkAnchor(item.objectID == firstItemID ? .pantryFirstRow : nil)
                 }
             }
             .listStyle(.plain)

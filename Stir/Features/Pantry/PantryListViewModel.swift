@@ -39,6 +39,14 @@ final class PantryListViewModel {
     /// commentary for why value-type projection is overkill here.
     private(set) var items: [PantryItem] = []
 
+    /// Flips true after the first `load()` completes (success OR
+    /// error). Used by the SCA-14 in-list coach-mark gate to defer
+    /// presentation until at least one fetch has landed — without
+    /// this, the empty-pantry tour variant could fire over a
+    /// populated screen during the brief window between view appear
+    /// and the first batch of items rendering.
+    private(set) var didCompleteInitialLoad: Bool = false
+
     /// Bound from the search bar in PantryListView. Filtering runs on
     /// every set; we don't memoize because the in-memory list is small
     /// (≤1000 entries, capped by the Pro tier).
@@ -103,9 +111,15 @@ final class PantryListViewModel {
     }
 
     /// Hydrate `items` from Core Data. Called from `.task { }` on
-    /// PantryListView's appearance and after every mutation.
+    /// PantryListView's appearance and after every mutation. Flips
+    /// `didCompleteInitialLoad` true on first call regardless of
+    /// outcome — the SCA-14 coach-mark gate uses this to defer tour
+    /// presentation until we have ground truth about the pantry's
+    /// emptiness, so the empty-variant tour doesn't briefly fire
+    /// over a populated screen during a slow first fetch.
     func load() {
         clearError()
+        defer { didCompleteInitialLoad = true }
         do {
             items = try repo.fetchAll(for: household)
         } catch {

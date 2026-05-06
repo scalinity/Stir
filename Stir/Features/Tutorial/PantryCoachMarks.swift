@@ -96,36 +96,41 @@ enum PantryCoachMarks {
     // saw the empty variant doesn't get the full variant later
     // (and vice-versa). If you want both, replay from Settings.
 
+    /// Step IDs are variant-prefixed (`populated_*` / `empty_*`) so
+    /// PostHog funnel queries that group on `tutorial_id + from_step`
+    /// can split the two cohorts even though both variants share the
+    /// `pantry_in_list_tour` tutorial_id. Without the prefix, both
+    /// variants emitting `from_step="welcome"` would conflate.
     static let inListTour: [CoachMarkStep] = [
         CoachMarkStep(
-            id: "welcome",
+            id: "populated_welcome",
             placement: .center,
             title: "Welcome to your pantry",
             message: "Stir uses what's in here to suggest dinners you can actually make. The list updates every time you scan or add an item.",
         ),
         CoachMarkStep(
-            id: "header",
+            id: "populated_header",
             anchor: .pantryHeaderStrip,
             placement: .below,
             title: "How much room you've got",
             message: "Standing items count toward your cap. Today items don't — they're for one-night ingredients you don't want to keep around.",
         ),
         CoachMarkStep(
-            id: "add",
+            id: "populated_add",
             anchor: .pantryAddButton,
             placement: .below,
             title: "Tap + to add by hand",
             message: "Most items get added by scan. Use + when Stir misses something — or for a one-off you bought today.",
         ),
         CoachMarkStep(
-            id: "edit_remove",
+            id: "populated_edit_remove",
             anchor: .pantryFirstRow,
             placement: .below,
             title: "Tap to edit, swipe to remove",
             message: "Tap any row to change its name, amount, or memory state. Swipe left to remove it.",
         ),
         CoachMarkStep(
-            id: "source_glyph",
+            id: "populated_source_glyph",
             anchor: .pantryListSourceGlyph,
             placement: .below,
             title: "Where each item came from",
@@ -135,13 +140,13 @@ enum PantryCoachMarks {
 
     static let inListTourEmpty: [CoachMarkStep] = [
         CoachMarkStep(
-            id: "welcome",
+            id: "empty_welcome",
             placement: .center,
             title: "Welcome to your pantry",
             message: "Stir uses what's in here to suggest dinners you can actually make. Right now it's empty — let's fix that.",
         ),
         CoachMarkStep(
-            id: "header_context",
+            id: "empty_header_context",
             placement: .center,
             title: "How the pantry fills up",
             message: "Scanning your fridge or pantry is the fastest way to populate the list. You can also add items by hand below.",
@@ -149,7 +154,12 @@ enum PantryCoachMarks {
         CoachMarkStep(
             id: "empty_add",
             anchor: .pantryListEmptyAdd,
-            placement: .above,
+            // `.auto` lets the presenter heuristic pick above/below
+            // based on where the empty-state Add button lands. On
+            // smaller screens (iPhone SE 320pt content height) `.above`
+            // would risk overlap with the body copy block above the
+            // button.
+            placement: .auto,
             title: "Add your first item",
             message: "Tap Add an item to type one in, then come back here whenever you want to manage what Stir knows about your kitchen.",
         ),
