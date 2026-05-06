@@ -63,13 +63,15 @@ struct PantryManagementTutorial: View {
 private struct PantryFillingMiniature: View {
     @State private var visible = false
 
+    // SCA-32 — capped at 4 items so total miniature height fits on
+    // iPhone-class screens without compressing the TutorialFlowContainer
+    // layout. 6 items pushed the progress dots up under the status-bar
+    // dynamic island. Four items still conveys "Stir keeps a pantry."
     private let items: [(icon: Image, name: String)] = [
-        (Image.Stir.leaf,  "Spinach"),
-        (Image.Stir.cook,  "Garlic"),
-        (Image.Stir.heat,  "Olive oil"),
+        (Image.Stir.leaf,   "Spinach"),
+        (Image.Stir.cook,   "Garlic"),
+        (Image.Stir.heat,   "Olive oil"),
         (Image.Stir.pantry, "Eggs"),
-        (Image.Stir.leaf,  "Lemon"),
-        (Image.Stir.cook,  "Pasta"),
     ]
 
     var body: some View {
