@@ -135,8 +135,15 @@ private struct PantryRowEditMiniature: View {
 
             ZStack(alignment: .trailing) {
                 HStack(spacing: 10) {
+                    // SCA-33 — both action discs use `ember600` so the
+                    // tutorial demo stays on Stir's brand palette
+                    // rather than borrowing the system `.red`. The
+                    // distinct glyphs (pencil / trash) keep the
+                    // affordances readable. Note: `ember700` is
+                    // design-system-marked gradient-stop only; 600 is
+                    // the correct flat-fill ember token.
                     actionDisc(icon: Image.Stir.edit, tint: Color.Stir.ember600)
-                    actionDisc(icon: Image.Stir.delete, tint: .red)
+                    actionDisc(icon: Image.Stir.delete, tint: Color.Stir.ember600)
                 }
                 .padding(.trailing, 8)
 
@@ -175,6 +182,12 @@ private struct PantryRowEditMiniature: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            // SCA-33 — clip the swipeable ZStack so the row's
+            // `.offset(x:)` is visually bounded by the card. Without
+            // this clip the row slides past the leading edge of the
+            // outer rounded background and renders on the screen-black
+            // behind the tutorial cover.
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .frame(maxWidth: CGFloat.Stir.tutorialMiniatureMaxWidth)
         .padding(14)
