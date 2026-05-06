@@ -53,10 +53,10 @@ enum CoachMarkAnchorID: Hashable {
     // Pantry management.
     //   - `settingsManagePantryRow`: entry-point coach mark on the
     //     Settings row that pushes PantryListView. Lives in
-    //     SettingsRootView.
-    //   - `pantryHeaderStrip` / `pantryAddButton` / `pantryFirstRow` /
-    //     `pantryMemoryStatePicker`: in-screen anchors for
-    //     `PantryCoachMarks.inListTour` (SCA-14).
+    //     SettingsRootView; mounted under `PantryCoachMarks.steps`.
+    //   - `pantryHeaderStrip` / `pantryAddButton` / `pantryFirstRow`:
+    //     in-screen anchors for `PantryCoachMarks.inListTour` (SCA-14,
+    //     populated variant).
     //   - `pantryListSourceGlyph`: the leading source-of-origin
     //     glyph inside a `PantryRow`. Final step of the in-list tour
     //     legend (camera = scanned, pencil = manual, star = staple,
@@ -68,7 +68,6 @@ enum CoachMarkAnchorID: Hashable {
     case settingsManagePantryRow
     case pantryAddButton
     case pantryHeaderStrip
-    case pantryMemoryStatePicker
     case pantryFirstRow
     case pantryListSourceGlyph
     case pantryListEmptyAdd

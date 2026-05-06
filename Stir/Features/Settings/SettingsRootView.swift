@@ -107,16 +107,13 @@ struct SettingsRootView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .stirToast($restoreToast)
         // SCA-13 Phase 1 — entry-point pantry coach mark. Anchors on
-        // the "Manage pantry" row inside `pantrySection`. Until
-        // `PantryListView` ships, only the entryOnly step (1 of 5)
-        // presents; the in-screen walkthrough (header / + / picker /
-        // first row) is dormant in `PantryCoachMarks.steps` and
-        // activates the moment the screen attaches the full
-        // `.coachMarks(key:.pantryManagement, steps:
-        // PantryCoachMarks.steps)` modifier.
+        // the "Manage pantry" row inside `pantrySection`. The in-list
+        // walkthrough lives on PantryListView under a separate
+        // `pantryInListTour` key (SCA-14) so each surface owns its own
+        // replay loop.
         .coachMarks(
             key: .pantryManagement,
-            steps: PantryCoachMarks.entryOnly,
+            steps: PantryCoachMarks.steps,
         )
         .sheet(item: $coordinator.activeProComparison) { entry in
             // SwiftUI invokes this content closure once per `item`
@@ -541,9 +538,8 @@ struct SettingsRootView: View {
     /// Pantry section — entry to `PantryListView` (Settings →
     /// Manage pantry). Tagged with
     /// `.coachMarkAnchor(.settingsManagePantryRow)` so the entry-
-    /// point coach mark in `PantryCoachMarks.entryOnly` can
-    /// spotlight this row the first time the user reaches Settings
-    /// post-launch.
+    /// point coach mark in `PantryCoachMarks.steps` can spotlight
+    /// this row the first time the user reaches Settings post-launch.
     ///
     /// Per ADR-0028, pantry is a low-frequency surface (users update
     /// it after weekly scans, or to spot-check the grocery diff) so
