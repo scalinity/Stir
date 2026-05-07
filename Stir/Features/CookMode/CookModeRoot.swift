@@ -563,8 +563,16 @@ struct CookModeRoot: View {
                     "new_recipe_plan_id": newPlan.id?.uuidString ?? "unknown",
                 ],
             )
+            // SCA-75: dismiss the LeftoversRoot cover first, then —
+            // after the cover-handoff gap — dismiss CookModeRoot. Both
+            // covers used to drop in the same synchronous tick; iOS
+            // sometimes swallowed the second dismiss-animation when
+            // they overlapped. Mirrors the present-direction gap.
             leftoversSession = nil
-            onDismiss()
+            Task { @MainActor in
+                try? await Task.sleep(for: Self.coverHandoffGap)
+                onDismiss()
+            }
         } catch {
             // SCA-56 (W1): persistence failed — DON'T silently dismiss
             // as if success. Keep the LeftoversRoot cover up and
