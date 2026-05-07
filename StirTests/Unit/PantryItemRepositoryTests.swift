@@ -406,6 +406,106 @@ final class PantryItemRepositoryTests: XCTestCase {
         return row
     }
 
+    // MARK: - SCA-24 bumpLastSeenAt
+
+    func test_bumpLastSeenAt_matchingRow_bumpsTimestamp() throws {
+        let oldTime = Date(timeIntervalSinceNow: -86_400)
+        let row = try seedItem(name: "olive oil", memoryState: .remembered, lastSeenAt: oldTime)
+        let originalLastSeen = row.lastSeenAt
+
+        let bumped = try repo.bumpLastSeenAt(displayName: "olive oil", on: household)
+
+        XCTAssertTrue(bumped)
+        XCTAssertNotEqual(row.lastSeenAt, originalLastSeen)
+        XCTAssertGreaterThan(row.lastSeenAt!, oldTime)
+    }
+
+    func test_bumpLastSeenAt_noMatch_returnsFalse() throws {
+        try seedItem(name: "olive oil")
+        let bumped = try repo.bumpLastSeenAt(displayName: "saffron", on: household)
+        XCTAssertFalse(bumped, "no-match must return false without a phantom save")
+    }
+
+    func test_bumpLastSeenAt_usesNormalizedMatching() throws {
+        // SCA-24 + SCA-26 interaction: substitution swap text might
+        // be "olive oils" while pantry is "olive oil" — Tier-3
+        // normalized match catches the plural divergence.
+        let row = try seedItem(name: "olive oil", memoryState: .remembered)
+        let bumped = try repo.bumpLastSeenAt(displayName: "olive oils", on: household)
+        XCTAssertTrue(bumped, "Tier-3 normalized match should bump on plural divergence")
+        XCTAssertNotNil(row.lastSeenAt)
+    }
+
+    // MARK: - SCA-23 amount refresh
+
+    func test_upsertFromScan_freshAmount_overwritesExisting() throws {
+        // Day 1: scan adds "olive oil" with amount "1 bottle".
+        let day1 = try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: "1 bottle",
+                confidence: 0.95,
+                parseConfidence: .likelyStaple,
+            )],
+            on: household,
+            usedRemembered: 0,
+            cap: 250,
+        )
+        XCTAssertEqual(day1.rows.first?.amountText, "1 bottle")
+
+        // Day 2: same ingredient, fresher amount "almost gone". The
+        // prior implementation only wrote on blank-existing — this
+        // would have been silently dropped. SCA-23 inverts: freshness
+        // wins, the new non-empty amount overwrites.
+        let day2 = try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: "almost gone",
+                confidence: 0.9,
+                parseConfidence: .likelyStaple,
+            )],
+            on: household,
+            usedRemembered: 1,
+            cap: 250,
+        )
+        XCTAssertEqual(day2.rows.count, 1, "upsert: same row, no new insert")
+        XCTAssertEqual(day2.rows.first?.amountText, "almost gone",
+                       "fresh amount must overwrite the prior — SCA-23")
+    }
+
+    func test_upsertFromScan_blankNewAmount_leavesExistingIntact() throws {
+        // Defensive: a blank/whitespace-only amount in the new scan
+        // must NOT clobber the existing useful value.
+        try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: "1 bottle",
+                confidence: 0.95,
+                parseConfidence: .likelyStaple,
+            )],
+            on: household,
+            usedRemembered: 0,
+            cap: 250,
+        )
+        let day2 = try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: "   ",
+                confidence: 0.9,
+                parseConfidence: .likelyStaple,
+            )],
+            on: household,
+            usedRemembered: 1,
+            cap: 250,
+        )
+        XCTAssertEqual(day2.rows.first?.amountText, "1 bottle",
+                       "whitespace-only new amount must NOT clobber a real existing value")
+    }
+
     // MARK: - SCA-22 ephemeral expire
 
     func test_upsertFromScan_ephemeralRow_setsExpiresAt() throws {

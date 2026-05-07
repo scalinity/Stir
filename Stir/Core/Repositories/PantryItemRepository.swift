@@ -86,8 +86,21 @@ final class PantryItemRepository {
                 existing.updatedAt = now
                 existing.userConfirmed = true
                 existing.confidence = max(existing.confidence, ing.confidence)
-                if let amountText = ing.amountText, existing.amountText?.isEmpty ?? true {
-                    existing.amountText = amountText
+                // SCA-23: re-scan amount refresh. Previously this only
+                // wrote when the existing amountText was blank, which
+                // silently dropped fresher info ("almost gone"
+                // replacing "1 jar"). Freshness wins now: any non-
+                // empty new amountText overwrites the existing value.
+                // Trim defensively so a whitespace-only new value
+                // doesn't blank out a real existing one.
+                if let newAmount = ing.amountText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !newAmount.isEmpty {
+                    if let prior = existing.amountText, prior != newAmount {
+                        Logger.coreData.info(
+                            "PantryItemRepository upsertFromScan refreshed amountText for slug=\(ing.canonicalSlug ?? "", privacy: .public)",
+                        )
+                    }
+                    existing.amountText = newAmount
                 }
                 results.append(existing)
                 continue
@@ -142,6 +155,39 @@ final class PantryItemRepository {
     func softDelete(_ item: PantryItem) throws {
         applySoftDeleteFields(item, at: Date())
         try controller.save()
+    }
+
+    /// Bump `lastSeenAt` on the pantry row matching the given name +
+    /// optional slug. Used by `SubstitutionSheetViewModel.accept` to
+    /// signal that the swap-in ingredient was just used (SCA-24).
+    /// Recency drives downstream voice-prompt prioritization
+    /// (RealtimeSession's up-to-1000-item walk uses lastSeenAt).
+    ///
+    /// Match is the same three-tier chain as `fetchExisting`. Returns
+    /// `true` if a row was matched + bumped, `false` on no match.
+    /// No-op (and no save) on no match — substitution accept that
+    /// references an ingredient the user doesn't have remembered
+    /// shouldn't generate a phantom CloudKit notification.
+    @discardableResult
+    func bumpLastSeenAt(
+        displayName: String,
+        slug: String? = nil,
+        on household: HouseholdProfile,
+        now: Date = Date(),
+    ) throws -> Bool {
+        let context = controller.viewContext
+        guard let row = try fetchExisting(
+            slug: slug,
+            displayName: displayName,
+            on: household,
+            context: context,
+        ) else {
+            return false
+        }
+        row.lastSeenAt = now
+        row.updatedAt = now
+        try controller.save()
+        return true
     }
 
     /// Bulk soft-delete every non-deleted PantryItem scoped to the

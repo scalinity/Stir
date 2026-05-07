@@ -41,6 +41,10 @@ final class SubstitutionSheetViewModel {
     private let currentStep: RecipeStep?
     private let aiDispatch: AIDispatch
     private let repository: SubstitutionRepository
+    /// SCA-24: bump pantry lastSeenAt for the substitute-IN ingredient
+    /// on accept. Recency feeds the voice-prompt prioritization on
+    /// the up-to-1000-item walk in RealtimeSession.
+    private let pantryRepository: PantryItemRepository
     private let analytics: PostHogClient
     private let onFinished: () -> Void
 
@@ -54,6 +58,7 @@ final class SubstitutionSheetViewModel {
         currentStep: RecipeStep?,
         aiDispatch: AIDispatch,
         repository: SubstitutionRepository? = nil,
+        pantryRepository: PantryItemRepository? = nil,
         analytics: PostHogClient = .shared,
         onFinished: @escaping () -> Void,
     ) {
@@ -63,6 +68,7 @@ final class SubstitutionSheetViewModel {
         self.currentStep = currentStep
         self.aiDispatch = aiDispatch
         self.repository = repository ?? SubstitutionRepository()
+        self.pantryRepository = pantryRepository ?? PantryItemRepository()
         self.analytics = analytics
         self.onFinished = onFinished
     }
@@ -112,6 +118,25 @@ final class SubstitutionSheetViewModel {
             Logger.coreData.error(
                 "applyAcceptedSwap failed: \(error.localizedDescription, privacy: .public)",
             )
+        }
+        // SCA-24: signal pantry that the swap-in ingredient was just
+        // used. Recency improves voice-prompt prioritization. Failure-
+        // tolerant: substitution acceptance is the user's primary
+        // action; a flaky bump shouldn't block the sheet's close. The
+        // substitute-OUT ingredient is intentionally NOT touched —
+        // the user's choice not to use it doesn't prove absence.
+        let trimmedSwap = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSwap.isEmpty {
+            do {
+                try pantryRepository.bumpLastSeenAt(
+                    displayName: trimmedSwap,
+                    on: household,
+                )
+            } catch {
+                Logger.coreData.error(
+                    "pantry bumpLastSeenAt failed for swap=\(trimmedSwap, privacy: .public): \(error.localizedDescription, privacy: .public)",
+                )
+            }
         }
         // `invocation` + `sub_event_id` on accepted lets the rescue-usage
         // funnel join requested → accepted pairs by sub_event_id AND

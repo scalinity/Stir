@@ -286,6 +286,76 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertTrue(vm.finishPresentationRequested)
     }
 
+    // MARK: - SCA-29 consume hook
+
+    /// Locks the SCA-21 wiring on `performFinish`. The repository-level
+    /// consume tests already cover the rule's correctness; this is the
+    /// integration test that proves the hook actually fires from the
+    /// VM's completion path. Without it, a refactor to performFinish
+    /// could silently strip the consume call and the pantry would
+    /// stop self-cleaning on cook completion (the original SCA-21 bug
+    /// the user reported).
+    func test_performFinish_consumesEphemeralMatchedPantryRows() async throws {
+        // Pantry: two rows that match recipe ingredients (.ephemeral
+        // → should soft-delete), plus one row that DOESN'T match
+        // (should survive).
+        let pantryRepo = PantryItemRepository(controller: controller)
+        let cilantro = try seedPantryItem(name: "Cilantro", slug: "cilantro", memoryState: .ephemeral)
+        let salsa = try seedPantryItem(name: "Salsa", slug: "salsa", memoryState: .ephemeral)
+        let unrelated = try seedPantryItem(name: "Saffron", slug: "saffron", memoryState: .ephemeral)
+
+        // Add matching ingredients to the recipe plan. Recipe also
+        // includes a non-pantry ingredient (no-op match) to verify
+        // the hook tolerates partial matches gracefully.
+        try addIngredient(named: "Cilantro", amount: "1 bunch")
+        try addIngredient(named: "Salsa", amount: "1 cup")
+        try addIngredient(named: "Tortilla chips", amount: "1 bag")
+        // Sanity: the household's pantry actually has the seeded rows.
+        XCTAssertEqual(try pantryRepo.fetchAll(for: household).count, 3)
+
+        let session = try freshSession(currentStepIndex: 3)
+        let vm = makeVM(session: session)
+
+        // Await the Task — finish()'s @discardableResult Task<Void, Never>
+        // is the SCA-49 plumbing that lets us deterministically wait
+        // for performFinish (and the consume call inside it) to land.
+        await vm.finish().value
+
+        // Matched ephemerals soft-deleted.
+        XCTAssertNotNil(cilantro.deletedAt, "matched ephemeral row must be soft-deleted by consume hook")
+        XCTAssertNotNil(salsa.deletedAt, "matched ephemeral row must be soft-deleted by consume hook")
+        // Unmatched ephemeral untouched.
+        XCTAssertNil(unrelated.deletedAt, "unmatched pantry row must NOT be touched by consume")
+
+        // fetchAll reflects the mutation (hook actually saved).
+        let surviving = try pantryRepo.fetchAll(for: household)
+        XCTAssertEqual(surviving.count, 1)
+        XCTAssertEqual(surviving.first?.displayName, "Saffron")
+    }
+
+    /// .remembered rows are bumped (lastSeenAt updated) but NOT
+    /// soft-deleted by the consume hook — standing items aren't
+    /// depleted by one cook. This pins ADR 0029's memory-state-aware
+    /// rule at the integration layer.
+    func test_performFinish_bumpsRememberedMatchesWithoutDeleting() async throws {
+        let oliveOil = try seedPantryItem(
+            name: "olive oil",
+            slug: "olive_oil",
+            memoryState: .remembered,
+            lastSeenAt: Date(timeIntervalSinceNow: -86_400),
+        )
+        let originalLastSeen = oliveOil.lastSeenAt
+        try addIngredient(named: "olive oil", amount: "2 tbsp")
+
+        let session = try freshSession(currentStepIndex: 3)
+        let vm = makeVM(session: session)
+
+        await vm.finish().value
+
+        XCTAssertNil(oliveOil.deletedAt, "remembered row must survive — standing pantry, no time-based decay from consume")
+        XCTAssertNotEqual(oliveOil.lastSeenAt, originalLastSeen, "lastSeenAt must be bumped on match")
+    }
+
     // MARK: - Exit cancels running timers (CA2-R1 regression)
     //
     // When the user chooses Abandon with a running timer, TimerService
@@ -897,6 +967,7 @@ final class CookModeViewModelTests: XCTestCase {
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: CookTimerRepository(controller: controller),
             substitutionRepository: SubstitutionRepository(controller: controller),
+            pantryItemRepository: PantryItemRepository(controller: controller),
             timerService: TimerService(
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),
@@ -955,6 +1026,32 @@ final class CookModeViewModelTests: XCTestCase {
         ing.isOptional = false
         try controller.save()
         return ing
+    }
+
+    /// Seeds a pantry row scoped to the test household. Mirrors the
+    /// seedItem helper in PantryItemRepositoryTests; kept private to
+    /// this file so the SCA-29 consume hook tests can stand up
+    /// matching pantry data without cross-file fixture coupling.
+    @discardableResult
+    private func seedPantryItem(
+        name: String,
+        slug: String? = nil,
+        memoryState: PantryItem.MemoryState = .ephemeral,
+        lastSeenAt: Date? = nil,
+    ) throws -> PantryItem {
+        let row = PantryItem(context: controller.viewContext)
+        row.id = UUID()
+        row.household = household
+        row.displayName = name
+        row.canonicalIngredientSlug = slug ?? ""
+        row.typedSource = .scan
+        row.typedMemoryState = memoryState
+        row.userConfirmed = true
+        row.createdAt = Date()
+        row.updatedAt = Date()
+        row.lastSeenAt = lastSeenAt ?? Date()
+        try controller.save()
+        return row
     }
 }
 
