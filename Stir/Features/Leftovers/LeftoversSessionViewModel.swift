@@ -139,9 +139,36 @@ final class LeftoversSessionViewModel: Identifiable {
     /// the cover silently dismissing as if persistence succeeded.
     /// Re-uses the existing `(code, message)` shape so no new view
     /// surfaces are required.
-    func markPersistenceFailed(code: String, message: String) {
+    ///
+    /// SCA-73: also captures the failed dish so the ErrorView's
+    /// "Try again" button can re-run the same persistence attempt
+    /// (most failures — Core Data lock contention, transient validation
+    /// — are retry-safe). Cleared by `clearPersistenceFailure()` on
+    /// retry-tap or by stage advancing past `.error`.
+    func markPersistenceFailed(code: String, message: String, dish: DishCard? = nil) {
+        lastFailedDish = dish
         stage = .error(code: code, message: message)
     }
+
+    /// SCA-73: cleared from `.error` back to `.options` by the
+    /// LeftoversSolveView ErrorView's Retry button immediately before
+    /// the host's `onSelect` retry runs. Drops `lastFailedDish` so a
+    /// second failure on the same dish (or on a different dish picked
+    /// after a retry) gets a fresh attempt rather than retry-storming.
+    func clearPersistenceFailure() {
+        lastFailedDish = nil
+        // Return to the populated dish-list so the user sees the
+        // options again while persistence retries. If the solve
+        // produced zero dishes (.error from `findFollowUpIdea`'s
+        // empty-result path), revert to `.prompt` so the prompt
+        // stage's "Find idea" CTA is reachable.
+        stage = dishes.isEmpty ? .prompt : .options
+    }
+
+    /// SCA-73: dish snapshot from the last persistence failure. Nil
+    /// when no failure has happened in this VM lifetime. ErrorView
+    /// surfaces a Retry button only when this is non-nil.
+    private(set) var lastFailedDish: DishCard?
 
     func addCustomItem(name: String, amount: String? = nil) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)

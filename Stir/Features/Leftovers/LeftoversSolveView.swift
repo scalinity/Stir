@@ -79,7 +79,23 @@ struct LeftoversSolveView: View {
                 .padding(.top, 4)
             }
         case .error(let code, let message):
-            ErrorView(code: code, message: message)
+            // SCA-73: surface a Retry button when the failure carries
+            // a captured dish (persistence path). VM clears stage +
+            // dish before the retry runs so a re-failure replaces the
+            // banner cleanly rather than stacking. AI-failure cases
+            // (`findFollowUpIdea`'s AI-01/AI-02) leave `lastFailedDish`
+            // nil so no Retry button shows there — different recovery
+            // path entirely.
+            ErrorView(
+                code: code,
+                message: message,
+                retry: viewModel.lastFailedDish.map { dish in
+                    {
+                        viewModel.clearPersistenceFailure()
+                        onSelect(dish)
+                    }
+                },
+            )
         case .prompt:
             // Shouldn't happen — the root swaps to prompt view before solve
             EmptyView()
@@ -280,6 +296,11 @@ private struct SolvingSkeleton: View {
 private struct ErrorView: View {
     let code: String
     let message: String
+    /// SCA-73: retry closure surfaced on persistence-failure errors.
+    /// Nil for AI-failure errors where retry isn't a same-action
+    /// recovery (those need a fresh `findFollowUpIdea`).
+    var retry: (() -> Void)? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -294,6 +315,10 @@ private struct ErrorView: View {
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink700)
                 .lineLimit(3)
+            if let retry {
+                TextButton(title: "Try again", action: retry)
+                    .padding(.top, 4)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

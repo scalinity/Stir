@@ -595,7 +595,11 @@ struct CookModeRoot: View {
             )
             vm.markPersistenceFailed(
                 code: "AI-02",
-                message: "Couldn't save that idea. Try a different one.",
+                // SCA-73: copy adjusted now that ErrorView surfaces a
+                // Retry button — "try a different one" was prescriptive
+                // and steered users away from the simpler retry path.
+                message: "Couldn't save that idea. Tap Try again, or pick a different one.",
+                dish: dish,
             )
         }
     }

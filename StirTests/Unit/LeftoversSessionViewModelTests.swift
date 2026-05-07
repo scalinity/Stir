@@ -176,6 +176,83 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         XCTAssertEqual(message, "Save failed")
     }
 
+    // SCA-73: persistence failures with a captured dish enable a
+    // Retry button on the ErrorView. VM stores the dish so the host
+    // can re-run `onSelect(dish)` against the same target.
+    func test_markPersistenceFailed_capturesDishForRetry() throws {
+        let (plan, household) = try seedRecipePlan(
+            ingredients: [("Rice", "rice", nil)],
+        )
+        let vm = LeftoversSessionViewModel(
+            recipePlan: plan,
+            household: household,
+            aiDispatch: AIDispatch.stub,
+        )
+        let dish = makeTestDish(rank: 1, title: "Rice bowl")
+        vm.markPersistenceFailed(code: "AI-02", message: "Save failed", dish: dish)
+        XCTAssertNotNil(vm.lastFailedDish)
+        XCTAssertEqual(vm.lastFailedDish?.title, "Rice bowl")
+    }
+
+    // SCA-73: clearing the failure must drop the dish reference AND
+    // route stage back to a useful state — `.options` when dishes
+    // exist, `.prompt` when there's nothing to show. Test exercises
+    // the `.prompt` branch (empty dishes from a fresh VM).
+    func test_clearPersistenceFailure_dropsDishAndReturnsStage() throws {
+        let (plan, household) = try seedRecipePlan(
+            ingredients: [("Rice", "rice", nil)],
+        )
+        let vm = LeftoversSessionViewModel(
+            recipePlan: plan,
+            household: household,
+            aiDispatch: AIDispatch.stub,
+        )
+        let dish = makeTestDish(rank: 1, title: "Rice bowl")
+        vm.markPersistenceFailed(code: "AI-02", message: "Save failed", dish: dish)
+        XCTAssertNotNil(vm.lastFailedDish)
+
+        vm.clearPersistenceFailure()
+
+        XCTAssertNil(vm.lastFailedDish)
+        XCTAssertEqual(vm.stage, .prompt)
+    }
+
+    // SCA-73 / SCA-56 (W1): AI-failure errors (no captured dish)
+    // surface no Retry button — the recovery path is a fresh
+    // `findFollowUpIdea`, not a same-dish retry. Verifies the
+    // optional dish parameter defaults to nil.
+    func test_markPersistenceFailed_withoutDish_leavesRetryOff() throws {
+        let (plan, household) = try seedRecipePlan(
+            ingredients: [("Rice", "rice", nil)],
+        )
+        let vm = LeftoversSessionViewModel(
+            recipePlan: plan,
+            household: household,
+            aiDispatch: AIDispatch.stub,
+        )
+        vm.markPersistenceFailed(code: "AI-01", message: "AI temporarily unavailable")
+        XCTAssertNil(vm.lastFailedDish)
+    }
+
+    // SCA-73 helper — minimal DishCard for retry-flow tests.
+    private func makeTestDish(rank: Int, title: String) -> DishCard {
+        DishCard(
+            rank: rank,
+            title: title,
+            totalTimeMinutes: 15,
+            whyItFits: "test",
+            missingIngredientCount: 0,
+            fitLabelPrimary: "best_fit",
+            fitLabelSecondary: nil,
+            hardConstraintPass: true,
+            recipePlan: DishCard.RecipePlanWire(
+                servings: 2, difficulty: 1, cuisine: nil,
+                ingredients: [], steps: [],
+            ),
+            reasoningSummary: "test",
+        )
+    }
+
     // SCA-56 (DB1 #11): `selectedItemsCountAtSolve` is captured at
     // `findFollowUpIdea` start so post-render item toggling can't
     // distort the per-dish telemetry slice. Verify the snapshot
