@@ -1,0 +1,105 @@
+# Stir CI — minimum viable (SCA-60)
+#
+# Two lanes: iOS (build + unit tests) and backend (Deno _shared unit tests).
+# Edge-runtime-dependent backend tests + `supabase start`-driven integration
+# tests are intentionally skipped in CI for v1 — they require Docker on the
+# runner and full local-Supabase stack startup, which is slow and flaky.
+# Run those locally via `deno test Backend/supabase/tests/` against a
+# `supabase start` stack before merging risky backend changes.
+#
+# Phase 2 (separate ticket): supabase deploy on merge to main, TestFlight
+# upload on tag via fastlane.
+#
+# Security note (per Anthropic workflow injection guidance):
+# This workflow consumes ZERO untrusted user input. The only template
+# expression used is github.ref in the concurrency group, which is a
+# pre-sanitized git-ref string and never interpolated into a shell run:.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel in-progress runs on the same PR / branch when a newer push lands.
+# Saves runner minutes; CI verdict the user cares about is the latest.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS — build + unit tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      # Pin to current Xcode 26 series. Bump when the project's
+      # MARKETING_VERSION / SDK requirement bumps.
+      DEVELOPER_DIR: /Applications/Xcode_26.0.app/Contents/Developer
+      DESTINATION: 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      # Mirror the local Config.xcconfig.example so the build can resolve
+      # the gitignored Config.xcconfig. Public-key-only fixture; never
+      # holds secrets.
+      - name: Stage CI Config.xcconfig
+        run: cp Config.xcconfig.example Config.xcconfig
+
+      - name: Build (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -scheme Stir \
+            -destination "$DESTINATION" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Run StirTests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme Stir \
+            -destination "$DESTINATION" \
+            -configuration Debug \
+            -only-testing:StirTests \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+  backend:
+    name: Backend — Deno _shared unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.46.x
+
+      - name: Deno _shared unit tests
+        # Pure unit tests against the _shared/ helpers (hashing, ingredient
+        # ontology, etc.) — no Postgres or edge-runtime dependency.
+        run: |
+          deno test \
+            --config Backend/supabase/functions/deno.json \
+            --allow-read --allow-env \
+            Backend/supabase/functions/_shared/
+
+      - name: Deno fmt check
+        run: |
+          deno fmt --check \
+            --config Backend/supabase/functions/deno.json \
+            Backend/supabase/functions/
+
+      - name: Deno lint
+        run: |
+          deno lint \
+            --config Backend/supabase/functions/deno.json \
+            Backend/supabase/functions/
