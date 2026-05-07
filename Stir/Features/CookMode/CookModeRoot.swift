@@ -189,6 +189,25 @@ struct CookModeRoot: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.2), value: viewModel.voiceToastMessage)
+                    // SCA-71: surface the post-paywall sticky-intent
+                    // wait so users who just bought Premium see
+                    // something happening while the RevenueCat webhook
+                    // → Supabase bootstrap → tier-flip round-trip
+                    // settles. Only renders when the paywall has
+                    // dismissed (otherwise the cover hides this view
+                    // anyway) AND we're still waiting on the
+                    // entitlement refresh. Cleared by the same
+                    // observers that consume `pendingLeftoversIntent`.
+                    .overlay(alignment: .top) {
+                        if pendingLeftoversIntent
+                            && coordinator.activePaywallTrigger == nil
+                        {
+                            ActivatingPremiumBanner()
+                                .padding(.top, 60)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.25), value: pendingLeftoversIntent)
             } else if let initError {
                 VStack(spacing: 0) {
                     EmptyState(
@@ -833,6 +852,48 @@ struct CookModeRoot: View {
             self.driverTeardown = { [driver] in driver.close() }
             return driver
         }
+    }
+}
+
+// MARK: - SCA-71 sticky-intent banner
+
+/// Top-of-screen banner shown after a successful leftovers-gate
+/// purchase, while the RevenueCat → Supabase bootstrap → tier-flip
+/// round-trip settles. Replaces the prior silent wait between paywall
+/// dismiss and LeftoversRoot presentation. Non-tappable — the underlying
+/// state-machine clears itself on tier flip or the 15s safety timeout.
+private struct ActivatingPremiumBanner: View {
+    var body: some View {
+        HStack(spacing: CGFloat.Stir.space3 - 2) { // 10pt
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(Color.Stir.ember600)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Activating Premium…")
+                    .stirFont(.labelMd)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink900)
+                Text("Opening your leftovers ideas next.")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
+            }
+            Spacer(minLength: CGFloat.Stir.space2)
+        }
+        .padding(.horizontal, CGFloat.Stir.space4)
+        .padding(.vertical, CGFloat.Stir.space3 - 2) // 10pt
+        .background(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                .fill(Color.Stir.paper100)
+                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2),
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                .strokeBorder(Color.Stir.ember600.opacity(0.25), lineWidth: 1),
+        )
+        .padding(.horizontal, CGFloat.Stir.screenMargin)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Activating Premium. Opening your leftovers ideas next.")
     }
 }
 
