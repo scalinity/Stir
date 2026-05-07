@@ -657,6 +657,13 @@ camera_permission_result, scan_started, scan_submitted, scan_parse_completed,
 # or 1 for singular). Backend computes the count from `images?.length
 # ?? 1`; do NOT add a wire field "to be safe" — the redundancy was
 # the bug.
+# SCA-47: scan_started carries `flash_mode` ∈ {"off","on","auto"} —
+# the user's selected flash policy at shutter time, persisted via
+# @AppStorage("com.scalinity.stir.scan.flashMode") on iOS. Default
+# "off" preserves the SCA-39 instant-shutter floor; "on"/"auto" are
+# user-opt-in for dark pantries (with the documented metering pre-
+# flash latency penalty). Wire values are 1:1 with
+# `ScanFlashMode.rawValue` — renaming any breaks the dashboard.
 ingredient_corrected, constraints_set,
 # SCA-44: dinner_solve_requested gains `feedback_summary_present: bool` +
 # `recent_meal_count: int` (ADR 0030). True iff iOS sent a non-nil

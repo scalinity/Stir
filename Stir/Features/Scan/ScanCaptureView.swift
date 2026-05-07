@@ -51,6 +51,15 @@ struct ScanCaptureView: View {
     @State private var captureTask: Task<Void, Never>?
     @State private var submitTask: Task<Void, Never>?
 
+    /// SCA-47: user-selectable flash policy, persisted per-installation
+    /// via UserDefaults. Default .off preserves the SCA-39 instant-
+    /// shutter floor; .on / .auto are user-opt-in for dark pantries
+    /// (with the documented metering-pre-flash latency penalty). The
+    /// AppStorage key is namespaced so a future reset/migration knows
+    /// it's a scan-feature preference rather than a generic toggle.
+    @AppStorage("com.scalinity.stir.scan.flashMode")
+    private var flashMode: ScanFlashMode = .off
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -195,22 +204,57 @@ struct ScanCaptureView: View {
         VStack(spacing: 16) {
             if !viewModel.capturedImages.isEmpty {
                 thumbnailStrip
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                doneButtonRow
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             shutterRow
         }
+        // SCA-52 S1: animate the conditional appearance of the thumb
+        // strip + Done row on first/last shutter so the layout doesn't
+        // jump abruptly. Tracks `isEmpty` (not `count`) so subsequent
+        // captures append thumbs without re-triggering the slide.
+        .animation(.easeInOut(duration: 0.2), value: viewModel.capturedImages.isEmpty)
     }
 
+    /// SCA-47: shutter + flash toggle. ZStack keeps the 74pt shutter
+    /// mathematically centered (the SCA-36 W13 invariant) while the
+    /// flash toggle floats on the leading edge — Apple Camera's
+    /// top-bar location is unavailable to us because the top of the
+    /// scan screen is occupied by the hint banner.
     private var shutterRow: some View {
         ZStack {
             captureButton
-            if !viewModel.capturedImages.isEmpty {
-                HStack {
-                    Spacer()
-                    doneButton
-                        .padding(.trailing, 24)
-                }
+            HStack {
+                flashToggleButton
+                    .padding(.leading, 32)
+                Spacer()
             }
         }
+    }
+
+    private var flashToggleButton: some View {
+        Button {
+            flashMode = flashMode.next()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.black.opacity(0.4))
+                    .frame(width: 36, height: 36)
+                Image(systemName: flashMode.sfSymbol)
+                    // justification: 18pt symbol on a 36pt dark-circle gives
+                    // a comfortable tap target while reading clearly against
+                    // the live preview; matches the shutter's white-on-dark
+                    // contrast.
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .symbolRenderingMode(.hierarchical)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(shutterDisabled)
+        .opacity(shutterDisabled ? 0.4 : 1.0)
+        .accessibilityLabel(flashMode.accessibilityLabel)
     }
 
     private var thumbnailStrip: some View {
@@ -314,6 +358,14 @@ struct ScanCaptureView: View {
             || viewModel.capturedImages.count >= ScanViewModel.maxImagesPerScan
     }
 
+    private var doneButtonRow: some View {
+        HStack {
+            Spacer()
+            doneButton
+                .padding(.trailing, 24)
+        }
+    }
+
     private var doneButton: some View {
         Button {
             submitTask = Task { await submit() }
@@ -326,7 +378,10 @@ struct ScanCaptureView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            // SCA-52 W1: vertical padding 10→14 brings the pill to ~45pt
+            // tall so it clears the iOS HIG 44pt tap-target minimum and
+            // matches the mockup's `height:44` (`04_scan_flow.html:157`).
+            .padding(.vertical, 14)
             .background(Color.Stir.ember600, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -358,10 +413,12 @@ struct ScanCaptureView: View {
         isCapturing = true
         defer { isCapturing = false }
 
-        PostHogClient.shared.capture(.scanStarted, properties: [:])
+        PostHogClient.shared.capture(.scanStarted, properties: [
+            "flash_mode": flashMode.rawValue,
+        ])
 
         do {
-            let fullData = try await cameraService.capturePhoto()
+            let fullData = try await cameraService.capturePhoto(flashMode: flashMode.avFlashMode)
             try Task.checkCancellation()
 
             // Two parallel detached tasks: one rasterizes the display

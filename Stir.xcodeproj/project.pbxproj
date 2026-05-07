@@ -77,6 +77,7 @@
 		40453A0006723DFBC4204EB4 /* StirCardModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */; };
 		404A71437E3D50A8F0FBF9B1 /* Icons.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91E50133C48D87663B85ECA /* Icons.swift */; };
 		40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */; };
+		DEAA93F28B2C45D8BE35F975 /* ScanFlashModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */; };
 		4251A10988292F425283C9A6 /* Shadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C360FB0B332A41A4A112ED /* Shadow.swift */; };
 		437C0842FA7855A67EDA4BC1 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31D8A5D5C82DF5113FFE4A1 /* Spacing.swift */; };
 		454797BE4791137605A8A926 /* ImportRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12C55AD7E8B976D68E7020A /* ImportRoot.swift */; };
@@ -160,6 +161,7 @@
 		845B820BE9908AE751E38629 /* LeftoversPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D66ABEE50D3262039974DC /* LeftoversPromptView.swift */; };
 		86AA82B314DE7ED038A3DF51 /* SharedTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A126ED8CE06FC62D54163207 /* SharedTier.swift */; };
 		8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A235A27546345C45BC15C3 /* ScanViewModel.swift */; };
+		B03D29307152421E95449EDA /* ScanFlashMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = F887C2FCD0DD42E68E5AFAF5 /* ScanFlashMode.swift */; };
 		89C550D052175C8023691845 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C97A077C3B8880A1E10D2F12 /* PaywallView.swift */; };
 		8BBEFC364CEFE0A1F037F29E /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F2075E34D782898B6DAC024A /* WidgetKit.framework */; };
 		8C6E380CAAA79444AA8FD0ED /* AIDispatchDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */; };
@@ -384,6 +386,7 @@
 		14744B65A207BA49BDB36C0A /* ErrorCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCode.swift; sourceTree = "<group>"; };
 		151133441B87DA5FA6CC975E /* LiveAudioPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAudioPipeline.swift; sourceTree = "<group>"; };
 		1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncTimeoutTests.swift; sourceTree = "<group>"; };
+		99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlashModeTests.swift; sourceTree = "<group>"; };
 		16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowRoot.swift; sourceTree = "<group>"; };
 		173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDispatchDecoderTests.swift; sourceTree = "<group>"; };
 		E8B2C6DAF50402938A6C5D8E /* BlankOptionalEncodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankOptionalEncodingTests.swift; sourceTree = "<group>"; };
@@ -586,6 +589,7 @@
 		D6FDAF0954F8D77AEA674D3F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryListView.swift; sourceTree = "<group>"; };
 		D7A235A27546345C45BC15C3 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
+		F887C2FCD0DD42E68E5AFAF5 /* ScanFlashMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlashMode.swift; sourceTree = "<group>"; };
 		D98501A5E5030F48A1DD11F5 /* TimerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceTests.swift; sourceTree = "<group>"; };
 		DE194C00CBA1EC009095718F /* CookingSessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingSessionRepository.swift; sourceTree = "<group>"; };
 		DF56858CD141F5AB2D206A82 /* CookTimer+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CookTimer+Extensions.swift"; sourceTree = "<group>"; };
@@ -729,6 +733,7 @@
 				71057D601BBC622C76763E03 /* AIDispatchSSETests.swift */,
 				288F193547101468063792F0 /* AppIntentsGateTests.swift */,
 				1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */,
+				99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */,
 				3A9DE9C3193E73E1AE97C1CF /* CookModeViewModelTests.swift */,
 				74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */,
 				B5FFF2B81F4345047488F784 /* CookModeVoiceTraceAggregationTests.swift */,
@@ -1170,6 +1175,7 @@
 				16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */,
 				06DD944D757CD38D2F98B502 /* ScanReviewView.swift */,
 				D7A235A27546345C45BC15C3 /* ScanViewModel.swift */,
+				F887C2FCD0DD42E68E5AFAF5 /* ScanFlashMode.swift */,
 			);
 			path = Scan;
 			sourceTree = "<group>";
@@ -1573,6 +1579,7 @@
 				AA628CBD9D02A7D0A5A95279 /* AppGroup.swift in Sources */,
 				926AE33F4571D696CA9FDB71 /* AppIntentsGateTests.swift in Sources */,
 				40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */,
+				DEAA93F28B2C45D8BE35F975 /* ScanFlashModeTests.swift in Sources */,
 				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
 				2D2311882A2127827CA3405A /* Colors.swift in Sources */,
 				FCF76E7B277686B408B1C983 /* CookModeViewModelTests.swift in Sources */,
@@ -1766,6 +1773,7 @@
 				00EC80F4220F9AE9265AEFA5 /* ScanFlowRoot.swift in Sources */,
 				C53777475685FB585A315191 /* ScanReviewView.swift in Sources */,
 				8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */,
+				B03D29307152421E95449EDA /* ScanFlashMode.swift in Sources */,
 				0CC6EF781F17377F12FFF940 /* SecondaryButton.swift in Sources */,
 				7A18D861DEE852A9E77CC785 /* SelectableChip.swift in Sources */,
 				0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */,

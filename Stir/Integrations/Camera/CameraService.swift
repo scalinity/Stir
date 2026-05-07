@@ -128,7 +128,14 @@ final class CameraService: NSObject {
     /// is responsible for any resize / re-encode before AI submit —
     /// keeping that work out of the photo-output delegate is what lets
     /// the shutter-tap → still-on-screen latency stay under ~300ms.
-    func capturePhoto() async throws -> Data {
+    ///
+    /// `flashMode` defaults to `.off`, which preserves the SCA-39
+    /// instant-shutter invariant (no `.auto` metering pre-flash). The
+    /// scan flow's user-facing flash toggle (SCA-47) overrides via
+    /// `ScanFlashMode.avFlashMode` when the user has opted into `.on`
+    /// or `.auto`; both arms accept the latency penalty in exchange
+    /// for guaranteed exposure in dark pantries.
+    func capturePhoto(flashMode: AVCaptureDevice.FlashMode = .off) async throws -> Data {
         guard let output = photoOutput else {
             throw CaptureError.configurationFailed("photoOutput missing")
         }
@@ -152,8 +159,10 @@ final class CameraService: NSObject {
         // gap was 300-700 ms — long enough that phone movement during
         // the click visibly skewed the captured frame. .off + .speed
         // brings it under ~150 ms with no fidelity hit on the kitchen-
-        // scan pantry-parse pipeline.
-        settings.flashMode = .off
+        // scan pantry-parse pipeline. SCA-47 made flashMode a per-call
+        // parameter (still defaulting .off) so the user-facing toggle
+        // can opt into .on / .auto for dark pantries.
+        settings.flashMode = flashMode
         settings.photoQualityPrioritization = .speed
 
         return try await withCheckedThrowingContinuation { continuation in
