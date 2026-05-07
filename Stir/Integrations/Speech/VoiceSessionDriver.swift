@@ -106,6 +106,19 @@ protocol VoiceSessionDriver: AnyObject {
     /// release AVAudioSession so the system mic indicator drops;
     /// failing to do so leaves the indicator stuck on after Cook
     /// Mode exit.
+    ///
+    /// SCA-76 invariant: `CookModeRoot` invokes the close path TWICE
+    /// on the leftovers handoff — once via
+    /// `closeVoiceSessionFromHost()` (SCA-57, called from
+    /// `handlePostSubmit(.openLeftovers/.openPaywall)`) and once via
+    /// `driverTeardown?()` on `.onDisappear`. Implementations MUST
+    /// guard against double-close: no thrown errors, no duplicated
+    /// telemetry events (e.g. `voice_session_closed`,
+    /// `$ai_trace` close-summary), and no double-release of audio
+    /// resources. The simplest pattern is a `private var isClosed`
+    /// flag that early-returns on the second entry. Breaking this
+    /// contract surfaces first as a `.onDisappear`-only crash on
+    /// the leftovers handoff path.
     func close()
 }
 

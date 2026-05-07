@@ -1304,6 +1304,18 @@ final class RealtimeSession: VoiceSessionDriver {
 
     // MARK: - close
 
+    /// SCA-76: invariant pinned at the protocol level — `CookModeRoot`
+    /// invokes the close path TWICE on the leftovers handoff (once via
+    /// `closeVoiceSessionFromHost()` per SCA-57, once via
+    /// `driverTeardown?()` on `.onDisappear`). This implementation must
+    /// not throw, must not double-emit `voice_session_closed_*` /
+    /// `$ai_trace` close-summary, and must not double-release audio
+    /// resources. Re-entry is gated below by checking individual
+    /// resource state (e.g. `pendingReport != nil`,
+    /// `audioEngine.isRunning`) — each guard is the per-resource
+    /// idempotency point. If you refactor any of those guards out,
+    /// add an explicit `if isClosed { return }` flag instead so the
+    /// SCA-76 contract holds at the entry boundary.
     func close() {
         #if DEBUG
         VoiceSessionLog.log("close.begin", ["turn_count": turnCount])

@@ -719,6 +719,16 @@ final class SpeechFallbackService: VoiceSessionDriver {
 
     /// Stop all audio, cancel tasks, advance to `.closed`. Idempotent.
     /// Call from Cook Mode exit regardless of current state.
+    ///
+    /// SCA-76: invariant pinned at the protocol level — `CookModeRoot`
+    /// invokes the close path TWICE on the leftovers handoff (once via
+    /// `closeVoiceSessionFromHost()` per SCA-57, once via
+    /// `driverTeardown?()` on `.onDisappear`). The audio-engine
+    /// guards below (`audioEngine.isRunning` checks before
+    /// `removeTap` / `stop`) are the per-resource idempotency points.
+    /// Removing those guards without adding an explicit
+    /// `if state == .closed { return }` entry-boundary check would
+    /// break the SCA-76 contract.
     func close() {
         // Drop the external VM subscriber first so any final
         // `forceClose()` transition below doesn't fire a callback
