@@ -53,6 +53,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         XCTAssertEqual(newPlan.title, "Salmon fried rice")
@@ -71,6 +72,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
@@ -90,6 +92,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
@@ -106,6 +109,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
@@ -128,6 +132,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         let ings = (newPlan.ingredients as? Set<RecipeIngredient>)?
@@ -139,6 +144,81 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             .sorted { $0.sortOrder < $1.sortOrder } ?? []
         XCTAssertEqual(steps.count, 4)
         XCTAssertEqual(steps.map { Int($0.stepNumber) }, [1, 2, 3, 4])
+    }
+
+    // SCA-56 S2 / S3 — verify the magic-string `aiVersion = "leftovers"`
+    // and magic-confidence 0.9/0.5 from the original implementation are
+    // gone; instead, persistence threads the actual prompt version and
+    // sets confidence to 0 (no model confidence on leftovers DishCards).
+    func test_createLeftoversSolveWithDish_threadsPromptVersionAndZerosConfidence() throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
+
+        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: "v1.1.0-canary",
+        )
+
+        XCTAssertEqual(newPlan.aiVersion, "v1.1.0-canary",
+                       "leftovers persistence MUST thread the backend prompt version, not a magic 'leftovers' tag")
+
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        let suggested = try XCTUnwrap(solve.suggestedDishArray.first)
+        XCTAssertEqual(suggested.confidence, 0,
+                       "leftovers DishCards don't carry a model confidence; persisted value must be 0 (sentinel), not a synthesized 0.9/0.5")
+    }
+
+    func test_createLeftoversSolveWithDish_unknownPromptVersionWhenNil() throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
+
+        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: nil,
+        )
+
+        XCTAssertEqual(newPlan.aiVersion, "unknown",
+                       "nil promptVersion (stream errored before done event) falls back to 'unknown' sentinel")
+    }
+
+    // SCA-56 (DB1 #8) — verify steps are pre-sorted by stepNumber so
+    // wire-order quirks can't desync sortOrder from semantic order.
+    func test_createLeftoversSolveWithDish_sortsStepsByStepNumberRegardlessOfWireOrder() throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let outOfOrderSteps = [
+            DishCard.RecipePlanWire.StepWire(stepNumber: 3, instructionText: "third", timerSeconds: nil, cautionTags: nil),
+            DishCard.RecipePlanWire.StepWire(stepNumber: 1, instructionText: "first", timerSeconds: nil, cautionTags: nil),
+            DishCard.RecipePlanWire.StepWire(stepNumber: 2, instructionText: "second", timerSeconds: nil, cautionTags: nil),
+        ]
+        let dish = DishCard(
+            rank: 1,
+            title: "Out-of-order dish",
+            totalTimeMinutes: 10,
+            whyItFits: "test",
+            missingIngredientCount: 0,
+            fitLabelPrimary: "best_fit",
+            fitLabelSecondary: nil,
+            hardConstraintPass: true,
+            recipePlan: DishCard.RecipePlanWire(
+                servings: 2, difficulty: 1, cuisine: nil,
+                ingredients: [], steps: outOfOrderSteps,
+            ),
+            reasoningSummary: "test",
+        )
+
+        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+            on: household, from: source, dish: dish,
+            aiRequestId: nil, promptVersion: nil,
+        )
+        let steps = (newPlan.steps as? Set<RecipeStep>)?
+            .sorted { $0.sortOrder < $1.sortOrder } ?? []
+        XCTAssertEqual(steps.map(\.instructionText), ["first", "second", "third"])
     }
 
     func test_createLeftoversSolveWithDish_promotesNewPlanToLatestTonightPick() throws {
@@ -154,6 +234,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             from: source,
             dish: dish,
             aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
         )
 
         let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))

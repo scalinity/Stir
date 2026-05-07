@@ -1,9 +1,9 @@
 // OutcomeFeedbackViewIntentTests
 //
 // SCA-55 — pin the PostSubmitIntent decision matrix in the OutcomeFeedback
-// gate. The decision lives in `postSubmitIntent(forLeftoverCount:)` so we
-// test it directly rather than driving the full Core Data submit() path
-// for a 3-line decision function. Branches:
+// gate. The decision lives in `static OutcomeFeedbackView.postSubmitIntent`
+// (refactored from a default-nil-arg overload to a pure static per
+// SCA-56 CR1 S8). Branches:
 //
 //   leftoverCount=0, any tier               → .dismiss
 //   leftoverCount>0, no entitlements        → .dismiss (test-fallback)
@@ -12,9 +12,16 @@
 //   leftoverCount>0, premium grace          → .openLeftovers
 //   leftoverCount>0, premium expired        → .openPaywall(.leftoversGate)
 //
-// CoreData fixtures use the in-memory PersistenceController so a
-// CookingSession can be passed to the view init. Test-scoped
-// install:test:<uuid> per CLAUDE.md "Integration test DB strategy."
+// SCA-56 critical-3 telemetry: `leftovers_eligible_free` reads
+// `effectiveTier`, not raw `tier`, so an expired-Premium user who hits
+// the paywall logs as eligible_free=true (matches the gate decision).
+// Locked in by `test_eligibleFreeTelemetry_includesExpiredPremium`.
+//
+// SCA-56 (CR1 S19) note: `test_leftoverCountPositive_noEntitlementsInjected_*`
+// pins a TEST-ERGONOMICS fallback (production always passes a non-nil
+// EntitlementService via the host's init), NOT a product behavior. The
+// fallback exists so unit tests that don't care about the gate can omit
+// it; do not interpret as documenting an intentional Free path.
 
 import CoreData
 import XCTest
@@ -24,106 +31,115 @@ import XCTest
 final class OutcomeFeedbackViewIntentTests: XCTestCase {
     private var controller: PersistenceController!
     private var householdRepo: HouseholdProfileRepository!
-    private var session: CookingSession!
 
     override func setUp() async throws {
         try await super.setUp()
         controller = PersistenceController(inMemory: true)
         householdRepo = HouseholdProfileRepository(controller: controller)
-        let household = try householdRepo.ensureHouseholdProfile(
-            for: "install:test:\(UUID().uuidString)",
-        )
-        // Bare CookingSession — postSubmitIntent only reads
-        // leftoverCount + entitlements, never the session, so we don't
-        // need a fully-populated row. CookingSessionRepository's
-        // create path requires a recipePlan, so we skip it and build
-        // the row manually.
-        let plan = RecipePlan(context: controller.viewContext)
-        plan.id = UUID()
-        plan.household = household
-        plan.title = "stub"
-        plan.summary = "stub"
-        plan.servings = 2
-        plan.aiVersion = "1.0.0"
-        plan.typedOrigin = .ai
-        plan.createdAt = Date()
-        plan.updatedAt = Date()
-        let s = CookingSession(context: controller.viewContext)
-        s.id = UUID()
-        s.household = household
-        s.recipePlan = plan
-        s.startedAt = Date()
-        try controller.viewContext.save()
-        self.session = s
     }
 
     override func tearDown() async throws {
         controller = nil
         householdRepo = nil
-        session = nil
         try await super.tearDown()
     }
 
     // MARK: - Intent matrix
 
     func test_leftoverCountZero_returnsDismiss_evenForPremium() {
-        let view = makeView(entitlements: makeEntitlements(tier: .premium, billingState: .active))
-        XCTAssertEqual(view.postSubmitIntent(forLeftoverCount: 0), .dismiss)
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        XCTAssertEqual(
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 0, entitlements: entitlements),
+            .dismiss,
+        )
     }
 
     func test_leftoverCountZero_returnsDismiss_forFree() {
-        let view = makeView(entitlements: makeEntitlements(tier: .free, billingState: .none))
-        XCTAssertEqual(view.postSubmitIntent(forLeftoverCount: 0), .dismiss)
+        let entitlements = makeEntitlements(tier: .free, billingState: .none)
+        XCTAssertEqual(
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 0, entitlements: entitlements),
+            .dismiss,
+        )
     }
 
     func test_leftoverCountPositive_freeUser_returnsPaywall() {
-        let view = makeView(entitlements: makeEntitlements(tier: .free, billingState: .none))
+        let entitlements = makeEntitlements(tier: .free, billingState: .none)
         XCTAssertEqual(
-            view.postSubmitIntent(forLeftoverCount: 2),
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
             .openPaywall(.leftoversGate),
         )
     }
 
     func test_leftoverCountPositive_premiumActive_returnsOpenLeftovers() {
-        let view = makeView(entitlements: makeEntitlements(tier: .premium, billingState: .active))
-        XCTAssertEqual(view.postSubmitIntent(forLeftoverCount: 2), .openLeftovers)
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        XCTAssertEqual(
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            .openLeftovers,
+        )
     }
 
     func test_leftoverCountPositive_premiumGrace_returnsOpenLeftovers() {
         // Grace = billing-retry — user retains paid access while Apple
         // recovers payment. Leftovers must continue to work.
-        let view = makeView(entitlements: makeEntitlements(tier: .premium, billingState: .grace))
-        XCTAssertEqual(view.postSubmitIntent(forLeftoverCount: 2), .openLeftovers)
+        let entitlements = makeEntitlements(tier: .premium, billingState: .grace)
+        XCTAssertEqual(
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            .openLeftovers,
+        )
     }
 
     func test_leftoverCountPositive_premiumExpired_returnsPaywall() {
         // Expired demotes to Free per EntitlementService:165 ("demote to
         // free for `expired` AND `none`"). Leftovers must paywall.
-        let view = makeView(entitlements: makeEntitlements(tier: .premium, billingState: .expired))
+        let entitlements = makeEntitlements(tier: .premium, billingState: .expired)
         XCTAssertEqual(
-            view.postSubmitIntent(forLeftoverCount: 2),
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
             .openPaywall(.leftoversGate),
         )
     }
 
     func test_leftoverCountPositive_noEntitlementsInjected_returnsDismiss() {
-        // Defensive fallback so unit tests that don't care about the
-        // gate (and tests of skipAndDismiss(), etc.) don't accidentally
-        // open Leftovers. Server-side ENT-LEFTOVERS-01 remains the
-        // authoritative gate in production.
-        let view = makeView(entitlements: nil)
-        XCTAssertEqual(view.postSubmitIntent(forLeftoverCount: 2), .dismiss)
+        // Test-ergonomics fallback (NOT a product contract) — see file
+        // header. Production always injects a non-nil EntitlementService
+        // via the host's init. This case exists so callers who don't
+        // care about the gate can omit it without forcing every test to
+        // instantiate a service.
+        XCTAssertEqual(
+            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: nil),
+            .dismiss,
+        )
+    }
+
+    // MARK: - SCA-56 critical-3: leftovers_eligible_free uses effectiveTier
+
+    func test_eligibleFreeTelemetry_trueForRawFreeUser() {
+        let entitlements = makeEntitlements(tier: .free, billingState: .none)
+        XCTAssertEqual(entitlements.effectiveTier, .free)
+    }
+
+    func test_eligibleFreeTelemetry_trueForExpiredPremium() {
+        // The bug fixed in SCA-56: previously `meal_rated.leftovers_eligible_free`
+        // read raw `tier` (= .premium) and miscounted this cohort as
+        // ineligible. After the fix, `effectiveTier` is .free and the
+        // funnel correctly sizes them as a conversion opportunity.
+        let entitlements = makeEntitlements(tier: .premium, billingState: .expired)
+        XCTAssertEqual(entitlements.effectiveTier, .free)
+        XCTAssertNotEqual(entitlements.tier, .free, "raw tier stays .premium even when billing expired")
+    }
+
+    func test_eligibleFreeTelemetry_falseForPremiumActive() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        XCTAssertNotEqual(entitlements.effectiveTier, .free)
+    }
+
+    func test_eligibleFreeTelemetry_falseForPremiumGrace() {
+        // Grace retains paid access — must NOT count as eligible_free
+        // (the user IS paying, Apple is just retrying their card).
+        let entitlements = makeEntitlements(tier: .premium, billingState: .grace)
+        XCTAssertNotEqual(entitlements.effectiveTier, .free)
     }
 
     // MARK: - Helpers
-
-    private func makeView(entitlements: EntitlementService?) -> OutcomeFeedbackView {
-        OutcomeFeedbackView(
-            session: session,
-            onSubmitted: { _ in },
-            entitlements: entitlements,
-        )
-    }
 
     private func makeEntitlements(
         tier: Tier,

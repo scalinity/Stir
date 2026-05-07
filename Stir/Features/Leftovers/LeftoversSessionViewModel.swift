@@ -51,6 +51,14 @@ final class LeftoversSessionViewModel: Identifiable {
     /// wants to flag the event to ops / show a cost hint.
     private(set) var lastPromptVersion: String?
 
+    /// SCA-56 (DB1 #11): snapshot of `selectedItems.count` at the
+    /// moment `findFollowUpIdea` fires, before the user can toggle
+    /// items off in the prompt UI after dishes start rendering.
+    /// Telemetry on `leftovers_dish_selected.leftovers_items_count`
+    /// reads this so the per-dish funnel slice reflects what the
+    /// solve actually consumed, not the post-toggle state.
+    private(set) var selectedItemsCountAtSolve: Int = 0
+
     let recipePlan: RecipePlan
     let household: HouseholdProfile
     let solveRequestID: UUID = UUID()
@@ -125,6 +133,16 @@ final class LeftoversSessionViewModel: Identifiable {
         items[idx].approximateAmountText = amount.trimmingCharacters(in: .whitespaces).isEmpty ? nil : amount
     }
 
+    /// SCA-56 (W1): host calls this when `createLeftoversSolveWithDish`
+    /// throws so the cover stays up and the existing `.error` UI in
+    /// `LeftoversSolveView` renders an actionable banner instead of
+    /// the cover silently dismissing as if persistence succeeded.
+    /// Re-uses the existing `(code, message)` shape so no new view
+    /// surfaces are required.
+    func markPersistenceFailed(code: String, message: String) {
+        stage = .error(code: code, message: message)
+    }
+
     func addCustomItem(name: String, amount: String? = nil) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
@@ -176,6 +194,10 @@ final class LeftoversSessionViewModel: Identifiable {
         }
 
         stage = .solving
+        // SCA-56 (DB1 #11): freeze the count at solve-start so
+        // post-render item toggling can't distort
+        // `leftovers_dish_selected.leftovers_items_count`.
+        selectedItemsCountAtSolve = selectedItems.count
 
         analytics.capture(
             .dinnerSolveRequested,

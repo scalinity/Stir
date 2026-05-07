@@ -60,10 +60,23 @@ struct CookModeRoot: View {
     @State private var leftoversSession: LeftoversSessionViewModel?
     /// SCA-55 sticky-intent flag for the Free → paywall → Leftovers path.
     /// Set when OutcomeFeedback emits `.openPaywall(.leftoversGate)`;
-    /// observed alongside `entitlements.tier` so a successful purchase
-    /// auto-opens Leftovers. Cleared on tier flip + open, on the 5s
-    /// safety timeout, or on the dismiss-without-purchase path.
+    /// observed alongside `entitlements.tier` AND `entitlements.billingState`
+    /// so a successful purchase auto-opens Leftovers (SCA-56 fix —
+    /// observing `tier` alone misses the expired-Premium re-purchase path
+    /// where only `billingState` flips, AND the in-`hydrate(from:)` write
+    /// ordering race where `tier` writes first while `billingState` is
+    /// still stale). Cleared on consume, the safety timeout, or dismiss
+    /// without purchase.
     @State private var pendingLeftoversIntent: Bool = false
+    /// SCA-56: Cancellable handles for the two ad-hoc Tasks the leftovers
+    /// handoff used to fire-and-forget. Storing them lets the success path
+    /// (`.onChange` observer consuming `pendingLeftoversIntent`) cancel
+    /// the safety timeout, prevents re-entrancy when a user starts a
+    /// second cook within the 5s window, and stops orphan Tasks from
+    /// surviving CookModeRoot teardown. Both are `MainActor` Tasks so
+    /// cancellation is synchronous from the actor.
+    @State private var leftoversTimeoutTask: Task<Void, Never>?
+    @State private var leftoversPresentationTask: Task<Void, Never>?
 
     init(
         recipePlan: RecipePlan,
@@ -133,17 +146,36 @@ struct CookModeRoot: View {
                     // through the leftovers-gate paywall, RootCoordinator's
                     // dismissPaywall(wasSuccessful:) fires
                     // refreshEntitlementsOnForeground() — once the refresh
-                    // lands and tier flips, present LeftoversRoot. The 5s
-                    // timeout (set when pendingLeftoversIntent goes true)
-                    // bails out gracefully if the webhook is delayed so
-                    // the user isn't left on a stale Cook Mode screen.
+                    // lands, present LeftoversRoot.
+                    //
+                    // SCA-56: observe BOTH `tier` AND `billingState`, not
+                    // just `tier`. Two real scenarios were silently broken
+                    // by the single-dimension observer: (1) expired-Premium
+                    // re-purchase only flips billingState (.expired→.active);
+                    // tier stays .premium, observer never fires. (2)
+                    // EntitlementService.hydrate writes tier then billingState
+                    // sequentially — observer firing on the tier write reads
+                    // stale .blockedByTier from canAccess (which routes
+                    // through effectiveTier) and bails before billingState
+                    // catches up. canAccess re-derives from both dimensions,
+                    // so two observers that call the same checker covers
+                    // every settle path.
                     .onChange(of: entitlements.tier) { _, _ in
-                        guard pendingLeftoversIntent,
-                              entitlements.canAccess(.leftoversMode) == .allowed,
-                              leftoversSession == nil
-                        else { return }
-                        pendingLeftoversIntent = false
-                        presentLeftovers()
+                        consumePendingLeftoversIntentIfReady()
+                    }
+                    .onChange(of: entitlements.billingState) { _, _ in
+                        consumePendingLeftoversIntentIfReady()
+                    }
+                    // SCA-56: cancel any in-flight leftovers Tasks if
+                    // CookModeRoot leaves the tree (parent rebuild, app
+                    // background-kill recovery). Without this, the
+                    // fire-and-forget timeout/presentation Tasks survive
+                    // the View teardown and write to a detached @State.
+                    .onDisappear {
+                        leftoversTimeoutTask?.cancel()
+                        leftoversTimeoutTask = nil
+                        leftoversPresentationTask?.cancel()
+                        leftoversPresentationTask = nil
                     }
                     // Transient voice-error toast (empty transcript,
                     // mic denied, backend error). Auto-clears on tap.
@@ -358,6 +390,25 @@ struct CookModeRoot: View {
 
     // MARK: - SCA-55 Leftovers handoff
 
+    /// 50ms cover-handoff gap. SwiftUI's `.fullScreenCover` dismiss
+    /// animation runs ~0.35s; the `isPresented` flip is synchronous but
+    /// queueing a second cover bind in the same tick can swallow the
+    /// presentation on iOS 17/18. 50ms is empirically large enough to
+    /// let the dismiss animation start while staying well under the
+    /// user-perceptible window. Used by both the leftovers branch
+    /// (OutcomeFeedback → LeftoversRoot, both covers on CookModeRoot)
+    /// and the paywall branch (OutcomeFeedback on CookModeRoot →
+    /// PaywallView at RootView). Both branches need the gap because
+    /// the OutcomeFeedback dismiss runs the same animation regardless
+    /// of where the next cover is bound.
+    private static let coverHandoffGap: Duration = .milliseconds(50)
+    /// Sticky-intent safety timeout. If RevenueCat's webhook → Supabase
+    /// bootstrap → entitlement-refresh round-trip stalls past this
+    /// window, drop the sticky intent and close Cook Mode normally on
+    /// the paywall's own dismiss. Sized larger than the typical webhook
+    /// SLA (~1-3s) to absorb APNS-push backpressure.
+    private static let stickyIntentTimeout: Duration = .seconds(15)
+
     /// Route OutcomeFeedback's PostSubmitIntent. The OutcomeFeedback cover
     /// is dismissed in every branch so iOS isn't asked to stack two
     /// fullScreenCovers (LeftoversRoot or PaywallView would otherwise be
@@ -378,53 +429,93 @@ struct CookModeRoot: View {
             onDismiss()
 
         case .openLeftovers:
-            // Cover-dismiss animation needs to finish before the next
-            // fullScreenCover binds, otherwise SwiftUI swallows the
-            // second presentation. 50ms picks up after the standard
-            // 0.35s spring is over (the cover's `isPresented` flips
-            // synchronously; the dismiss animation runs separately).
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(50))
+            // Voice-driver early-teardown deferred (DB2 minor):
+            // CookModeViewModel.closeVoiceSession is private and async;
+            // the existing `driverTeardown?()` on CookModeRoot's
+            // `.onDisappear` correctly releases the driver when the
+            // sheet dismisses on dish-pick. The "voice stays warm
+            // during the leftovers prompt UI" concern is tracked in
+            // docs/deferred-work.md (SCA-56 follow-ups) — fix requires
+            // either widening the VM's API or surfacing a teardown
+            // hook callable from here. Both are out of scope for the
+            // wiring fix.
+            cancelLeftoversPresentationTask()
+            leftoversPresentationTask = Task { @MainActor in
+                try? await Task.sleep(for: Self.coverHandoffGap)
+                guard !Task.isCancelled else { return }
                 presentLeftovers()
             }
 
         case .openPaywall(let trigger):
+            // Re-arm: cancel any prior in-flight timer/presentation
+            // Tasks before stamping new ones. Without this, two cooks
+            // in a single Cook Mode session stack overlapping timers
+            // and the older one can race in and clear the newer
+            // sticky intent (DB1 #3 / DB2 #1 / CA1 #1).
+            cancelLeftoversTimeoutTask()
+            cancelLeftoversPresentationTask()
             pendingLeftoversIntent = true
-            // 5s safety timeout — if the post-purchase entitlement
-            // refresh hasn't landed by then (RevenueCat webhook stalled
-            // or the user dismissed without buying), drop the sticky
-            // intent and close Cook Mode normally on the paywall's
-            // own dismiss.
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(5))
-                if pendingLeftoversIntent {
-                    pendingLeftoversIntent = false
-                }
+            leftoversTimeoutTask = Task { @MainActor in
+                try? await Task.sleep(for: Self.stickyIntentTimeout)
+                guard !Task.isCancelled, pendingLeftoversIntent else { return }
+                pendingLeftoversIntent = false
             }
-            // Same 50ms cover-handoff gap as the leftovers branch —
-            // otherwise PaywallView's fullScreenCover queues behind
-            // OutcomeFeedback's still-dismissing cover.
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(50))
+            leftoversPresentationTask = Task { @MainActor in
+                try? await Task.sleep(for: Self.coverHandoffGap)
+                guard !Task.isCancelled else { return }
                 coordinator.presentPaywall(trigger)
             }
         }
+    }
+
+    /// Single transition for the post-purchase sticky-intent path.
+    /// Called from BOTH the `.onChange(of: tier)` and
+    /// `.onChange(of: billingState)` observers — re-derives via
+    /// `canAccess(.leftoversMode)` so any settle order produces a
+    /// correct decision. No-op when there's nothing pending or the
+    /// user isn't yet entitled.
+    @MainActor
+    private func consumePendingLeftoversIntentIfReady() {
+        guard pendingLeftoversIntent,
+              entitlements.canAccess(.leftoversMode) == .allowed,
+              leftoversSession == nil
+        else { return }
+        cancelLeftoversTimeoutTask()
+        pendingLeftoversIntent = false
+        presentLeftovers()
+    }
+
+    @MainActor
+    private func cancelLeftoversTimeoutTask() {
+        leftoversTimeoutTask?.cancel()
+        leftoversTimeoutTask = nil
+    }
+
+    @MainActor
+    private func cancelLeftoversPresentationTask() {
+        leftoversPresentationTask?.cancel()
+        leftoversPresentationTask = nil
     }
 
     /// Build a fresh `LeftoversSessionViewModel` and bind it to
     /// `leftoversSession` so the SwiftUI `.fullScreenCover(item:)` picks
     /// it up. Single source of truth so both the direct Premium path
     /// (handlePostSubmit → .openLeftovers) and the sticky-intent path
-    /// (post-purchase tier flip) construct the VM identically.
+    /// (post-purchase consume) construct the VM identically.
     @MainActor
     private func presentLeftovers() {
+        // SCA-56: dropped `[weak coordinator]` capture — coordinator is
+        // an app-singleton injected via @Environment, outlives every
+        // view, and the strong cycle [weak] would prevent (VM →
+        // closure → coordinator → … → VM) doesn't exist because
+        // coordinator never holds the VM.
         leftoversSession = LeftoversSessionViewModel(
             recipePlan: recipePlan,
             household: household,
             aiDispatch: aiDispatch,
             entitlements: entitlements,
-            presentPaywall: { [weak coordinator] trigger in
-                coordinator?.presentPaywall(trigger)
+            presentPaywall: { trigger in
+                coordinator.presentPaywall(trigger)
             },
         )
     }
@@ -447,23 +538,36 @@ struct CookModeRoot: View {
                 from: recipePlan,
                 dish: dish,
                 aiRequestId: nil,
+                promptVersion: vm.lastPromptVersion,
             )
             PostHogClient.shared.capture(
                 .leftoversDishSelected,
                 properties: [
                     "rank": dish.rank,
-                    "leftovers_items_count": vm.selectedItems.count,
+                    // Snapshot taken at solve-start in
+                    // LeftoversSessionViewModel — defends against the
+                    // user toggling items off after the dishes render
+                    // but before tapping a card (DB1 #11).
+                    "leftovers_items_count": vm.selectedItemsCountAtSolve,
                     "prompt_version": vm.lastPromptVersion ?? "unknown",
-                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "",
-                    "new_recipe_plan_id": newPlan.id?.uuidString ?? "",
+                    // "unknown" placeholder beats "" so PostHog
+                    // dashboards that filter by ID don't silently
+                    // drop these events (DB1 #7).
+                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
+                    "new_recipe_plan_id": newPlan.id?.uuidString ?? "unknown",
                 ],
             )
+            leftoversSession = nil
+            onDismiss()
         } catch {
-            // Persistence failed (Core Data save rejected). Log + Sentry,
-            // but still close out — we've at least captured the user's
-            // selection in PostHog via the meal_rated `leftovers_*`
-            // properties from earlier in the flow. A fresh leftovers
-            // attempt would re-solve from scratch.
+            // SCA-56 (W1): persistence failed — DON'T silently dismiss
+            // as if success. Keep the LeftoversRoot cover up and
+            // transition the VM to its `.error` stage so the existing
+            // ErrorView surface (LeftoversSolveView) renders an
+            // actionable message. The `meal_rated` properties emitted
+            // upstream still record the offer; the per-dish
+            // `leftovers_dish_selected` is correctly suppressed because
+            // no plan was created.
             Logger.coreData.error(
                 "createLeftoversSolveWithDish failed: \(error.localizedDescription, privacy: .public)",
             )
@@ -471,12 +575,15 @@ struct CookModeRoot: View {
                 error,
                 context: [
                     "screen": "leftovers_handoff",
-                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "",
+                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
+                    "error_type": String(describing: type(of: error)),
                 ],
             )
+            vm.markPersistenceFailed(
+                code: "AI-02",
+                message: "Couldn't save that idea. Try a different one.",
+            )
         }
-        leftoversSession = nil
-        onDismiss()
     }
 
     /// Driver selection (C.2 + C.3, ADR 0007):

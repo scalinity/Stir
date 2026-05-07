@@ -183,12 +183,20 @@ final class SolveRepository {
     /// Distinct from `createSolveWithDishes` because the leftovers shape
     /// (single dish, sourced from a prior recipe, no pantry) doesn't fit
     /// cleanly as overloaded nullable parameters — see SCA-55 spec D4.
+    ///
+    /// Field-mapping note (SCA-56 S5): `dish.whyItFits` here plays the
+    /// same role as `DishInput.summary` on `createSolveWithDishes` —
+    /// it's the one-line user-facing rationale persisted on both
+    /// `RecipePlan.summary` and `SuggestedDish.summary`. Wire-name
+    /// divergence on `DishCard` vs `DishInput` only; no semantic
+    /// difference.
     @discardableResult
     func createLeftoversSolveWithDish(
         on household: HouseholdProfile,
         from sourceRecipePlan: RecipePlan,
         dish: DishCard,
         aiRequestId: String?,
+        promptVersion: String?,
     ) throws -> RecipePlan {
         let context = controller.viewContext
         let now = Date()
@@ -205,6 +213,16 @@ final class SolveRepository {
         // leftovers solves skip both per LeftoversSessionViewModel:
         // pantry-skip is line 187 (`ingredients: []`); constraints aren't
         // collected on the leftovers prompt.
+        //
+        // SCA-56 S4 — `sourceRecipePlanId` is intentionally a bare UUID,
+        // NOT a Core Data relationship. Orphan acceptance: if the source
+        // RecipePlan is later soft- or hard-deleted, the leftovers solve
+        // carries a dangling pointer with no cascade. This is acceptable
+        // because (1) no UI consumes the field today; it's analytics-only,
+        // (2) joining via UUID at query time tolerates absent rows, and
+        // (3) flipping to a relationship later requires an inverse on
+        // RecipePlan and a lightweight migration. Revisit if a UI surface
+        // ever depends on the link being live.
 
         let recipe = RecipePlan(context: context)
         recipe.id = UUID()
@@ -215,7 +233,13 @@ final class SolveRepository {
         recipe.difficulty = Int16(clamping: dish.recipePlan.difficulty)
         recipe.estimatedMinutes = Int16(clamping: dish.totalTimeMinutes)
         recipe.cuisine = dish.recipePlan.cuisine
-        recipe.aiVersion = "leftovers"  // backend prompt-version isn't surfaced on the leftovers DishCard rehydration; tag explicitly
+        // SCA-56 S2: thread the actual backend prompt version through
+        // (captured by LeftoversSessionViewModel on the dinner-solve
+        // `done` event) instead of a magic "leftovers" tag. The
+        // "unknown" fallback only fires when the stream errored before
+        // emitting a done event — matches the telemetry fallback shape
+        // on `leftovers_dish_selected.prompt_version`.
+        recipe.aiVersion = promptVersion ?? "unknown"
         recipe.typedOrigin = .ai
         recipe.isFavorite = false
         recipe.isSaved = false
@@ -234,7 +258,11 @@ final class SolveRepository {
             row.typedSource = .ai
         }
 
-        for step in dish.recipePlan.steps {
+        // SCA-56 (DB1 #8): pre-sort by stepNumber so sortOrder is
+        // monotonic regardless of any wire-ordering quirks. Ingredients
+        // use enumerated() for sortOrder (insertion order wins); steps
+        // tie sortOrder to the semantic stepNumber for safety.
+        for step in dish.recipePlan.steps.sorted(by: { $0.stepNumber < $1.stepNumber }) {
             let row = RecipeStep(context: context)
             row.id = UUID()
             row.recipePlan = recipe
@@ -246,7 +274,8 @@ final class SolveRepository {
         }
 
         let suggested = SuggestedDish(context: context)
-        suggested.id = UUID()
+        let suggestedID = UUID()
+        suggested.id = suggestedID
         suggested.solveRequest = solve
         suggested.recipePlan = recipe
         suggested.rank = Int16(clamping: dish.rank)
@@ -258,12 +287,22 @@ final class SolveRepository {
         suggested.missingIngredientCount = Int16(clamping: dish.missingIngredientCount)
         suggested.hardConstraintPass = dish.hardConstraintPass
         suggested.reasoningSummary = dish.reasoningSummary
-        suggested.confidence = dish.hardConstraintPass ? 0.9 : 0.5
+        // SCA-56 S3: leftovers solves don't surface a model confidence
+        // value (DishCard doesn't carry one — the wire DishCard ships
+        // with `hardConstraintPass` but no scalar confidence). Persist
+        // 0 explicitly so downstream consumers can detect the
+        // "no-confidence-from-leftovers" case rather than reading a
+        // synthesized magic number.
+        suggested.confidence = 0
         // Mark selected on the solve immediately — the user has already
         // committed by tapping the leftovers card; there's no separate
         // selection step downstream the way the dinner-solve flow has.
+        // SCA-56 (DB1 #5): use the local UUID we just minted rather
+        // than re-reading `suggested.id` post-assignment, mirroring
+        // the defensive guard at the bottom of `createSolveWithDishes`.
+        // Avoids any post-save nil edge case from impacting the pick.
         suggested.selectedAt = now
-        solve.selectedSuggestedDishId = suggested.id
+        solve.selectedSuggestedDishId = suggestedID
 
         try controller.save()
         Logger.coreData.info("SolveRepository persisted 1-dish leftovers solve")

@@ -378,7 +378,10 @@ struct OutcomeFeedbackView: View {
                 notes: notes.isEmpty ? nil : notes,
                 leftoverCount: leftoverCount,
             ))
-            let intent = postSubmitIntent()
+            let intent = Self.postSubmitIntent(
+                leftoverCount: leftoverCount,
+                entitlements: entitlements,
+            )
             analytics.capture(.mealRated, properties: [
                 "rating": rating,
                 "has_notes": !notes.isEmpty,
@@ -394,11 +397,18 @@ struct OutcomeFeedbackView: View {
                 // (Free). _taken is reserved for the Premium+ branch — the
                 // Free→paywall path emits its own `paywall_viewed.trigger=
                 // leftovers_gate` event. _eligible_free sizes the
-                // conversion opportunity for product analytics.
+                // conversion opportunity.
+                //
+                // SCA-56 critical fix: read `effectiveTier`, NOT raw
+                // `tier`, for `_eligible_free`. The gate decision uses
+                // `effectiveTier` (which demotes (.premium|.pro,
+                // .expired|.none) to .free per EntitlementService:176-181),
+                // so reading raw `tier` here under-reports the Free-
+                // equivalent cohort the property is meant to size.
                 "leftovers_handoff_offered": intent != .dismiss,
                 "leftovers_handoff_taken": intent == .openLeftovers,
                 "leftovers_eligible_free": leftoverCount > 0
-                    && (entitlements?.tier == .free),
+                    && (entitlements?.effectiveTier == .free),
             ])
             submitting = false
             onSubmitted(intent)
@@ -448,21 +458,32 @@ struct OutcomeFeedbackView: View {
     /// would require a full Core Data fixture per case for a 3-line
     /// decision function.
     @MainActor
-    func postSubmitIntent(forLeftoverCount overrideCount: Int? = nil) -> PostSubmitIntent {
-        let count = overrideCount ?? leftoverCount
-        guard count > 0 else { return .dismiss }
+    static func postSubmitIntent(
+        leftoverCount: Int,
+        entitlements: EntitlementService?,
+    ) -> PostSubmitIntent {
+        guard leftoverCount > 0 else { return .dismiss }
         guard let entitlements else {
+            // SCA-56 (CR1 S7): defensive fallback — production always
+            // passes a non-nil EntitlementService via the host's init.
+            // This branch exists for tests that don't care about the
+            // gate; server-side ENT-LEFTOVERS-01 remains authoritative.
             return .dismiss
         }
         switch entitlements.canAccess(.leftoversMode) {
         case .allowed:
             return .openLeftovers
-        case .blockedByTier, .blockedByBilling:
+        case .blockedByTier, .blockedByBilling, .blockedByQuota:
+            // SCA-56 (CR1 W1): collapsed the previously-dead
+            // `.blockedByQuota` arm into the paywall path.
+            // `EntitlementService.canAccess(.leftoversMode)` only ever
+            // returns `.allowed` or `.blockedByTier(.premium)` today
+            // (line 206-208) — the gate is unmetered. Future-proof:
+            // any new state the compiler flags here gets a deliberate
+            // decision rather than the silent `.dismiss` the dead arm
+            // used to give.
             return .openPaywall(.leftoversGate)
-        case .blockedByQuota:
-            return .dismiss
         }
     }
-
 }
 

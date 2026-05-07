@@ -155,6 +155,47 @@ final class LeftoversSessionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.stage, .prompt)
     }
 
+    // SCA-56 (W1): host calls `markPersistenceFailed(code:message:)`
+    // when `createLeftoversSolveWithDish` throws so the cover stays up
+    // and the existing `.error` UI renders instead of the cover
+    // silently dismissing as if persistence succeeded.
+    func test_markPersistenceFailed_transitionsToErrorStageWithMessage() throws {
+        let (plan, household) = try seedRecipePlan(
+            ingredients: [("Rice", "rice", nil)],
+        )
+        let vm = LeftoversSessionViewModel(
+            recipePlan: plan,
+            household: household,
+            aiDispatch: AIDispatch.stub,
+        )
+        vm.markPersistenceFailed(code: "AI-02", message: "Save failed")
+        guard case let .error(code, message) = vm.stage else {
+            return XCTFail("expected .error stage, got \(vm.stage)")
+        }
+        XCTAssertEqual(code, "AI-02")
+        XCTAssertEqual(message, "Save failed")
+    }
+
+    // SCA-56 (DB1 #11): `selectedItemsCountAtSolve` is captured at
+    // `findFollowUpIdea` start so post-render item toggling can't
+    // distort the per-dish telemetry slice. Verify the snapshot
+    // initializes to zero before any solve and stays unchanged on
+    // toggling without solving.
+    func test_selectedItemsCountAtSolve_zeroBeforeFirstSolve() throws {
+        let (plan, household) = try seedRecipePlan(
+            ingredients: [("Rice", "rice", nil), ("Salmon", "salmon", "200g")],
+        )
+        let vm = LeftoversSessionViewModel(
+            recipePlan: plan,
+            household: household,
+            aiDispatch: AIDispatch.stub,
+        )
+        vm.items.indices.forEach { vm.items[$0].isSelected = true }
+        XCTAssertEqual(vm.selectedItems.count, 2)
+        XCTAssertEqual(vm.selectedItemsCountAtSolve, 0,
+                       "snapshot stays 0 until findFollowUpIdea runs")
+    }
+
     // MARK: - Helpers
 
     /// Build an in-memory RecipePlan + HouseholdProfile for test use. Uses
