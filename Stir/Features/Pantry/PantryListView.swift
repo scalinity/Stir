@@ -108,6 +108,28 @@ struct PantryListView: View {
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        // SCA-54: searchable lives at the screen-level Group (not the
+        // inner List inside `populatedList`) so iOS owns the transition
+        // between the pinned navigation-bar drawer and the scrolling
+        // List below. Attaching to the inner List left iOS computing
+        // the collapse animation against the nav-bar context while the
+        // actual scroll target was a List sitting under a non-scrolling
+        // header strip — that layout discontinuity made the very first
+        // scroll engagement jump rather than smooth-collapse. Drawer
+        // placement `.always` keeps the bar visible across scroll
+        // states so the affordance is steady. Binding routes through
+        // an Optional-unwrap that no-ops while the VM is still loading
+        // (the searchable is gated visually by the `if let viewModel`
+        // branch in `listBody`, so a stray write during loading is
+        // harmless either way).
+        .searchable(
+            text: Binding(
+                get: { viewModel?.searchText ?? "" },
+                set: { viewModel?.searchText = $0 },
+            ),
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search pantry",
+        )
         // SCA-19 / SCA-28 — full-screen in-list Pantry walkthrough.
         // SCA-28 C2 collapsed the prior two-`.tutorial(...)` mount
         // into a single modifier keyed off `inListTutorialKey`. Two
@@ -231,6 +253,15 @@ struct PantryListView: View {
                 ForEach(vm.filteredItems, id: \.objectID) { item in
                     PantryRow(item: item)
                         .listRowBackground(Color.Stir.paper100)
+                        // SCA-53: pull the row separator's leading edge
+                        // to 0 so the hairline reaches the cell's left
+                        // edge. SwiftUI's default aligns separators to
+                        // the first text-baseline content of the row,
+                        // which lands AFTER PantryRow's 28pt camera-
+                        // icon column — visible as separators that
+                        // start mid-row. Setting the alignment guide
+                        // to 0 forces full-width.
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = item }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -258,7 +289,7 @@ struct PantryListView: View {
                 // Delete-all footer. Lives inside the List as its own
                 // Section so it scrolls with the content (user must
                 // reach the end to find it — discoverable but not
-                // accident-prone). Confirmation dialog at the view
+                // accident-prone). Confirmation sheet at the view
                 // root provides the destructive-action safety net per
                 // the global "executing actions with care" guidance.
                 // Hidden when the search filter narrows results so
@@ -280,6 +311,10 @@ struct PantryListView: View {
                             .contentShape(Rectangle())
                         }
                         .listRowBackground(Color.Stir.paper100)
+                        // Same SCA-53 alignment fix as the data rows so
+                        // the trailing footer separator (above the
+                        // button) also reaches the leading edge.
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         .accessibilityLabel("Delete all items from pantry")
                         .accessibilityHint("Removes every pantry item. Confirmation required.")
                     }
@@ -303,7 +338,10 @@ struct PantryListView: View {
             // tab bar" gap. Coupled with the bar's chrome — change one,
             // recheck the other.
             .contentMargins(.bottom, CGFloat.Stir.space5, for: .scrollContent)
-            .searchable(text: $bindable.searchText, prompt: "Search pantry")
+            // SCA-54: searchable hoisted to the outer Group at screen
+            // scope; no `.searchable` modifier remains here. Keeping
+            // the comment so a future reader doesn't accidentally
+            // re-attach it to the inner List.
         }
         .background(Color.Stir.paper50)
         // Themed destructive bulk-delete confirmation. Lives at the
