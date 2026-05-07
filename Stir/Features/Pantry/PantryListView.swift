@@ -289,40 +289,52 @@ struct PantryListView: View {
             .scrollContentBackground(.hidden)
             .background(Color.Stir.paper50)
             // Tab-bar bottom-clearance compensation. StirCustomTabBar
-            // uses `padding(.bottom, -.space3Half)` (-14pt) to encroach
-            // into the home-indicator inset, AND its measured frame
-            // (icon + label + top padding) sits above that — so the
-            // safeAreaInset reservation is shorter than the bar's
-            // visible extent by ~50pt total. The .space3Half attempt
-            // only covered the negative-padding portion and left the
-            // last row visibly clipped (SCA-20 bug returned). 64pt
-            // matches Tonight's `padding(.bottom, .space7 + .space4)`
-            // — the documented mitigation in `StirCustomTabBar.body`.
-            // Coupled with the bar's chrome — change one, recheck the
-            // other.
-            .contentMargins(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4, for: .scrollContent)
+            // uses `padding(.bottom, -.space3Half)` (−14pt) to encroach
+            // into the home-indicator inset. The List's auto safeArea
+            // reservation already covers the bar's measured frame —
+            // `contentMargins(.scrollContent)` adds ON TOP of that, so
+            // it only needs to cover the negative-padding extent + a
+            // small visual buffer (≈14pt + 10pt = 24pt = `.space5`).
+            // SCA-20 originally copied Tonight's 64pt value, but
+            // Tonight uses `.padding(.bottom)` INSIDE a ScrollView's
+            // VStack — that primitive composes with safeArea differently
+            // and needs the larger number. SCA-50 right-sizes Pantry to
+            // its actual primitive, removing the visible "extra-tall
+            // tab bar" gap. Coupled with the bar's chrome — change one,
+            // recheck the other.
+            .contentMargins(.bottom, CGFloat.Stir.space5, for: .scrollContent)
             .searchable(text: $bindable.searchText, prompt: "Search pantry")
         }
         .background(Color.Stir.paper50)
-        // Destructive bulk-delete confirmation. Lives at the
-        // populatedList root (not on the button itself) so the
-        // dialog stays attached even if the button scrolls out of
-        // view between tap and confirm. Item count is computed at
-        // present-time so a CloudKit-merge that lands while the
-        // dialog is up doesn't lie about what's being deleted —
-        // the dialog text reads against the snapshot at tap; the
-        // actual delete walks the live count via softDeleteAll.
-        .confirmationDialog(
-            "Delete all \(vm.items.count) items?",
-            isPresented: $showingDeleteAllConfirmation,
-            titleVisibility: .visible,
-        ) {
-            Button("Delete all items", role: .destructive) {
-                vm.deleteAllItems()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
+        // Themed destructive bulk-delete confirmation. Lives at the
+        // populatedList root (not on the button itself) so the sheet
+        // stays attached even if the button scrolls out of view between
+        // tap and confirm. Item count is captured at present-time so a
+        // CloudKit-merge that lands while the sheet is up doesn't lie
+        // about what's being deleted — the sheet text reads against the
+        // snapshot at tap; the actual delete walks the live count via
+        // softDeleteAll.
+        //
+        // SCA-50: was `.confirmationDialog(...)` which renders as an
+        // iOS-26 glass popover anchored to the trigger — looked
+        // off-theme on the surrounding Stir surface. Custom sheet uses
+        // the same backstop (cancel-default focus, primary CTA only on
+        // explicit destructive tap) while honoring the design system.
+        .sheet(isPresented: $showingDeleteAllConfirmation) {
+            PantryDeleteAllConfirmationSheet(
+                itemCount: vm.items.count,
+                onConfirm: {
+                    showingDeleteAllConfirmation = false
+                    vm.deleteAllItems()
+                },
+                onCancel: {
+                    showingDeleteAllConfirmation = false
+                },
+            )
+            .presentationDetents([.height(360)])
+            .presentationCornerRadius(CGFloat.Stir.radiusLg)
+            .presentationBackground(Color.Stir.paper50)
+            .presentationDragIndicator(.visible)
         }
         // Edit sheet stays here (rather than hoisted to outer Group)
         // because it's `.sheet(item:)` driven by a row tap and only
@@ -386,6 +398,73 @@ struct PantryListView: View {
 // the entity's `@NSManaged var id: UUID?` would collide with any
 // `var id: NSManagedObjectID` we tried to declare. Sheet(item:)
 // happily uses the inherited objectID-based identity.
+
+// MARK: - PantryDeleteAllConfirmationSheet
+
+/// Themed confirmation modal for bulk-delete on the pantry list (SCA-50).
+/// Replaces the system `.confirmationDialog` whose iOS-26 glass-popover
+/// styling clashed with the rest of the Stir surface. Lives in the same
+/// file as its only caller — promoting to `DesignSystem/Components/`
+/// only makes sense once a second destructive flow needs the same shape
+/// (favorites bulk-clear is the next plausible candidate).
+private struct PantryDeleteAllConfirmationSheet: View {
+    let itemCount: Int
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                Text("Delete all \(itemCount) items?")
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.ink900)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink500)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: CGFloat.Stir.space3)
+
+            VStack(spacing: CGFloat.Stir.space3) {
+                // Destructive CTA. Mirrors PrimaryButton's geometry
+                // (full-width, 52pt tall, radiusMd) but swaps the
+                // ember600 fill for crimson600 — the standing
+                // "destructive primary action" treatment the design
+                // system already exposes via Color.Stir.crimson600
+                // (== .danger). Built inline rather than parameterizing
+                // PrimaryButton so the change stays scoped to SCA-50.
+                Button(action: onConfirm) {
+                    Text("Delete all items")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.paper50)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(height: 52)
+                        .background(
+                            RoundedRectangle(
+                                cornerRadius: CGFloat.Stir.radiusMd,
+                                style: .continuous,
+                            )
+                            .fill(Color.Stir.crimson600),
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete all \(itemCount) items")
+                .accessibilityHint("Removes every pantry item. This cannot be undone in the app.")
+
+                SecondaryButton(title: "Cancel", action: onCancel)
+            }
+        }
+        .padding(.horizontal, CGFloat.Stir.screenMargin)
+        .padding(.top, CGFloat.Stir.space5)
+        .padding(.bottom, CGFloat.Stir.space4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.Stir.paper50)
+    }
+}
 
 /// Folds the error-toast + tombstone-toast wiring out of the outer
 /// `body` so the expression stays under SwiftUI's typecheck ceiling.
