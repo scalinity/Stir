@@ -273,7 +273,15 @@ section at the bottom of this file (don't delete — keep the trail).
 
 | Old name | New name | Owner | Migrated in | Notes |
 |----------|----------|-------|-------------|-------|
-| `tags.user_hash` | `tags.canonical_user_key_hash` | Backend SQL `stir_ops_cost_anomaly_alert_dispatch` Sentry event body | migration `20260424000007` (Phase D, 2026-04-24) | Same migration also added `tags.actor_id = 'system:cron'` per §3 system-actor convention. Dashboards keying on user identity for cost anomalies must query BOTH `tags.user_hash` (pre-2026-04-24 events still indexed) AND `tags.canonical_user_key_hash` for the transition window. |
+| `tags.user_hash` | `tags.canonical_user_key_hash` | Backend SQL `stir_ops_cost_anomaly_alert_dispatch` Sentry event body | migration `20260424000007` (Phase D, 2026-04-24) | Same migration also added `tags.actor_id = 'system:cron'` per §3 system-actor convention. Transition window (dual-query period): **2026-04-24 → 2026-05-08**. After 2026-05-08 dashboards / saved searches / alert rules should reference only `tags.canonical_user_key_hash`; pre-cutover events under `tags.user_hash` age out of Sentry retention naturally. SCA-59 closed the dual-query period. |
+
+#### Sentry tag deprecation timeline
+
+Schedule for any future tag rename of the same shape (rotate dashboards 14 days post-deploy, when Sentry's index has fully populated under the new name):
+
+| Tag | Cutover deploy | Index settle | Dashboards rotated |
+|-----|----------------|--------------|--------------------|
+| `tags.user_hash` → `tags.canonical_user_key_hash` | 2026-04-24 (mig `20260424000007`) | 2026-05-08 | 2026-05-08 (SCA-59) |
 
 ---
 

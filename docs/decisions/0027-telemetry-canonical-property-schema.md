@@ -151,6 +151,18 @@ as the living reference.**
   for joins must include both the canonical AND deprecated forms
   until migration completes, OR accept reduced join fidelity on
   rows written before the rename.
+
+  **Update 2026-05-07 (SCA-59):** the backend `tags.user_hash` →
+  `tags.canonical_user_key_hash` cutover (migration `20260424000007`,
+  deployed 2026-04-24) reached its 14-day Sentry index settle window
+  on 2026-05-08. The cost-anomaly dispatcher now emits exclusively
+  the canonical tag; old events under `tags.user_hash` will age out
+  of Sentry's retention window naturally. **Sentry workspace owners**:
+  drop the dual-query branch from any dashboard / saved search / alert
+  rule referencing `tags.user_hash`; see `docs/telemetry/canonical-properties.md`
+  §Sentry tag deprecation for the rotation timestamps. iOS-side
+  `canonical_key_hash` remains an open deprecation with no retirement
+  date scheduled.
 - **Review-time enforcement is fallible.** A reviewer who forgets to
   ask "does this new event have `request_id`?" lets drift through.
   Mitigation: add a one-line checklist to `docs/telemetry/canonical-properties.md`
