@@ -201,7 +201,9 @@ final class CameraService: NSObject {
         // 17+ leaves the photo output's connection at the sensor-native
         // landscape angle while the preview layer auto-tracks portrait —
         // the two get out of sync and the captured image is shifted
-        // horizontally relative to what the preview showed.
+        // horizontally relative to what the preview showed. Paired with
+        // ScanCaptureView.CameraPreview.makeUIView — both connections
+        // must stay pinned to the same angle.
         if let connection = output.connection(with: .video),
            connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
