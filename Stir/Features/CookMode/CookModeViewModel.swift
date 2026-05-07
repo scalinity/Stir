@@ -241,7 +241,7 @@ final class CookModeViewModel {
     private let cookingSessionRepository: CookingSessionRepository
     private let cookTimerRepository: CookTimerRepository
     private let substitutionRepository: SubstitutionRepository
-    /// Used by `performFinish` to auto-consume pantry items per ADR 0029
+    /// Used by `performFinishAsyncTail` to auto-consume pantry items per ADR 0029
     /// (SCA-21). Memory-state-aware: ephemeral matches soft-delete,
     /// remembered matches bump `lastSeenAt`. No confirmation prompt;
     /// the conservative match rule is the safety mechanism.
@@ -1068,26 +1068,32 @@ final class CookModeViewModel {
 
     // MARK: - Completion
 
-    /// User tapped Finish on the last step (or voice advanced off the last
-    /// step). Tears down active timers + LiveActivities + voice driver +
-    /// audio session (mirroring `exit(markAbandoned:)`), then marks the
-    /// session completed, emits `cook_session_completed`, and raises the
-    /// outcome feedback flag.
+    /// Mark the cook session completed and request OutcomeFeedback.
     ///
-    /// Teardown ordering matters: timers stop ringing before the outcome
-    /// sheet presents; voice close-trace fires BEFORE the
-    /// `cook_session_completed` event so PostHog records the trace close
-    /// with the session-end semantics attached.
+    /// Synchronous part — observable test/UI contract:
+    ///   - `cookingSessionRepository.markCompleted(session)` flips
+    ///     `session.typedStatus`, sets `endedAt`, sticky-saves the recipe.
+    ///   - `finishPresentationRequested = true` so CookModeRoot shows
+    ///     OutcomeFeedback on the next render pass.
     ///
-    /// Callers are sync (StepCardView Finish button, nextStep voice
-    /// last-step branch) so the async teardown runs inside a Task; the
-    /// presentation flag flips only after teardown completes on the main
-    /// actor.
-    func finish() {
-        Task { await performFinish() }
+    /// Async tail (`performFinishAsyncTail`) — fire-and-forget side
+    /// effects that don't gate the UI: timer + Live Activity teardown,
+    /// voice driver close, audio-session deactivation, pantry auto-
+    /// consume, telemetry, reactivation scheduling, intent donation.
+    /// Order doesn't matter — none of the tail work reads
+    /// `session.typedStatus` (SCA-48 / SCA-49).
+    @discardableResult
+    func finish() -> Task<Void, Never> {
+        do {
+            try cookingSessionRepository.markCompleted(session)
+        } catch {
+            Logger.ui.error("markCompleted failed: \(error.localizedDescription, privacy: .public)")
+        }
+        finishPresentationRequested = true
+        return Task { await performFinishAsyncTail() }
     }
 
-    private func performFinish() async {
+    private func performFinishAsyncTail() async {
         // Mark running AND paused timers complete + end their Live
         // Activities. Paused timers' Lock Screen surfaces stay alive
         // through pause (so the static "2:14" renders) — without
@@ -1124,11 +1130,6 @@ final class CookModeViewModel {
         fireVoiceSessionCloseTrace(endedReason: "session_finish")
         AVAudioSessionConfigurator.deactivate()
 
-        do {
-            try cookingSessionRepository.markCompleted(session)
-        } catch {
-            Logger.ui.error("markCompleted failed: \(error.localizedDescription, privacy: .public)")
-        }
         // SCA-21 / ADR 0029: auto-consume pantry items reflecting the
         // recipe the user just cooked. Memory-state-aware rule lives
         // in `PantryItemRepository.consumeForRecipe`. Emit the
@@ -1171,12 +1172,11 @@ final class CookModeViewModel {
         // ask them on every completion.
         Task { await ReactivationScheduler.shared.scheduleAfterCook() }
         Task { await IntentDonationService().donateStartNewDinnerSolveIfEligible() }
-        finishPresentationRequested = true
     }
 
     /// Teardown hook for `CookModeRoot.onDisappear`. Ends every Live
     /// Activity the manager still tracks. The user-flow paths
-    /// (`exit(markAbandoned:)` and `performFinish`) already end
+    /// (`exit(markAbandoned:)` and `performFinishAsyncTail`) already end
     /// activities through their targeted timer-cancel loops AND the
     /// `endAll` defense-in-depth call there, so this is a no-op in the
     /// happy path. The guarantee is for paths that dismiss Cook Mode
@@ -1544,27 +1544,31 @@ final class CookModeViewModel {
     /// call-only turns produce no model text; very short utterances
     /// may produce no user transcription).
     ///
-    /// CA1-H3 fix: keep the previous `lastModelTranscript` when only
-    /// `userText` arrives. The earlier behaviour blanked the model
-    /// text on every userText-bearing turn, defended on the assumption
-    /// "model reply lands in the same snapshot." That assumption fails
-    /// for tool-call-only turns: the post-tool model reply lands on the
-    /// FOLLOWING turnComplete (after the toolResponse round-trip), so
-    /// blanking left the user staring at "YOU SAID … STIR ‹blank›"
-    /// for the tool-call duration. Now we only overwrite the model
-    /// half when the new snapshot actually carries model text. The
-    /// `lastUserTranscript` write goes through unconditionally because
-    /// every fresh user utterance should reset the upper line — pairing
-    /// the new YOU SAID with a stale STIR reply is uncommon (the prior
-    /// reply was for the prior question) but strictly less misleading
-    /// than the prior bug.
+    /// SCA-49 — asymmetric blank rule, three-branch contract:
+    ///
+    ///   1. Both halves non-empty (normal turn) → both populate.
+    ///   2. Only userText non-empty (tool-call-only turn) → userText
+    ///      populates AND the prior modelText is BLANKED. Pairing a
+    ///      fresh "YOU SAID" with the stale STIR reply that was
+    ///      addressed to the PRIOR question reads as "Stir replied to
+    ///      my latest utterance with this old answer", which is worse
+    ///      than a brief blank during the tool round-trip. The post-
+    ///      tool model reply lands on the FOLLOWING `turnComplete`
+    ///      (after the toolResponse) and falls into branch 3.
+    ///   3. Only modelText non-empty (the post-tool reply, or rare
+    ///      proactive narration) → modelText populates without
+    ///      disturbing prior userText.
     func recordTurnTranscript(_ snapshot: LiveTurnTranscript) {
         if !snapshot.userText.isEmpty {
             lastUserTranscript = snapshot.userText
         }
-        if !snapshot.modelText.isEmpty {
-            lastModelTranscript = snapshot.modelText
-        }
+        // Tool-call-only turns send modelText="" because the model called
+        // a function instead of speaking. Don't preserve the prior turn's
+        // reply — pairing the OLD reply with the NEW user input reads as
+        // "Stir said this in response to my latest utterance" (SCA-48).
+        // userText keeps its preserve-on-empty guard above (model-only
+        // proactive-narration turns are rare but valid).
+        lastModelTranscript = snapshot.modelText.isEmpty ? nil : snapshot.modelText
     }
 
     /// Called by CookModeRoot's `onTurnFinalized` wiring on every
