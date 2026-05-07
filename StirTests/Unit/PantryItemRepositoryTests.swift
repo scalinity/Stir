@@ -412,12 +412,17 @@ final class PantryItemRepositoryTests: XCTestCase {
         let oldTime = Date(timeIntervalSinceNow: -86_400)
         let row = try seedItem(name: "olive oil", memoryState: .remembered, lastSeenAt: oldTime)
         let originalLastSeen = row.lastSeenAt
+        let originalUpdatedAt = row.updatedAt
 
         let bumped = try repo.bumpLastSeenAt(displayName: "olive oil", on: household)
 
         XCTAssertTrue(bumped)
         XCTAssertNotEqual(row.lastSeenAt, originalLastSeen)
         XCTAssertGreaterThan(row.lastSeenAt!, oldTime)
+        // updatedAt must also bump — CloudKit needs the touch to
+        // propagate the change. Review S1 / SCA-24 follow-up.
+        XCTAssertNotEqual(row.updatedAt, originalUpdatedAt,
+                          "updatedAt must also be bumped for CloudKit propagation")
     }
 
     func test_bumpLastSeenAt_noMatch_returnsFalse() throws {

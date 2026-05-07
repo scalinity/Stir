@@ -96,7 +96,7 @@ final class PantryItemRepository {
                 if let newAmount = ing.amountText?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !newAmount.isEmpty {
                     if let prior = existing.amountText, prior != newAmount {
-                        Logger.coreData.info(
+                        Logger.coreData.debug(
                             "PantryItemRepository upsertFromScan refreshed amountText for slug=\(ing.canonicalSlug ?? "", privacy: .public)",
                         )
                     }

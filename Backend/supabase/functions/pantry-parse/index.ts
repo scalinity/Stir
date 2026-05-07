@@ -40,6 +40,7 @@ import {
 } from '../_shared/errors.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
+import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
 import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
@@ -353,7 +354,14 @@ Deno.serve(async (req) => {
 
   const renderedPrompt = renderPrompt(activePrompt.template_blob, {
     household_profile_json: { hash: body.household_profile_hash ?? null },
-    ingredient_ontology_slugs: [],
+    // SCA-46: real canonical slug vocabulary. The pantry-parse prompt
+    // template instructs the model to draw `canonical_slug` from this
+    // list when confident; before SCA-46 the variable rendered as `[]`
+    // so every emission was either null or hallucinated, breaking
+    // slug coordination with dinner-solve. ~135 starter slugs cover
+    // the dominant US weeknight cooking surface; expand as field
+    // reports surface gaps.
+    ingredient_ontology_slugs: INGREDIENT_ONTOLOGY_SLUGS,
   });
 
   // ---------------------------------------------------------------------
