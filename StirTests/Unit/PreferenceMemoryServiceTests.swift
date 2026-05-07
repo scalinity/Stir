@@ -68,7 +68,7 @@ final class PreferenceMemoryServiceTests: XCTestCase {
 
     func test_buildDigest_returnsNil_whenSessionExistsButHasNoFeedback() throws {
         let plan = try makeRecipePlan(title: "Unrated Dish")
-        _ = try makeCompletedSession(plan: plan, feedbackCreatedAt: nil)
+        _ = try makeCompletedSession(plan: plan)
         XCTAssertNil(makeService().buildDigest(for: household))
     }
 
@@ -319,6 +319,50 @@ final class PreferenceMemoryServiceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(digest.recentMeals.first?.cookedDaysAgo ?? -1, 0)
     }
 
+    // MARK: - Determinism (review fix)
+
+    /// Pre-fix bug: `dominantRawValue` used `Dictionary.max`, which reads
+    /// in undefined Dictionary iteration order — identical CoreData state
+    /// could produce different `dominant_workload` / `dominant_taste`
+    /// across calls, polluting the prompt and breaking eval reproducibility.
+    /// Post-fix: stable sort by `(-count, rawValue)`. We seed exact
+    /// 3-3 ties on workload AND taste, then assert the aggregate is
+    /// byte-identical across multiple builds on the same data.
+    func test_buildDigest_aggregates_areDeterministicAcrossRuns_onTies() throws {
+        // 6 entries — workload 3 .easy / 3 .hard, taste 3 .loved / 3 .bad.
+        // Ascending alphabetical wins → "easy" beats "hard", "bad" beats "loved".
+        let inputs: [(String, OutcomeFeedback.Workload, OutcomeFeedback.Taste)] = [
+            ("Tied 1", .easy, .loved),
+            ("Tied 2", .easy, .loved),
+            ("Tied 3", .easy, .loved),
+            ("Tied 4", .hard, .bad),
+            ("Tied 5", .hard, .bad),
+            ("Tied 6", .hard, .bad),
+        ]
+        for (i, row) in inputs.enumerated() {
+            let plan = try makeRecipePlan(title: row.0)
+            _ = try makeRatedSession(
+                plan: plan, ratedDaysAgo: i + 1, rating: 4,
+                workload: row.1, taste: row.2, spice: .medium,
+                wouldRepeat: true, notes: nil,
+            )
+        }
+        applyTier(.pro)
+
+        // Build digest twice. With the unstable Dictionary.max prior code,
+        // these would occasionally diverge on workload/taste. With the
+        // deterministic sort, they MUST match.
+        let first  = try XCTUnwrap(makeService().buildDigest(for: household))
+        let second = try XCTUnwrap(makeService().buildDigest(for: household))
+        XCTAssertEqual(first.aggregates?.dominantWorkload, second.aggregates?.dominantWorkload)
+        XCTAssertEqual(first.aggregates?.dominantTaste,    second.aggregates?.dominantTaste)
+        XCTAssertEqual(first.aggregates?.dominantSpiceLevel, second.aggregates?.dominantSpiceLevel)
+        // Pin the actual chosen value too — proves the rule is "lowest
+        // rawValue wins on tie", not just "stable across runs."
+        XCTAssertEqual(first.aggregates?.dominantWorkload, "easy")
+        XCTAssertEqual(first.aggregates?.dominantTaste, "bad")
+    }
+
     // MARK: - Helpers
 
     /// Hydrate the test EntitlementService at a specific tier using the
@@ -399,7 +443,7 @@ final class PreferenceMemoryServiceTests: XCTestCase {
 
     /// Insert a session WITHOUT an OutcomeFeedback row.
     @discardableResult
-    private func makeCompletedSession(plan: RecipePlan, feedbackCreatedAt: Date?) throws -> CookingSession {
+    private func makeCompletedSession(plan: RecipePlan) throws -> CookingSession {
         let session = try sessionRepo.createSession(on: household, for: plan, entryPoint: .solve)
         session.sessionStatus = CookingSession.Status.completed.rawValue
         session.endedAt = Self.fixedNow

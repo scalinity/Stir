@@ -930,19 +930,18 @@ async function pickStandardPrompt(
     }
   | null
 > {
+  // Explicit version allowlist mirrors pickLeftoversPrompt's
+  // `.in(['1.1.0'])` pattern. A lexicographic `.gte('version', '2.0.0')`
+  // works fine for now but trips on v10+ (string '10.0.0' < '2.0.0').
+  // When the next canary lands, add its version to this list — promotion
+  // to is_default=TRUE then drops it from this set automatically.
   const { data, error } = await client
     .from('prompt_versions')
     .select('feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled')
     .eq('feature_key', FEATURE_KEY)
     .eq('is_enabled', true)
     .eq('is_default', false)
-    .gte('version', '2.0.0')
-    // Bound the canary slate so a future v2.x.x or v3.0.0 migration can
-    // ship without the picker accidentally promoting it. The handler
-    // controlling its own canary slate via `.in()` would be tighter; the
-    // gte+is_default=false combination matches the existing v1.1.0
-    // leftovers convention closely enough that ops drift between the
-    // two paths stays minimal.
+    .in('version', ['2.0.0'])
     .order('version', { ascending: false })
     .limit(1);
   if (error || !data || data.length === 0) {

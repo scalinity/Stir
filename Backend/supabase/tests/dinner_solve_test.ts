@@ -245,3 +245,50 @@ Deno.test('dinner-solve: VAL-01 when feedback_summary.recent_meals exceeds 10 en
   assertEquals(res.status, 400);
   assertEquals(res.body?.error, 'VAL-01');
 });
+
+Deno.test('dinner-solve: kill switch — preference_memory_enabled=false still parses populated feedback_summary', async () => {
+  // Regression guard for the kill-switch path. The handler reads the
+  // flag and conditionally nullifies feedback_json; a future refactor
+  // could silently drop the gate. We can't observe the rendered prompt
+  // from here, but driving the request past validation + flag-read all
+  // the way to RATE-01 proves the handler reached renderPrompt without
+  // crashing on the populated feedback_summary path while the flag
+  // forced the loop OFF.
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+  const client = serviceClient();
+
+  // Cap quota so the request stops at RATE-01 before Gemini.
+  {
+    const { error } = await client
+      .from('usage_counters')
+      .update({ used_count: 6 })
+      .eq('canonical_user_key', boot.canonical_user_key)
+      .eq('feature_key', 'dinner_solve');
+    if (error) throw error;
+  }
+
+  // Force the kill switch OFF for this assertion. Restore at the end
+  // so other tests / runs see the migration default.
+  const flipFlag = async (value: boolean) => {
+    const { error } = await client
+      .from('feature_flags')
+      .update({ payload_json: { value } })
+      .eq('key', 'preference_memory_enabled');
+    if (error) throw error;
+  };
+  await flipFlag(false);
+  try {
+    const res = await callDinnerSolve(
+      { ...validBody(), feedback_summary: validFeedbackSummary() },
+      boot.session_jwt,
+    );
+    assertEquals(
+      res.status, 429,
+      'handler must reach RATE-01 even when kill switch is off and feedback is populated',
+    );
+    assertEquals(res.body?.error, 'RATE-01');
+  } finally {
+    await flipFlag(true);
+  }
+});

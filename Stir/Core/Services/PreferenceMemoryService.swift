@@ -134,11 +134,22 @@ final class PreferenceMemoryService {
                 wouldRepeat: feedback.wouldRepeat,
                 notes: feedback.notes,
                 cookedDaysAgo: daysAgo,
+                createdAt: createdAt,
             )
         }
 
         guard !entries.isEmpty else { return nil }
-        let sorted = entries.sorted { $0.cookedDaysAgo < $1.cookedDaysAgo }
+        // Sort by cookedDaysAgo (Int day buckets) ascending, then by
+        // createdAt DESC as a stable tie-break. Two meals cooked the
+        // same calendar day surface in deterministic order across
+        // identical inputs — Swift Array.sorted isn't stable, so an
+        // unbroken tie could swap entries between solves.
+        let sorted = entries.sorted { lhs, rhs in
+            if lhs.cookedDaysAgo != rhs.cookedDaysAgo {
+                return lhs.cookedDaysAgo < rhs.cookedDaysAgo
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
 
         let recentMeals = Array(sorted.prefix(Self.recentMealsCap))
             .map { entry in
@@ -188,10 +199,12 @@ final class PreferenceMemoryService {
     }
 
     /// Most-frequent raw value for an enum-typed field. Ties broken by
-    /// the order returned by Dictionary iteration — deterministic-enough
-    /// for prompt input (the model treats this as a soft preference,
-    /// not a categorical assertion). Empty input returns "" which the
-    /// backend Zod schema rejects, so callers must guard count > 0.
+    /// rawValue lexicographic order — Swift's Dictionary iteration is
+    /// undefined, so a naive `counts.max` would produce non-deterministic
+    /// digests on ties (identical CoreData state → different prompts).
+    /// Sorting by `(-count, rawValue)` makes ties reproducible without
+    /// changing the dominant-value semantics. Empty input returns "" which
+    /// the backend Zod schema rejects, so callers must guard count > 0.
     private static func dominantRawValue<F: RawRepresentable>(
         of keyPath: KeyPath<Entry, F>,
         in entries: [Entry],
@@ -200,7 +213,14 @@ final class PreferenceMemoryService {
         for e in entries {
             counts[e[keyPath: keyPath].rawValue, default: 0] += 1
         }
-        return counts.max(by: { $0.value < $1.value })?.key ?? ""
+        // Stable: sort highest count first, then alphabetical on the
+        // raw enum value. Ties resolve to the same rawValue every run.
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .first?.key ?? ""
     }
 
     private static func roundTo2(_ value: Double) -> Double {
@@ -308,5 +328,9 @@ final class PreferenceMemoryService {
         let wouldRepeat: Bool
         let notes: String?
         let cookedDaysAgo: Int
+        /// Stable secondary sort key — `cookedDaysAgo` rounds to whole
+        /// days, so two meals cooked the same calendar day need
+        /// `createdAt` precision to keep digest order reproducible.
+        let createdAt: Date
     }
 }
