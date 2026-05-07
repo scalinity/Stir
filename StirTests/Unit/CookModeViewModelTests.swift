@@ -728,6 +728,37 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertEqual(vm.lastModelTranscript, "About two and a half left.")
     }
 
+    /// SCA-52 S3: locks the doc-comment's 4th branch — when the caller
+    /// violates the "non-empty text" contract on `onTurnTranscriptFinalized`
+    /// and sends both halves empty, the shipped behavior is:
+    ///   - lastUserTranscript: preserved (guarded by `!userText.isEmpty`)
+    ///   - lastModelTranscript: blanked (the `isEmpty ? nil : modelText`
+    ///     ternary fires unconditionally)
+    /// The test exists so a future refactor toward an asymmetric
+    /// "blank-only-when-userText-changes" rule (a reasonable variant)
+    /// gets caught — that variant would PRESERVE lastModelTranscript on
+    /// both-empty input, breaking this assertion.
+    func test_recordTurnTranscript_bothEmptyTurn_blanksModelPreservesUser() throws {
+        let vm = makeVM(session: try freshSession())
+
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(turnIndex: 1, userText: "How long?", modelText: "Four minutes."),
+        )
+        XCTAssertEqual(vm.lastUserTranscript, "How long?")
+        XCTAssertEqual(vm.lastModelTranscript, "Four minutes.")
+
+        // Contract-violating turn: the caller normally drops these,
+        // but the VM must handle them deterministically anyway.
+        vm.recordTurnTranscript(
+            LiveTurnTranscript(turnIndex: 2, userText: "", modelText: ""),
+        )
+
+        XCTAssertEqual(vm.lastUserTranscript, "How long?",
+            "userText must be preserved across a both-empty turn (guarded write)")
+        XCTAssertNil(vm.lastModelTranscript,
+            "modelText must be blanked on a both-empty turn (unconditional ternary)")
+    }
+
     func test_recordTurnTranscript_attachVoiceDriverNil_clearsBothTranscripts() throws {
         let vm = makeVM(session: try freshSession())
 

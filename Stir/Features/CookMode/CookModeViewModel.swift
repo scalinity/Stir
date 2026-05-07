@@ -1090,6 +1090,9 @@ final class CookModeViewModel {
             Logger.ui.error("markCompleted failed: \(error.localizedDescription, privacy: .public)")
         }
         finishPresentationRequested = true
+        // Task captures self for the duration of the tail. StepCardView
+        // discards the returned Task; that's fine — the closure keeps
+        // self alive until the tail returns, then releases it. No leak.
         return Task { await performFinishAsyncTail() }
     }
 
@@ -1544,7 +1547,7 @@ final class CookModeViewModel {
     /// call-only turns produce no model text; very short utterances
     /// may produce no user transcription).
     ///
-    /// SCA-49 — asymmetric blank rule, three-branch contract:
+    /// SCA-49 — asymmetric blank rule, four-branch contract:
     ///
     ///   1. Both halves non-empty (normal turn) → both populate.
     ///   2. Only userText non-empty (tool-call-only turn) → userText
@@ -1558,6 +1561,12 @@ final class CookModeViewModel {
     ///   3. Only modelText non-empty (the post-tool reply, or rare
     ///      proactive narration) → modelText populates without
     ///      disturbing prior userText.
+    ///   4. Both halves empty (contract violation by the caller —
+    ///      `onTurnTranscriptFinalized` is documented to fire only on
+    ///      `turnComplete` events that produced any non-empty text)
+    ///      → userText preserved (guarded), modelText blanked. Defensive
+    ///      and rare; consequence is a brief STIR blank on the card,
+    ///      which is the same failure mode as branch 2.
     func recordTurnTranscript(_ snapshot: LiveTurnTranscript) {
         if !snapshot.userText.isEmpty {
             lastUserTranscript = snapshot.userText
