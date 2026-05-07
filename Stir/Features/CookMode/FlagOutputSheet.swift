@@ -85,12 +85,22 @@ struct FlagOutputSheet: View {
                     }
                 }
             }
+            // Keep `navigationTitle` for the back-chevron label +
+            // VoiceOver; the visible title comes from the .principal
+            // toolbar item below in the Stir display serif. Default
+            // chrome would render in SF Pro Bold and break the
+            // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Report issue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Report issue")
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.textPrimary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Submit") {
@@ -99,6 +109,8 @@ struct FlagOutputSheet: View {
                     .disabled(!canSubmit)
                 }
             }
+            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 

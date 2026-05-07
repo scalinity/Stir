@@ -41,6 +41,11 @@ struct ImportEntryView: View {
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
             .safeAreaInset(edge: .bottom) { footer }
+            // Keep `navigationTitle` for the back-chevron label +
+            // VoiceOver; the visible title comes from the .principal
+            // toolbar item below in the Stir display serif. Default
+            // chrome would render in SF Pro Bold and break the
+            // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Import recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -50,7 +55,14 @@ struct ImportEntryView: View {
                         .accessibilityLabel("Close")
                         .accessibilityHint("Cancels the import and closes this screen")
                 }
+                ToolbarItem(placement: .principal) {
+                    Text("Import recipe")
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                }
             }
+            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .onChange(of: pickerItem) { _, newItem in
                 if let newItem { Task { await handlePicked(newItem) } }
             }
@@ -276,6 +288,11 @@ private struct PasteSheet: View {
                 .padding(20)
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
+            // Keep `navigationTitle` for the back-chevron label +
+            // VoiceOver; the visible title comes from the .principal
+            // toolbar item below in the Stir display serif. Default
+            // chrome would render in SF Pro Bold and break the
+            // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Paste recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -283,12 +300,19 @@ private struct PasteSheet: View {
                     Button("Cancel") { dismiss() }
                         .foregroundStyle(Color.Stir.ink700)
                 }
+                ToolbarItem(placement: .principal) {
+                    Text("Paste recipe")
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Import", action: onSubmit)
                         .foregroundStyle(text.isEmpty ? Color.Stir.ink300 : Color.Stir.ember600)
                         .disabled(text.isEmpty)
                 }
             }
+            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 }

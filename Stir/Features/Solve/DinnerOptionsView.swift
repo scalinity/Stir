@@ -35,14 +35,26 @@ struct DinnerOptionsView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
+        // Keep `navigationTitle` for the back-chevron label +
+        // VoiceOver; the visible title comes from the .principal
+        // toolbar item below in the Stir display serif. Default
+        // chrome would render in SF Pro Bold and break the
+        // cross-screen rhythm (matches Settings / Saved / Pantry).
         .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Dinner options")
+                    .stirFont(.displaySm)
+                    .foregroundStyle(Color.Stir.textPrimary)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Tune", action: onTune)
                     .tint(Color.Stir.ember600)
             }
         }
+        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()

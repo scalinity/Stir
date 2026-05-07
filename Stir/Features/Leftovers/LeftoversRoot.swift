@@ -35,6 +35,11 @@ struct LeftoversRoot: View {
                     onSelect: onSelect,
                     onDismiss: onDismiss,
                 )
+                // Keep `navigationTitle` for the back-chevron label +
+                // VoiceOver; the visible title comes from the .principal
+                // toolbar item below in the Stir display serif. Default
+                // chrome would render in SF Pro Bold and break the
+                // cross-screen rhythm (matches Settings / Saved / Pantry).
                 .navigationTitle("Use what's left")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -42,7 +47,14 @@ struct LeftoversRoot: View {
                         Button("Close", action: onDismiss)
                             .foregroundStyle(Color.Stir.ink700)
                     }
+                    ToolbarItem(placement: .principal) {
+                        Text("Use what's left")
+                            .stirFont(.displaySm)
+                            .foregroundStyle(Color.Stir.textPrimary)
+                    }
                 }
+                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
             }
         }
     }

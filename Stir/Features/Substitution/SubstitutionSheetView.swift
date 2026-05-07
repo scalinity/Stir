@@ -67,13 +67,25 @@ struct SubstitutionSheetView: View {
     var body: some View {
         NavigationStack {
             content(vm: viewModel)
+                // Keep `navigationTitle` for the back-chevron label +
+                // VoiceOver; the visible title comes from the .principal
+                // toolbar item below in the Stir display serif. Default
+                // chrome would render in SF Pro Bold and break the
+                // cross-screen rhythm (matches Settings / Saved / Pantry).
                 .navigationTitle("Substitute")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close", action: onDismiss)
                     }
+                    ToolbarItem(placement: .principal) {
+                        Text("Substitute")
+                            .stirFont(.displaySm)
+                            .foregroundStyle(Color.Stir.textPrimary)
+                    }
                 }
+                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 

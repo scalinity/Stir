@@ -43,13 +43,25 @@ struct ConstraintsSheet: View {
                 .padding(.bottom, CGFloat.Stir.space5)
             }
             .background(Color.Stir.paper50)
+            // Keep `navigationTitle` for the back-chevron label +
+            // VoiceOver; the visible title comes from the .principal
+            // toolbar item below in the Stir display serif. Default
+            // chrome would render in SF Pro Bold and break the
+            // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Tonight's constraints")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .principal) {
+                    Text("Tonight's constraints")
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                }
             }
+            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 

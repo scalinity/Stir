@@ -59,6 +59,11 @@ struct GroceryListView: View {
                 }
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
+            // Keep `navigationTitle` for the back-chevron label +
+            // VoiceOver; the visible title comes from the .principal
+            // toolbar item below in the Stir display serif. Default
+            // chrome would render in SF Pro Bold and break the
+            // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Grocery")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -68,7 +73,14 @@ struct GroceryListView: View {
                         .accessibilityLabel("Close")
                         .accessibilityHint("Dismisses the grocery list")
                 }
+                ToolbarItem(placement: .principal) {
+                    Text("Grocery")
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                }
             }
+            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .task {
                 if viewModel.stage == .generating {
                     await viewModel.generate()
