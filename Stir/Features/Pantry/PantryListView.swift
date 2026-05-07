@@ -327,9 +327,6 @@ struct PantryListView: View {
                     showingDeleteAllConfirmation = false
                     vm.deleteAllItems()
                 },
-                onCancel: {
-                    showingDeleteAllConfirmation = false
-                },
             )
             .presentationDetents([.height(360)])
             .presentationCornerRadius(CGFloat.Stir.radiusLg)
@@ -410,59 +407,90 @@ struct PantryListView: View {
 private struct PantryDeleteAllConfirmationSheet: View {
     let itemCount: Int
     let onConfirm: () -> Void
-    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                Text("Delete all \(itemCount) items?")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.ink900)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
-                    .stirFont(.bodyMd)
-                    .foregroundStyle(Color.Stir.ink500)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: CGFloat.Stir.space3)
-
-            VStack(spacing: CGFloat.Stir.space3) {
-                // Destructive CTA. Mirrors PrimaryButton's geometry
-                // (full-width, 52pt tall, radiusMd) but swaps the
-                // ember600 fill for crimson600 — the standing
-                // "destructive primary action" treatment the design
-                // system already exposes via Color.Stir.crimson600
-                // (== .danger). Built inline rather than parameterizing
-                // PrimaryButton so the change stays scoped to SCA-50.
-                Button(action: onConfirm) {
-                    Text("Delete all items")
-                        .stirFont(.labelLg)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.Stir.paper50)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .frame(height: 52)
-                        .background(
-                            RoundedRectangle(
-                                cornerRadius: CGFloat.Stir.radiusMd,
-                                style: .continuous,
-                            )
-                            .fill(Color.Stir.crimson600),
-                        )
-                        .contentShape(Rectangle())
+        // ScrollView so Dynamic-Type at AX text sizes scrolls within the
+        // locked `.height(360)` detent instead of clipping the destructive
+        // CTA. At default text sizes the content fits and the ScrollView
+        // is invisible — at AX3+ users can scroll the title/body to
+        // surface the buttons. Cheap insurance for the explicit detent.
+        ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                    Text(titleText)
+                        .stirFont(.displaySm)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
+                        .stirFont(.bodyMd)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Delete all \(itemCount) items")
-                .accessibilityHint("Removes every pantry item. This cannot be undone in the app.")
 
-                SecondaryButton(title: "Cancel", action: onCancel)
+                Spacer(minLength: CGFloat.Stir.space3)
+
+                VStack(spacing: CGFloat.Stir.space3) {
+                    // Destructive CTA. Mirrors PrimaryButton's geometry
+                    // (full-width, 52pt tall, radiusMd) but swaps the
+                    // ember600 fill for crimson600 — the standing
+                    // "destructive primary action" treatment the design
+                    // system already exposes via Color.Stir.crimson600
+                    // (== .danger). Built inline rather than parameterizing
+                    // PrimaryButton so the change stays scoped to SCA-50.
+                    Button(action: onConfirm) {
+                        Text("Delete all items")
+                            .stirFont(.labelLg)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.Stir.paper50)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(height: 52)
+                            .background(
+                                RoundedRectangle(
+                                    cornerRadius: CGFloat.Stir.radiusMd,
+                                    style: .continuous,
+                                )
+                                .fill(Color.Stir.crimson600),
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(accessibilityText)
+                    .accessibilityHint("Removes every pantry item. This cannot be undone in the app.")
+
+                    // Cancel dismisses via @Environment(\.dismiss) so the
+                    // explicit-button path and the swipe-down/backdrop-tap
+                    // gesture-dismiss path resolve through the same hook —
+                    // a future telemetry addition (e.g.
+                    // pantry_delete_all_cancelled) only needs one
+                    // subscription point. onConfirm stays as a parent
+                    // closure because the destructive intent must NOT
+                    // fire on gesture-dismiss.
+                    SecondaryButton(title: "Cancel") {
+                        dismiss()
+                    }
+                }
             }
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.top, CGFloat.Stir.space5)
+            .padding(.bottom, CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.horizontal, CGFloat.Stir.screenMargin)
-        .padding(.top, CGFloat.Stir.space5)
-        .padding(.bottom, CGFloat.Stir.space4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .scrollContentBackground(.hidden)
         .background(Color.Stir.paper50)
+    }
+
+    /// Header copy with proper grammar at the singular case. Stir's
+    /// English-only launch (spec §11) doesn't excuse "Delete all 1
+    /// items?" — branching on itemCount is one ternary and removes
+    /// the user-visible grammar slip.
+    private var titleText: String {
+        itemCount == 1 ? "Delete this item?" : "Delete all \(itemCount) items?"
+    }
+
+    private var accessibilityText: String {
+        itemCount == 1 ? "Delete this pantry item" : "Delete all \(itemCount) pantry items"
     }
 }
 
