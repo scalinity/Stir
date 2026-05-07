@@ -229,6 +229,16 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case widgetAdded = "widget_added"
     case shortcutRun = "shortcut_run"
     case groceryListExported = "grocery_list_exported"
+    /// SCA-55 — Leftovers handoff. Fires when a Premium+ user picks a
+    /// dish from `LeftoversRoot` and it's persisted as a new RecipePlan
+    /// via `SolveRepository.createLeftoversSolveWithDish`. Properties:
+    /// `rank` (1..3), `leftovers_items_count`, `prompt_version`,
+    /// `source_recipe_plan_id` (the meal that produced the leftovers),
+    /// `new_recipe_plan_id` (the persisted leftover plan). Pairs with
+    /// the `meal_rated.leftovers_handoff_*` properties for the full
+    /// Premium-side conversion funnel; Free-side conversion lives on
+    /// `paywall_viewed.trigger=leftovers_gate` → `purchase_completed`.
+    case leftoversDishSelected = "leftovers_dish_selected"
     // SCA-5 — in-app feature tutorials. Fired once per tutorial-key
     // lifecycle: started on first appear, then exactly one of
     // {completed, skipped} on resolution. `tutorial_step_advanced`

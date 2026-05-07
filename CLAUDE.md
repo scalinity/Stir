@@ -677,9 +677,28 @@ voice_affordance_tapped, cook_turn_submitted, cook_turn_resolved,
 voice_session_token_snapshot, voice_session_refreshed,
 voice_turn_stuck_watchdog_fired,
 substitution_requested, substitution_accepted,
-cook_session_completed, meal_rated, meal_rating_skipped,
+cook_session_completed,
+# SCA-55: meal_rated gains `leftovers_handoff_offered` (bool, true iff
+# leftover_count>0 AND the OutcomeFeedback gate routed the user into
+# either Leftovers or the leftovers-gate paywall), `leftovers_handoff_taken`
+# (bool, true iff Premium+ went to LeftoversRoot — Free→paywall conversion
+# is measured via paywall_viewed.trigger=leftovers_gate, NOT this), and
+# `leftovers_eligible_free` (bool, true iff leftover_count>0 AND tier=free
+# — sizes the conversion opportunity). meal_rating_skipped does NOT carry
+# these — skip always routes to .dismiss regardless of any unsaved
+# leftoverCount stepper value. See spec §15 meal_rated.leftovers_*
+# clarification.
+meal_rated, meal_rating_skipped,
 pantry_auto_consume_resolved,
 grocery_list_exported, favorite_saved,
+# SCA-55: leftovers_dish_selected fires when a Premium+ user picks a
+# dish from LeftoversRoot and SolveRepository.createLeftoversSolveWithDish
+# persists it as a new RecipePlan (which becomes latestTonightPick per
+# the LeftoversSolveView "adds it to tomorrow's Tonight" promise).
+# Properties: rank (1..3), leftovers_items_count, prompt_version,
+# source_recipe_plan_id, new_recipe_plan_id. Pairs with meal_rated's
+# leftovers_handoff_* for the full Premium-side conversion funnel.
+leftovers_dish_selected,
 recipe_import_started, recipe_import_completed,
 paywall_viewed, trial_started, trial_reminder_sent,
 purchase_started, purchase_completed, restore_purchases_tapped,

@@ -173,6 +173,103 @@ final class SolveRepository {
         return SolveOutcome(solveRequestId: solveID, suggestedDishIds: dishIds)
     }
 
+    /// Persist a leftovers-mode solve outcome: ONE picked dish, no pantry
+    /// snapshot, no constraints, linked back to the meal that produced the
+    /// leftovers via `MealSolveRequest.sourceRecipePlanId`. Returns the
+    /// persisted `RecipePlan` so the caller can route it (typically letting
+    /// `latestTonightPick` surface it as the next Tonight hero card per the
+    /// LeftoversSolveView helper text "adds it to tomorrow's Tonight").
+    ///
+    /// Distinct from `createSolveWithDishes` because the leftovers shape
+    /// (single dish, sourced from a prior recipe, no pantry) doesn't fit
+    /// cleanly as overloaded nullable parameters — see SCA-55 spec D4.
+    @discardableResult
+    func createLeftoversSolveWithDish(
+        on household: HouseholdProfile,
+        from sourceRecipePlan: RecipePlan,
+        dish: DishCard,
+        aiRequestId: String?,
+    ) throws -> RecipePlan {
+        let context = controller.viewContext
+        let now = Date()
+
+        let solve = MealSolveRequest(context: context)
+        solve.id = UUID()
+        solve.household = household
+        solve.requestedAt = now
+        solve.completedAt = now
+        solve.typedStatus = .completed
+        solve.aiRequestId = aiRequestId
+        solve.sourceRecipePlanId = sourceRecipePlan.id
+        // Intentionally NOT set: typedConstraints, typedPantrySnapshot —
+        // leftovers solves skip both per LeftoversSessionViewModel:
+        // pantry-skip is line 187 (`ingredients: []`); constraints aren't
+        // collected on the leftovers prompt.
+
+        let recipe = RecipePlan(context: context)
+        recipe.id = UUID()
+        recipe.household = household
+        recipe.title = dish.title
+        recipe.summary = dish.whyItFits
+        recipe.servings = Int16(clamping: dish.recipePlan.servings)
+        recipe.difficulty = Int16(clamping: dish.recipePlan.difficulty)
+        recipe.estimatedMinutes = Int16(clamping: dish.totalTimeMinutes)
+        recipe.cuisine = dish.recipePlan.cuisine
+        recipe.aiVersion = "leftovers"  // backend prompt-version isn't surfaced on the leftovers DishCard rehydration; tag explicitly
+        recipe.typedOrigin = .ai
+        recipe.isFavorite = false
+        recipe.isSaved = false
+        recipe.createdAt = now
+        recipe.updatedAt = now
+
+        for (idx, ing) in dish.recipePlan.ingredients.enumerated() {
+            let row = RecipeIngredient(context: context)
+            row.id = UUID()
+            row.recipePlan = recipe
+            row.displayName = ing.displayName
+            row.canonicalIngredientSlug = ing.canonicalSlug
+            row.amountText = ing.amountText
+            row.isOptional = ing.isOptional ?? false
+            row.sortOrder = Int16(clamping: idx)
+            row.typedSource = .ai
+        }
+
+        for step in dish.recipePlan.steps {
+            let row = RecipeStep(context: context)
+            row.id = UUID()
+            row.recipePlan = recipe
+            row.stepNumber = Int16(clamping: step.stepNumber)
+            row.sortOrder = Int16(clamping: step.stepNumber)
+            row.instructionText = step.instructionText
+            row.timerSeconds = Int32(clamping: step.timerSeconds ?? 0)
+            row.cautionTagsArray = step.cautionTags ?? []
+        }
+
+        let suggested = SuggestedDish(context: context)
+        suggested.id = UUID()
+        suggested.solveRequest = solve
+        suggested.recipePlan = recipe
+        suggested.rank = Int16(clamping: dish.rank)
+        suggested.title = dish.title
+        suggested.summary = dish.whyItFits
+        suggested.estimatedMinutes = Int16(clamping: dish.totalTimeMinutes)
+        suggested.typedFitLabelPrimary = SuggestedDish.FitLabel(rawValue: dish.fitLabelPrimary) ?? .bestFit
+        suggested.typedFitLabelSecondary = dish.fitLabelSecondary.flatMap(SuggestedDish.FitLabel.init(rawValue:))
+        suggested.missingIngredientCount = Int16(clamping: dish.missingIngredientCount)
+        suggested.hardConstraintPass = dish.hardConstraintPass
+        suggested.reasoningSummary = dish.reasoningSummary
+        suggested.confidence = dish.hardConstraintPass ? 0.9 : 0.5
+        // Mark selected on the solve immediately — the user has already
+        // committed by tapping the leftovers card; there's no separate
+        // selection step downstream the way the dinner-solve flow has.
+        suggested.selectedAt = now
+        solve.selectedSuggestedDishId = suggested.id
+
+        try controller.save()
+        Logger.coreData.info("SolveRepository persisted 1-dish leftovers solve")
+        return recipe
+    }
+
     /// Mark a SuggestedDish as selected by the user. Used by DishPreview's
     /// Start Cooking CTA (step 4 replaces the disabled stub).
     func markSelected(

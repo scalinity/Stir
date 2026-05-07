@@ -100,6 +100,7 @@
         <attribute name="requestedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="selectedSuggestedDishId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="sourceAssetIdsJSON" optional="YES" attributeType="Binary"/>
+        <attribute name="sourceRecipePlanId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="status" optional="YES" attributeType="String" defaultValueString="pending"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="mealSolveRequests" inverseEntity="HouseholdProfile"/>
         <relationship name="suggestedDishes" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SuggestedDish" inverseName="solveRequest" inverseEntity="SuggestedDish"/>

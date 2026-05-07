@@ -24,7 +24,7 @@ import OSLog
 
 @Observable
 @MainActor
-final class LeftoversSessionViewModel {
+final class LeftoversSessionViewModel: Identifiable {
     /// Two-stage machine: show the prompt to collect items, then show
     /// the solve result. A fresh instance per leftovers invocation so
     /// state doesn't leak across sessions.
@@ -54,6 +54,11 @@ final class LeftoversSessionViewModel {
     let recipePlan: RecipePlan
     let household: HouseholdProfile
     let solveRequestID: UUID = UUID()
+    /// Identifiable conformance — backed by `solveRequestID` so SwiftUI's
+    /// `.fullScreenCover(item:)` keys cover presentations off the same
+    /// stable handle the backend telemetry uses. Two consecutive finishes
+    /// produce distinct VMs and distinct presentations.
+    nonisolated var id: UUID { solveRequestID }
 
     private let aiDispatch: AIDispatch
     private let analytics: PostHogClient

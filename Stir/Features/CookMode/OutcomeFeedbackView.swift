@@ -25,8 +25,21 @@ import OSLog
 import SwiftUI
 
 struct OutcomeFeedbackView: View {
+    /// What the host should do next after the sheet completes. SCA-55:
+    /// the host (CookModeRoot) routes Premium+ users with logged
+    /// leftovers into LeftoversRoot, Free users to the leftovers-gate
+    /// paywall, and everyone else (including skip) straight to dismiss.
+    /// Living on the View itself rather than in a feature/coordinator
+    /// type keeps the call surface narrow — only the host that already
+    /// embeds OutcomeFeedbackView needs to switch on it.
+    enum PostSubmitIntent: Equatable {
+        case dismiss
+        case openLeftovers
+        case openPaywall(PaywallTrigger)
+    }
+
     let session: CookingSession
-    let onSubmitted: () -> Void
+    let onSubmitted: (PostSubmitIntent) -> Void
 
     @State private var rating: Int = 0
     @State private var workload: OutcomeFeedback.Workload = .medium
@@ -40,17 +53,27 @@ struct OutcomeFeedbackView: View {
 
     private let repository: OutcomeFeedbackRepository
     private let analytics: PostHogClient
+    /// Injected so `submit()` can decide between `.openLeftovers`,
+    /// `.openPaywall(.leftoversGate)`, and `.dismiss` based on the
+    /// effective tier. Optional with a server-only fallback so unit
+    /// tests can omit it without losing coverage of the leftoverCount=0
+    /// dismiss path. When nil, leftoverCount>0 trips `.dismiss` rather
+    /// than `.openLeftovers` — server-side ENT-LEFTOVERS-01 remains the
+    /// authoritative gate.
+    private let entitlements: EntitlementService?
 
     init(
         session: CookingSession,
-        onSubmitted: @escaping () -> Void,
+        onSubmitted: @escaping (PostSubmitIntent) -> Void,
         repository: OutcomeFeedbackRepository = OutcomeFeedbackRepository(),
         analytics: PostHogClient = .shared,
+        entitlements: EntitlementService? = nil,
     ) {
         self.session = session
         self.onSubmitted = onSubmitted
         self.repository = repository
         self.analytics = analytics
+        self.entitlements = entitlements
     }
 
     var body: some View {
@@ -355,6 +378,7 @@ struct OutcomeFeedbackView: View {
                 notes: notes.isEmpty ? nil : notes,
                 leftoverCount: leftoverCount,
             ))
+            let intent = postSubmitIntent()
             analytics.capture(.mealRated, properties: [
                 "rating": rating,
                 "has_notes": !notes.isEmpty,
@@ -364,9 +388,20 @@ struct OutcomeFeedbackView: View {
                 "spice_level": spiceLevel.rawValue,
                 "would_repeat": wouldRepeat,
                 "leftover_count": leftoverCount,
+                // SCA-55: leftover-handoff funnel properties. _offered is
+                // true when the user logged leftovers AND the gate routed
+                // them either into Leftovers (Premium+) or the paywall
+                // (Free). _taken is reserved for the Premium+ branch — the
+                // Free→paywall path emits its own `paywall_viewed.trigger=
+                // leftovers_gate` event. _eligible_free sizes the
+                // conversion opportunity for product analytics.
+                "leftovers_handoff_offered": intent != .dismiss,
+                "leftovers_handoff_taken": intent == .openLeftovers,
+                "leftovers_eligible_free": leftoverCount > 0
+                    && (entitlements?.tier == .free),
             ])
             submitting = false
-            onSubmitted()
+            onSubmitted(intent)
         } catch {
             Logger.coreData.error("outcome feedback save failed: \(error.localizedDescription, privacy: .public)")
             // Match HouseholdPreferencesView's pattern — repository
@@ -391,11 +426,43 @@ struct OutcomeFeedbackView: View {
     /// north-star funnel can distinguish "user opted out of rating" from
     /// "user never reached the sheet." User can still see the meal in
     /// Saved.
+    ///
+    /// SCA-55: skip ALWAYS routes to `.dismiss` regardless of any
+    /// (un-saved) leftoverCount stepper value — the user opted out of
+    /// rating, so we shouldn't pivot them into a Premium-feature pitch
+    /// they didn't ask for.
     private func skipAndDismiss() {
         analytics.capture(.mealRatingSkipped, properties: [
             "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "",
         ])
-        onSubmitted()
+        onSubmitted(.dismiss)
     }
+
+    /// Decide which intent to bubble up after a successful submit. Free
+    /// + leftoverCount>0 → paywall (per SCA-55 D2 — don't defer);
+    /// Premium+ + leftoverCount>0 → leftovers; everything else → dismiss.
+    /// Pulled out so unit tests can assert the intent matrix without
+    /// driving the full submit path through Core Data. `internal` (not
+    /// `private`) because `OutcomeFeedbackViewIntentTests` exercises it
+    /// directly via @testable import — driving `submit()` end-to-end
+    /// would require a full Core Data fixture per case for a 3-line
+    /// decision function.
+    @MainActor
+    func postSubmitIntent(forLeftoverCount overrideCount: Int? = nil) -> PostSubmitIntent {
+        let count = overrideCount ?? leftoverCount
+        guard count > 0 else { return .dismiss }
+        guard let entitlements else {
+            return .dismiss
+        }
+        switch entitlements.canAccess(.leftoversMode) {
+        case .allowed:
+            return .openLeftovers
+        case .blockedByTier, .blockedByBilling:
+            return .openPaywall(.leftoversGate)
+        case .blockedByQuota:
+            return .dismiss
+        }
+    }
+
 }
 

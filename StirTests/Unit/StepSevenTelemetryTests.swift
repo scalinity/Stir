@@ -24,6 +24,7 @@ final class StepSevenTelemetryTests: XCTestCase {
         XCTAssertTrue(names.contains("shortcut_run"))
         XCTAssertTrue(names.contains("grocery_list_exported"))
         XCTAssertTrue(names.contains("reactivation_notification_opened"))
+        XCTAssertTrue(names.contains("leftovers_dish_selected"))
     }
 
     func test_widgetTapped_isNOTAnEvent_perSpec() {

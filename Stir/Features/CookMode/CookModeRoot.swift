@@ -50,6 +50,21 @@ struct CookModeRoot: View {
     @State private var driverTeardown: (@MainActor () -> Void)?
     @State private var initError: InitErrorMessage?
 
+    /// SCA-55: presented after OutcomeFeedback resolves with
+    /// `PostSubmitIntent.openLeftovers`. Lifetime is one finish—> one
+    /// LeftoversSessionViewModel; nilled on dismiss OR after the user
+    /// picks a dish (handoff persists then closes the cover). Identifiable
+    /// via the VM's `solveRequestID` UUID — fresh per finish, so two
+    /// consecutive cooks in the same Cook Mode session each get their
+    /// own cover presentation rather than animating a no-op swap.
+    @State private var leftoversSession: LeftoversSessionViewModel?
+    /// SCA-55 sticky-intent flag for the Free → paywall → Leftovers path.
+    /// Set when OutcomeFeedback emits `.openPaywall(.leftoversGate)`;
+    /// observed alongside `entitlements.tier` so a successful purchase
+    /// auto-opens Leftovers. Cleared on tier flip + open, on the 5s
+    /// safety timeout, or on the dismiss-without-purchase path.
+    @State private var pendingLeftoversIntent: Bool = false
+
     init(
         recipePlan: RecipePlan,
         household: HouseholdProfile,
@@ -89,11 +104,46 @@ struct CookModeRoot: View {
                     )) {
                         OutcomeFeedbackView(
                             session: viewModel.session,
-                            onSubmitted: {
-                                viewModel.finishPresentationRequested = false
+                            onSubmitted: { intent in
+                                handlePostSubmit(intent: intent)
+                            },
+                            entitlements: entitlements,
+                        )
+                    }
+                    // SCA-55 — Leftovers cover. Presented when OutcomeFeedback
+                    // bubbles `.openLeftovers` (Premium+ + leftoverCount>0)
+                    // OR when a successful Free→paywall purchase trips the
+                    // sticky-intent path. UUID-keyed via the VM's
+                    // `solveRequestID` so two consecutive finishes get
+                    // distinct presentations.
+                    .fullScreenCover(item: $leftoversSession) { vm in
+                        LeftoversRoot(
+                            viewModel: vm,
+                            onSelect: { dish in
+                                handleLeftoverDishSelected(dish, vm: vm)
+                            },
+                            onDismiss: {
+                                leftoversSession = nil
                                 onDismiss()
                             },
                         )
+                    }
+                    // Sticky-intent observation for the Free→paywall
+                    // success path (SCA-55 D5/D6). When the user purchases
+                    // through the leftovers-gate paywall, RootCoordinator's
+                    // dismissPaywall(wasSuccessful:) fires
+                    // refreshEntitlementsOnForeground() — once the refresh
+                    // lands and tier flips, present LeftoversRoot. The 5s
+                    // timeout (set when pendingLeftoversIntent goes true)
+                    // bails out gracefully if the webhook is delayed so
+                    // the user isn't left on a stale Cook Mode screen.
+                    .onChange(of: entitlements.tier) { _, _ in
+                        guard pendingLeftoversIntent,
+                              entitlements.canAccess(.leftoversMode) == .allowed,
+                              leftoversSession == nil
+                        else { return }
+                        pendingLeftoversIntent = false
+                        presentLeftovers()
                     }
                     // Transient voice-error toast (empty transcript,
                     // mic denied, backend error). Auto-clears on tap.
@@ -304,6 +354,129 @@ struct CookModeRoot: View {
         case .imported: return .imported
         case .leftovers: return .leftovers
         }
+    }
+
+    // MARK: - SCA-55 Leftovers handoff
+
+    /// Route OutcomeFeedback's PostSubmitIntent. The OutcomeFeedback cover
+    /// is dismissed in every branch so iOS isn't asked to stack two
+    /// fullScreenCovers (LeftoversRoot or PaywallView would otherwise be
+    /// queued silently behind the still-presenting OutcomeFeedback).
+    @MainActor
+    private func handlePostSubmit(intent: OutcomeFeedbackView.PostSubmitIntent) {
+        guard let viewModel else {
+            // Defensive: no VM means submit() shouldn't have run, but if
+            // it did, fall back to the dismiss path so the cover doesn't
+            // strand the user.
+            onDismiss()
+            return
+        }
+        viewModel.finishPresentationRequested = false
+
+        switch intent {
+        case .dismiss:
+            onDismiss()
+
+        case .openLeftovers:
+            // Cover-dismiss animation needs to finish before the next
+            // fullScreenCover binds, otherwise SwiftUI swallows the
+            // second presentation. 50ms picks up after the standard
+            // 0.35s spring is over (the cover's `isPresented` flips
+            // synchronously; the dismiss animation runs separately).
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                presentLeftovers()
+            }
+
+        case .openPaywall(let trigger):
+            pendingLeftoversIntent = true
+            // 5s safety timeout — if the post-purchase entitlement
+            // refresh hasn't landed by then (RevenueCat webhook stalled
+            // or the user dismissed without buying), drop the sticky
+            // intent and close Cook Mode normally on the paywall's
+            // own dismiss.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                if pendingLeftoversIntent {
+                    pendingLeftoversIntent = false
+                }
+            }
+            // Same 50ms cover-handoff gap as the leftovers branch —
+            // otherwise PaywallView's fullScreenCover queues behind
+            // OutcomeFeedback's still-dismissing cover.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                coordinator.presentPaywall(trigger)
+            }
+        }
+    }
+
+    /// Build a fresh `LeftoversSessionViewModel` and bind it to
+    /// `leftoversSession` so the SwiftUI `.fullScreenCover(item:)` picks
+    /// it up. Single source of truth so both the direct Premium path
+    /// (handlePostSubmit → .openLeftovers) and the sticky-intent path
+    /// (post-purchase tier flip) construct the VM identically.
+    @MainActor
+    private func presentLeftovers() {
+        leftoversSession = LeftoversSessionViewModel(
+            recipePlan: recipePlan,
+            household: household,
+            aiDispatch: aiDispatch,
+            entitlements: entitlements,
+            presentPaywall: { [weak coordinator] trigger in
+                coordinator?.presentPaywall(trigger)
+            },
+        )
+    }
+
+    /// LeftoversRoot.onSelect handler. Persist the picked dish via the
+    /// dedicated `createLeftoversSolveWithDish` path (single dish, no
+    /// pantry, sourced from `recipePlan`), emit `leftovers_dish_selected`
+    /// telemetry, then drop both covers. The new RecipePlan becomes the
+    /// latest completed solve so TonightHome's `latestTonightPick` will
+    /// surface it as the next hero card automatically — matches the
+    /// LeftoversSolveView helper text "adds it to tomorrow's Tonight."
+    @MainActor
+    private func handleLeftoverDishSelected(
+        _ dish: DishCard,
+        vm: LeftoversSessionViewModel,
+    ) {
+        do {
+            let newPlan = try coordinator.solveRepository.createLeftoversSolveWithDish(
+                on: household,
+                from: recipePlan,
+                dish: dish,
+                aiRequestId: nil,
+            )
+            PostHogClient.shared.capture(
+                .leftoversDishSelected,
+                properties: [
+                    "rank": dish.rank,
+                    "leftovers_items_count": vm.selectedItems.count,
+                    "prompt_version": vm.lastPromptVersion ?? "unknown",
+                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "",
+                    "new_recipe_plan_id": newPlan.id?.uuidString ?? "",
+                ],
+            )
+        } catch {
+            // Persistence failed (Core Data save rejected). Log + Sentry,
+            // but still close out — we've at least captured the user's
+            // selection in PostHog via the meal_rated `leftovers_*`
+            // properties from earlier in the flow. A fresh leftovers
+            // attempt would re-solve from scratch.
+            Logger.coreData.error(
+                "createLeftoversSolveWithDish failed: \(error.localizedDescription, privacy: .public)",
+            )
+            SentryReporter.shared.captureError(
+                error,
+                context: [
+                    "screen": "leftovers_handoff",
+                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "",
+                ],
+            )
+        }
+        leftoversSession = nil
+        onDismiss()
     }
 
     /// Driver selection (C.2 + C.3, ADR 0007):

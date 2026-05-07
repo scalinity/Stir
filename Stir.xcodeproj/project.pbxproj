@@ -29,6 +29,8 @@
 		A1B2C3D4E5F60718293A4B5C /* RootCoordinatorFastPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A69788776655AA /* RootCoordinatorFastPathTests.swift */; };
 		5875E9B1D1A4736E4DDBC68D /* RootCoordinatorIdentityTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23BFB3AD48C67DCF75B946EE /* RootCoordinatorIdentityTransitionTests.swift */; };
 		2B617B5FA4B973963CB62358 /* SolveRepositoryTonightPickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BC1612898AE25120D410E52 /* SolveRepositoryTonightPickTests.swift */; };
+		C74ACE516ABC12183FB1BDB9 /* SolveRepositoryLeftoversTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62C4969CA7DA53200DB8885 /* SolveRepositoryLeftoversTests.swift */; };
+		B35DE9FC2DC58E36133C4271 /* OutcomeFeedbackViewIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC9B99010C219D01A10F91F /* OutcomeFeedbackViewIntentTests.swift */; };
 		17EA5CAAC31FB20BD496DA83 /* CookModeVoiceIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */; };
 		19B02FE79819BBBD464EBFA4 /* ImportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FA03961F19A69E7FD4B995 /* ImportViewModel.swift */; };
 		1B2B143DFCB7F192F6FFF7C2 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C653C4CC294FAC1B2AA7B81 /* Typography.swift */; };
@@ -521,6 +523,8 @@
 		F1E2D3C4B5A69788776655AA /* RootCoordinatorFastPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootCoordinatorFastPathTests.swift; sourceTree = "<group>"; };
 		23BFB3AD48C67DCF75B946EE /* RootCoordinatorIdentityTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootCoordinatorIdentityTransitionTests.swift; sourceTree = "<group>"; };
 		8BC1612898AE25120D410E52 /* SolveRepositoryTonightPickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolveRepositoryTonightPickTests.swift; sourceTree = "<group>"; };
+		B62C4969CA7DA53200DB8885 /* SolveRepositoryLeftoversTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolveRepositoryLeftoversTests.swift; sourceTree = "<group>"; };
+		6CC9B99010C219D01A10F91F /* OutcomeFeedbackViewIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackViewIntentTests.swift; sourceTree = "<group>"; };
 		948032DBA10C08623AB8E7A4 /* AccountStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStateTests.swift; sourceTree = "<group>"; };
 		94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeImportRepositoryTests.swift; sourceTree = "<group>"; };
 		94F4A1DD9C752F0E6F25ADFC /* TimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerLiveActivity.swift; sourceTree = "<group>"; };
@@ -764,6 +768,8 @@
 				F1E2D3C4B5A69788776655AA /* RootCoordinatorFastPathTests.swift */,
 				23BFB3AD48C67DCF75B946EE /* RootCoordinatorIdentityTransitionTests.swift */,
 				8BC1612898AE25120D410E52 /* SolveRepositoryTonightPickTests.swift */,
+				B62C4969CA7DA53200DB8885 /* SolveRepositoryLeftoversTests.swift */,
+				6CC9B99010C219D01A10F91F /* OutcomeFeedbackViewIntentTests.swift */,
 				EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */,
 				5EB0A25C9F12C9916D340A79 /* SavedMealsSortingTests.swift */,
 				89CFCB91391847B216C4E960 /* ScanViewModelTests.swift */,
@@ -1617,6 +1623,8 @@
 				A1B2C3D4E5F60718293A4B5C /* RootCoordinatorFastPathTests.swift in Sources */,
 				5875E9B1D1A4736E4DDBC68D /* RootCoordinatorIdentityTransitionTests.swift in Sources */,
 				2B617B5FA4B973963CB62358 /* SolveRepositoryTonightPickTests.swift in Sources */,
+				C74ACE516ABC12183FB1BDB9 /* SolveRepositoryLeftoversTests.swift in Sources */,
+				B35DE9FC2DC58E36133C4271 /* OutcomeFeedbackViewIntentTests.swift in Sources */,
 				548F2E9307CEADB0FE50693D /* SanityTest.swift in Sources */,
 				71A07B871B5C0D2A4AC61668 /* SavedMealsSortingTests.swift in Sources */,
 				F26F63D3426852F517A36463 /* ScanViewModelTests.swift in Sources */,
