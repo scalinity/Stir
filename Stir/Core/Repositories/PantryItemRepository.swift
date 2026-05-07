@@ -119,6 +119,12 @@ final class PantryItemRepository {
             row.userConfirmed = true
             row.typedSource = .scan
             row.typedMemoryState = resolved
+            // SCA-22: ephemeral rows auto-expire on the next morning's
+            // foreground sweep. `.remembered` rows leave expiresAt nil
+            // (standing pantry, no time-based decay).
+            if resolved == .ephemeral {
+                row.expiresAt = Self.expiresAtForEphemeral(now: now)
+            }
             row.lastSeenAt = now
             row.createdAt = now
             row.updatedAt = now
@@ -536,11 +542,86 @@ final class PantryItemRepository {
         row.userConfirmed = true
         row.typedSource = .manual
         row.typedMemoryState = memoryState
+        // SCA-22: ephemeral rows auto-expire daily; `.remembered` rows
+        // leave expiresAt nil. Same rule applies to manually-added
+        // rows so a manual "today only" entry doesn't outlive the
+        // dinner cycle it was added for.
+        if memoryState == .ephemeral {
+            row.expiresAt = Self.expiresAtForEphemeral(now: now)
+        }
         row.lastSeenAt = now
         row.createdAt = now
         row.updatedAt = now
         try controller.save()
         return .inserted(row)
+    }
+
+    /// Compute the expiry timestamp for a newly-inserted `.ephemeral`
+    /// pantry row (SCA-22). The semantics are "today only" — items
+    /// scanned for tonight's cooking should auto-clean by the next
+    /// morning's app foreground.
+    ///
+    /// Formula: `startOfDay(now + 30h) + 6h`, evaluated in the user's
+    /// local calendar. Concretely:
+    ///   - Scan at 8am Mon: now+30h = Tue 2pm; startOfDay = Tue 0am;
+    ///     +6h = Tue 6am. Window: 22h.
+    ///   - Scan at 8pm Mon: now+30h = Wed 2am; startOfDay = Wed 0am;
+    ///     +6h = Wed 6am. Window: 34h.
+    ///   - Scan at 11pm Mon: now+30h = Wed 5am; startOfDay = Wed 0am;
+    ///     +6h = Wed 6am. Window: 31h.
+    ///
+    /// Why not `startOfDay(now + 24h) + 6h`: a naive 24h offset gives
+    /// late-night scans a window that can be ≤8h ("scan at 11pm Mon
+    /// → expire Tue 6am"). The 30h offset guarantees the window
+    /// crosses two midnights for any scan time, so the expiry always
+    /// lands on a morning AFTER the cook session, not during it.
+    ///
+    /// Why 6am as the time-of-day anchor: empirically a quiet hour in
+    /// kitchen-app usage. Foreground sweep on first morning open
+    /// (typically 6-8am) finds the row already past expiry.
+    private static func expiresAtForEphemeral(now: Date) -> Date {
+        let calendar = Calendar.current
+        let plus30h = now.addingTimeInterval(30 * 3600)
+        let nextMorningStart = calendar.startOfDay(for: plus30h)
+        return nextMorningStart.addingTimeInterval(6 * 3600)
+    }
+
+    /// Bulk-soft-delete ephemeral pantry rows past their expiresAt.
+    /// Wired to the foreground sweep at app `.scenePhase == .active`
+    /// (SCA-22). Idempotent — re-call within the same minute returns
+    /// 0 because the predicate filters `deletedAt == nil`. Routes
+    /// through `applySoftDeleteFields` for soft-delete contract
+    /// consistency. One save at the end so the entire batch lands
+    /// as a single CloudKit propagation unit.
+    ///
+    /// Only `.ephemeral` rows are affected. `.remembered` rows with
+    /// a non-nil expiresAt (a hypothetical that no current code path
+    /// produces) are intentionally LEFT ALONE — the sweep is
+    /// memoryState-typed so a future "remembered with explicit
+    /// expiry" feature can opt-in via a separate sweep call.
+    @discardableResult
+    func softDeleteExpired(now: Date = Date(), for household: HouseholdProfile) throws -> Int {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt == nil"),
+            NSPredicate(format: "memoryState == %@", PantryItem.MemoryState.ephemeral.rawValue),
+            NSPredicate(format: "expiresAt != nil AND expiresAt < %@", now as NSDate),
+        ])
+        let context = controller.viewContext
+        let rows: [PantryItem]
+        do {
+            rows = try context.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+        guard !rows.isEmpty else { return 0 }
+        for row in rows {
+            applySoftDeleteFields(row, at: now)
+        }
+        try controller.save()
+        Logger.coreData.info("PantryItemRepository softDeleteExpired: \(rows.count, privacy: .public) ephemeral rows swept")
+        return rows.count
     }
 
     /// Length caps on user-typed pantry strings. Prevents a paste of

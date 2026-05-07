@@ -406,6 +406,128 @@ final class PantryItemRepositoryTests: XCTestCase {
         return row
     }
 
+    // MARK: - SCA-22 ephemeral expire
+
+    func test_upsertFromScan_ephemeralRow_setsExpiresAt() throws {
+        let now = Date()
+        let outcome = try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "fresh basil",
+                canonicalSlug: "fresh_basil",
+                amountText: "small handful",
+                confidence: 0.9,
+                parseConfidence: .confirmed, // → .ephemeral
+            )],
+            on: household,
+        )
+        XCTAssertEqual(outcome.rows.count, 1)
+        let row = outcome.rows[0]
+        XCTAssertEqual(row.typedMemoryState, .ephemeral)
+        XCTAssertNotNil(row.expiresAt)
+        XCTAssertGreaterThan(row.expiresAt!, now, "expiresAt must be in the future on insert")
+        // Window: at least 18h, at most 36h (the formula's bounds —
+        // startOfDay(now+30h)+6h falls between [now+22h, now+36h]).
+        let hoursUntilExpiry = row.expiresAt!.timeIntervalSince(now) / 3600
+        XCTAssertGreaterThan(hoursUntilExpiry, 18, "expire window must be at least 18h to survive a typical cook session")
+        XCTAssertLessThan(hoursUntilExpiry, 38, "expire window must not exceed 38h — anything longer breaks 'today' semantics")
+    }
+
+    func test_upsertFromScan_rememberedRow_leavesExpiresAtNil() throws {
+        let outcome = try repo.upsertFromScan(
+            [PantryItemRepository.ScanIngredient(
+                displayName: "olive oil",
+                canonicalSlug: "olive_oil",
+                amountText: "one bottle",
+                confidence: 0.95,
+                parseConfidence: .likelyStaple, // → .remembered (no cap pressure)
+            )],
+            on: household,
+            usedRemembered: 0,
+            cap: 250,
+        )
+        XCTAssertEqual(outcome.rows.count, 1)
+        let row = outcome.rows[0]
+        XCTAssertEqual(row.typedMemoryState, .remembered)
+        XCTAssertNil(row.expiresAt, "remembered rows must not get an expiresAt — standing pantry has no time-based decay")
+    }
+
+    func test_insertManual_ephemeralRow_setsExpiresAt() throws {
+        let outcome = try repo.insertManual(
+            displayName: "tonight's tomato",
+            amountText: nil,
+            memoryState: .ephemeral,
+            on: household,
+        )
+        guard case let .inserted(row) = outcome else {
+            XCTFail("Expected .inserted, got \(outcome)")
+            return
+        }
+        XCTAssertNotNil(row.expiresAt, "manual ephemeral inserts must also get an expiresAt")
+        XCTAssertGreaterThan(row.expiresAt!, Date())
+    }
+
+    func test_insertManual_rememberedRow_leavesExpiresAtNil() throws {
+        let outcome = try repo.insertManual(
+            displayName: "kosher salt",
+            amountText: nil,
+            memoryState: .remembered,
+            on: household,
+        )
+        guard case let .inserted(row) = outcome else {
+            XCTFail("Expected .inserted, got \(outcome)")
+            return
+        }
+        XCTAssertNil(row.expiresAt, "manual remembered inserts must NOT get an expiresAt")
+    }
+
+    func test_softDeleteExpired_sweepsOnlyExpiredEphemerals() throws {
+        let now = Date()
+        let yesterday = now.addingTimeInterval(-86400)
+        let tomorrow = now.addingTimeInterval(86400)
+
+        // Past-expiry ephemeral — must be swept.
+        let expiredEph = try seedItem(name: "old basil", memoryState: .ephemeral)
+        expiredEph.expiresAt = yesterday
+        // Future-expiry ephemeral — must NOT be swept.
+        let freshEph = try seedItem(name: "fresh cilantro", memoryState: .ephemeral)
+        freshEph.expiresAt = tomorrow
+        // Remembered with hypothetical past expiresAt — must NOT be
+        // swept (sweep is memoryState-typed; .remembered opts out).
+        let rememberedRow = try seedItem(name: "olive oil", memoryState: .remembered)
+        rememberedRow.expiresAt = yesterday
+        // Already soft-deleted — must NOT be re-touched (idempotency).
+        let alreadyDeleted = try seedItem(name: "ghost", memoryState: .ephemeral, deleted: true)
+        alreadyDeleted.expiresAt = yesterday
+        try pc.viewContext.save()
+
+        let count = try repo.softDeleteExpired(now: now, for: household)
+
+        XCTAssertEqual(count, 1, "only the expired ephemeral row should be swept")
+        XCTAssertNotNil(expiredEph.deletedAt)
+        XCTAssertNil(freshEph.deletedAt, "future-expiry ephemeral must survive")
+        XCTAssertNil(rememberedRow.deletedAt, "remembered row must survive even with past expiresAt")
+        // alreadyDeleted.deletedAt was set in seed; sweep didn't bump it.
+        XCTAssertNotNil(alreadyDeleted.deletedAt)
+    }
+
+    func test_softDeleteExpired_isIdempotent() throws {
+        let now = Date()
+        let yesterday = now.addingTimeInterval(-86400)
+        let row = try seedItem(name: "old basil", memoryState: .ephemeral)
+        row.expiresAt = yesterday
+        try pc.viewContext.save()
+
+        let first = try repo.softDeleteExpired(now: now, for: household)
+        let second = try repo.softDeleteExpired(now: now, for: household)
+        XCTAssertEqual(first, 1)
+        XCTAssertEqual(second, 0, "re-call after sweep must be a no-op — predicate filters deletedAt == nil")
+    }
+
+    func test_softDeleteExpired_emptyPantry_returnsZero() throws {
+        let count = try repo.softDeleteExpired(now: Date(), for: household)
+        XCTAssertEqual(count, 0)
+    }
+
     // MARK: - softDeleteAll
 
     func test_softDeleteAll_softDeletesEveryNonDeletedRow() throws {

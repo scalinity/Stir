@@ -13,6 +13,7 @@
 // above Tonight specifically.
 
 import SwiftUI
+import OSLog
 
 struct RootView: View {
     @Bindable var coordinator: RootCoordinator
@@ -110,6 +111,27 @@ struct RootView: View {
                        currentUserKey: SharedStorage().readCanonicalUserKey(),
                    ) {
                     pendingShareImport = pending
+                }
+                // SCA-22: sweep expired ephemeral pantry rows on every
+                // foreground. The "TODAY" badge would otherwise lie —
+                // items scanned days ago would still display as today.
+                // Combined with SCA-21's auto-consume on cook
+                // completion, this makes pantry self-healing: matched
+                // ingredients soft-delete at cook end; un-matched
+                // ephemerals expire by the next morning's first open.
+                // Phase guard mirrors the share-import drain — needs a
+                // resolved household profile to scope to. Errors are
+                // logged but never surfaced: pantry will retry the
+                // sweep on the next foreground.
+                if coordinator.phase == .ready,
+                   let household = coordinator.household.profile {
+                    do {
+                        try coordinator.pantryItemRepository.softDeleteExpired(for: household)
+                    } catch {
+                        Logger.coreData.error(
+                            "pantry softDeleteExpired failed: \(error.localizedDescription, privacy: .private)",
+                        )
+                    }
                 }
             }
         }
