@@ -987,6 +987,44 @@ final class CookModeViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - SCA-57: closeVoiceSessionFromHost (host-callable wrapper)
+
+    func test_closeVoiceSessionFromHost_isNoOp_whenDriverNeverAttached() async throws {
+        // The wrapper exists so CookModeRoot.handlePostSubmit can
+        // release voice early on the OutcomeFeedback → LeftoversRoot
+        // handoff. Tap-mode users (Free tier, no voice) hit this path
+        // too — calling on a VM that never attached a driver must be
+        // a clean no-op (the underlying closeVoiceSession guards
+        // `let driver = voiceDriver else { return }`). Test asserts
+        // the call returns and `hasBegunFirstTurn` (private(set))
+        // stays at its default false rather than racing into true.
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+        XCTAssertFalse(vm.hasBegunFirstTurn)
+
+        await vm.closeVoiceSessionFromHost()
+
+        XCTAssertFalse(vm.hasBegunFirstTurn)
+    }
+
+    func test_closeVoiceSessionFromHost_isIdempotent_acrossDoubleInvocation() async throws {
+        // CookModeRoot.handlePostSubmit kicks the early teardown via
+        // a Task; CookModeRoot.onDisappear's driverTeardown?() runs
+        // again on cover dismiss. Both paths must be safe to invoke
+        // back-to-back without throwing or mutating state past the
+        // first close. The actual driver close is documented
+        // idempotent within the driver implementation; this pins the
+        // wrapper-level behavior so a future regression in
+        // closeVoiceSession's nil-driver guard is caught.
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        await vm.closeVoiceSessionFromHost()
+        await vm.closeVoiceSessionFromHost()  // double-tap
+
+        XCTAssertFalse(vm.hasBegunFirstTurn)
+    }
+
     // MARK: - Helpers
 
     private func makeVM(session: CookingSession, source: CookModeViewModel.EntrySource = .solve) -> CookModeViewModel {

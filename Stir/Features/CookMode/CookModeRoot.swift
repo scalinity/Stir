@@ -429,16 +429,17 @@ struct CookModeRoot: View {
             onDismiss()
 
         case .openLeftovers:
-            // Voice-driver early-teardown deferred (DB2 minor):
-            // CookModeViewModel.closeVoiceSession is private and async;
-            // the existing `driverTeardown?()` on CookModeRoot's
-            // `.onDisappear` correctly releases the driver when the
-            // sheet dismisses on dish-pick. The "voice stays warm
-            // during the leftovers prompt UI" concern is tracked in
-            // docs/deferred-work.md (SCA-56 follow-ups) — fix requires
-            // either widening the VM's API or surfacing a teardown
-            // hook callable from here. Both are out of scope for the
-            // wiring fix.
+            // SCA-57: cooking is finished — release the Live voice
+            // driver / WS / AVAudioSession now rather than waiting for
+            // CookModeRoot.onDisappear (which runs after the user
+            // finishes the leftovers prompt 60-180s later). The 30-min
+            // hard session cap (LiveSessionLimits.maxSessionDurationSec)
+            // ticks the whole time otherwise. driverTeardown?() on
+            // .onDisappear stays as defense-in-depth — the underlying
+            // close is idempotent.
+            Task { @MainActor in
+                await viewModel.closeVoiceSessionFromHost()
+            }
             cancelLeftoversPresentationTask()
             leftoversPresentationTask = Task { @MainActor in
                 try? await Task.sleep(for: Self.coverHandoffGap)
@@ -447,6 +448,11 @@ struct CookModeRoot: View {
             }
 
         case .openPaywall(let trigger):
+            // SCA-57: same rationale as .openLeftovers — user is done
+            // cooking; close voice early.
+            Task { @MainActor in
+                await viewModel.closeVoiceSessionFromHost()
+            }
             // Re-arm: cancel any prior in-flight timer/presentation
             // Tasks before stamping new ones. Without this, two cooks
             // in a single Cook Mode session stack overlapping timers

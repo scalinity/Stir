@@ -2051,6 +2051,21 @@ final class CookModeViewModel {
     /// explicit user-tap paths clear it synchronously beforehand so
     /// SwiftUI re-renders into tap-mode chrome on the same frame as
     /// the tap, before any `await` in this method suspends.
+    /// SCA-57: host-callable wrapper around the private
+    /// `closeVoiceSession()` so `CookModeRoot.handlePostSubmit` can
+    /// release the voice driver the moment cooking finishes — before
+    /// the user spends 60-180s in LeftoversRoot's prompt + solve. The
+    /// underlying `closeVoiceSession` is idempotent (guards on `let
+    /// driver = voiceDriver else { return }`); calling this when no
+    /// driver is active is a no-op. `driverTeardown?()` on
+    /// `CookModeRoot.onDisappear` continues to run as defense-in-depth
+    /// — `Driver.close()` is documented idempotent within the driver
+    /// and the `voiceDriver = nil` after the early call makes the
+    /// late teardown's closure body a no-op.
+    func closeVoiceSessionFromHost() async {
+        await closeVoiceSession()
+    }
+
     private func closeVoiceSession() async {
         guard let driver = voiceDriver else { return }
         // Cancel any in-flight playback synchronously — gives
