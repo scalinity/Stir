@@ -14,7 +14,6 @@
 		04BA8453AA04030FB6C1017E /* StirGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF8D946132AFBD4013A90040 /* StirGlyph.swift */; };
 		04E5EBC3A45393DA0AD37C33 /* SessionDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */; };
 		08C3EE511396C43746CD3A49 /* ShowTonightsIdeaIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EBA83279EB0B3F534DD388C /* ShowTonightsIdeaIntent.swift */; };
-		08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */; };
 		0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA87CCBD66F8F755CF978A54 /* SentryReporter.swift */; };
 		0CC6EF781F17377F12FFF940 /* SecondaryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15773184EB5F4E8BF129A85 /* SecondaryButton.swift */; };
 		0D973AD26FEDF6511E6580C0 /* SpeechFallbackServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89400F08F55482240FB5B0A /* SpeechFallbackServiceTests.swift */; };
@@ -227,7 +226,6 @@
 		BA71123C302233095A846C05 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B1A2B6DC9F30341873906 /* RevenueCat */; };
 		BA9DF37A4E6BF5D1E74C7CF9 /* AVAudioSessionConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E704BD15AB6492410C269B5 /* AVAudioSessionConfigurator.swift */; };
 		BAE68A81DE3914972A55E2C5 /* TonightSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D85C83C67E1CA51774FE07 /* TonightSnapshot.swift */; };
-		BB48B6207A5F083858AA11E1 /* TrialReminderSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADA96EB6F09911854C0B07BB /* TrialReminderSchedulerTests.swift */; };
 		BD722A94E7FF0EC1E2F2EFE5 /* TonightSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D85C83C67E1CA51774FE07 /* TonightSnapshot.swift */; };
 		BDB6D6710EDF448E5C2E154A /* TonightSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */; };
 		BEA0F700E315E264F9C39E36 /* ImportViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E33AF9526E02C4F679AA654 /* ImportViewModelTests.swift */; };
@@ -438,7 +436,6 @@
 		494C830D500C89939B57CD7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4999CEF92E7CA2E35D80A0F2 /* SubstitutionEvent+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubstitutionEvent+Extensions.swift"; sourceTree = "<group>"; };
 		49FE6CFDD113808B37FD886C /* VoiceSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionState.swift; sourceTree = "<group>"; };
-		4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialReminderScheduler.swift; sourceTree = "<group>"; };
 		4AC930B6FE46D88D0005D2DD /* SolveViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolveViewModel.swift; sourceTree = "<group>"; };
 		4BB49FCA03EF17C97D6C5DB9 /* Stir.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Stir.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockKeychain.swift; sourceTree = "<group>"; };
@@ -549,7 +546,6 @@
 		E78F4521A6C9D801E2F45678 /* SubstitutionRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubstitutionRepositoryTests.swift; sourceTree = "<group>"; };
 		ACD3FF753664453B636AD33F /* RevenueCatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevenueCatService.swift; sourceTree = "<group>"; };
 		AD619EDEE235408D45923D3A /* LeftoversRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoversRoot.swift; sourceTree = "<group>"; };
-		ADA96EB6F09911854C0B07BB /* TrialReminderSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialReminderSchedulerTests.swift; sourceTree = "<group>"; };
 		ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightSnapshotService.swift; sourceTree = "<group>"; };
 		AED17934BF102B6FDEDF9CAD /* VoiceSessionLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionLog.swift; sourceTree = "<group>"; };
 		AFF0AB8E20B8FEEE5E1F06D2 /* VoiceSessionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateTests.swift; sourceTree = "<group>"; };
@@ -785,7 +781,6 @@
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
 				F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */,
 				D98501A5E5030F48A1DD11F5 /* TimerServiceTests.swift */,
-				ADA96EB6F09911854C0B07BB /* TrialReminderSchedulerTests.swift */,
 				AFF0AB8E20B8FEEE5E1F06D2 /* VoiceSessionStateTests.swift */,
 				4300A920E84A19CD8F8AC1B3 /* VoiceTurnRepositoryTests.swift */,
 				8893F1B9DC617B40A8E19877 /* VoiceTurnUsageDTOTests.swift */,
@@ -1057,7 +1052,6 @@
 				9BCD3DF9316F0867951228BB /* NotificationPreferencesStore.swift */,
 				5BA5D3B10982CD095498B875 /* ReactivationScheduler.swift */,
 				761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */,
-				4ABA5D9F14689338B55D1BFD /* TrialReminderScheduler.swift */,
 				F0D72B1E8BC34F51F6DD0059 /* UserNotificationCenterClient.swift */,
 			);
 			path = Notifications;
@@ -1647,7 +1641,6 @@
 				EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */,
 				15E5F3952E09C849758C64EB /* TimerServiceTests.swift in Sources */,
 				D827F0A18F8117BF95FA0210 /* TonightSnapshot.swift in Sources */,
-				BB48B6207A5F083858AA11E1 /* TrialReminderSchedulerTests.swift in Sources */,
 				567786D5AE71E5A18E1941DC /* Typography.swift in Sources */,
 				3334BAB679FB334A1FA1F52B /* VoiceSessionStateTests.swift in Sources */,
 				D8B040764AED517E1B242AE7 /* VoiceTurnRepositoryTests.swift in Sources */,
@@ -1826,7 +1819,6 @@
 				B5F4E3C2A1908A7B6C5D4E3F /* OtherOptionsRoot.swift in Sources */,
 				BAE68A81DE3914972A55E2C5 /* TonightSnapshot.swift in Sources */,
 				BDB6D6710EDF448E5C2E154A /* TonightSnapshotService.swift in Sources */,
-				08D96901F4416FA98330E341 /* TrialReminderScheduler.swift in Sources */,
 				A3F7C6232C29044444C18041 /* Typography.swift in Sources */,
 				817B86409212D9D46EB748BF /* UserNotificationCenterClient.swift in Sources */,
 				AD737537FFA0AD5C5980B072 /* VoiceActiveStepView.swift in Sources */,

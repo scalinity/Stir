@@ -551,8 +551,7 @@ async function scheduleJobRetry(
 // Payload shape (written by stir_ops_reactivation_enqueue + recipe-import
 // follow-on insert):
 //   {
-//     template:     'reactivation' | 'import_completion' | 'trial_reminder'
-//                   | 'cook_reminder',
+//     template:     'reactivation' | 'import_completion' | 'cook_reminder',
 //     title:        string,
 //     body:         string,
 //     deep_link:    'stir://...' (optional),
@@ -578,7 +577,7 @@ async function scheduleJobRetry(
 // future recipe-import regression, etc.) can't cause CRLF-injection in
 // apns-collapse-id or misroute production pushes to sandbox.
 const PushSendPayloadSchema = z.object({
-  template: z.enum(['reactivation', 'import_completion', 'trial_reminder', 'cook_reminder']),
+  template: z.enum(['reactivation', 'import_completion', 'cook_reminder']),
   title: z.string().min(1).max(256),
   body: z.string().min(1).max(2048),
   deep_link: z.string().regex(/^stir:\/\//).max(512).optional(),

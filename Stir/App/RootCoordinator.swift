@@ -72,7 +72,6 @@ final class RootCoordinator {
     /// RC SDK facade. Used for logIn (keeping RC's canonical key in sync
     /// with Supabase's) and for the paywall's offerings/purchase flows.
     let revenueCat: any RevenueCatPurchasing
-    private let trialReminders: TrialReminderScheduler
 
     private(set) var phase: Phase = .loading
 
@@ -301,7 +300,6 @@ final class RootCoordinator {
         householdRepo: HouseholdProfileRepository = HouseholdProfileRepository(),
         sharedStorage: SharedStorage = SharedStorage(),
         revenueCat: (any RevenueCatPurchasing)? = nil,
-        trialReminders: TrialReminderScheduler = .shared,
         fastPathMinLoadingDuration: Duration = .milliseconds(500),
     ) {
         self.config = config
@@ -319,7 +317,6 @@ final class RootCoordinator {
         self.householdRepo = householdRepo
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared
-        self.trialReminders = trialReminders
         self.fastPathMinLoadingDuration = fastPathMinLoadingDuration
         attemptFastPathLaunch()
     }
@@ -803,10 +800,7 @@ final class RootCoordinator {
         //      without emitting, silently swallowing real transitions.
         emitAccountStateChangeIfNeeded()
 
-        // 3. Trial reminder: schedule when we're in trial; cancel otherwise.
-        await updateTrialReminder()
-
-        // 4. Start the customerInfo observer — RC informs us of purchase
+        // 3. Start the customerInfo observer — RC informs us of purchase
         //    events from outside our process (e.g. manage-subscription
         //    flow in Apple ID). Every change triggers a configBootstrap
         //    refresh from our source of truth (Supabase).
@@ -855,14 +849,6 @@ final class RootCoordinator {
             "account state \(previous.rawValue, privacy: .public) → \(next.rawValue, privacy: .public)",
         )
         lastEmittedAccountState = next
-    }
-
-    private func updateTrialReminder() async {
-        if entitlements.billingState == .trial, let expires = entitlements.expiresAt {
-            await trialReminders.ensureReminder(expiresAt: expires)
-        } else {
-            trialReminders.cancel()
-        }
     }
 
     /// Attempt `revenueCat.logIn` with bounded retries so a transient RC
@@ -992,7 +978,6 @@ final class RootCoordinator {
             }
             entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
             emitAccountStateChangeIfNeeded()
-            await updateTrialReminder()
             Logger.coordinator.debug(
                 "foreground refresh ok tier=\(self.entitlements.tier.rawValue, privacy: .public)",
             )

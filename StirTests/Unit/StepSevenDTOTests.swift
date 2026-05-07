@@ -171,15 +171,15 @@ final class StepSevenDTOTests: XCTestCase {
         let body = PushRegisterRequest(
             apnsToken: String(repeating: "a", count: 64),
             environment: .sandbox,
-            notificationPrefs: .init(importCompletion: true, reactivation: false, trialReminder: true),
+            notificationPrefs: .init(importCompletion: true, reactivation: false),
         )
         let json = try encoder.encode(body)
         let str = String(data: json, encoding: .utf8) ?? ""
         XCTAssertTrue(str.contains("\"apns_token\""))
         XCTAssertTrue(str.contains("\"environment\":\"sandbox\""))
         XCTAssertTrue(str.contains("\"import_completion\":true"))
-        XCTAssertTrue(str.contains("\"trial_reminder\":true"))
         XCTAssertTrue(str.contains("\"reactivation\":false"))
+        XCTAssertFalse(str.contains("trial_reminder"), "wire field retired in SCA-74")
     }
 
     // MARK: - DinnerSolveRequest leftovers mode

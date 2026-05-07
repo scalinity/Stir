@@ -653,7 +653,6 @@ export const PushRegisterRequest = z.object({
   notification_prefs: z.object({
     import_completion: z.boolean(),
     reactivation: z.boolean(),
-    trial_reminder: z.boolean(),
   }).strict(),
 }).strict();
 

@@ -29,11 +29,10 @@
 // preserved. Restore flow, paywall trigger plumbing, and all
 // telemetry are unchanged.
 //
-// The trial-reminder card was removed 2026-04-28 — it duplicated the
-// (now also removed) trial-reminder toggle in the Notifications page,
-// and the two were wired to different stores so they could disagree.
-// The `TrialReminderScheduler` and `Preferences.trialReminder` field
-// are now dead code; removable in a follow-up cleanup.
+// The trial-reminder feature was retired in SCA-74 (2026-05-07) —
+// `TrialReminderScheduler`, `Preferences.trialReminder`, and the
+// `trial_reminder_sent` telemetry event were all removed. iOS now
+// relies on Apple's system trial-end reminder.
 
 import OSLog
 import SwiftUI

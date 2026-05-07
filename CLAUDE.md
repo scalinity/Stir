@@ -700,7 +700,7 @@ grocery_list_exported, favorite_saved,
 # leftovers_handoff_* for the full Premium-side conversion funnel.
 leftovers_dish_selected,
 recipe_import_started, recipe_import_completed,
-paywall_viewed, trial_started, trial_reminder_sent,
+paywall_viewed, trial_started,
 purchase_started, purchase_completed, restore_purchases_tapped,
 entitlement_state_changed, reactivation_notification_opened,
 widget_added, shortcut_run,
@@ -880,7 +880,7 @@ Tracked tech debt + triggered refactors live in `docs/deferred-work.md`. Read th
 
 Active categories:
 
-- **Pre-launch chrome polish** — Cook Mode top-bar mockup divergence, Tonight `Other options` placeholder, Settings dead-code (TrialReminderScheduler).
+- **Pre-launch chrome polish** — Cook Mode top-bar mockup divergence, Tonight `Other options` placeholder.
 - **v1.1 / pre-public-launch backend** — retention crons, in-app CCPA deletion flow, Sentry tag deprecation rotation.
 - **Step 9 / ops hardening** — TanStack Query for ops SPA, ops SPA test harness, per-admin rate limit, HTTPErrorHandler refactor, SQL session_id rewrite, runaway_session detector, canned_fallback schema registry, APNs test mock, source-IP HMAC, voice-path mock transport.
 - **Triggered-by-next-touch** — RealtimeSession 3-part split (LOC trigger tripped at 3622), CookModeViewModel telemetry extraction (>1915 LOC), VoiceSessionDriver delegate collapse, VoiceSessionState path split, Clock injection.

@@ -40,15 +40,6 @@ enum BillingTelemetryProperties {
         ]
     }
 
-    // MARK: trial_reminder_sent
-
-    /// Spec §15: `days_remaining`.
-    static func trialReminderSent(daysRemaining: Int) -> [String: Any] {
-        [
-            "days_remaining": daysRemaining,
-        ]
-    }
-
     // MARK: purchase_started
 
     /// Spec §15: `sku`, `origin`. `origin` is the paywall trigger at the

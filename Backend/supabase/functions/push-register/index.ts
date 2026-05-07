@@ -145,8 +145,7 @@ Deno.serve(async (req) => {
       // boolean is a cheap "any push at all?" index.
       notifications_enabled:
         body.notification_prefs.import_completion ||
-        body.notification_prefs.reactivation ||
-        body.notification_prefs.trial_reminder,
+        body.notification_prefs.reactivation,
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),
     })

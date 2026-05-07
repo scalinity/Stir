@@ -194,7 +194,6 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // Step 5 — billing + paywall.
     case paywallViewed = "paywall_viewed"
     case trialStarted = "trial_started"
-    case trialReminderSent = "trial_reminder_sent"
     case purchaseStarted = "purchase_started"
     case purchaseCompleted = "purchase_completed"
     case restorePurchasesTapped = "restore_purchases_tapped"

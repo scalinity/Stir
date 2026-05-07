@@ -21,8 +21,6 @@ final class NotificationPreferencesStore {
     static let shared = NotificationPreferencesStore()
 
     struct Preferences: Equatable, Sendable {
-        /// 2-day-before trial reminder (trial_reminder_sent telemetry).
-        var trialReminder: Bool
         /// 7-day-after-last-cook "Cook something tonight?" reminder.
         var reactivation: Bool
         /// Async-import completion (>5000 char paste → pgmq worker →
@@ -30,14 +28,12 @@ final class NotificationPreferencesStore {
         var importCompletion: Bool
 
         static let defaults = Preferences(
-            trialReminder: true,
             reactivation: true,
             importCompletion: true,
         )
     }
 
     private let defaults: UserDefaults
-    private static let trialKey     = "stir.notif.trialReminder.v1"
     private static let reactKey     = "stir.notif.reactivation.v1"
     private static let importKey    = "stir.notif.importCompletion.v1"
 
@@ -49,17 +45,12 @@ final class NotificationPreferencesStore {
 
     var preferences: Preferences {
         Preferences(
-            trialReminder: readBool(Self.trialKey, default: true),
             reactivation: readBool(Self.reactKey, default: true),
             importCompletion: readBool(Self.importKey, default: true),
         )
     }
 
     // MARK: - Write
-
-    func setTrialReminder(_ enabled: Bool) {
-        defaults.set(enabled, forKey: Self.trialKey)
-    }
 
     func setReactivation(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.reactKey)
@@ -72,7 +63,6 @@ final class NotificationPreferencesStore {
     // MARK: - Bulk replace (used by server sync when it lands)
 
     func replace(with prefs: Preferences) {
-        setTrialReminder(prefs.trialReminder)
         setReactivation(prefs.reactivation)
         setImportCompletion(prefs.importCompletion)
     }

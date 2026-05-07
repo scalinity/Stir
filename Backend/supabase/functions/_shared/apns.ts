@@ -10,8 +10,7 @@
 //   - environment    'production' | 'sandbox' (matches device_installations
 //                    CHECK constraint; iOS DEBUG builds send 'sandbox', Release
 //                    sends 'production')
-//   - category       'reactivation' | 'import_completion' | 'trial_reminder'
-//                    | 'cook_reminder'
+//   - category       'reactivation' | 'import_completion' | 'cook_reminder'
 //   - alert          { title, body }
 //   - data?          custom key/value for deep-link routing in iOS
 //
@@ -56,7 +55,7 @@ const PROVIDER_JWT_TTL_SECONDS = 30 * 60; // APNs accepts up to 60 min; we use 3
 const APNS_FETCH_TIMEOUT_MS = 10_000; // Stall guard — APNs HTTP/2 normally < 500 ms.
 
 export type APNsEnvironment = 'production' | 'sandbox';
-export type APNsCategory = 'reactivation' | 'import_completion' | 'trial_reminder' | 'cook_reminder';
+export type APNsCategory = 'reactivation' | 'import_completion' | 'cook_reminder';
 
 export interface APNsPushInput {
   token: string;

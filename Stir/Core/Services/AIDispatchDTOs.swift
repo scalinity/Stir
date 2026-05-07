@@ -1267,12 +1267,10 @@ struct PushRegisterRequest: Encodable, Sendable {
     struct NotificationPrefs: Encodable, Sendable, Equatable {
         let importCompletion: Bool
         let reactivation: Bool
-        let trialReminder: Bool
 
         enum CodingKeys: String, CodingKey {
             case importCompletion = "import_completion"
             case reactivation
-            case trialReminder = "trial_reminder"
         }
     }
 }

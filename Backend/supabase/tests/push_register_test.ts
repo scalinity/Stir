@@ -47,7 +47,6 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     notification_prefs: {
       import_completion: true,
       reactivation: false,
-      trial_reminder: true,
     },
     ...overrides,
   };
@@ -85,7 +84,7 @@ Deno.test('push_register: VAL-01 when a notification_pref is not boolean', async
   const { session_jwt } = await quickBootstrap();
   const res = await callPushRegister(
     validBody({
-      notification_prefs: { import_completion: 'yes', reactivation: false, trial_reminder: false },
+      notification_prefs: { import_completion: 'yes', reactivation: false },
     }),
     session_jwt,
   );
@@ -104,7 +103,7 @@ Deno.test('push_register: happy path persists push_token + env + prefs', async (
     validBody({
       apns_token: token,
       environment: 'production',
-      notification_prefs: { import_completion: true, reactivation: true, trial_reminder: false },
+      notification_prefs: { import_completion: true, reactivation: true },
     }),
     session_jwt,
   );
@@ -129,5 +128,4 @@ Deno.test('push_register: happy path persists push_token + env + prefs', async (
   assertEquals(data?.notifications_enabled, true);
   assertEquals(data?.notification_prefs_json?.import_completion, true);
   assertEquals(data?.notification_prefs_json?.reactivation, true);
-  assertEquals(data?.notification_prefs_json?.trial_reminder, false);
 });

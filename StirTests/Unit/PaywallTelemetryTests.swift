@@ -17,7 +17,6 @@ final class PaywallTelemetryTests: XCTestCase {
     private let canonicalKeys: [TelemetryEvent: Set<String>] = [
         .paywallViewed: ["trigger", "variant", "current_tier"],
         .trialStarted: ["sku", "trigger"],
-        .trialReminderSent: ["days_remaining"],
         .purchaseStarted: ["sku", "origin"],
         .purchaseCompleted: ["sku", "price", "trial", "intro_offer"],
         .restorePurchasesTapped: ["origin"],
@@ -60,14 +59,6 @@ final class PaywallTelemetryTests: XCTestCase {
         XCTAssertEqual(Set(props.keys), canonicalKeys[.trialStarted])
         XCTAssertEqual(props["sku"] as? String, "stir.premium.annual.trial7")
         XCTAssertEqual(props["trigger"] as? String, "voice_affordance_tapped")
-    }
-
-    // MARK: trial_reminder_sent
-
-    func test_trialReminderSent_keysMatchSpec() {
-        let props = BillingTelemetryProperties.trialReminderSent(daysRemaining: 2)
-        XCTAssertEqual(Set(props.keys), canonicalKeys[.trialReminderSent])
-        XCTAssertEqual(props["days_remaining"] as? Int, 2)
     }
 
     // MARK: purchase_started
@@ -198,7 +189,6 @@ final class PaywallTelemetryTests: XCTestCase {
         let allProps: [[String: Any]] = [
             BillingTelemetryProperties.paywallViewed(trigger: .savedFavoritesGate, variant: nil, currentTier: .free),
             BillingTelemetryProperties.trialStarted(sku: "x", trigger: .savedFavoritesGate),
-            BillingTelemetryProperties.trialReminderSent(daysRemaining: 2),
             BillingTelemetryProperties.purchaseStarted(sku: "x", origin: .savedFavoritesGate),
             BillingTelemetryProperties.purchaseCompleted(sku: "x", priceDisplay: "$1", trial: false, introOffer: false),
             BillingTelemetryProperties.restorePurchasesTapped(origin: .settings),

@@ -9,14 +9,11 @@
 // `StirCustomTabBar`. SF-Pro nav title + iOS-default `Form` chrome
 // + green-tinted toggles all replaced.
 //
-// Trial-reminder toggle removed in the same change — the
-// pre-rebuild file shipped a "Trial reminder" toggle here AND a
-// trial-reminder card in `SettingsRootView`. The two were wired to
-// different mechanisms (this page set a `NotificationPreferencesStore`
-// flag, Settings called `TrialReminderScheduler` directly) which
-// could disagree, and the feature itself has been retired. The
-// `Preferences.trialReminder` field and `TrialReminderScheduler` are
-// now dead code; removable in a follow-up cleanup.
+// Trial-reminder toggle removed in the same change — the feature was
+// retired in SCA-74 (2026-05-07): `TrialReminderScheduler`,
+// `Preferences.trialReminder`, and the `trial_reminder_sent`
+// telemetry event were all deleted. iOS now relies on Apple's system
+// trial-end reminder.
 //
 // Authorization status distinguishes three presentation modes:
 //   - .authorized / .provisional / .ephemeral: banner hidden.

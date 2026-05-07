@@ -57,8 +57,8 @@ struct StirApp: App {
                 }
             }
 
-            // Install the local-notification delegate so the trial
-            // reminder's delivery emits `trial_reminder_sent` telemetry.
+            // Install the local-notification delegate so reactivation
+            // delivery emits `reactivation_notification_opened` telemetry.
             StirNotificationDelegate.register()
 
             _coordinator = State(wrappedValue: RootCoordinator(config: config))

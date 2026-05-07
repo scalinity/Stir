@@ -4,8 +4,8 @@
 //   - Presenting notifications in-foreground with banner + sound.
 //   - Swapping the default iOS Tri-tone for a softer "Tink" chime when
 //     a Cook Mode timer notification fires while the app is foreground.
-//   - Emitting `trial_reminder_sent` when the trial-reminder notification
-//     is delivered (spec §15 canonical).
+//   - Emitting `reactivation_notification_opened` when the 7-day cook
+//     reminder fires (delivery or tap-through; spec §15 canonical).
 //
 // The delegate is installed at launch by StirApp via
 // `StirNotificationDelegate.register()`. It's a singleton because
@@ -27,11 +27,11 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     private static let tinkSoundID: SystemSoundID = 1057
 
     private let telemetry: PostHogClient
-    /// Identifiers we've already emitted `trial_reminder_sent` for this
+    /// Identifiers we've already emitted reactivation telemetry for this
     /// process lifetime. Guards against double-emission when a single
     /// notification triggers both `willPresent` (foreground delivery) AND
     /// `didReceive` (user subsequently taps the banner). The set stays
-    /// bounded — trial reminders use a singleton identifier so this is
+    /// bounded — reactivation uses a singleton identifier so this is
     /// a 1-entry set in practice.
     private var emittedReminderIDs: Set<String> = []
     private let emitLock = NSLock()
@@ -50,8 +50,8 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     // MARK: - UNUserNotificationCenterDelegate
 
     /// Delivery while app is foregrounded. Show banner + play sound so the
-    /// user notices, and emit `trial_reminder_sent` if this is the trial
-    /// reminder payload.
+    /// user notices, and emit reactivation telemetry on the 7-day cook
+    /// reminder.
     ///
     /// Timer notifications take a custom audio path: the system Tri-tone
     /// is too aggressive for a kitchen-cook chime, so we swap it for the
@@ -65,7 +65,6 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
     ) {
-        emitTelemetryIfTrialReminder(notification)
         emitTelemetryIfReactivation(notification)
 
         let userInfo = notification.request.content.userInfo
@@ -81,39 +80,13 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     }
 
     /// Delivery when user taps a notification in-background → app foregrounds.
-    /// We emit `trial_reminder_sent` on delivery (not on tap) so the
-    /// telemetry value counts users who SAW the reminder, not users who
-    /// tapped through. Tap-through is covered separately via
-    /// reactivation_notification_opened in step 8.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void,
     ) {
-        emitTelemetryIfTrialReminder(response.notification)
         emitTelemetryIfReactivation(response.notification)
         completionHandler()
-    }
-
-    private func emitTelemetryIfTrialReminder(_ notification: UNNotification) {
-        let userInfo = notification.request.content.userInfo
-        guard let days = TrialReminderNotification.daysRemaining(from: userInfo) else { return }
-
-        // Dedup: a foreground-delivered trial reminder fires `willPresent`
-        // at delivery AND `didReceive` on tap-through. Emitting both would
-        // double-count the "saw the reminder" event in PostHog. Track by
-        // notification identifier so a single delivery produces exactly
-        // one `trial_reminder_sent`.
-        let id = notification.request.identifier
-        emitLock.lock()
-        let shouldEmit = emittedReminderIDs.insert(id).inserted
-        emitLock.unlock()
-        guard shouldEmit else { return }
-
-        telemetry.capture(
-            .trialReminderSent,
-            properties: BillingTelemetryProperties.trialReminderSent(daysRemaining: days),
-        )
     }
 
     /// Emit `reactivation_notification_opened` with `trigger_kind` when the

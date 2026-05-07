@@ -124,7 +124,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             fastPathMinLoadingDuration: .milliseconds(50),
         )
 
@@ -166,7 +165,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             fastPathMinLoadingDuration: .milliseconds(50),
         )
 
@@ -209,7 +207,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             fastPathMinLoadingDuration: .milliseconds(50),
         )
 
@@ -246,7 +243,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             fastPathMinLoadingDuration: .milliseconds(50),
         )
 
@@ -279,7 +275,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             fastPathMinLoadingDuration: .milliseconds(200),
         )
     }
@@ -342,7 +337,6 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             householdRepo: repo,
             sharedStorage: storage,
             revenueCat: MockRevenueCatService(),
-            trialReminders: .shared,
             // Long enough for our explicit phase mutation below to happen first.
             fastPathMinLoadingDuration: .milliseconds(200),
         )

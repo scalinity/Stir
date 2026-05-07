@@ -46,9 +46,9 @@ final class ReactivationScheduler {
     /// the user has opted out in Settings. Idempotent — re-scheduling
     /// after a second cook-in-the-same-week resets the 7-day clock.
     ///
-    /// Rollback pattern mirrors TrialReminderScheduler: snapshot any
-    /// pending request before cancel, restore on `add` failure so a
-    /// transient UN error doesn't silently erase the prior reminder.
+    /// Rollback pattern: snapshot any pending request before cancel,
+    /// restore on `add` failure so a transient UN error doesn't silently
+    /// erase the prior reminder.
     func scheduleAfterCook(now: Date = .init()) async {
         guard preferences.preferences.reactivation else {
             Logger.reactivation.info("reactivation disabled in prefs — skipping schedule")
