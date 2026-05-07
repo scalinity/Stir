@@ -46,3 +46,15 @@ Deno.test('pg_cron: stir-audit-log-retention wired to nightly 09:30 UTC', async 
   assertEquals(job!.active, true);
   assertEquals(job!.command.toLowerCase().includes('delete from public.audit_log'), true);
 });
+
+// SCA-63: ai_request_log retention enforces the Privacy Policy §6 30-day
+// commitment. Covers all feature_key values including
+// `cook_mode_realtime` voice turns.
+Deno.test('pg_cron: stir-cleanup-ai-request-log wired to hourly :23', async () => {
+  const job = await fetchJob('stir-cleanup-ai-request-log');
+  assertNotEquals(job, null);
+  assertEquals(job!.schedule, '23 * * * *');
+  assertEquals(job!.active, true);
+  assertEquals(job!.command.toLowerCase().includes('delete from ai_request_log'), true);
+  assertEquals(job!.command.includes("interval '30 days'"), true);
+});

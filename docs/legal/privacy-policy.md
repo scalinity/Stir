@@ -124,17 +124,17 @@ We retain different categories of data for different periods, balancing service 
 | Pantry remembered items | CloudKit | Until you delete; expired items auto-purge after 30 days |
 | Saved recipes / favorites | CloudKit | Until you delete |
 | Cooking sessions | CloudKit | App-managed rolling 24-month window |
-| Voice turn metadata | Stir backend | Targeted 30 days; deletion on request |
-| Substitution events | Stir backend | Targeted 12 months; deletion on request |
-| Outcome feedback | Stir backend | Targeted 24 months; deletion on request |
+| Substitution events | CloudKit | Until you delete (lives alongside the cooking session) |
+| Outcome feedback (post-meal ratings) | CloudKit | Until you delete |
+| Voice turn metadata | Stir backend | Automatic; deleted hourly after 30 days |
+| AI request logs (operational, all features) | Stir backend | Automatic; deleted hourly after 30 days |
 | Raw kitchen scan images | Stir backend (transient) | Processed and discarded per request; not durably stored |
 | Imported recipe images | Stir backend (transient) | Processed and discarded per request; not durably stored |
 | Grocery export metadata | CloudKit | Until you delete |
-| AI request logs (operational) | Stir backend | Targeted 30 days; deletion on request |
 | Crash logs | Sentry (third-party processor) | Per Sentry's standard retention (~90 days) |
 | Analytics events | PostHog (third-party processor) | Per PostHog's standard retention (~13 months) |
 
-App-managed retentions (CloudKit) execute when you take an action in the App or directly in iCloud. Backend retentions marked "Targeted" describe the maximum window we intend to keep operational data and the period within which we will execute a deletion request you submit (see §7.7); we are progressively automating these as part of v1 ops hardening. If you require confirmation that a specific backend record has been deleted, submit a deletion request as described in §7.7.
+App-managed retentions (CloudKit) execute when you take an action in the App or directly in iCloud. Backend retention for AI request logs (including voice turn metadata) runs automatically via a scheduled job that deletes rows older than 30 days. If you require confirmation that a specific backend record has been deleted, submit a deletion request as described in §7.7.
 
 ## 7. Your rights (CCPA, CPRA)
 
