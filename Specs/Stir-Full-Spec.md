@@ -819,12 +819,39 @@ Use these exact messages everywhere; each screen references applicable codes.
 | `VOICE-SESSION-01`   | *(internal; iOS rebuilds voice driver silently)*                                         | Driver rebuild (silent)            |
 | `VAL-01`        | "Something went wrong. Please try again or contact support if this keeps happening."        | Retry / Contact Support            |
 | `AUTH-01`       | *(internal; auto-handled by iOS re-bootstrap)*                                              | Auto-refresh (silent)              |
+| `METHOD-NOT-ALLOWED-01` | *(internal; never user-visible — client bug)*                                       | None (Sentry alert)                |
 
-**`VAL-01` — request body validation failure.** Server returns `400 { error: "VAL-01", message, field_errors: [{ field, issue }] }`. iOS logs the full payload to Sentry at `error` severity and shows the generic user-visible copy above (one-tap Retry; Contact Support for persistent failures). iOS never retries automatically — a malformed request body is an iOS bug, not a transient failure. See `CLAUDE.md` §"VAL-01 response shape".
+**`VAL-01` — request body validation failure.** Server returns `400 { error: "VAL-01", message, field_errors: [{ field, issue }] }`. iOS logs the full payload to Sentry at `error` severity and shows the generic user-visible copy above (one-tap Retry; Contact Support for persistent failures). iOS never retries automatically — a malformed request body is an iOS bug, not a transient failure.
+
+`field_errors` shape:
+
+```json
+{
+  "error": "VAL-01",
+  "message": "Request body failed validation: 'installation_id' must be a UUID",
+  "field_errors": [
+    { "field": "installation_id", "issue": "Expected UUID, got 'abc123'" }
+  ]
+}
+```
+
+`message` is dev/Sentry-facing; `field_errors` is structured for iOS dashboards/tests. User-visible copy lives in iOS `ErrorPresenter`. Server logs at `warn` (every one is a client bug worth investigating). iOS: log to Sentry at `error` with full `field_errors`; show generic copy; **do not retry**; do not cache.
 
 **`AUTH-01` — session missing / expired / malformed / signature_invalid / user_stale / reauth_required.** Server returns `401 { error: "AUTH-01", message, reason: "missing" | "expired" | "malformed" | "signature_invalid" | "user_stale" | "reauth_required" }`. iOS auto-re-bootstraps via `/v1/session/bootstrap` and retries the original request ONCE for the first five reasons. `missing|expired|user_stale` are routine (info-level); `malformed|signature_invalid` page Sentry at alert threshold. **`reauth_required` is distinct:** set by admin `users.force_reauth` (step-8 ADR 0023), maps to a Sign-in-with-Apple re-flow (rotate Keychain install_id + clear canonical_user_key + nav to SIWA with header "Please sign in again to continue") rather than silent retry. If any retry-path 401s again, surface `NET-01` (no retry storm). See `CLAUDE.md` §"AUTH-01 response shape" and ADR 0023.
 
-**`VOICE-SESSION-01` — voice session lifecycle violation.** Server returns `{ error: "VOICE-SESSION-01", message, reason: "session_missing" | "owner_mismatch" | "session_closed" | "lookup_failed" }`. HTTP 403 for the first three reasons; HTTP 500 for `lookup_failed`. iOS rebuilds the voice driver silently — NEVER paywalls (`ENT-VOICE-01` has Premium-upsell semantics and would punish a superseded Premium user). Reasons: `session_missing` = mint-race or retention cron cleanup; `owner_mismatch` = IDOR attempt (authenticated user posting turns under another user's session_id); `session_closed` = superseded by a newer mint from the same user; `lookup_failed` = transient DB error during the `voice_session_owners` SELECT (replica lag, connectivity blip) — same silent-rebuild handler path; the distinction is server-side observability. Not listed on any screen-level applicable-errors row because the error is internal-only (matches `AUTH-01` treatment). See `CLAUDE.md` §"Error code matrix" and ADR 0017.
+**`VOICE-SESSION-01` — voice session lifecycle violation.** Server returns `{ error: "VOICE-SESSION-01", message, reason: "session_missing" | "owner_mismatch" | "session_closed" | "lookup_failed" }`. HTTP 403 for the first three reasons; HTTP 500 for `lookup_failed`. iOS rebuilds the voice driver silently — NEVER paywalls (`ENT-VOICE-01` has Premium-upsell semantics and would punish a superseded Premium user). Reasons: `session_missing` = mint-race or retention cron cleanup; `owner_mismatch` = IDOR attempt (authenticated user posting turns under another user's session_id); `session_closed` = superseded by a newer mint from the same user; `lookup_failed` = transient DB error during the `voice_session_owners` SELECT (replica lag, connectivity blip) — same silent-rebuild handler path; the distinction is server-side observability. Not listed on any screen-level applicable-errors row because the error is internal-only (matches `AUTH-01` treatment). See ADR 0017.
+
+**`METHOD-NOT-ALLOWED-01` — wrong HTTP method against an endpoint.** Server returns `405 { error: "METHOD-NOT-ALLOWED-01", message }`. Internal-only (client bug, never user-visible) — same treatment as `AUTH-01` and `VOICE-SESSION-01`. iOS logs to Sentry at `error` with the offending request line. No retry (client bug). Mapped at the Edge Function shared handler boundary: any handler whose `Allow` header doesn't include the incoming `request.method` returns this code. iOS should never fire one in steady state — appearance in production telemetry indicates an endpoint contract drift between iOS and Edge Functions.
+
+**ENT-\* paywall trigger mapping.** Each entitlement-gated error code maps 1:1 to a `paywall_viewed.trigger` value (see §15). When iOS receives one of these codes from a server-gated action, it routes to `PaywallView` with the matching trigger:
+
+| Server error | `paywall_viewed.trigger` | Origin surface |
+| --- | --- | --- |
+| `ENT-VOICE-01` | `voice_affordance_tapped` (Free tap) or `voice_cook_quota_exhausted` (cap reached) | Cook Mode mic affordance |
+| `ENT-MULTI-IMAGE-01` | `multi_image_scan_gate` | Scan Camera (≥2 photo selection) |
+| `ENT-LEFTOVERS-01` | `leftovers_gate` | Post-cook feedback (leftover count >0) |
+
+Other paywall triggers (`dinner_solve_quota_exhausted`, `pantry_cap_reached`, `recipe_import_quota_exhausted`, `saved_favorites_gate`, `widgets_gate`, `settings_upgrade`) originate from client-side gates rather than server error codes and don't have a corresponding `ENT-*` row.
 
 ### Accessibility baseline
 
