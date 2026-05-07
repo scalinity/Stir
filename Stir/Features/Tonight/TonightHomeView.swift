@@ -389,6 +389,7 @@ struct TonightHomeView: View {
                     title: pick.title,
                     solvedAt: pick.solvedAt,
                     isHighMatch: pick.confidence >= 0.7,
+                    isFromLeftovers: pick.isFromLeftovers,
                     estimatedMinutes: pick.estimatedMinutes,
                     servings: pick.servings,
                     chips: pick.chips,
@@ -740,6 +741,13 @@ private struct TonightPickHeroCard: View {
     let title: String
     let solvedAt: Date
     let isHighMatch: Bool
+    /// SCA-70 visibility fix: when true, swap the high-match badge for
+    /// a "From your leftovers" eyebrow so the user understands the
+    /// pedigree of the current pick. The two badges are mutually
+    /// exclusive in the same slot — leftovers solves don't carry a
+    /// model confidence (set to 0 in `createLeftoversSolveWithDish`)
+    /// so `isHighMatch` is always false for them anyway.
+    let isFromLeftovers: Bool
     let estimatedMinutes: Int
     let servings: Int
     let chips: [String]
@@ -791,7 +799,14 @@ private struct TonightPickHeroCard: View {
             .frame(maxWidth: .infinity)
 
             HStack(alignment: .top) {
-                if isHighMatch {
+                // SCA-70: leftovers eyebrow takes precedence over the
+                // high-match badge when both could fire (in practice
+                // they're mutually exclusive — leftovers solves carry
+                // confidence=0 so isHighMatch is always false). Empty
+                // group falls through to the spacer when neither fires.
+                if isFromLeftovers {
+                    leftoversBadge
+                } else if isHighMatch {
                     highMatchBadge
                 }
                 Spacer(minLength: CGFloat.Stir.space2)
@@ -800,6 +815,28 @@ private struct TonightPickHeroCard: View {
             .padding(.horizontal, CGFloat.Stir.space3)
             .padding(.top, CGFloat.Stir.space3)
         }
+    }
+
+    private var leftoversBadge: some View {
+        HStack(spacing: CGFloat.Stir.space1) {
+            Image(systemName: "shippingbox.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.Stir.sage600)
+            Text("FROM YOUR LEFTOVERS")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.sage600)
+        }
+        .padding(.horizontal, CGFloat.Stir.space2 + 2) // 10pt
+        .padding(.vertical, CGFloat.Stir.space1)       // 4pt
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.Stir.paper50),
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Color.Stir.sage600.opacity(0.4), lineWidth: 0.5),
+        )
+        .accessibilityLabel("From your leftovers — Solve again to re-roll")
     }
 
     private var highMatchBadge: some View {
@@ -1141,6 +1178,7 @@ private struct PlateIllustration: View {
         title: "Miso-Glazed Salmon with Sesame Rice",
         solvedAt: Date().addingTimeInterval(-180),
         isHighMatch: true,
+        isFromLeftovers: false,
         estimatedMinutes: 22,
         servings: 4,
         chips: ["pescatarian", "nut-free", "quick"],
@@ -1158,6 +1196,7 @@ private struct PlateIllustration: View {
         title: "Miso-Glazed Salmon with Sesame Rice",
         solvedAt: Date().addingTimeInterval(-180),
         isHighMatch: true,
+        isFromLeftovers: false,
         estimatedMinutes: 22,
         servings: 4,
         chips: ["pescatarian", "nut-free", "quick"],

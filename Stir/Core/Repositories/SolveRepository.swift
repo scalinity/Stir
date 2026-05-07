@@ -356,6 +356,15 @@ final class SolveRepository {
         /// rule values plus a synthetic "quick" tag when the dish is
         /// ≤30 min. Capped at 3 entries — mockup 03 shows three chips.
         let chips: [String]
+        /// SCA-70 visibility fix: true when the underlying
+        /// `MealSolveRequest.sourceRecipePlanId != nil` — i.e., this
+        /// pick was promoted from a Leftovers handoff rather than a
+        /// regular dinner-solve. TonightHomeView surfaces a "From your
+        /// leftovers" eyebrow on the hero card so the user understands
+        /// what they're looking at; the "Solve again" affordance below
+        /// the hero is the documented escape hatch (LeftoversSolveView
+        /// helper text "Solve again to re-roll").
+        let isFromLeftovers: Bool
     }
 
     /// Latest dish to surface as the Tonight hero card. Picks the user-
@@ -426,6 +435,7 @@ final class SolveRepository {
             estimatedMinutes: Int(dish.estimatedMinutes),
             servings: Int(plan.servings),
             chips: chips,
+            isFromLeftovers: solve.sourceRecipePlanId != nil,
         )
     }
 
