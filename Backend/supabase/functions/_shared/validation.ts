@@ -199,15 +199,17 @@ export const DinnerSolveRequest = z.object({
   feedback_summary: z.object({
     recent_meal_count: z.number().int().min(0).max(1000),
     window_days: z.number().int().min(1).max(366),
-    recent_meals: z.array(z.object({
-      title: z.string().min(1).max(80),
-      rating: z.number().int().min(1).max(5),
-      workload: z.enum(['easy', 'medium', 'hard']),
-      taste: z.enum(['loved', 'good', 'ok', 'bad']),
-      spice_level: z.enum(['mild', 'medium', 'hot', 'too_hot']),
-      would_repeat: z.boolean(),
-      cooked_days_ago: z.number().int().min(0).max(366),
-    }).strict()).max(10),
+    recent_meals: z.array(
+      z.object({
+        title: z.string().min(1).max(80),
+        rating: z.number().int().min(1).max(5),
+        workload: z.enum(['easy', 'medium', 'hard']),
+        taste: z.enum(['loved', 'good', 'ok', 'bad']),
+        spice_level: z.enum(['mild', 'medium', 'hot', 'too_hot']),
+        would_repeat: z.boolean(),
+        cooked_days_ago: z.number().int().min(0).max(366),
+      }).strict(),
+    ).max(10),
     aggregates: z.object({
       average_rating: z.number().min(1).max(5),
       dominant_taste: z.enum(['loved', 'good', 'ok', 'bad']),
@@ -217,11 +219,13 @@ export const DinnerSolveRequest = z.object({
       would_repeat_rate: z.number().min(0).max(1),
     }).strict().nullable(),
     disliked_meals: z.array(z.string().min(1).max(80)).max(5),
-    highlight_notes: z.array(z.object({
-      title: z.string().min(1).max(80),
-      rating: z.number().int().min(1).max(5),
-      note: z.string().min(1).max(100),
-    }).strict()).max(3),
+    highlight_notes: z.array(
+      z.object({
+        title: z.string().min(1).max(80),
+        rating: z.number().int().min(1).max(5),
+        note: z.string().min(1).max(100),
+      }).strict(),
+    ).max(3),
   }).strict().optional(),
 }).strict().refine(
   // Guard rails: leftovers mode must carry items; standard mode must not.
@@ -359,28 +363,36 @@ const RealtimeRecipeContext = z.object({
   // bound; each instruction capped at 2000 chars to match
   // `current_step_text`. Timer bound mirrors
   // `current_step_timer_seconds`.
-  all_steps: z.array(z.object({
-    step_number: z.number().int().min(1).max(100),
-    text: z.string().min(1).max(2000),
-    timer_seconds: z.number().int().min(0).max(36000).nullable(),
-  }).strict()).max(100),
-  remaining_ingredients: z.array(z.object({
-    display_name: z.string().min(1).max(128),
-    canonical_slug: z.string().min(1).max(128).optional(),
-  }).strict()).max(50),
+  all_steps: z.array(
+    z.object({
+      step_number: z.number().int().min(1).max(100),
+      text: z.string().min(1).max(2000),
+      timer_seconds: z.number().int().min(0).max(36000).nullable(),
+    }).strict(),
+  ).max(100),
+  remaining_ingredients: z.array(
+    z.object({
+      display_name: z.string().min(1).max(128),
+      canonical_slug: z.string().min(1).max(128).optional(),
+    }).strict(),
+  ).max(50),
 }).strict();
 
 const RealtimeHouseholdContext = z.object({
-  dietary_rules: z.array(z.object({
-    kind: DietaryRuleKind,
-    value: z.string().min(1).max(64),
-    severity: DietaryRuleSeverity,
-  }).strict()).max(50),
+  dietary_rules: z.array(
+    z.object({
+      kind: DietaryRuleKind,
+      value: z.string().min(1).max(64),
+      severity: DietaryRuleSeverity,
+    }).strict(),
+  ).max(50),
   available_equipment: z.array(z.string().min(1).max(64)).max(50),
-  pantry_snapshot: z.array(z.object({
-    display_name: z.string().min(1).max(128),
-    canonical_slug: z.string().min(1).max(128).optional(),
-  }).strict()).max(200),
+  pantry_snapshot: z.array(
+    z.object({
+      display_name: z.string().min(1).max(128),
+      canonical_slug: z.string().min(1).max(128).optional(),
+    }).strict(),
+  ).max(200),
 }).strict();
 
 export const RealtimeSessionRequest = z.object({
@@ -501,9 +513,10 @@ export const VoiceTurnUsageRequest = z.object({
   // .refine() on an inner object is still validated per-item when
   // z.array() runs — same effective coverage, cleaner error message.
   .refine(
-    (body) => body.turns.every(
-      (t) => (t.prompt_tokens_cached ?? 0) <= t.prompt_tokens_total,
-    ),
+    (body) =>
+      body.turns.every(
+        (t) => (t.prompt_tokens_cached ?? 0) <= t.prompt_tokens_total,
+      ),
     {
       message: 'prompt_tokens_cached must not exceed prompt_tokens_total',
       path: ['turns'],
@@ -542,7 +555,7 @@ const UrlImportPayload = z.object({
 
 const ScreenshotOcrPayload = z.object({
   url: z.undefined().optional(),
-  ocr_text: z.string().min(1).max(200_000),   // ~50 pages of OCR text
+  ocr_text: z.string().min(1).max(200_000), // ~50 pages of OCR text
   pasted_text: z.undefined().optional(),
   ocr_page_count: z.number().int().min(1).max(20),
 }).strict();
@@ -628,7 +641,7 @@ export const GroceryGenerateRequest = z.object({
   source_type: z.enum(['recipe', 'session', 'leftovers']),
   ingredients_needed: z.array(GroceryIngredient).min(1).max(200),
   pantry_snapshot: z.array(GroceryPantryItem).max(500),
-  recipe_title: z.string().min(1).max(256).optional(),   // context for model; aids category inference
+  recipe_title: z.string().min(1).max(256).optional(), // context for model; aids category inference
 }).strict();
 
 export type GroceryGenerateRequest = z.infer<typeof GroceryGenerateRequest>;

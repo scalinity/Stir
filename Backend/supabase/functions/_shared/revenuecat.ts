@@ -100,10 +100,10 @@ const RevenueCatEvent = z.object({
   original_app_user_id: canonicalKey.optional(),
   aliases: z.array(z.string()).optional(),
   new_app_user_id: canonicalKey.optional(), // SUBSCRIBER_ALIAS
-  transferred_from: z.array(canonicalKey).optional(),  // TRANSFER
-  transferred_to: z.array(canonicalKey).optional(),    // TRANSFER
+  transferred_from: z.array(canonicalKey).optional(), // TRANSFER
+  transferred_to: z.array(canonicalKey).optional(), // TRANSFER
   product_id: z.string().min(1).max(256).optional(),
-  period_type: z.string().min(1).max(64).optional(),      // "NORMAL" | "INTRO" | "TRIAL" | "PROMOTIONAL"
+  period_type: z.string().min(1).max(64).optional(), // "NORMAL" | "INTRO" | "TRIAL" | "PROMOTIONAL"
   purchased_at_ms: z.number().int().nonnegative().optional(),
   expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
   environment: z.enum(['SANDBOX', 'PRODUCTION']).optional(),
@@ -128,10 +128,10 @@ export type RevenueCatEvent = z.infer<typeof RevenueCatEvent>;
 // silently add SKUs, they have to flow through cohort-economics math too.
 
 export const PRODUCT_TIER_MAP: Readonly<Record<string, UserTier>> = Object.freeze({
-  'stir.premium.monthly':       'premium',
+  'stir.premium.monthly': 'premium',
   'stir.premium.annual.trial7': 'premium',
-  'stir.pro.monthly':           'pro',
-  'stir.pro.annual':            'pro',
+  'stir.pro.monthly': 'pro',
+  'stir.pro.annual': 'pro',
 });
 
 export function productIdToTier(productId: string | undefined): UserTier | null {
@@ -251,7 +251,7 @@ export function isEventFresh(
   now: number = Date.now(),
 ): boolean {
   const ts = event.event_timestamp_ms;
-  if (ts == null) return true;  // RC test events omit; allow.
+  if (ts == null) return true; // RC test events omit; allow.
   const age = now - ts;
   // Past: age > window → stale. Future: age < 0 → clock skew or forgery;
   // allow up to 60s future tolerance for RC server-clock drift.
@@ -448,7 +448,9 @@ export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
       if (!from || !to || from === to) {
         return {
           kind: 'ignore',
-          reason: `SUBSCRIBER_ALIAS missing or same-value original_app_user_id (from=${from ?? '<null>'}, to=${to})`,
+          reason: `SUBSCRIBER_ALIAS missing or same-value original_app_user_id (from=${
+            from ?? '<null>'
+          }, to=${to})`,
         };
       }
       return { kind: 'alias', from, to };
@@ -472,7 +474,9 @@ export function resolveEventAction(event: RevenueCatEvent): EntitlementAction {
       if (!from || !to || from === to) {
         return {
           kind: 'ignore',
-          reason: `TRANSFER missing or same-value transferred_from/to (from=${from ?? '<null>'}, to=${to ?? '<null>'})`,
+          reason: `TRANSFER missing or same-value transferred_from/to (from=${
+            from ?? '<null>'
+          }, to=${to ?? '<null>'})`,
         };
       }
       return { kind: 'transfer', from, to };

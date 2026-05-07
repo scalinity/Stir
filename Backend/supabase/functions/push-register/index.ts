@@ -23,7 +23,11 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { PushRegisterRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -47,7 +51,10 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof AuthError) {
       log.warn('auth_failed', { reason: err.reason });
-      return jsonError(ErrorCode.AUTH_01, 401, { message: 'Session expired or missing.', reason: err.reason }, requestId);
+      return jsonError(ErrorCode.AUTH_01, 401, {
+        message: 'Session expired or missing.',
+        reason: err.reason,
+      }, requestId);
     }
     log.error('auth_unexpected', err);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
@@ -72,7 +79,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -85,7 +95,12 @@ Deno.serve(async (req) => {
     const ipRl = await checkAndIncrement(client, 'ip:push_register_hourly', sourceIP);
     if (!ipRl.allowed) {
       userLog.warn('rate_limited', { scope: 'ip:push_register_hourly' });
-      return buildRate01Response('ip:push_register_hourly', ipRl.retry_after_seconds, ipRl.reset_at, requestId);
+      return buildRate01Response(
+        'ip:push_register_hourly',
+        ipRl.retry_after_seconds,
+        ipRl.reset_at,
+        requestId,
+      );
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
@@ -95,10 +110,16 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'user_stale' }, requestId);
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User not found; re-bootstrap.',
+      reason: 'user_stale',
+    }, requestId);
   }
   if (userRow.status === 'banned') {
-    return jsonError(ErrorCode.BILL_01, 403, { message: 'Account is not eligible for Stir.', state: 'banned' }, requestId);
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
   }
 
   // ---- Upsert: find the most recent device_installation for this user
@@ -143,8 +164,7 @@ Deno.serve(async (req) => {
       // (step-8 reactivation campaigns, ops dashboards). notification_
       // prefs_json remains the per-category source of truth; the
       // boolean is a cheap "any push at all?" index.
-      notifications_enabled:
-        body.notification_prefs.import_completion ||
+      notifications_enabled: body.notification_prefs.import_completion ||
         body.notification_prefs.reactivation,
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),

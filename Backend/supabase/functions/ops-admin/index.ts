@@ -24,7 +24,12 @@ import {
   verifyAdminAuth,
 } from '../_shared/admin_auth.ts';
 import { writeAudit } from '../_shared/audit.ts';
-import { createLogger, requestIdFrom, sanitizeErrorForLog, type Logger } from '../_shared/logger.ts';
+import {
+  createLogger,
+  type Logger,
+  requestIdFrom,
+  sanitizeErrorForLog,
+} from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
 import {
@@ -144,17 +149,29 @@ const FeatureFlagsUpdateParams = z.object({
 }).strict();
 
 const AdminActionSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('users.list'),          params: UsersListParams.default({}) }).strict(),
-  z.object({ action: z.literal('users.detail'),        params: UsersDetailParams }).strict(),
-  z.object({ action: z.literal('users.reset_quota'),   params: UsersResetQuotaParams }).strict(),
-  z.object({ action: z.literal('users.status'),        params: UsersStatusParams }).strict(),
-  z.object({ action: z.literal('users.force_reauth'),  params: UsersForceReauthParams }).strict(),
-  z.object({ action: z.literal('flagged_outputs.list'),    params: FlaggedOutputsListParams.default({}) }).strict(),
-  z.object({ action: z.literal('flagged_outputs.resolve'), params: FlaggedOutputsResolveParams }).strict(),
-  z.object({ action: z.literal('cost_anomalies.list'),     params: CostAnomaliesListParams.default({}) }).strict(),
-  z.object({ action: z.literal('voice_sessions.list'),     params: VoiceSessionsListParams.default({}) }).strict(),
-  z.object({ action: z.literal('prompt_versions.rollout'), params: PromptVersionsRolloutParams }).strict(),
-  z.object({ action: z.literal('feature_flags.update'),    params: FeatureFlagsUpdateParams }).strict(),
+  z.object({ action: z.literal('users.list'), params: UsersListParams.default({}) }).strict(),
+  z.object({ action: z.literal('users.detail'), params: UsersDetailParams }).strict(),
+  z.object({ action: z.literal('users.reset_quota'), params: UsersResetQuotaParams }).strict(),
+  z.object({ action: z.literal('users.status'), params: UsersStatusParams }).strict(),
+  z.object({ action: z.literal('users.force_reauth'), params: UsersForceReauthParams }).strict(),
+  z.object({
+    action: z.literal('flagged_outputs.list'),
+    params: FlaggedOutputsListParams.default({}),
+  }).strict(),
+  z.object({ action: z.literal('flagged_outputs.resolve'), params: FlaggedOutputsResolveParams })
+    .strict(),
+  z.object({
+    action: z.literal('cost_anomalies.list'),
+    params: CostAnomaliesListParams.default({}),
+  }).strict(),
+  z.object({
+    action: z.literal('voice_sessions.list'),
+    params: VoiceSessionsListParams.default({}),
+  }).strict(),
+  z.object({ action: z.literal('prompt_versions.rollout'), params: PromptVersionsRolloutParams })
+    .strict(),
+  z.object({ action: z.literal('feature_flags.update'), params: FeatureFlagsUpdateParams })
+    .strict(),
 ]);
 
 type AdminAction = z.infer<typeof AdminActionSchema>;
@@ -213,7 +230,10 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
     if (!rl.allowed) {
-      log.warn('rate_limited', { scope: 'ip:ops_admin_hourly', source_ip_bucket: await ipBucket(sourceIP) });
+      log.warn('rate_limited', {
+        scope: 'ip:ops_admin_hourly',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
       return buildRate01Response(
         'ip:ops_admin_hourly',
         rl.retry_after_seconds,
@@ -295,17 +315,28 @@ interface HandlerCtx {
 
 async function dispatch(parsed: AdminAction, ctx: HandlerCtx): Promise<Record<string, unknown>> {
   switch (parsed.action) {
-    case 'users.list':               return await handleUsersList(parsed.params, ctx);
-    case 'users.detail':             return await handleUsersDetail(parsed.params, ctx);
-    case 'users.reset_quota':        return await handleUsersResetQuota(parsed.params, ctx);
-    case 'users.status':             return await handleUsersStatus(parsed.params, ctx);
-    case 'users.force_reauth':       return await handleUsersForceReauth(parsed.params, ctx);
-    case 'flagged_outputs.list':     return await handleFlaggedOutputsList(parsed.params, ctx);
-    case 'flagged_outputs.resolve':  return await handleFlaggedOutputsResolve(parsed.params, ctx);
-    case 'cost_anomalies.list':      return await handleCostAnomaliesList(parsed.params, ctx);
-    case 'voice_sessions.list':      return await handleVoiceSessionsList(parsed.params, ctx);
-    case 'prompt_versions.rollout':  return await handlePromptVersionsRollout(parsed.params, ctx);
-    case 'feature_flags.update':     return await handleFeatureFlagsUpdate(parsed.params, ctx);
+    case 'users.list':
+      return await handleUsersList(parsed.params, ctx);
+    case 'users.detail':
+      return await handleUsersDetail(parsed.params, ctx);
+    case 'users.reset_quota':
+      return await handleUsersResetQuota(parsed.params, ctx);
+    case 'users.status':
+      return await handleUsersStatus(parsed.params, ctx);
+    case 'users.force_reauth':
+      return await handleUsersForceReauth(parsed.params, ctx);
+    case 'flagged_outputs.list':
+      return await handleFlaggedOutputsList(parsed.params, ctx);
+    case 'flagged_outputs.resolve':
+      return await handleFlaggedOutputsResolve(parsed.params, ctx);
+    case 'cost_anomalies.list':
+      return await handleCostAnomaliesList(parsed.params, ctx);
+    case 'voice_sessions.list':
+      return await handleVoiceSessionsList(parsed.params, ctx);
+    case 'prompt_versions.rollout':
+      return await handlePromptVersionsRollout(parsed.params, ctx);
+    case 'feature_flags.update':
+      return await handleFeatureFlagsUpdate(parsed.params, ctx);
     default: {
       // Exhaustiveness guard (review W45). TS can't narrow z.infer<any>
       // through discriminated-switch at the Zod seam, so we fall through
@@ -366,7 +397,11 @@ async function handleUsersForceReauth(
     // raw SQL text. Any other PGRST failure is genuine infra → NET-01 500.
     const msg = String(error.message ?? '');
     if (msg.includes('user not found')) {
-      throw new DispatchError(ErrorCode.VAL_01, 404, `user not found: ${params.canonical_user_key}`);
+      throw new DispatchError(
+        ErrorCode.VAL_01,
+        404,
+        `user not found: ${params.canonical_user_key}`,
+      );
     }
     throw new Error(`stir_ops_force_reauth failed: ${msg}`);
   }
@@ -557,10 +592,18 @@ async function handleFlaggedOutputsResolve(
 ): Promise<Record<string, unknown>> {
   // Require canned_fallback_json iff action is canned_fallback_pinned.
   if (params.action === 'canned_fallback_pinned' && params.canned_fallback_json === undefined) {
-    throw new DispatchError(ErrorCode.VAL_01, 400, 'canned_fallback_json required for canned_fallback_pinned action');
+    throw new DispatchError(
+      ErrorCode.VAL_01,
+      400,
+      'canned_fallback_json required for canned_fallback_pinned action',
+    );
   }
   if (params.action !== 'canned_fallback_pinned' && params.canned_fallback_json !== undefined) {
-    throw new DispatchError(ErrorCode.VAL_01, 400, 'canned_fallback_json only allowed for canned_fallback_pinned action');
+    throw new DispatchError(
+      ErrorCode.VAL_01,
+      400,
+      'canned_fallback_json only allowed for canned_fallback_pinned action',
+    );
   }
 
   // Fetch the flagged row to get the request_id + canonical_user_key_hash for

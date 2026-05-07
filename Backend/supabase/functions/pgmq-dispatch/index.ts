@@ -27,18 +27,18 @@
 import { z } from 'zod';
 import { createServiceClient } from '../_shared/db.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
-import { jsonOk, jsonError, ErrorCode } from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
 import { sendAPNsPush } from '../_shared/apns.ts';
 
-const CLAIM_LIMIT = 10;      // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
+const CLAIM_LIMIT = 10; // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
-const RETRY_BACKOFF_SECONDS = [60, 300, 900];  // 1m, 5m, 15m
-const STUCK_JOB_TIMEOUT_MINUTES = 5;  // processing → pending re-queue threshold
+const RETRY_BACKOFF_SECONDS = [60, 300, 900]; // 1m, 5m, 15m
+const STUCK_JOB_TIMEOUT_MINUTES = 5; // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
 const MODEL = GeminiModel.FlashLite;
 
@@ -181,7 +181,10 @@ Deno.serve(async (req) => {
       return jsonError(
         ErrorCode.AUTH_01,
         401,
-        { reason: 'signature_invalid' as never, message: 'Missing or invalid pgmq-dispatch shared secret.' },
+        {
+          reason: 'signature_invalid' as never,
+          message: 'Missing or invalid pgmq-dispatch shared secret.',
+        },
         requestId,
       );
     }
@@ -263,7 +266,8 @@ Deno.serve(async (req) => {
 
   log.info('claimed_jobs', { count: claimed.length });
 
-  const results: Array<{ job_id: string; kind: string; status: 'completed' | 'failed' | 'retry' }> = [];
+  const results: Array<{ job_id: string; kind: string; status: 'completed' | 'failed' | 'retry' }> =
+    [];
 
   for (const job of claimed) {
     try {
@@ -285,18 +289,33 @@ Deno.serve(async (req) => {
         results.push({ job_id: job.id, kind: job.kind, status: 'failed' });
         log.warn('job_failed_terminal', { job_id: job.id, attempt: nextAttempt, err: msg });
       } else {
-        const backoff = RETRY_BACKOFF_SECONDS[job.attempt_count] ?? RETRY_BACKOFF_SECONDS[RETRY_BACKOFF_SECONDS.length - 1]!;
+        const backoff = RETRY_BACKOFF_SECONDS[job.attempt_count] ??
+          RETRY_BACKOFF_SECONDS[RETRY_BACKOFF_SECONDS.length - 1]!;
         await scheduleJobRetry(client, job.id, backoff, msg.slice(0, 1024));
         results.push({ job_id: job.id, kind: job.kind, status: 'retry' });
-        log.warn('job_failed_retry', { job_id: job.id, attempt: nextAttempt, backoff_sec: backoff, err: msg });
+        log.warn('job_failed_retry', {
+          job_id: job.id,
+          attempt: nextAttempt,
+          backoff_sec: backoff,
+          err: msg,
+        });
       }
     }
   }
 
   const elapsedMs = Math.round(performance.now() - started);
-  log.info('tick_complete', { claimed: claimed.length, processed: results.length, elapsed_ms: elapsedMs });
+  log.info('tick_complete', {
+    claimed: claimed.length,
+    processed: results.length,
+    elapsed_ms: elapsedMs,
+  });
 
-  return jsonOk({ claimed: claimed.length, processed: results.length, results, elapsed_ms: elapsedMs }, requestId);
+  return jsonOk({
+    claimed: claimed.length,
+    processed: results.length,
+    results,
+    elapsed_ms: elapsedMs,
+  }, requestId);
 });
 
 // -----------------------------------------------------------------------------
@@ -317,7 +336,9 @@ async function processRecipeImportAsync(
       job_id: job.id,
       issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
     });
-    throw new Error('invalid recipe_import_async payload (see recipe_import_async_payload_invalid log)');
+    throw new Error(
+      'invalid recipe_import_async payload (see recipe_import_async_payload_invalid log)',
+    );
   }
   const payload: RecipeImportAsyncPayload = parsed.data;
 
@@ -381,10 +402,15 @@ async function processRecipeImportAsync(
     textOutputTokens: totalOutputTokens,
   });
 
-  const userLog = await createLogger(job.id, '/v1/ops/pgmq-dispatch:recipe_import', job.canonical_user_key);
+  const userLog = await createLogger(
+    job.id,
+    '/v1/ops/pgmq-dispatch:recipe_import',
+    job.canonical_user_key,
+  );
 
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: payload.import_id,
       canonical_user_key: job.canonical_user_key,
@@ -411,7 +437,11 @@ async function processRecipeImportAsync(
   );
 
   if (!recipe) {
-    throw new Error(`recipe normalization failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+    throw new Error(
+      `recipe normalization failed: ${
+        lastErr instanceof Error ? lastErr.message : String(lastErr)
+      }`,
+    );
   }
 
   const responseBody = {
@@ -425,7 +455,14 @@ async function processRecipeImportAsync(
 
   // Write to ai_response_cache — the iOS client's next POST with the same
   // import_id will hit this cache and return instantly.
-  await writeCache(client, job.canonical_user_key, payload.import_id, RECIPE_IMPORT_FEATURE_KEY, 200, responseBody);
+  await writeCache(
+    client,
+    job.canonical_user_key,
+    payload.import_id,
+    RECIPE_IMPORT_FEATURE_KEY,
+    200,
+    responseBody,
+  );
 
   // Mark job completed.
   const { error: markErr } = await client
@@ -478,10 +515,15 @@ async function maybeSendImportCompletionPush(
       notification_prefs_json: { import_completion?: boolean } | null;
     }>();
   if (error || !installRow) {
-    log.info('no_push_install_for_user', { canonical_user_key_hint: canonicalUserKey.slice(0, 12) });
+    log.info('no_push_install_for_user', {
+      canonical_user_key_hint: canonicalUserKey.slice(0, 12),
+    });
     return;
   }
-  if (installRow.notifications_enabled !== true || installRow.notification_prefs_json?.import_completion !== true) {
+  if (
+    installRow.notifications_enabled !== true ||
+    installRow.notification_prefs_json?.import_completion !== true
+  ) {
     log.info('push_opted_out', { category: 'import_completion' });
     return;
   }
@@ -595,7 +637,9 @@ async function processPushSend(
   const parsed = PushSendPayloadSchema.safeParse(job.payload_json);
   if (!parsed.success) {
     throw new Error(
-      `invalid push_send payload: ${parsed.error.errors.map((e) => `${e.path.join('.')}=${e.message}`).join(', ')}`,
+      `invalid push_send payload: ${
+        parsed.error.errors.map((e) => `${e.path.join('.')}=${e.message}`).join(', ')
+      }`,
     );
   }
   const payload: PushSendPayload = parsed.data;
@@ -652,6 +696,8 @@ async function processPushSend(
 
   // Other failures re-throw; outer loop schedules retry with backoff.
   throw new Error(
-    `APNs push failed (reason=${result.reason}, status=${result.status}, apns=${result.apnsReason ?? 'n/a'})`,
+    `APNs push failed (reason=${result.reason}, status=${result.status}, apns=${
+      result.apnsReason ?? 'n/a'
+    })`,
   );
 }

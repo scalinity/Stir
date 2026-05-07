@@ -22,11 +22,12 @@
 // using an ephemeral token. v1alpha (NOT v1beta) for Constrained path.
 
 const MINT_URL = 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens';
-const WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+const WS_BASE =
+  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
 
 /** Stir policy constants from CLAUDE.md §Gemini Live constants. */
-export const LIVE_MINT_OPEN_WINDOW_SEC = 60;     // session must open within 60s
-export const LIVE_MINT_HARD_DEADLINE_SEC = 35 * 60;  // session itself times out at 35min (5min past the 30min model limit)
+export const LIVE_MINT_OPEN_WINDOW_SEC = 60; // session must open within 60s
+export const LIVE_MINT_HARD_DEADLINE_SEC = 35 * 60; // session itself times out at 35min (5min past the 30min model limit)
 
 /** Function tool declarations baked into the session. CLAUDE.md §Cook
  * Mode Architecture §7. Ordering is stable so prompt_versions schema_hash
@@ -35,14 +36,20 @@ export const COOK_MODE_TOOLS: Array<Record<string, unknown>> = [
   {
     name: 'substitution_check',
     description:
-      'Check safe ingredient substitutions against the current recipe and the user\'s dietary rules. ' +
+      "Check safe ingredient substitutions against the current recipe and the user's dietary rules. " +
       'Before calling this tool, you MUST first say a short filler out loud like "Let me see what\'ll work" or "Let me check that". ' +
       'Never call this tool without speaking first.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        missing_ingredient: { type: 'STRING', description: 'Ingredient the user is out of, as a short display name.' },
-        user_problem: { type: 'STRING', description: 'Short paraphrase of what the user said, for logs.' },
+        missing_ingredient: {
+          type: 'STRING',
+          description: 'Ingredient the user is out of, as a short display name.',
+        },
+        user_problem: {
+          type: 'STRING',
+          description: 'Short paraphrase of what the user said, for logs.',
+        },
       },
       required: ['missing_ingredient'],
     },
@@ -93,7 +100,8 @@ export const COOK_MODE_TOOLS: Array<Record<string, unknown>> = [
       properties: {
         seconds: {
           type: 'INTEGER',
-          description: 'Optional duration in seconds for the restarted timer. If omitted, reuses the existing timer\'s total duration. Required if no timer currently exists on this step.',
+          description:
+            "Optional duration in seconds for the restarted timer. If omitted, reuses the existing timer's total duration. Required if no timer currently exists on this step.",
         },
         label: { type: 'STRING', description: 'Optional label for the restarted timer.' },
       },
@@ -108,7 +116,8 @@ export const COOK_MODE_TOOLS: Array<Record<string, unknown>> = [
       properties: {
         step_number: {
           type: 'INTEGER',
-          description: '1-indexed step number to navigate to. Must be between 1 and total_steps inclusive.',
+          description:
+            '1-indexed step number to navigate to. Must be between 1 and total_steps inclusive.',
         },
       },
       required: ['step_number'],
@@ -217,15 +226,13 @@ export async function mintLiveToken(config: LiveMintConfig): Promise<LiveMintRes
   // VAD profile switch — `semantic_vad` is the tuned-for-kitchen
   // config; `server_vad` is the escape hatch that defers to Gemini's
   // defaults if the tuned config misbehaves.
-  const automaticActivityDetection = turnDetectionMode === 'server_vad'
-    ? { disabled: false }
-    : {
-        disabled: false,
-        silenceDurationMs: 800,
-        prefixPaddingMs: 300,
-        startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
-        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
-      };
+  const automaticActivityDetection = turnDetectionMode === 'server_vad' ? { disabled: false } : {
+    disabled: false,
+    silenceDurationMs: 800,
+    prefixPaddingMs: 300,
+    startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+    endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+  };
 
   const bidiGenerateContentSetup = {
     model: config.model,

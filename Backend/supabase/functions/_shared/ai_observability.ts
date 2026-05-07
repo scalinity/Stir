@@ -130,8 +130,10 @@ export function recordAIRequest(
     // aggregate SUM($ai_cache_read_input_tokens) don't lose their
     // "how many cache reads fired?" count. Feeds the spec §9 cap-
     // reversal trigger (cachedContentTokenCount ≥ 50% of prompt).
-    if (rowEntry.prompt_cached_tokens !== undefined
-        && rowEntry.prompt_cached_tokens > 0) {
+    if (
+      rowEntry.prompt_cached_tokens !== undefined &&
+      rowEntry.prompt_cached_tokens > 0
+    ) {
       properties.$ai_cache_read_input_tokens = rowEntry.prompt_cached_tokens;
     }
     if (rowEntry.prompt_version !== undefined) {

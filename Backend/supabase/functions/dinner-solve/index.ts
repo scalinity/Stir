@@ -29,31 +29,20 @@
 import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
-import {
-  ErrorCode,
-  jsonError,
-  jsonOk,
-} from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { DinnerSolveRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
-import {
-  incrementQuotaAtomic,
-  refundQuota,
-} from '../_shared/quota.ts';
-import {
-  type CandidateDish,
-  type DishContext,
-  validateDish,
-} from '../_shared/hard_rules.ts';
+import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
+import { type CandidateDish, type DishContext, validateDish } from '../_shared/hard_rules.ts';
 import { effectiveTier, readEntitlement } from '../_shared/entitlements.ts';
 
 const FEATURE_KEY = 'dinner_solve';
@@ -114,9 +103,15 @@ const DISH_SCHEMA: Record<string, unknown> = {
     reasoning_summary: { type: 'STRING' },
   },
   required: [
-    'rank', 'title', 'total_time_minutes', 'why_it_fits',
-    'missing_ingredient_count', 'fit_label_primary', 'hard_constraint_pass',
-    'recipe_plan', 'reasoning_summary',
+    'rank',
+    'title',
+    'total_time_minutes',
+    'why_it_fits',
+    'missing_ingredient_count',
+    'fit_label_primary',
+    'hard_constraint_pass',
+    'recipe_plan',
+    'reasoning_summary',
   ],
 };
 
@@ -135,7 +130,13 @@ const DishRuntimeSchema = z.object({
   total_time_minutes: z.number().int().min(1).max(720),
   why_it_fits: z.string().min(1).max(400),
   missing_ingredient_count: z.number().int().min(0),
-  fit_label_primary: z.enum(['fastest', 'least_waste', 'best_fit', 'uses_what_you_have', 'new_to_you']),
+  fit_label_primary: z.enum([
+    'fastest',
+    'least_waste',
+    'best_fit',
+    'uses_what_you_have',
+    'new_to_you',
+  ]),
   fit_label_secondary: z.string().nullable().optional(),
   hard_constraint_pass: z.boolean(),
   recipe_plan: z.object({
@@ -238,7 +239,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -265,13 +269,30 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:dinner_solve_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:dinner_solve_daily', source_ip_bucket: await ipBucket(sourceIP) });
-      return rate01Response(requestId, 'ip:dinner_solve_daily', ipRl.retry_after_seconds, ipRl.reset_at);
+      userLog.warn('rate_limited', {
+        scope: 'ip:dinner_solve_daily',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
+      return rate01Response(
+        requestId,
+        'ip:dinner_solve_daily',
+        ipRl.retry_after_seconds,
+        ipRl.reset_at,
+      );
     }
-    const userRl = await checkAndIncrement(client, 'user:dinner_solve_hourly', claims.canonical_user_key);
+    const userRl = await checkAndIncrement(
+      client,
+      'user:dinner_solve_hourly',
+      claims.canonical_user_key,
+    );
     if (!userRl.allowed) {
       userLog.warn('rate_limited', { scope: 'user:dinner_solve_hourly' });
-      return rate01Response(requestId, 'user:dinner_solve_hourly', userRl.retry_after_seconds, userRl.reset_at);
+      return rate01Response(
+        requestId,
+        'user:dinner_solve_hourly',
+        userRl.retry_after_seconds,
+        userRl.reset_at,
+      );
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
@@ -317,10 +338,16 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'user_stale' }, requestId);
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User not found; re-bootstrap.',
+      reason: 'user_stale',
+    }, requestId);
   }
   if (userRow.status === 'banned') {
-    return jsonError(ErrorCode.BILL_01, 403, { message: 'Account is not eligible for Stir.', state: 'banned' }, requestId);
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
   }
 
   // Leftovers mode is Premium+ (spec entitlements). Gate BEFORE the
@@ -409,7 +436,13 @@ Deno.serve(async (req) => {
     ? await pickLeftoversPrompt(client, body.solve_request_id)
     : await pickStandardPrompt(client, body.solve_request_id);
   if (!activePrompt) {
-    await refundQuota(client, userLog, claims.canonical_user_key, 'dinner_solve', consumedPeriodStart);
+    await refundQuota(
+      client,
+      userLog,
+      claims.canonical_user_key,
+      'dinner_solve',
+      consumedPeriodStart,
+    );
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
   }
@@ -548,13 +581,20 @@ Deno.serve(async (req) => {
   }
 
   if (!initialDishes) {
-    await refundQuota(client, userLog, claims.canonical_user_key, 'dinner_solve', consumedPeriodStart);
+    await refundQuota(
+      client,
+      userLog,
+      claims.canonical_user_key,
+      'dinner_solve',
+      consumedPeriodStart,
+    );
     const costUsd = computeCostUSD(MODEL, {
       textInputTokens: totalInputTokens,
       textOutputTokens: totalOutputTokens,
     });
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.solve_request_id,
         canonical_user_key: claims.canonical_user_key,
@@ -651,7 +691,8 @@ Deno.serve(async (req) => {
     textOutputTokens: totalOutputTokens,
   });
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.solve_request_id,
       canonical_user_key: claims.canonical_user_key,
@@ -693,7 +734,9 @@ Deno.serve(async (req) => {
 
   // Best-effort cache write — re-runs stream identical events.
   try {
-    await writeCache(client, claims.canonical_user_key, body.solve_request_id, FEATURE_KEY, 200, { events });
+    await writeCache(client, claims.canonical_user_key, body.solve_request_id, FEATURE_KEY, 200, {
+      events,
+    });
   } catch (err) {
     userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
@@ -878,18 +921,20 @@ async function pickLeftoversPrompt(
   solveRequestId: string,
 ): Promise<
   | {
-      feature_key: string;
-      version: string;
-      provider_model: string;
-      template_blob: string;
-      schema_hash: string;
-      rollout_pct: number;
-    }
+    feature_key: string;
+    version: string;
+    provider_model: string;
+    template_blob: string;
+    schema_hash: string;
+    rollout_pct: number;
+  }
   | null
 > {
   const { data, error } = await client
     .from('prompt_versions')
-    .select('feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled')
+    .select(
+      'feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled',
+    )
     .eq('feature_key', FEATURE_KEY)
     .eq('is_enabled', true)
     .in('version', ['1.1.0']);
@@ -934,13 +979,13 @@ async function pickStandardPrompt(
   solveRequestId: string,
 ): Promise<
   | {
-      feature_key: string;
-      version: string;
-      provider_model: string;
-      template_blob: string;
-      schema_hash: string;
-      rollout_pct: number;
-    }
+    feature_key: string;
+    version: string;
+    provider_model: string;
+    template_blob: string;
+    schema_hash: string;
+    rollout_pct: number;
+  }
   | null
 > {
   // Explicit version allowlist mirrors pickLeftoversPrompt's
@@ -950,7 +995,9 @@ async function pickStandardPrompt(
   // to is_default=TRUE then drops it from this set automatically.
   const { data, error } = await client
     .from('prompt_versions')
-    .select('feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled')
+    .select(
+      'feature_key, version, provider_model, template_blob, schema_hash, rollout_pct, is_default, is_enabled',
+    )
     .eq('feature_key', FEATURE_KEY)
     .eq('is_enabled', true)
     .eq('is_default', false)

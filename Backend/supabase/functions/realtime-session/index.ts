@@ -35,10 +35,7 @@ import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
-import {
-  effectiveVoiceEnabled,
-  readEntitlement,
-} from '../_shared/entitlements.ts';
+import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
@@ -262,7 +259,7 @@ Deno.serve(async (req) => {
         ErrorCode.RATE_01,
         429,
         {
-          message: "Too many voice session starts. Try again shortly.",
+          message: 'Too many voice session starts. Try again shortly.',
           scope: 'ip:realtime_session_daily',
           retry_after_seconds: ipRl.retry_after_seconds,
           reset_at: ipRl.reset_at,
@@ -271,7 +268,9 @@ Deno.serve(async (req) => {
       );
     }
     const userRl = await checkAndIncrement(
-      client, 'user:realtime_session_hourly', claims.canonical_user_key,
+      client,
+      'user:realtime_session_hourly',
+      claims.canonical_user_key,
     );
     if (!userRl.allowed) {
       userLog.warn('rate_limited', {
@@ -282,7 +281,7 @@ Deno.serve(async (req) => {
         ErrorCode.RATE_01,
         429,
         {
-          message: "Too many voice session starts in the past hour. Try again shortly.",
+          message: 'Too many voice session starts in the past hour. Try again shortly.',
           scope: 'user:realtime_session_hourly',
           retry_after_seconds: userRl.retry_after_seconds,
           reset_at: userRl.reset_at,
@@ -323,7 +322,7 @@ Deno.serve(async (req) => {
     readActivePrompt(client, FEATURE_KEY),
   ]);
 
-  let flags: Awaited<ReturnType<typeof readFlags>> = flagsResult;
+  const flags: Awaited<ReturnType<typeof readFlags>> = flagsResult;
   try {
     const disableRealtime = flags.find((f) => f.key === 'disable_cook_realtime');
     if (disableRealtime?.is_enabled && disableRealtime.value === true) {
@@ -441,7 +440,11 @@ Deno.serve(async (req) => {
   if (!activePrompt) {
     if (didConsumeQuota && consumedPeriodStart) {
       await refundQuota(
-        client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
       );
     }
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
@@ -469,8 +472,7 @@ Deno.serve(async (req) => {
       current_step_number_json: body.current_step_number,
       total_steps_json: body.recipe_context.total_steps,
       current_step_text_json: body.recipe_context.current_step_text,
-      current_step_timer_seconds_json:
-        body.recipe_context.current_step_timer_seconds ?? 0,
+      current_step_timer_seconds_json: body.recipe_context.current_step_timer_seconds ?? 0,
       all_steps_json: body.recipe_context.all_steps,
       remaining_ingredients_json: body.recipe_context.remaining_ingredients,
       pantry_snapshot_json: body.household_context.pantry_snapshot,
@@ -533,7 +535,11 @@ Deno.serve(async (req) => {
     // sessions (review 2026-04-22 Critical #3).
     if (didConsumeQuota && consumedPeriodStart) {
       await refundQuota(
-        client, userLog, claims.canonical_user_key, 'voice_cook_session', consumedPeriodStart,
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
       );
     }
     // `refund_applied` metadata mirrors the actual refund decision so

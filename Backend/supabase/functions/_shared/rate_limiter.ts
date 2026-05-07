@@ -53,32 +53,32 @@ export interface RateLimitPolicy {
  *   - user dinner_solve 10/hour: burst protection over monthly quota
  */
 export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitPolicy>> = {
-  'ip:dinner_solve_daily':    { windowSeconds: 86400, maxCount: 30 },
-  'ip:pantry_parse_daily':    { windowSeconds: 86400, maxCount: 100 },
-  'ip:substitution_daily':    { windowSeconds: 86400, maxCount: 50 },
-  'ip:cook_turn_daily':       { windowSeconds: 86400, maxCount: 300 },
-  'ip:bootstrap_hourly':      { windowSeconds: 3600,  maxCount: 20 },
+  'ip:dinner_solve_daily': { windowSeconds: 86400, maxCount: 30 },
+  'ip:pantry_parse_daily': { windowSeconds: 86400, maxCount: 100 },
+  'ip:substitution_daily': { windowSeconds: 86400, maxCount: 50 },
+  'ip:cook_turn_daily': { windowSeconds: 86400, maxCount: 300 },
+  'ip:bootstrap_hourly': { windowSeconds: 3600, maxCount: 20 },
   // Step 7 additions:
   // recipe_import: unmetered per-user quota (Free:2/mo, Premium/Pro:unlimited)
   //   enforced separately via usage_counters. This IP cap catches abusers
   //   who rotate Apple IDs; 40/day covers 20 imports × 2 retries.
-  'ip:recipe_import_daily':    { windowSeconds: 86400, maxCount: 40 },
+  'ip:recipe_import_daily': { windowSeconds: 86400, maxCount: 40 },
   // grocery_generate: unmetered across all tiers; 100/day/IP is a burst cap,
   //   not a product cap. A real user generates <5/day.
   'ip:grocery_generate_daily': { windowSeconds: 86400, maxCount: 100 },
   // push_register: iOS calls once per install + once per preference change.
   //   20/hour prevents token-churn abuse (rotating installs to enumerate
   //   apns_token space) without interfering with legitimate use.
-  'ip:push_register_hourly':   { windowSeconds: 3600,  maxCount: 20 },
-  'user:dinner_solve_hourly': { windowSeconds: 3600,  maxCount: 10 },
+  'ip:push_register_hourly': { windowSeconds: 3600, maxCount: 20 },
+  'user:dinner_solve_hourly': { windowSeconds: 3600, maxCount: 10 },
   // voice_turn_usage (ADR 0009): one POST per Gemini Live turnComplete.
   // A realistic Premium voice session emits ~15 POSTs; the 500/hr user
   // cap allows ~33 sessions/hr (far above the 20 voice_cook_session
   // monthly quota). The IP cap (2000/day) is defense against forged
   // clients trying to inflate ai_request_log + PostHog ingest volume;
   // real households aren't voice-cooking all day.
-  'ip:voice_turn_usage_daily':   { windowSeconds: 86400, maxCount: 2000 },
-  'user:voice_turn_usage_hourly':{ windowSeconds: 3600,  maxCount: 500 },
+  'ip:voice_turn_usage_daily': { windowSeconds: 86400, maxCount: 2000 },
+  'user:voice_turn_usage_hourly': { windowSeconds: 3600, maxCount: 500 },
   // Cook turn (text fallback when Gemini Live is unavailable) is
   // Premium+ tier-gated but NOT metered via usage_counters — spec §9
   // calls the fallback path "unmetered" because a healthy user on
@@ -90,7 +90,7 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   // with 2x headroom for repeats) while clamping the worst-case cost
   // exposure at ~$0.05/hour = ~$1.20/day/user in the persistent-C.3
   // scenario. Revisit if real C.3 users regularly hit the cap.
-  'user:cook_turn_hourly':       { windowSeconds: 3600,  maxCount: 30 },
+  'user:cook_turn_hourly': { windowSeconds: 3600, maxCount: 30 },
   // realtime_session (ADR 0014): each mint opens a Gemini Live session.
   // Normal path: 1 mint per Cook Mode entry + 1 refresh per ~10 turns.
   // A Premium user's 20 voice_cook_session monthly cap, even with 3
@@ -99,14 +99,14 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   // client (or a malicious client looping is_refresh=true to bypass
   // quota) without interfering with shared-NAT households. User cap
   // 40/hour protects a single account from a 1000-mints/hour script.
-  'ip:realtime_session_daily':    { windowSeconds: 86400, maxCount: 200 },
-  'user:realtime_session_hourly': { windowSeconds: 3600,  maxCount: 40 },
+  'ip:realtime_session_daily': { windowSeconds: 86400, maxCount: 200 },
+  'user:realtime_session_hourly': { windowSeconds: 3600, maxCount: 40 },
   // ops_admin (SA2 W2): admin-token compromise → unbounded enumeration via
   // users.list / flagged_outputs.list. 30/min = 1800/hour per IP caps an
   // attacker at 30 rpm — enough headroom for legit active triage (rarely
   // exceeds 5-10 rpm) while cutting enumeration from thousands/sec to
   // 30/min. Per-admin bucket is a step-9 follow-up per CLAUDE.md §Deferred.
-  'ip:ops_admin_hourly':          { windowSeconds: 3600,  maxCount: 1800 },
+  'ip:ops_admin_hourly': { windowSeconds: 3600, maxCount: 1800 },
 };
 
 export interface RateLimitResult {
@@ -145,7 +145,8 @@ export async function checkAndIncrement(
       return {
         allowed: true,
         current_count: 0,
-        reset_at: new Date(Date.now() + RATE_LIMIT_POLICIES[scopeKey].windowSeconds * 1000).toISOString(),
+        reset_at: new Date(Date.now() + RATE_LIMIT_POLICIES[scopeKey].windowSeconds * 1000)
+          .toISOString(),
         retry_after_seconds: 0,
       };
     }
@@ -177,8 +178,8 @@ function isPrivateOrLoopbackIP(candidate: string): boolean {
 
   // IPv6 loopback + unique-local.
   if (ip === '::1') return true;
-  if (ip.startsWith('fc') || ip.startsWith('fd')) return true;  // fc00::/7
-  if (ip.startsWith('fe80:')) return true;  // link-local
+  if (ip.startsWith('fc') || ip.startsWith('fd')) return true; // fc00::/7
+  if (ip.startsWith('fe80:')) return true; // link-local
 
   // IPv4: quick dotted-quad parse.
   const parts = ip.split('.');
@@ -186,11 +187,11 @@ function isPrivateOrLoopbackIP(candidate: string): boolean {
   const octets = parts.map((p) => Number(p));
   if (octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b] = octets as [number, number, number, number];
-  if (a === 10) return true;                        // 10/8
-  if (a === 127) return true;                       // 127/8
-  if (a === 192 && b === 168) return true;          // 192.168/16
+  if (a === 10) return true; // 10/8
+  if (a === 127) return true; // 127/8
+  if (a === 192 && b === 168) return true; // 192.168/16
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
-  if (a === 169 && b === 254) return true;          // link-local 169.254/16
+  if (a === 169 && b === 254) return true; // link-local 169.254/16
   return false;
 }
 
@@ -356,7 +357,9 @@ let _logIpSaltWarned = false;
 function warnOnceLogIpSaltMissing(): void {
   if (_logIpSaltWarned) return;
   _logIpSaltWarned = true;
-  console.warn('[rate_limiter] LOG_IP_SALT not set; using unsalted FNV-1a bucket (privacy-degraded path). Set LOG_IP_SALT via `supabase secrets set LOG_IP_SALT=$(openssl rand -hex 32)` — see docs/runbooks/ip-salt-rotation.md.');
+  console.warn(
+    '[rate_limiter] LOG_IP_SALT not set; using unsalted FNV-1a bucket (privacy-degraded path). Set LOG_IP_SALT via `supabase secrets set LOG_IP_SALT=$(openssl rand -hex 32)` — see docs/runbooks/ip-salt-rotation.md.',
+  );
 }
 
 function fnv1aHex(ip: string): string {

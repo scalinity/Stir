@@ -16,11 +16,7 @@
 
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
-import {
-  ErrorCode,
-  jsonError,
-  jsonOk,
-} from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import {
@@ -155,7 +151,10 @@ Deno.serve(async (req) => {
     const { periodStart, periodEnd } = computeCurrentPeriodStart(accountCreatedAt);
 
     const quotasReadPromise = readQuotasForWire(
-      client, claims.canonical_user_key, periodStart, periodEnd,
+      client,
+      claims.canonical_user_key,
+      periodStart,
+      periodEnd,
     ).catch((err: unknown) => err);
     const flagsPromise = readFlags(client, userLog);
     const promptsPromiseRaw = client
@@ -164,7 +163,9 @@ Deno.serve(async (req) => {
       .eq('is_default', true);
 
     const [quotasReadResult, flags, promptsResult] = await Promise.all([
-      quotasReadPromise, flagsPromise, promptsPromiseRaw,
+      quotasReadPromise,
+      flagsPromise,
+      promptsPromiseRaw,
     ]);
 
     let quotas: QuotaWire[];
@@ -178,10 +179,16 @@ Deno.serve(async (req) => {
         period_start: toIsoDate(periodStart),
       });
       await ensureCurrentPeriodRows(
-        client, claims.canonical_user_key, tier, accountCreatedAt,
+        client,
+        claims.canonical_user_key,
+        tier,
+        accountCreatedAt,
       );
       quotas = await readQuotasForWire(
-        client, claims.canonical_user_key, periodStart, periodEnd,
+        client,
+        claims.canonical_user_key,
+        periodStart,
+        periodEnd,
       );
     } else if (quotasReadResult instanceof Error) {
       // Some other DB error — bubble to the outer catch.
@@ -198,8 +205,13 @@ Deno.serve(async (req) => {
     // canary rollout can leave a feature silently without a prompt, and the
     // runtime error would be far from the root cause.
     const expectedFeatureKeys = [
-      'pantry_parse', 'dinner_solve', 'cook_turn', 'cook_mode_realtime',
-      'substitution', 'recipe_import', 'grocery_generate',
+      'pantry_parse',
+      'dinner_solve',
+      'cook_turn',
+      'cook_mode_realtime',
+      'substitution',
+      'recipe_import',
+      'grocery_generate',
     ] as const;
     const seenKeys = new Set(prompts.map((p) => p.feature_key));
     for (const expected of expectedFeatureKeys) {

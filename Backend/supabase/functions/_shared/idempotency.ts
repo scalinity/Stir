@@ -34,8 +34,14 @@ function withCacheTimeout<T>(op: 'read' | 'write', work: PromiseLike<T>): Promis
       reject(new CacheTimeoutError(op, CACHE_OP_TIMEOUT_MS));
     }, CACHE_OP_TIMEOUT_MS);
     Promise.resolve(work).then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
     );
   });
 }

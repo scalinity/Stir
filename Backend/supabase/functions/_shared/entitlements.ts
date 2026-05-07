@@ -37,9 +37,9 @@ export const TIER_CAPS: Record<UserTier, Record<UsageFeatureKey, number>> = {
   //     at 7 dinners/week ≈ every dinner)
   // Cost model + margin justification: ADR 0015. Cap-reversal trigger +
   // guard rail for raising back toward 20/40: same ADR.
-  free:    { dinner_solve: 6,   voice_cook_session: 0,  recipe_import: 2 },
-  premium: { dinner_solve: 40,  voice_cook_session: 13, recipe_import: 100_000 },
-  pro:     { dinner_solve: 120, voice_cook_session: 27, recipe_import: 100_000 },
+  free: { dinner_solve: 6, voice_cook_session: 0, recipe_import: 2 },
+  premium: { dinner_solve: 40, voice_cook_session: 13, recipe_import: 100_000 },
+  pro: { dinner_solve: 120, voice_cook_session: 27, recipe_import: 100_000 },
 };
 // ASSUMPTION: "unlimited" Recipe Imports for Premium/Pro is modeled as a
 // very large integer (100_000) to keep the atomic cap-check shape uniform.
@@ -241,9 +241,11 @@ export function computeCurrentPeriodStart(
 
 /** Format a Date as an ISO date string `YYYY-MM-DD` in UTC. */
 export function toIsoDate(d: Date): string {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
-    d.getUTCDate(),
-  ).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${
+    String(
+      d.getUTCDate(),
+    ).padStart(2, '0')
+  }`;
 }
 
 /**

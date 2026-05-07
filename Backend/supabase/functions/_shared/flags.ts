@@ -33,34 +33,35 @@ export interface FeatureFlagWire {
 
 const KillSwitch = z.boolean();
 
-export const flagRegistry: Readonly<Record<string, { schema: z.ZodType; defaultValue: unknown }>> = {
-  disable_cook_realtime:          { schema: KillSwitch, defaultValue: false },
-  disable_scan_parse:             { schema: KillSwitch, defaultValue: false },
-  disable_imports:                { schema: KillSwitch, defaultValue: false },
-  force_saved_meals_only:         { schema: KillSwitch, defaultValue: false },
-  priority_queue_pro_enabled:     { schema: KillSwitch, defaultValue: false },
-  // SCA-44 preference-memory loop. Default true — when set to false,
-  // dinner-solve renders feedback_json as null even when iOS sent a
-  // populated feedback_summary in the request body. Cheap rip-cord
-  // for an unexpected prompt regression without an iOS rev.
-  preference_memory_enabled:      { schema: KillSwitch, defaultValue: true },
-  cook_voice_thinking_level:      {
-    schema: z.enum(['minimal', 'low']),
-    defaultValue: 'minimal',
-  },
-  voice_turn_detection_mode:      {
-    schema: z.enum(['semantic_vad', 'server_vad']),
-    defaultValue: 'semantic_vad',
-  },
-  prompt_version_override:        {
-    schema: z.union([z.null(), z.string()]),
-    defaultValue: null,
-  },
-  recipe_import_async_threshold:  {
-    schema: z.number().int().positive(),
-    defaultValue: 8192,
-  },
-};
+export const flagRegistry: Readonly<Record<string, { schema: z.ZodType; defaultValue: unknown }>> =
+  {
+    disable_cook_realtime: { schema: KillSwitch, defaultValue: false },
+    disable_scan_parse: { schema: KillSwitch, defaultValue: false },
+    disable_imports: { schema: KillSwitch, defaultValue: false },
+    force_saved_meals_only: { schema: KillSwitch, defaultValue: false },
+    priority_queue_pro_enabled: { schema: KillSwitch, defaultValue: false },
+    // SCA-44 preference-memory loop. Default true — when set to false,
+    // dinner-solve renders feedback_json as null even when iOS sent a
+    // populated feedback_summary in the request body. Cheap rip-cord
+    // for an unexpected prompt regression without an iOS rev.
+    preference_memory_enabled: { schema: KillSwitch, defaultValue: true },
+    cook_voice_thinking_level: {
+      schema: z.enum(['minimal', 'low']),
+      defaultValue: 'minimal',
+    },
+    voice_turn_detection_mode: {
+      schema: z.enum(['semantic_vad', 'server_vad']),
+      defaultValue: 'semantic_vad',
+    },
+    prompt_version_override: {
+      schema: z.union([z.null(), z.string()]),
+      defaultValue: null,
+    },
+    recipe_import_async_threshold: {
+      schema: z.number().int().positive(),
+      defaultValue: 8192,
+    },
+  };
 
 /**
  * Read all feature_flags rows and convert to wire shape. Every row's value

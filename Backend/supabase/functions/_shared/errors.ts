@@ -72,7 +72,8 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.BILL_01]: "We couldn't confirm your subscription right now.",
   [ErrorCode.PAY_01]: "Purchase didn't go through.",
   [ErrorCode.ENT_VOICE_01]: 'Cook Mode voice is a Premium feature.',
-  [ErrorCode.ENT_MULTI_IMAGE_01]: 'Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once.',
+  [ErrorCode.ENT_MULTI_IMAGE_01]:
+    'Multi-image scan is available on Pro. Upgrade to scan your whole kitchen at once.',
   [ErrorCode.ENT_LEFTOVERS_01]: 'Leftovers mode is a Premium feature.',
   [ErrorCode.VOICE_SESSION_01]: 'Voice session is no longer valid. Start a new session.',
   // VAL-01 message is dev-oriented: iOS shows generic copy from ErrorPresenter.

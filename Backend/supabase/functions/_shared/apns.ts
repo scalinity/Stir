@@ -35,9 +35,9 @@ function readApnsEnv(): {
   bundleId: string | undefined;
 } {
   return {
-    keyId:    Deno.env.get('APNS_AUTH_KEY_ID'),
-    keyP8:    Deno.env.get('APNS_AUTH_KEY_P8'),
-    teamId:   Deno.env.get('APNS_TEAM_ID'),
+    keyId: Deno.env.get('APNS_AUTH_KEY_ID'),
+    keyP8: Deno.env.get('APNS_AUTH_KEY_P8'),
+    teamId: Deno.env.get('APNS_TEAM_ID'),
     bundleId: Deno.env.get('APNS_BUNDLE_ID'),
   };
 }
@@ -73,12 +73,12 @@ export type APNsPushResult =
   | { ok: false; reason: APNsFailureReason; status: number; apnsReason?: string };
 
 export type APNsFailureReason =
-  | 'bad_device_token'      // 400/410 — token dead, null it out
-  | 'config_invalid'         // 403 / signing failure
-  | 'rate_limited'           // 429
-  | 'server_error'           // 5xx — retry via backoff
-  | 'network'                // fetch threw
-  | 'missing_secret';        // env var missing at call time
+  | 'bad_device_token' // 400/410 — token dead, null it out
+  | 'config_invalid' // 403 / signing failure
+  | 'rate_limited' // 429
+  | 'server_error' // 5xx — retry via backoff
+  | 'network' // fetch threw
+  | 'missing_secret'; // env var missing at call time
 
 async function getProviderJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -93,7 +93,9 @@ async function getProviderJwt(): Promise<string> {
   mintingPromise = (async () => {
     const { keyId, keyP8, teamId } = readApnsEnv();
     if (!keyP8 || !keyId || !teamId) {
-      throw new Error('APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID');
+      throw new Error(
+        'APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID',
+      );
     }
 
     // Decode base64 → PEM-wrap for jose.importPKCS8. importPKCS8 throws on
@@ -102,7 +104,9 @@ async function getProviderJwt(): Promise<string> {
     const rawPem = new TextDecoder().decode(base64Decode(keyP8));
     const pem = rawPem.includes('BEGIN PRIVATE KEY')
       ? rawPem
-      : `-----BEGIN PRIVATE KEY-----\n${rawPem.match(/.{1,64}/g)?.join('\n') ?? rawPem}\n-----END PRIVATE KEY-----`;
+      : `-----BEGIN PRIVATE KEY-----\n${
+        rawPem.match(/.{1,64}/g)?.join('\n') ?? rawPem
+      }\n-----END PRIVATE KEY-----`;
 
     let privateKey;
     try {
@@ -111,7 +115,9 @@ async function getProviderJwt(): Promise<string> {
       // Wrap with a clearer message; readers of logs should know this is
       // a deploy-time misconfig, not a wire/APNs problem.
       throw new Error(
-        `APNS_AUTH_KEY_P8 did not parse as ES256 PKCS#8: ${err instanceof Error ? err.message : String(err)}`,
+        `APNS_AUTH_KEY_P8 did not parse as ES256 PKCS#8: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
     }
 

@@ -33,20 +33,21 @@
 import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
-import {
-  ErrorCode,
-  jsonError,
-  jsonOk,
-} from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { PantryParseRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+  ipBucket,
+} from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import { decodeAndValidateImage } from '../_shared/image_validation.ts';
 
@@ -175,9 +176,9 @@ Deno.serve(async (req) => {
   const contentLengthHeader = req.headers.get('content-length');
   const declaredContentLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : NaN;
   if (
-    claims.tier !== 'pro'
-    && Number.isFinite(declaredContentLength)
-    && declaredContentLength > NON_PRO_BODY_CAP
+    claims.tier !== 'pro' &&
+    Number.isFinite(declaredContentLength) &&
+    declaredContentLength > NON_PRO_BODY_CAP
   ) {
     userLog.warn('non_pro_oversized_body', {
       tier: claims.tier,
@@ -220,7 +221,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -248,7 +252,10 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:pantry_parse_daily', sourceIP);
     if (!rl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:pantry_parse_daily', source_ip_bucket: await ipBucket(sourceIP) });
+      userLog.warn('rate_limited', {
+        scope: 'ip:pantry_parse_daily',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
       return buildRate01Response(
         'ip:pantry_parse_daily',
         rl.retry_after_seconds,
@@ -296,9 +303,15 @@ Deno.serve(async (req) => {
   // Build a normalized array of `{ base64, mime_type }` so the rest of
   // the handler doesn't care which payload shape arrived.
   // ---------------------------------------------------------------------
-  type IncomingImage = { base64: string; mime_type: 'image/jpeg' | 'image/png' | 'image/heic' | 'image/webp' };
+  type IncomingImage = {
+    base64: string;
+    mime_type: 'image/jpeg' | 'image/png' | 'image/heic' | 'image/webp';
+  };
   const incomingImages: IncomingImage[] = body.images
-    ? body.images.map((img: IncomingImage): IncomingImage => ({ base64: img.base64, mime_type: img.mime_type }))
+    ? body.images.map((img: IncomingImage): IncomingImage => ({
+      base64: img.base64,
+      mime_type: img.mime_type,
+    }))
     : [{ base64: body.image_base64!, mime_type: body.image_mime_type! }];
 
   for (let i = 0; i < incomingImages.length; i++) {
@@ -334,7 +347,9 @@ Deno.serve(async (req) => {
       return jsonError(
         ErrorCode.AI_01,
         503,
-        { message: 'Scan parsing is temporarily disabled. Try again shortly or pick a saved meal.' },
+        {
+          message: 'Scan parsing is temporarily disabled. Try again shortly or pick a saved meal.',
+        },
         requestId,
       );
     }
@@ -402,9 +417,7 @@ Deno.serve(async (req) => {
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText,
-        ...(isMultiImage
-          ? { images: geminiImages }
-          : { image: geminiImages[0]! }),
+        ...(isMultiImage ? { images: geminiImages } : { image: geminiImages[0]! }),
         thinkingLevel: 'minimal',
         responseSchema: GEMINI_RESPONSE_SCHEMA,
         // Multi-image scans need slightly more headroom — 4 photos can
@@ -468,7 +481,8 @@ Deno.serve(async (req) => {
       textOutputTokens: totalOutputTokens,
     });
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.client_request_id,
         canonical_user_key: claims.canonical_user_key,
@@ -493,7 +507,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.AI_02,
       status,
-      { message: "I'm not confident about a few ingredients. Try retaking the photo with better lighting." },
+      {
+        message:
+          "I'm not confident about a few ingredients. Try retaking the photo with better lighting.",
+      },
       requestId,
     );
   }
@@ -507,7 +524,8 @@ Deno.serve(async (req) => {
     textOutputTokens: totalOutputTokens,
   });
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.client_request_id,
       canonical_user_key: claims.canonical_user_key,
@@ -538,7 +556,14 @@ Deno.serve(async (req) => {
 
   // Best-effort cache write.
   try {
-    await writeCache(client, claims.canonical_user_key, body.client_request_id, FEATURE_KEY, 200, wire);
+    await writeCache(
+      client,
+      claims.canonical_user_key,
+      body.client_request_id,
+      FEATURE_KEY,
+      200,
+      wire,
+    );
   } catch (err) {
     userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }

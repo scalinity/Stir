@@ -34,14 +34,8 @@ import { computeCostUSD, MODEL_PRICING } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
-import {
-  VoiceTurnUsageRequest,
-  zodToFieldErrors,
-} from '../_shared/validation.ts';
-import {
-  effectiveVoiceEnabled,
-  readEntitlement,
-} from '../_shared/entitlements.ts';
+import { VoiceTurnUsageRequest, zodToFieldErrors } from '../_shared/validation.ts';
+import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
 import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 
 const VOICE_FEATURE_KEY = 'cook_mode_realtime';
@@ -167,7 +161,10 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:voice_turn_usage_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:voice_turn_usage_daily', source_ip_bucket: await ipBucket(sourceIP) });
+      userLog.warn('rate_limited', {
+        scope: 'ip:voice_turn_usage_daily',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
       return jsonError(
         ErrorCode.RATE_01,
         429,
@@ -180,7 +177,11 @@ Deno.serve(async (req) => {
         requestId,
       );
     }
-    const userRl = await checkAndIncrement(client, 'user:voice_turn_usage_hourly', claims.canonical_user_key);
+    const userRl = await checkAndIncrement(
+      client,
+      'user:voice_turn_usage_hourly',
+      claims.canonical_user_key,
+    );
     if (!userRl.allowed) {
       userLog.warn('rate_limited', { scope: 'user:voice_turn_usage_hourly' });
       return jsonError(
@@ -285,8 +286,7 @@ Deno.serve(async (req) => {
       .select('merged_into')
       .eq('canonical_user_key', ownerRow.canonical_user_key)
       .maybeSingle();
-    const isAliasForwarded =
-      originalUser?.merged_into === claims.canonical_user_key;
+    const isAliasForwarded = originalUser?.merged_into === claims.canonical_user_key;
     if (!isAliasForwarded) {
       // Authenticated user is posting turns under someone else's session
       // id. Attempted IDOR (or a VM bug writing a stale session_id —
@@ -387,7 +387,8 @@ Deno.serve(async (req) => {
         turn_index: turn.turn_index,
         prompt_tokens_cached: turn.prompt_tokens_cached,
         prompt_tokens_text: turn.prompt_tokens_text,
-        note: 'ADR 0015 assumed cached=0 on Live; re-verify Google pricing page before trusting cost math',
+        note:
+          'ADR 0015 assumed cached=0 on Live; re-verify Google pricing page before trusting cost math',
       });
     }
 
@@ -397,8 +398,10 @@ Deno.serve(async (req) => {
     // If this ever fires, `computeCostUSD` silently clamps, but we need
     // the log so the upstream breakdown bug is visible instead of
     // swallowed by the clamp.
-    if (turn.prompt_tokens_cached !== undefined
-        && turn.prompt_tokens_cached > turn.prompt_tokens_text) {
+    if (
+      turn.prompt_tokens_cached !== undefined &&
+      turn.prompt_tokens_cached > turn.prompt_tokens_text
+    ) {
       userLog.warn('voice_cached_tokens_exceed_text', {
         session_id: body.session_id,
         turn_index: turn.turn_index,
@@ -429,14 +432,14 @@ Deno.serve(async (req) => {
     });
     const promptRemainder = Math.max(0, inputTokens - breakdownPromptSum);
     const responseRemainder = Math.max(0, outputTokens - breakdownResponseSum);
-    const remainderCost =
-      (promptRemainder * livePricing.audioInPer1M) / 1_000_000 +
+    const remainderCost = (promptRemainder * livePricing.audioInPer1M) / 1_000_000 +
       (responseRemainder * livePricing.audioOutPer1M) / 1_000_000;
     // Round to 6 decimal places to match ai_request_log.cost_usd NUMERIC(10,6).
     const costUsd = Math.round((baseCost + remainderCost) * 1_000_000) / 1_000_000;
 
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: rowRequestId,
         canonical_user_key: claims.canonical_user_key,

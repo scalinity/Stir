@@ -36,8 +36,8 @@ import {
   HANDLED_EVENT_TYPES,
   isEventFresh,
   MAX_EVENT_AGE_MS,
-  RevenueCatWebhookEnvelope,
   resolveEventAction,
+  RevenueCatWebhookEnvelope,
   verifyAuthHeader,
 } from '../_shared/revenuecat.ts';
 import { ZodError } from 'zod';
@@ -131,9 +131,7 @@ Deno.serve(async (req) => {
   // means dashboard config + server env var don't have to agree on prefix
   // (operational brittleness the step-5 review flagged).
   const providedRaw = req.headers.get('authorization');
-  const provided = providedRaw?.startsWith('Bearer ')
-    ? providedRaw.slice(7)
-    : providedRaw;
+  const provided = providedRaw?.startsWith('Bearer ') ? providedRaw.slice(7) : providedRaw;
   if (!verifyAuthHeader(provided, WEBHOOK_SECRET)) {
     log.warn('signature_invalid', { has_header: Boolean(providedRaw) });
     // DO NOT log to webhook_log here. Unauthenticated requests are

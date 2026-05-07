@@ -1,7 +1,7 @@
 // Tests for INGREDIENT_ONTOLOGY_SLUGS — pin invariants the prompt
 // rendering depends on. SCA-46.
 
-import { assertEquals, assert } from 'https://deno.land/std@0.208.0/assert/mod.ts';
+import { assert, assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from './ingredient_ontology.ts';
 
 Deno.test('ontology has at least 100 slugs (starter floor)', () => {

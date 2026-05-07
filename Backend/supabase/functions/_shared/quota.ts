@@ -12,11 +12,7 @@
 // it into a single statement.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  computeCurrentPeriodStart,
-  toIsoDate,
-  type UsageFeatureKey,
-} from './entitlements.ts';
+import { computeCurrentPeriodStart, toIsoDate, type UsageFeatureKey } from './entitlements.ts';
 import type { Logger } from './logger.ts';
 
 export type IncrementResult =

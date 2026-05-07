@@ -18,7 +18,7 @@ import { GeminiModel } from './gemini.ts';
 // ---------------------------------------------------------------------------
 
 export interface ModelPricing {
-  textInPer1M: number;    // USD per 1M text input tokens
+  textInPer1M: number; // USD per 1M text input tokens
   /** USD per 1M text input tokens served from implicit context cache.
    *
    * Values below are LITERALS, not derived from `textInPer1M * 0.25`.
@@ -45,10 +45,10 @@ export interface ModelPricing {
    * non-zero cached count arrives so the assumption break is
    * surfaced BEFORE the cost math feeds a cap-reversal decision. */
   cachedInPer1M: number;
-  audioInPer1M: number;   // USD per 1M audio input tokens
-  imageInPer1M: number;   // USD per 1M image tokens (approximated as text-price tier)
-  textOutPer1M: number;   // USD per 1M text output tokens
-  audioOutPer1M: number;  // USD per 1M audio output tokens (Live only; 0 for non-audio)
+  audioInPer1M: number; // USD per 1M audio input tokens
+  imageInPer1M: number; // USD per 1M image tokens (approximated as text-price tier)
+  textOutPer1M: number; // USD per 1M text output tokens
+  audioOutPer1M: number; // USD per 1M audio output tokens (Live only; 0 for non-audio)
 }
 
 export const MODEL_PRICING: Readonly<Record<GeminiModel, ModelPricing>> = {
@@ -123,8 +123,7 @@ export function computeCostUSD(
   // retries, test fixtures, future call sites) so a bad input produces
   // a sane 0 rather than propagating NaN into `ai_request_log.cost_usd`
   // and tripping the NUMERIC(10,6) constraint at insert time.
-  const safe = (n: number | undefined): number =>
-    Number.isFinite(n) ? Math.max(0, n as number) : 0;
+  const safe = (n: number | undefined): number => Number.isFinite(n) ? Math.max(0, n as number) : 0;
   const textInputTokens = safe(counts.textInputTokens);
   const imageInputTokens = safe(counts.imageInputTokens);
   const audioInputTokens = safe(counts.audioInputTokens);
@@ -143,8 +142,7 @@ export function computeCostUSD(
     Math.min(safe(counts.cachedInputTokens), textInputTokens),
   );
   const uncachedTextTokens = textInputTokens - cachedTextTokens;
-  const cost =
-    (uncachedTextTokens * p.textInPer1M) / 1_000_000 +
+  const cost = (uncachedTextTokens * p.textInPer1M) / 1_000_000 +
     (cachedTextTokens * p.cachedInPer1M) / 1_000_000 +
     (imageInputTokens * p.imageInPer1M) / 1_000_000 +
     (audioInputTokens * p.audioInPer1M) / 1_000_000 +

@@ -54,8 +54,8 @@ const JWKS_URL = new URL(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/.well-known
 // cache-miss kid (the typical case after a key rotation). The cooldown
 // prevents thundering-herd refresh storms on a malformed-kid attack.
 const JWKS = jose.createRemoteJWKSet(JWKS_URL, {
-  cooldownDuration: 30_000,        // ≥30s between refresh attempts on miss
-  cacheMaxAge: 10 * 60_000,        // discard cached JWKS after 10min
+  cooldownDuration: 30_000, // ≥30s between refresh attempts on miss
+  cacheMaxAge: 10 * 60_000, // discard cached JWKS after 10min
 });
 
 // Legacy fallback secret — kept for backwards-compat with JWTs that were
@@ -66,9 +66,7 @@ const JWKS = jose.createRemoteJWKSet(JWKS_URL, {
 // during the migration window. Future: remove this branch once all
 // active operator sessions have been re-issued under JWKS.
 const LEGACY_SECRET = Deno.env.get('STIR_JWT_SECRET');
-const LEGACY_SECRET_BYTES = LEGACY_SECRET
-  ? new TextEncoder().encode(LEGACY_SECRET)
-  : null;
+const LEGACY_SECRET_BYTES = LEGACY_SECRET ? new TextEncoder().encode(LEGACY_SECRET) : null;
 
 // Local Auth issuer (Supabase CLI gotrue) vs production.
 // Token.iss looks like "http://127.0.0.1:54321/auth/v1" locally and
@@ -244,7 +242,9 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
   if (alg === 'HS256') {
     if (!LEGACY_SECRET_BYTES) {
       console.error(
-        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} reason=no_legacy_secret legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${
+          issForLog ?? '(none)'
+        } reason=no_legacy_secret legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
       );
       throw new AdminAuthError(
         'signature_invalid',
@@ -260,7 +260,9 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(
-        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+        `admin_auth_diag alg=HS256 kid=${kid ?? '(none)'} iss=${
+          issForLog ?? '(none)'
+        } jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
       );
       const wrapped = mapJoseError(err);
       throw new AdminAuthError(wrapped.reason, wrapped.message);
@@ -277,7 +279,9 @@ async function verifyAgainstJwksWithLegacyFallback(token: string): Promise<jose.
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(
-      `admin_auth_diag alg=${alg ?? '(none)'} kid=${kid ?? '(none)'} iss=${issForLog ?? '(none)'} jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
+      `admin_auth_diag alg=${alg ?? '(none)'} kid=${kid ?? '(none)'} iss=${
+        issForLog ?? '(none)'
+      } jose_err=${msg} legacy_secret_len=${LEGACY_SECRET ? LEGACY_SECRET.length : 0}`,
     );
     const wrapped = mapJoseError(err);
     throw new AdminAuthError(wrapped.reason, wrapped.message);
@@ -300,8 +304,10 @@ function mapJoseError(err: unknown): AdminAuthError {
     if (failedClaim === 'aud') return new AdminAuthError('wrong_audience', msg);
     return new AdminAuthError('signature_invalid', msg);
   }
-  if (err instanceof jose.errors.JWKSNoMatchingKey ||
-      err instanceof jose.errors.JWKSMultipleMatchingKeys) {
+  if (
+    err instanceof jose.errors.JWKSNoMatchingKey ||
+    err instanceof jose.errors.JWKSMultipleMatchingKeys
+  ) {
     // Fell here only when LEGACY_SECRET wasn't configured for fallback.
     return new AdminAuthError(
       'signature_invalid',
@@ -319,7 +325,9 @@ function mapJoseError(err: unknown): AdminAuthError {
  * Map an AdminAuthError to an HTTP status + code. Centralized so all
  * /v1/ops/admin/* routes render errors consistently.
  */
-export function adminAuthErrorHttp(err: AdminAuthError): { status: number; reason: AdminAuthReason } {
+export function adminAuthErrorHttp(
+  err: AdminAuthError,
+): { status: number; reason: AdminAuthReason } {
   switch (err.reason) {
     case 'not_admin':
       return { status: 403, reason: 'not_admin' };

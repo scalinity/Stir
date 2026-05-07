@@ -46,11 +46,16 @@ export type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 // the 4.5/tokens-per-1M pricing model.
 function mapLevelToBudget(level: GeminiThinkingLevel | undefined): number | undefined {
   switch (level) {
-    case 'minimal': return 0;
-    case 'low':     return 1024;
-    case 'medium':  return undefined; // omit → model default
-    case 'high':    return 8192;
-    case undefined: return undefined;
+    case 'minimal':
+      return 0;
+    case 'low':
+      return 1024;
+    case 'medium':
+      return undefined; // omit → model default
+    case 'high':
+      return 8192;
+    case undefined:
+      return undefined;
   }
 }
 

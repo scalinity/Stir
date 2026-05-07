@@ -25,17 +25,13 @@
 //   8. issueSessionJWT and return 200.
 
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
-import {
-  ErrorCode,
-  jsonError,
-  jsonOk,
-} from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { issueSessionJWT, type UserTier } from '../_shared/auth.ts';
 import { SessionBootstrapRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import {
-  type AppUserRow,
   aliasForward,
+  type AppUserRow,
   followMergedInto,
   readAppUser,
   resolveCanonicalKey,
@@ -133,7 +129,10 @@ Deno.serve(async (req) => {
   try {
     const rl = await checkAndIncrement(client, 'ip:bootstrap_hourly', sourceIP);
     if (!rl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:bootstrap_hourly', source_ip_bucket: await ipBucket(sourceIP) });
+      userLog.warn('rate_limited', {
+        scope: 'ip:bootstrap_hourly',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
       return buildRate01Response(
         'ip:bootstrap_hourly',
         rl.retry_after_seconds,

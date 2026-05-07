@@ -43,8 +43,8 @@ function resolvePostHogHost(): string {
     }
     // Allowlist: PostHog Cloud (US + EU) only. Self-hosted deployments
     // would need to extend this list in an explicit ADR.
-    const okHost = /^(us|eu)\.i\.posthog\.com$/.test(url.hostname)
-      || /^(us|eu)\.posthog\.com$/.test(url.hostname);
+    const okHost = /^(us|eu)\.i\.posthog\.com$/.test(url.hostname) ||
+      /^(us|eu)\.posthog\.com$/.test(url.hostname);
     if (!okHost) {
       console.warn(JSON.stringify({
         level: 'warn',
@@ -70,8 +70,7 @@ if (!POSTHOG_API_KEY) {
     JSON.stringify({
       level: 'warn',
       msg: 'posthog_env_missing',
-      detail:
-        'POSTHOG_PUBLIC_API_KEY missing; $ai_generation/$ai_trace captures will no-op.',
+      detail: 'POSTHOG_PUBLIC_API_KEY missing; $ai_generation/$ai_trace captures will no-op.',
     }),
   );
 }

@@ -205,7 +205,7 @@ export async function verifySessionJWT(
       });
     } else if (row) {
       // Direct hit on the claim's key.
-      await rejectIfReauthRequired(iat, row.reauth_required_at);
+      rejectIfReauthRequired(iat, row.reauth_required_at);
 
       // If the row is a merged alias, also check the winning target.
       if (row.merged_into) {
@@ -220,7 +220,7 @@ export async function verifySessionJWT(
             err: targetErr.message,
           });
         } else if (target) {
-          await rejectIfReauthRequired(iat, target.reauth_required_at);
+          rejectIfReauthRequired(iat, target.reauth_required_at);
         }
       }
     }
@@ -242,7 +242,7 @@ export async function verifySessionJWT(
   };
 }
 
-async function rejectIfReauthRequired(iat: number, reauthRequiredAt: string | null): Promise<void> {
+function rejectIfReauthRequired(iat: number, reauthRequiredAt: string | null): void {
   if (!reauthRequiredAt) return;
   const reauthAtMs = Date.parse(reauthRequiredAt);
   if (Number.isNaN(reauthAtMs)) return;

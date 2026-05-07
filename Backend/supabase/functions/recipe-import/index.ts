@@ -31,12 +31,22 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { createLogger, requestIdFrom, sanitizeErrorForLog, type Logger } from '../_shared/logger.ts';
+import {
+  createLogger,
+  type Logger,
+  requestIdFrom,
+  sanitizeErrorForLog,
+} from '../_shared/logger.ts';
 import { RecipeImportRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+  ipBucket,
+} from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 
@@ -44,7 +54,7 @@ const FEATURE_KEY = 'recipe_import';
 const MODEL = GeminiModel.FlashLite;
 const DEFAULT_ASYNC_THRESHOLD_BYTES = 8192;
 const URL_FETCH_TIMEOUT_MS = 10_000;
-const URL_FETCH_MAX_BYTES = 2 * 1024 * 1024;  // 2 MB
+const URL_FETCH_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 const URL_FETCH_USER_AGENT = 'StirBot/1.0 (+https://getstir.app)';
 
 // -----------------------------------------------------------------------------
@@ -147,7 +157,10 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof AuthError) {
       log.warn('auth_failed', { reason: err.reason });
-      return jsonError(ErrorCode.AUTH_01, 401, { message: 'Session expired or missing.', reason: err.reason }, requestId);
+      return jsonError(ErrorCode.AUTH_01, 401, {
+        message: 'Session expired or missing.',
+        reason: err.reason,
+      }, requestId);
     }
     log.error('auth_unexpected', err);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
@@ -173,7 +186,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -196,8 +212,16 @@ Deno.serve(async (req) => {
   try {
     const ipRl = await checkAndIncrement(client, 'ip:recipe_import_daily', sourceIP);
     if (!ipRl.allowed) {
-      userLog.warn('rate_limited', { scope: 'ip:recipe_import_daily', source_ip_bucket: await ipBucket(sourceIP) });
-      return buildRate01Response('ip:recipe_import_daily', ipRl.retry_after_seconds, ipRl.reset_at, requestId);
+      userLog.warn('rate_limited', {
+        scope: 'ip:recipe_import_daily',
+        source_ip_bucket: await ipBucket(sourceIP),
+      });
+      return buildRate01Response(
+        'ip:recipe_import_daily',
+        ipRl.retry_after_seconds,
+        ipRl.reset_at,
+        requestId,
+      );
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
@@ -224,10 +248,16 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'user_stale' }, requestId);
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User not found; re-bootstrap.',
+      reason: 'user_stale',
+    }, requestId);
   }
   if (userRow.status === 'banned') {
-    return jsonError(ErrorCode.BILL_01, 403, { message: 'Account is not eligible for Stir.', state: 'banned' }, requestId);
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
   }
 
   const quotaResult = await incrementQuotaAtomic(
@@ -269,10 +299,24 @@ Deno.serve(async (req) => {
   try {
     rawContent = await resolveRawContent(body, userLog);
   } catch (err) {
-    await refundQuota(client, userLog, claims.canonical_user_key, 'recipe_import', consumedPeriodStart);
+    await refundQuota(
+      client,
+      userLog,
+      claims.canonical_user_key,
+      'recipe_import',
+      consumedPeriodStart,
+    );
     const message = err instanceof FetchFailure ? err.message : 'Failed to fetch source content.';
-    userLog.warn('source_fetch_failed', { source_type: body.source_type, err: sanitizeErrorForLog(err) });
-    return jsonError(ErrorCode.IMPORT_01, 502, { message, source_type: body.source_type }, requestId);
+    userLog.warn('source_fetch_failed', {
+      source_type: body.source_type,
+      err: sanitizeErrorForLog(err),
+    });
+    return jsonError(
+      ErrorCode.IMPORT_01,
+      502,
+      { message, source_type: body.source_type },
+      requestId,
+    );
   }
 
   // ---- 8. Async threshold check
@@ -292,7 +336,7 @@ Deno.serve(async (req) => {
       status: 'queued' as const,
       recipe: null,
       retry_count: 0,
-      prompt_version: '1.0.0',   // best-effort; worker records real version on completion
+      prompt_version: '1.0.0', // best-effort; worker records real version on completion
       async_job_id: jobId,
     };
     userLog.info('queued_async', { job_id: jobId, raw_bytes: rawBytes });
@@ -302,7 +346,13 @@ Deno.serve(async (req) => {
   // ---- 9. Sync path — prompt + Gemini
   const activePrompt = await readActivePrompt(client, FEATURE_KEY);
   if (!activePrompt) {
-    await refundQuota(client, userLog, claims.canonical_user_key, 'recipe_import', consumedPeriodStart);
+    await refundQuota(
+      client,
+      userLog,
+      claims.canonical_user_key,
+      'recipe_import',
+      consumedPeriodStart,
+    );
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
   }
@@ -367,9 +417,16 @@ Deno.serve(async (req) => {
   });
 
   if (!recipe) {
-    await refundQuota(client, userLog, claims.canonical_user_key, 'recipe_import', consumedPeriodStart);
+    await refundQuota(
+      client,
+      userLog,
+      claims.canonical_user_key,
+      'recipe_import',
+      consumedPeriodStart,
+    );
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.import_id,
         canonical_user_key: claims.canonical_user_key,
@@ -407,7 +464,8 @@ Deno.serve(async (req) => {
   // server-side pass here as belt-and-suspenders.
 
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.import_id,
       canonical_user_key: claims.canonical_user_key,
@@ -438,7 +496,14 @@ Deno.serve(async (req) => {
   // Cache the completed response so a retry hits the idempotency cache
   // before re-charging quota.
   try {
-    await writeCache(client, claims.canonical_user_key, body.import_id, FEATURE_KEY, 200, responseBody);
+    await writeCache(
+      client,
+      claims.canonical_user_key,
+      body.import_id,
+      FEATURE_KEY,
+      200,
+      responseBody,
+    );
   } catch (err) {
     userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
@@ -507,7 +572,11 @@ async function resolveRawContent(
 }
 
 function safeUrlHost(raw: string): string {
-  try { return new URL(raw).host; } catch { return '<unparseable>'; }
+  try {
+    return new URL(raw).host;
+  } catch {
+    return '<unparseable>';
+  }
 }
 
 async function fetchUrlText(url: string): Promise<string> {
@@ -553,7 +622,10 @@ async function fetchUrlText(url: string): Promise<string> {
       throw new FetchFailure(`upstream ${response.status}`);
     }
     const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.includes('text/') && !contentType.includes('json') && !contentType.includes('xml')) {
+    if (
+      !contentType.includes('text/') && !contentType.includes('json') &&
+      !contentType.includes('xml')
+    ) {
       throw new FetchFailure(`unsupported content-type: ${contentType.slice(0, 64)}`);
     }
     // Enforce the byte cap while streaming — avoids pulling a 50MB video
@@ -577,7 +649,9 @@ async function fetchUrlText(url: string): Promise<string> {
     return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
   } catch (err) {
     if (err instanceof FetchFailure) throw err;
-    if ((err as Error).name === 'AbortError') throw new FetchFailure(`timeout after ${URL_FETCH_TIMEOUT_MS}ms`);
+    if ((err as Error).name === 'AbortError') {
+      throw new FetchFailure(`timeout after ${URL_FETCH_TIMEOUT_MS}ms`);
+    }
     throw new FetchFailure(`fetch failed: ${(err as Error).message}`);
   } finally {
     clearTimeout(timeout);
@@ -663,19 +737,19 @@ function isPrivateIp(ip: string): boolean {
   const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (v4) {
     const [a, b] = v4.slice(1, 3).map((n) => parseInt(n, 10));
-    if (a === 10) return true;                              // 10/8
-    if (a === 127) return true;                             // loopback
-    if (a === 0) return true;                               // 0/8
-    if (a === 169 && b === 254) return true;                // link-local (IMDS)
-    if (a === 172 && b >= 16 && b <= 31) return true;       // 172.16/12
-    if (a === 192 && b === 168) return true;                // 192.168/16
-    if (a === 100 && b >= 64 && b <= 127) return true;      // CGNAT 100.64/10
+    if (a === 10) return true; // 10/8
+    if (a === 127) return true; // loopback
+    if (a === 0) return true; // 0/8
+    if (a === 169 && b === 254) return true; // link-local (IMDS)
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+    if (a === 192 && b === 168) return true; // 192.168/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
     if (a === 192 && b === 0 && v4[3] === '0') return true; // 192.0.0/24 IETF
     if (a === 192 && b === 0 && v4[3] === '2') return true; // 192.0.2/24 TEST-NET-1
-    if (a === 198 && (b === 18 || b === 19)) return true;   // 198.18/15 benchmark
-    if (a === 198 && b === 51) return true;                 // 198.51.100/24
-    if (a === 203 && b === 0) return true;                  // 203.0.113/24
-    if (a >= 224) return true;                              // 224+ multicast + reserved
+    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18/15 benchmark
+    if (a === 198 && b === 51) return true; // 198.51.100/24
+    if (a === 203 && b === 0) return true; // 203.0.113/24
+    if (a >= 224) return true; // 224+ multicast + reserved
     return false;
   }
   // IPv6 — normalize lower + strip zone id. Block loopback (::1), unspec
@@ -683,9 +757,11 @@ function isPrivateIp(ip: string): boolean {
   // IPv4-mapped ::ffff:a.b.c.d / IPv4-compat ::a.b.c.d.
   const v6 = ip.toLowerCase().split('%')[0];
   if (v6 === '::1' || v6 === '::') return true;
-  if (v6.startsWith('fc') || v6.startsWith('fd')) return true;  // ULA fc00::/7
-  if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) return true;  // fe80::/10
-  if (v6.startsWith('ff')) return true;  // multicast
+  if (v6.startsWith('fc') || v6.startsWith('fd')) return true; // ULA fc00::/7
+  if (
+    v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')
+  ) return true; // fe80::/10
+  if (v6.startsWith('ff')) return true; // multicast
   // IPv4-mapped / IPv4-compat: ::ffff:x.y.z.w or ::x.y.z.w — extract the v4 tail.
   const mapped = v6.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mapped) return isPrivateIp(mapped[1]);
@@ -764,8 +840,8 @@ function extractRecipeText(html: string): string {
       .replace(/&quot;/gi, '"')
       .replace(/&#039;/gi, "'")
       .replace(/&#x27;/gi, "'")
-      .replace(/&rsquo;/gi, "’")
-      .replace(/&lsquo;/gi, "‘");
+      .replace(/&rsquo;/gi, '’')
+      .replace(/&lsquo;/gi, '‘');
     if (stripped === before) break;
   }
 
@@ -799,7 +875,9 @@ function findRecipeBlocks(jsonLd: unknown): unknown[] {
   return out;
 }
 
-async function readAsyncThresholdBytes(client: ReturnType<typeof createServiceClient>): Promise<number> {
+async function readAsyncThresholdBytes(
+  client: ReturnType<typeof createServiceClient>,
+): Promise<number> {
   try {
     const flags = await readFlags(client);
     const flag = flags.find((f) => f.key === 'recipe_import_async_threshold');

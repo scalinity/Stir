@@ -30,23 +30,23 @@
 import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
-import {
-  ErrorCode,
-  jsonError,
-  jsonOk,
-} from '../_shared/errors.ts';
+import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { SubstitutionRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 import {
+  type DietaryRule,
   summarizeViolations,
   validateSubstitution,
-  type DietaryRule,
 } from '../_shared/hard_rules.ts';
 
 const FEATURE_KEY = 'substitution';
@@ -361,7 +361,8 @@ Deno.serve(async (req) => {
       retry_count: totalRetries,
     });
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.sub_event_id,
         canonical_user_key: claims.canonical_user_key,
@@ -385,7 +386,9 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.AI_02,
       502,
-      { message: 'Substitution is taking longer than expected. Try again or skip this ingredient.' },
+      {
+        message: 'Substitution is taking longer than expected. Try again or skip this ingredient.',
+      },
       requestId,
     );
   }
@@ -395,36 +398,37 @@ Deno.serve(async (req) => {
   // safety-first: validator wins.
   const wire: WireResponse = finalValidationValid
     ? {
-        sub_event_id: body.sub_event_id,
-        substitution_text: parsed.substitution_text,
-        amount_conversion: parsed.amount_conversion ?? null,
-        constraint_safe: true,
-        constraint_violation_reason: null,
-        reasoning: parsed.reasoning,
-        confidence: parsed.confidence,
-        prompt_version: activePrompt.version,
-        latency_ms: Math.round(performance.now() - started),
-        retry_count: totalRetries,
-      }
+      sub_event_id: body.sub_event_id,
+      substitution_text: parsed.substitution_text,
+      amount_conversion: parsed.amount_conversion ?? null,
+      constraint_safe: true,
+      constraint_violation_reason: null,
+      reasoning: parsed.reasoning,
+      confidence: parsed.confidence,
+      prompt_version: activePrompt.version,
+      latency_ms: Math.round(performance.now() - started),
+      retry_count: totalRetries,
+    }
     : {
-        sub_event_id: body.sub_event_id,
-        substitution_text: CANNED_UNSAFE_MESSAGE,
-        amount_conversion: null,
-        constraint_safe: false,
-        // Intentionally generic — avoids leaking rule specifics back to the
-        // client and keeps the iOS UX copy stable.
-        constraint_violation_reason:
-          parsed.constraint_violation_reason ?? 'Violates a hard dietary or equipment constraint.',
-        reasoning: "No substitution passed the household's hard rules.",
-        confidence: 'low',
-        prompt_version: activePrompt.version,
-        latency_ms: Math.round(performance.now() - started),
-        retry_count: totalRetries,
-      };
+      sub_event_id: body.sub_event_id,
+      substitution_text: CANNED_UNSAFE_MESSAGE,
+      amount_conversion: null,
+      constraint_safe: false,
+      // Intentionally generic — avoids leaking rule specifics back to the
+      // client and keeps the iOS UX copy stable.
+      constraint_violation_reason: parsed.constraint_violation_reason ??
+        'Violates a hard dietary or equipment constraint.',
+      reasoning: "No substitution passed the household's hard rules.",
+      confidence: 'low',
+      prompt_version: activePrompt.version,
+      latency_ms: Math.round(performance.now() - started),
+      retry_count: totalRetries,
+    };
 
   // Log cost + best-effort cache write.
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.sub_event_id,
       canonical_user_key: claims.canonical_user_key,

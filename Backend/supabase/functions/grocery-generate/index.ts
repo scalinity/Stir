@@ -20,12 +20,16 @@ import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { GroceryGenerateRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 
 const FEATURE_KEY = 'grocery_generate';
@@ -128,7 +132,10 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof AuthError) {
       log.warn('auth_failed', { reason: err.reason });
-      return jsonError(ErrorCode.AUTH_01, 401, { message: 'Session expired or missing.', reason: err.reason }, requestId);
+      return jsonError(ErrorCode.AUTH_01, 401, {
+        message: 'Session expired or missing.',
+        reason: err.reason,
+      }, requestId);
     }
     log.error('auth_unexpected', err);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
@@ -153,7 +160,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -177,7 +187,12 @@ Deno.serve(async (req) => {
     const ipRl = await checkAndIncrement(client, 'ip:grocery_generate_daily', sourceIP);
     if (!ipRl.allowed) {
       userLog.warn('rate_limited', { scope: 'ip:grocery_generate_daily' });
-      return buildRate01Response('ip:grocery_generate_daily', ipRl.retry_after_seconds, ipRl.reset_at, requestId);
+      return buildRate01Response(
+        'ip:grocery_generate_daily',
+        ipRl.retry_after_seconds,
+        ipRl.reset_at,
+        requestId,
+      );
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
@@ -187,10 +202,16 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    return jsonError(ErrorCode.AUTH_01, 401, { message: 'User not found; re-bootstrap.', reason: 'user_stale' }, requestId);
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User not found; re-bootstrap.',
+      reason: 'user_stale',
+    }, requestId);
   }
   if (userRow.status === 'banned') {
-    return jsonError(ErrorCode.BILL_01, 403, { message: 'Account is not eligible for Stir.', state: 'banned' }, requestId);
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
   }
 
   // ---- Prompt
@@ -269,7 +290,8 @@ Deno.serve(async (req) => {
 
   if (!output) {
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.source_id,
         canonical_user_key: claims.canonical_user_key,
@@ -316,7 +338,8 @@ Deno.serve(async (req) => {
   };
 
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.source_id,
       canonical_user_key: claims.canonical_user_key,
@@ -337,7 +360,14 @@ Deno.serve(async (req) => {
   );
 
   try {
-    await writeCache(client, claims.canonical_user_key, body.source_id, FEATURE_KEY, 200, responseBody);
+    await writeCache(
+      client,
+      claims.canonical_user_key,
+      body.source_id,
+      FEATURE_KEY,
+      200,
+      responseBody,
+    );
   } catch (err) {
     userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }

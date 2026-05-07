@@ -30,19 +30,28 @@
 //   8. Call gemini-3-flash-preview with responseSchema JSON output
 //   9. Parse + validate response; log ai_request_log; return.
 
-import { ZodError, z } from 'zod';
+import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
-import { readActivePrompt, renderPrompt, USER_DATA_END, USER_DATA_START } from '../_shared/prompt_versions.ts';
-import { GeminiError, GeminiModel, geminiGenerate } from '../_shared/gemini.ts';
+import {
+  readActivePrompt,
+  renderPrompt,
+  USER_DATA_END,
+  USER_DATA_START,
+} from '../_shared/prompt_versions.ts';
+import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { CookTurnRequest, zodToFieldErrors } from '../_shared/validation.ts';
-import { buildRate01Response, checkAndIncrement, extractSourceIP } from '../_shared/rate_limiter.ts';
+import {
+  buildRate01Response,
+  checkAndIncrement,
+  extractSourceIP,
+} from '../_shared/rate_limiter.ts';
 
 const FEATURE_KEY = 'cook_turn';
 const MODEL = GeminiModel.Flash;
@@ -146,7 +155,10 @@ Deno.serve(async (req) => {
     return jsonError(
       ErrorCode.VAL_01,
       400,
-      { message: 'Request body is not valid JSON.', field_errors: [{ field: '<root>', issue: 'invalid JSON' }] },
+      {
+        message: 'Request body is not valid JSON.',
+        field_errors: [{ field: '<root>', issue: 'invalid JSON' }],
+      },
       requestId,
     );
   }
@@ -164,7 +176,12 @@ Deno.serve(async (req) => {
     const rlIP = await checkAndIncrement(client, 'ip:cook_turn_daily', sourceIP);
     if (!rlIP.allowed) {
       userLog.warn('rate_limited', { scope: 'ip:cook_turn_daily' });
-      return buildRate01Response('ip:cook_turn_daily', rlIP.retry_after_seconds, rlIP.reset_at, requestId);
+      return buildRate01Response(
+        'ip:cook_turn_daily',
+        rlIP.retry_after_seconds,
+        rlIP.reset_at,
+        requestId,
+      );
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
@@ -172,12 +189,17 @@ Deno.serve(async (req) => {
   }
   try {
     const rlUser = await checkAndIncrement(
-      client, 'user:cook_turn_hourly', claims.canonical_user_key,
+      client,
+      'user:cook_turn_hourly',
+      claims.canonical_user_key,
     );
     if (!rlUser.allowed) {
       userLog.warn('rate_limited', { scope: 'user:cook_turn_hourly' });
       return buildRate01Response(
-        'user:cook_turn_hourly', rlUser.retry_after_seconds, rlUser.reset_at, requestId,
+        'user:cook_turn_hourly',
+        rlUser.retry_after_seconds,
+        rlUser.reset_at,
+        requestId,
       );
     }
   } catch (err) {
@@ -190,21 +212,24 @@ Deno.serve(async (req) => {
   if (!userRow) {
     userLog.warn('user_row_missing');
     return jsonError(
-      ErrorCode.AUTH_01, 401,
+      ErrorCode.AUTH_01,
+      401,
       { message: 'User not found; re-bootstrap.', reason: 'user_stale' },
       requestId,
     );
   }
   if (userRow.status === 'banned') {
     return jsonError(
-      ErrorCode.BILL_01, 403,
+      ErrorCode.BILL_01,
+      403,
       { message: 'Account is not eligible for Stir.', state: 'banned' },
       requestId,
     );
   }
   if (userRow.merged_into) {
     return jsonError(
-      ErrorCode.AUTH_01, 401,
+      ErrorCode.AUTH_01,
+      401,
       { message: 'User identity was merged; re-bootstrap required.', reason: 'user_stale' },
       requestId,
     );
@@ -214,7 +239,8 @@ Deno.serve(async (req) => {
   const entitlement = await readEntitlement(client, claims.canonical_user_key);
   if (!entitlement) {
     return jsonError(
-      ErrorCode.VAL_01, 400,
+      ErrorCode.VAL_01,
+      400,
       {
         message: 'No entitlement row. Call /v1/session/bootstrap to refresh.',
         field_errors: [{ field: 'session', issue: 'entitlement_snapshots missing row' }],
@@ -228,7 +254,8 @@ Deno.serve(async (req) => {
       billing_state: entitlement.billing_state,
     });
     return jsonError(
-      ErrorCode.ENT_VOICE_01, 403,
+      ErrorCode.ENT_VOICE_01,
+      403,
       {
         message: 'Cook Mode voice is a Premium feature.',
         tier: entitlement.tier,
@@ -255,8 +282,7 @@ Deno.serve(async (req) => {
     current_step_number_json: body.current_step_number,
     total_steps_json: body.recipe_context.total_steps,
     current_step_text_json: body.recipe_context.current_step_text,
-    current_step_timer_seconds_json:
-      body.recipe_context.current_step_timer_seconds ?? 0,
+    current_step_timer_seconds_json: body.recipe_context.current_step_timer_seconds ?? 0,
     all_steps_json: body.recipe_context.all_steps,
     remaining_ingredients_json: body.recipe_context.remaining_ingredients,
     pantry_snapshot_json: body.household_context.pantry_snapshot,
@@ -268,7 +294,8 @@ Deno.serve(async (req) => {
   });
   // renderPrompt already wraps the transcript in USER_DATA markers via
   // `untrusted`. Unused import warning for the raw markers is OK.
-  void USER_DATA_START; void USER_DATA_END;
+  void USER_DATA_START;
+  void USER_DATA_END;
 
   // 8. Gemini call (retry-once on 5xx or schema failure)
   let parsed: ParsedCookTurn | null = null;
@@ -325,7 +352,8 @@ Deno.serve(async (req) => {
   if (!parsed) {
     userLog.error('cook_turn_failed_after_retry', lastErr, { retry_count: retryCount });
     recordAIRequest(
-      client, userLog,
+      client,
+      userLog,
       {
         request_id: body.client_request_id,
         canonical_user_key: claims.canonical_user_key,
@@ -356,7 +384,8 @@ Deno.serve(async (req) => {
   }
 
   recordAIRequest(
-    client, userLog,
+    client,
+    userLog,
     {
       request_id: body.client_request_id,
       canonical_user_key: claims.canonical_user_key,

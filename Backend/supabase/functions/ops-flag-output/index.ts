@@ -32,7 +32,7 @@
 // If either lookup fails we still create the flag with NULL raw columns —
 // partial is better than none for admin review.
 
-import { ZodError, z } from 'zod';
+import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
@@ -136,7 +136,9 @@ Deno.serve(async (req) => {
   const [{ data: reqRow }, { data: cacheRow }] = await Promise.all([
     client
       .from('ai_request_log')
-      .select('feature_key, model, input_tokens, output_tokens, cost_usd, latency_ms, retry_count, created_at')
+      .select(
+        'feature_key, model, input_tokens, output_tokens, cost_usd, latency_ms, retry_count, created_at',
+      )
       .eq('request_id', parsed.request_id)
       .eq('canonical_user_key', claims.canonical_user_key)
       .maybeSingle(),

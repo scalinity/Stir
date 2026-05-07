@@ -23,7 +23,7 @@ export type DietaryRuleSeverity = 'hard' | 'soft';
 
 export interface DietaryRule {
   kind: DietaryRuleKind;
-  value: string;           // free text, e.g. "peanut", "vegetarian", "low-sodium"
+  value: string; // free text, e.g. "peanut", "vegetarian", "low-sodium"
   severity: DietaryRuleSeverity;
 }
 
@@ -89,21 +89,68 @@ export interface ValidationResult {
 // AND canonical_slug via substring. A single keyword match fires a violation.
 
 const MEAT_KEYWORDS = [
-  'beef', 'steak', 'chicken', 'pork', 'bacon', 'sausage', 'ham', 'lamb',
-  'turkey', 'duck', 'veal', 'goat', 'rabbit', 'pepperoni', 'salami',
-  'prosciutto', 'chorizo', 'bratwurst', 'venison', 'bison',
+  'beef',
+  'steak',
+  'chicken',
+  'pork',
+  'bacon',
+  'sausage',
+  'ham',
+  'lamb',
+  'turkey',
+  'duck',
+  'veal',
+  'goat',
+  'rabbit',
+  'pepperoni',
+  'salami',
+  'prosciutto',
+  'chorizo',
+  'bratwurst',
+  'venison',
+  'bison',
 ];
 
 const FISH_SHELLFISH_KEYWORDS = [
-  'fish', 'salmon', 'tuna', 'cod', 'halibut', 'trout', 'mackerel', 'sardine',
-  'anchovy', 'shrimp', 'prawn', 'lobster', 'crab', 'clam', 'mussel', 'oyster',
-  'scallop', 'squid', 'octopus', 'calamari',
+  'fish',
+  'salmon',
+  'tuna',
+  'cod',
+  'halibut',
+  'trout',
+  'mackerel',
+  'sardine',
+  'anchovy',
+  'shrimp',
+  'prawn',
+  'lobster',
+  'crab',
+  'clam',
+  'mussel',
+  'oyster',
+  'scallop',
+  'squid',
+  'octopus',
+  'calamari',
 ];
 
 const DAIRY_KEYWORDS = [
-  'milk', 'cream', 'butter', 'cheese', 'yogurt', 'yoghurt', 'ghee',
-  'whey', 'casein', 'parmesan', 'mozzarella', 'cheddar', 'feta', 'ricotta',
-  'kefir', 'buttermilk',
+  'milk',
+  'cream',
+  'butter',
+  'cheese',
+  'yogurt',
+  'yoghurt',
+  'ghee',
+  'whey',
+  'casein',
+  'parmesan',
+  'mozzarella',
+  'cheddar',
+  'feta',
+  'ricotta',
+  'kefir',
+  'buttermilk',
 ];
 
 const EGG_KEYWORDS = ['egg', 'eggs'];
@@ -133,20 +180,45 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
   // walnuts / hazelnuts / chestnuts / peanuts (the plurals).
   nut: [
     'nut',
-    'nuts',  // plain substring — catches "mixed nuts", "roasted nuts", etc. that the word-boundary "nut" misses.
-    'almond', 'cashew', 'pistachio', 'pecan', 'macadamia',
-    'walnut', 'hazelnut', 'chestnut', 'peanut', 'groundnut',
-    'brazil nut', 'pine nut', 'pignoli',
-    'marzipan', 'praline', 'nougat', 'gianduja',
+    'nuts', // plain substring — catches "mixed nuts", "roasted nuts", etc. that the word-boundary "nut" misses.
+    'almond',
+    'cashew',
+    'pistachio',
+    'pecan',
+    'macadamia',
+    'walnut',
+    'hazelnut',
+    'chestnut',
+    'peanut',
+    'groundnut',
+    'brazil nut',
+    'pine nut',
+    'pignoli',
+    'marzipan',
+    'praline',
+    'nougat',
+    'gianduja',
   ],
   // tree_nut: same coverage as `nut` minus peanut (which is a legume).
   // Keeps existing rawValue working — historic Settings selections
   // persist to "tree_nut" and were previously near-non-functional.
   tree_nut: [
-    'almond', 'cashew', 'pistachio', 'pecan', 'macadamia',
-    'walnut', 'hazelnut', 'chestnut',
-    'brazil nut', 'pine nut', 'pignoli',
-    'tree nut', 'marzipan', 'praline', 'nougat', 'gianduja',
+    'almond',
+    'cashew',
+    'pistachio',
+    'pecan',
+    'macadamia',
+    'walnut',
+    'hazelnut',
+    'chestnut',
+    'brazil nut',
+    'pine nut',
+    'pignoli',
+    'tree nut',
+    'marzipan',
+    'praline',
+    'nougat',
+    'gianduja',
   ],
   peanut: ['peanut', 'groundnut'],
   // soy: covers tofu / tempeh / edamame / miso / soy sauce that don't
@@ -155,8 +227,19 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
   // shellfish: rawValue alone misses crab / lobster / shrimp etc. The
   // existing FISH_SHELLFISH_KEYWORDS list covers the species; reuse.
   shellfish: [
-    'shellfish', 'shrimp', 'prawn', 'lobster', 'crab', 'clam', 'mussel',
-    'oyster', 'scallop', 'squid', 'octopus', 'calamari', 'crawfish',
+    'shellfish',
+    'shrimp',
+    'prawn',
+    'lobster',
+    'crab',
+    'clam',
+    'mussel',
+    'oyster',
+    'scallop',
+    'squid',
+    'octopus',
+    'calamari',
+    'crawfish',
     'crayfish',
   ],
 };
@@ -190,7 +273,13 @@ const EQUIPMENT_IMPLICATION: Record<string, string[]> = {
 // CLAUDE.md: "favor false positives (extra retry) over false negatives
 // (ship an allergen)."
 const WORD_BOUNDARY_KEYWORDS: ReadonlySet<string> = new Set([
-  'egg', 'eggs', 'butter', 'milk', 'wheat', 'ham', 'cream',
+  'egg',
+  'eggs',
+  'butter',
+  'milk',
+  'wheat',
+  'ham',
+  'cream',
 ]);
 
 // Allergy-side word-boundary exceptions. Almost all allergy needles are
@@ -313,14 +402,23 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
 
       if (rule.kind === 'dislike') {
         const hit = containsAnyStrict(text, [value]);
-        if (hit) issues.push({ kind: 'dislike_hard', value: rule.value, ingredient: ing.display_name });
+        if (hit) {
+          issues.push({ kind: 'dislike_hard', value: rule.value, ingredient: ing.display_name });
+        }
       }
 
       if (rule.kind === 'diet') {
         const keywords = dietKeywordsFor(value);
         if (keywords) {
           const hit = containsDietKeyword(ing.display_name, text, keywords);
-          if (hit) issues.push({ kind: 'diet_violation', diet: rule.value, ingredient: ing.display_name, keyword: hit });
+          if (hit) {
+            issues.push({
+              kind: 'diet_violation',
+              diet: rule.value,
+              ingredient: ing.display_name,
+              keyword: hit,
+            });
+          }
         }
       }
     }
