@@ -292,3 +292,132 @@ Deno.test('dinner-solve: kill switch — preference_memory_enabled=false still p
     await flipFlag(true);
   }
 });
+
+// SCA-68: leftovers prompt-routing audit — pin the wire-shape contract
+// the iOS DinnerSolveRequest.LeftoversItem ships against, the
+// canary picker's eligibility mechanics, and the prompt_version
+// emission contract. The negative-case Zod tests above (lines
+// 123-151) already cover the refine guard rails; these positive-case
+// + boundary tests pin the snake_case key names + cap behavior so a
+// future drift on either side surfaces here, not in production
+// analytics.
+
+Deno.test('dinner-solve: leftovers wire-shape — fully-populated LeftoversItem (canonical_slug + approximate_amount_text) parses (RATE-01 not VAL-01)', async () => {
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+
+  // Seed quota at cap so we hit RATE-01 instead of paying for a real
+  // Gemini call. RATE-01 fires AFTER Zod parse, so reaching it proves
+  // the leftovers wire shape passed validation. Same trick as line
+  // 198's `well-formed feedback_summary parses` test.
+  const client = serviceClient();
+  const { error } = await client
+    .from('usage_counters')
+    .update({ used_count: 6 })
+    .eq('canonical_user_key', boot.canonical_user_key)
+    .eq('feature_key', 'dinner_solve');
+  if (error) throw error;
+
+  const res = await callDinnerSolve(
+    {
+      ...validBody(),
+      context_hint: 'leftovers',
+      leftovers_items: [
+        {
+          // All three iOS fields populated — exercises the optional
+          // canonical_slug + approximate_amount_text path. Snake-case
+          // end-to-end: iOS DTO encodes via CodingKeys, backend Zod
+          // expects exactly these keys.
+          display_name: 'Cooked salmon',
+          canonical_slug: 'salmon',
+          approximate_amount_text: '~6 oz',
+        },
+      ],
+    },
+    boot.session_jwt,
+  );
+  assertEquals(
+    res.status, 429,
+    'fully-populated leftovers request must pass Zod and reach RATE-01',
+  );
+  assertEquals(res.body?.error, 'RATE-01');
+});
+
+Deno.test('dinner-solve: leftovers wire-shape — display_name-only LeftoversItem (both optionals omitted) parses', async () => {
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+
+  const client = serviceClient();
+  const { error } = await client
+    .from('usage_counters')
+    .update({ used_count: 6 })
+    .eq('canonical_user_key', boot.canonical_user_key)
+    .eq('feature_key', 'dinner_solve');
+  if (error) throw error;
+
+  const res = await callDinnerSolve(
+    {
+      ...validBody(),
+      context_hint: 'leftovers',
+      leftovers_items: [{ display_name: 'leftover rice' }],
+    },
+    boot.session_jwt,
+  );
+  assertEquals(
+    res.status, 429,
+    'display_name-only LeftoversItem must parse — canonical_slug + approximate_amount_text are optional',
+  );
+  assertEquals(res.body?.error, 'RATE-01');
+});
+
+Deno.test('dinner-solve: leftovers cap — 20 items parse, 21 reject', async () => {
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+
+  const client = serviceClient();
+  const { error } = await client
+    .from('usage_counters')
+    .update({ used_count: 6 })
+    .eq('canonical_user_key', boot.canonical_user_key)
+    .eq('feature_key', 'dinner_solve');
+  if (error) throw error;
+
+  const twenty = Array.from({ length: 20 }, (_, i) => ({
+    display_name: `leftover ${i + 1}`,
+  }));
+  const passing = await callDinnerSolve(
+    { ...validBody(), context_hint: 'leftovers', leftovers_items: twenty },
+    boot.session_jwt,
+  );
+  assertEquals(passing.status, 429, '20 leftovers_items at the cap must parse');
+  assertEquals(passing.body?.error, 'RATE-01');
+
+  const twentyOne = [...twenty, { display_name: 'leftover 21' }];
+  const failing = await callDinnerSolve(
+    { ...validBody(), context_hint: 'leftovers', leftovers_items: twentyOne },
+    boot.session_jwt,
+  );
+  assertEquals(failing.status, 400, '21 leftovers_items exceeds the cap');
+  assertEquals(failing.body?.error, 'VAL-01');
+});
+
+Deno.test('dinner-solve: leftovers wire-shape — extra unknown field on LeftoversItem rejects (.strict() schema)', async () => {
+  // Defends against silent wire-protocol drift where iOS adds a new
+  // field but doesn't update the backend schema — Zod's `.strict()`
+  // on LeftoversItem rejects unknown keys at the boundary so the
+  // mismatch surfaces as VAL-01, not silent data-loss.
+  const installId = testInstallId();
+  const boot = await quickBootstrap({ installation_id: installId });
+
+  const res = await callDinnerSolve(
+    {
+      ...validBody(),
+      context_hint: 'leftovers',
+      // deno-lint-ignore no-explicit-any
+      leftovers_items: [{ display_name: 'salmon', unknown_future_field: 'x' } as any],
+    },
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body?.error, 'VAL-01');
+});
