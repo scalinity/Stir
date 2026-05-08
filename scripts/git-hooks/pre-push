@@ -62,8 +62,15 @@ if xcodebuild test \
         -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
         -quiet \
         > "$TMPLOG" 2>&1; then
-    PASSED="$(grep -cE '^Test Case .* passed' "$TMPLOG" || true)"
-    echo "[pre-push] ✅ all $PASSED tests passed"
+    # `-quiet` strips per-`Test Case` lines but the
+    # "Test Suite 'StirTests.xctest' passed ... Executed N tests"
+    # summary survives. Parse that for the count.
+    SUMMARY="$(grep -E 'Executed [0-9]+ tests, with [0-9]+ failures' "$TMPLOG" | tail -1 | sed -E 's/.*(Executed [0-9]+ tests, with [0-9]+ failures).*/\1/' || true)"
+    if [ -z "$SUMMARY" ]; then
+        echo "[pre-push] ✅ tests passed"
+    else
+        echo "[pre-push] ✅ $SUMMARY"
+    fi
     exit 0
 fi
 
