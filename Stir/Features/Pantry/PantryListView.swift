@@ -401,7 +401,7 @@ struct PantryListView: View {
             Image.Stir.pantry
                 .font(.system(size: CGFloat.Stir.iconLg, weight: .regular))
                 .foregroundStyle(Color.Stir.ember600)
-                .frame(width: 80, height: 80)  // justification: 80pt hero icon tile, matches TonightHomeView empty-state square (sub-token escape hatch)
+                .frame(width: CGFloat.Stir.iconHero, height: CGFloat.Stir.iconHero)
                 .background(
                     RoundedRectangle(cornerRadius: CGFloat.Stir.radiusHero, style: .continuous)
                         .fill(Color.Stir.ember100),

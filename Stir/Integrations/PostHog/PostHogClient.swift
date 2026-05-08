@@ -108,7 +108,7 @@ class PostHogClient: @unchecked Sendable {
     /// sibling rows rather than a single merged record (the documented
     /// rejection in ADR 0009). See
     /// `CookModeViewModel.fireVoiceSessionCloseTrace` for the single
-    /// call site and `_shared/ai_observability.ts` lines 168-172 for
+    /// call site and `_shared/ai_observability.ts` lines 170-174 for
     /// the backend's explicit "no mint-time trace" contract.
     ///
     /// Privacy: no user content. `inputState` / `outputState` must
