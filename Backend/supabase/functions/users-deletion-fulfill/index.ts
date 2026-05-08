@@ -63,7 +63,7 @@ function authorize(req: Request): { ok: true } | { ok: false; reason: string } {
     }
     return { ok: true };
   }
-  const incoming = req.headers.get('X-Stir-Cron-Secret') ?? '';
+  const incoming = req.headers.get('x-stir-cron-secret') ?? '';
   // Constant-time compare.
   const a = new TextEncoder().encode(incoming);
   const b = new TextEncoder().encode(SHARED_SECRET);
