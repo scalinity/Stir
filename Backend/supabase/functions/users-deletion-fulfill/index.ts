@@ -127,6 +127,11 @@ async function stepPostHog(ctx: FulfillContext): Promise<SubsystemRecord> {
 
 async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
   if (ctx.refs.sentry?.completed_at) return ctx.refs.sentry;
+  // SCA-227: preserve the prior triggered_at across retry ticks so
+  // ops dashboards show when this row first hit the manual-action
+  // path. Without this short-circuit, every retry re-walks the env
+  // check and overwrites the timestamp.
+  if (ctx.refs.sentry?.requires_manual_action) return ctx.refs.sentry;
 
   // SCA-225 scope note: this step uses Sentry's BULK ISSUE-DELETE
   // endpoint, NOT a full GDPR user-erase API. It deletes Issue rows
@@ -149,6 +154,7 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
     return {
       requires_manual_action: true,
       error: 'sentry_auth_token_or_slugs_unset',
+      triggered_at: new Date().toISOString(),
     };
   }
 
@@ -180,7 +186,11 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
     // as requires_manual_action so the failure is observable + retryable
     // by ops without stranding the row in 'failed' on a transient stall.
     if (err instanceof DOMException && err.name === 'TimeoutError') {
-      return { requires_manual_action: true, error: 'sentry_timeout_8s' };
+      return {
+        requires_manual_action: true,
+        error: 'sentry_timeout_8s',
+        triggered_at: new Date().toISOString(),
+      };
     }
     return { error: truncate(String(err), 200) };
   }
@@ -188,12 +198,15 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
 
 async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
   if (ctx.refs.revenuecat?.completed_at) return ctx.refs.revenuecat;
+  // SCA-227: preserve prior triggered_at across retries (mirrors stepSentry).
+  if (ctx.refs.revenuecat?.requires_manual_action) return ctx.refs.revenuecat;
 
   const token = Deno.env.get('REVENUECAT_SECRET_API_KEY');
   if (!token) {
     return {
       requires_manual_action: true,
       error: 'revenuecat_secret_api_key_unset',
+      triggered_at: new Date().toISOString(),
     };
   }
 
@@ -223,7 +236,11 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
     };
   } catch (err) {
     if (err instanceof DOMException && err.name === 'TimeoutError') {
-      return { requires_manual_action: true, error: 'revenuecat_timeout_8s' };
+      return {
+        requires_manual_action: true,
+        error: 'revenuecat_timeout_8s',
+        triggered_at: new Date().toISOString(),
+      };
     }
     return { error: truncate(String(err), 200) };
   }
