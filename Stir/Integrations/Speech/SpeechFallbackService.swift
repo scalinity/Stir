@@ -79,14 +79,27 @@ struct CookTurnResult: Sendable {
 /// latch + timeout interaction can be exercised without a real
 /// voice-synthesis backend.
 ///
-/// Intentionally minimal — only the surface `speak()` touches. The
-/// cancel-path surface (`isSpeaking` + `stopSpeaking(at:)`) is NOT
-/// exposed; `cancelSpeaking` casts to the concrete type for those.
-/// Widen this protocol when cancel-path tests are written. See
-/// CLAUDE.md §Deferred "SpeechSynthesizing protocol widening".
+/// SCA-142 widened this protocol with the cancel-path surface
+/// (`isSpeaking` + `stopSpeaking(at:)`) so the three call sites that
+/// previously cast `synthesizer as? AVSpeechSynthesizer` (cancelSpeaking,
+/// audio-interruption handler, close()) can drop the cast and exercise
+/// the protocol directly. AVSpeechSynthesizer already provides matching
+/// signatures, so the existing conformance is automatic.
+///
+/// Mocks under test now satisfy `isSpeaking` and `stopSpeaking(at:)`
+/// directly — the previous "cast fails, no-op" behavior was an
+/// accidental property of the cast pattern, not a contract.
 protocol SpeechSynthesizing: AnyObject {
     var delegate: AVSpeechSynthesizerDelegate? { get set }
+    var isSpeaking: Bool { get }
     func speak(_ utterance: AVSpeechUtterance)
+    /// Returns `true` if any speech was actually stopped (matches
+    /// `AVSpeechSynthesizer.stopSpeaking(at:)`'s signature). Callers
+    /// in this file ignore the return value — the contract is "best-
+    /// effort cancel" and the post-condition we care about is
+    /// `isSpeaking == false`, not the precise transition we caused.
+    @discardableResult
+    func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool
 }
 
 extension AVSpeechSynthesizer: SpeechSynthesizing {}
@@ -322,16 +335,11 @@ final class SpeechFallbackService: VoiceSessionDriver {
             recognitionTask?.cancel()
             recognitionTask = nil
             recognitionRequest = nil
-            // Concrete cast: the `SpeechSynthesizing` protocol is
-            // intentionally minimal for P1-Q scope (speak + delegate
-            // only). `isSpeaking` + `stopSpeaking(at:)` are not on the
-            // protocol; widen it when cancel-path tests are written —
-            // see CLAUDE.md §Deferred "SpeechSynthesizing protocol
-            // widening". In tests where a mock synthesizer is injected,
-            // the cast fails and the stop is a no-op — fine because
-            // mocks don't have real speech to cancel.
-            if let concrete = synthesizer as? AVSpeechSynthesizer, concrete.isSpeaking {
-                concrete.stopSpeaking(at: .immediate)
+            // SCA-142: protocol-level isSpeaking + stopSpeaking(at:),
+            // no concrete-type cast required. Mocks under test satisfy
+            // the protocol surface directly.
+            if synthesizer.isSpeaking {
+                synthesizer.stopSpeaking(at: .immediate)
             }
             if stateMachine.state != .closed && stateMachine.state != .error {
                 stateMachine.advance(to: .error)
@@ -697,16 +705,11 @@ final class SpeechFallbackService: VoiceSessionDriver {
     /// the mic tap — if the cap is reached we return anyway and let
     /// `beginTurn` throw `.busy`, which the VM already handles.
     func cancelSpeaking() async {
-        // Concrete cast: the `SpeechSynthesizing` protocol is
-        // intentionally minimal for P1-Q scope (speak + delegate only).
-        // `isSpeaking` + `stopSpeaking(at:)` are not on the protocol;
-        // widen it when cancel-path tests are written (see CLAUDE.md
-        // §Deferred "SpeechSynthesizing protocol widening"). In tests
-        // where a mock is injected, this cast fails and cancelSpeaking
-        // no-ops — acceptable until the cancel-path tests arrive.
-        guard let concrete = synthesizer as? AVSpeechSynthesizer else { return }
-        guard concrete.isSpeaking else { return }
-        concrete.stopSpeaking(at: .immediate)
+        // SCA-142: protocol-level isSpeaking + stopSpeaking(at:), no
+        // concrete-type cast required. Mocks under test now actually
+        // exercise the cancel path rather than silently no-op'ing.
+        guard synthesizer.isSpeaking else { return }
+        synthesizer.stopSpeaking(at: .immediate)
         // Poll the state machine until it settles. 50 × 10ms = 500ms cap.
         // In practice the delegate fires within one runloop tick.
         for _ in 0..<50 {
@@ -753,14 +756,12 @@ final class SpeechFallbackService: VoiceSessionDriver {
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
-        // Concrete cast: the `SpeechSynthesizing` protocol is
-        // intentionally minimal for P1-Q scope (speak + delegate only).
-        // Widen it when cancel-path tests are written — see CLAUDE.md
-        // §Deferred "SpeechSynthesizing protocol widening". Close is
-        // idempotent and the stop-if-speaking is defensive, so a failed
-        // cast (mock) being a no-op matches the intent.
-        if let concrete = synthesizer as? AVSpeechSynthesizer, concrete.isSpeaking {
-            concrete.stopSpeaking(at: .immediate)
+        // SCA-142: protocol-level isSpeaking + stopSpeaking(at:), no
+        // concrete-type cast required. close() remains idempotent —
+        // the stop-if-speaking is defensive against being called while
+        // a synthesis is mid-flight.
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
         }
         // P0-D (2026-04-23): stop AVAudioSession observers so no late
         // notification fires callbacks into a torn-down service.

@@ -226,6 +226,9 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | `icon.md` | 20pt | Buttons, tab bar |
 | `icon.lg` | 28pt | Primary action icons |
 | `icon.xl` | 44pt | Hero icons on empty states, mic button |
+| `icon.hero` | 80pt | Hero icon TILE on first-use empty states |
+
+`icon.hero` is the rounded ember-tint SQUARE that frames an inner glyph (PantryListView empty, TonightHomeView first-use empty), not the symbol inside it — that's `icon.xl`.
 
 **Semantic icon mapping** (the single source of truth — agents don't invent icons). This table is the full v1 vocabulary; additions require updating this table and the mirror `Icons.swift`.
 

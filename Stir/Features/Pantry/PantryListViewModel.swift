@@ -37,7 +37,21 @@ final class PantryListViewModel {
     /// Underlying NSManagedObjects so SwiftUI rows can `@ObservedObject`
     /// for live KVO redraws on edit. See PantryItemRepository.fetchAll
     /// commentary for why value-type projection is overkill here.
-    private(set) var items: [PantryItem] = []
+    ///
+    /// SCA-101 review W1: invalidate `filteredItemsCache` on every
+    /// reassignment of the array. Today every mutation routes through
+    /// `load()` which produces a fresh array — the cache key would
+    /// stay correct via `items.count + effectiveSearchText` alone for
+    /// add/delete, but EDITS keep `count` constant while changing
+    /// row-content (displayName). Wiping the cache on every set
+    /// makes the cache trivially correct (post-set hits are by
+    /// definition reads against fresh items) and inoculates against
+    /// the deferred SCA-101 follow-up which would adopt surgical
+    /// mutation: that refactor would silently invalidate a count-only
+    /// cache, but the didSet hook still fires.
+    private(set) var items: [PantryItem] = [] {
+        didSet { filteredItemsCache = nil }
+    }
 
     /// Flips true after the first `load()` completes (success OR
     /// error). Used by the SCA-14 in-list coach-mark gate to defer
@@ -47,15 +61,52 @@ final class PantryListViewModel {
     /// and the first batch of items rendering.
     private(set) var didCompleteInitialLoad: Bool = false
 
-    /// Bound from the search bar in PantryListView. Filtering runs on
-    /// every set; we don't memoize because the in-memory list is small
-    /// (≤1000 entries, capped by the Pro tier).
+    /// Bound from the search bar in PantryListView. Field updates fire
+    /// per keystroke; the view-layer wraps writes in a 150ms debounce
+    /// (SCA-101 d) and forwards them to `effectiveSearchText` below
+    /// once the user has stopped typing — so this property is the
+    /// raw, undebounced typing buffer.
     var searchText: String = ""
 
+    /// Debounced search text. Reads from this instead of `searchText`
+    /// so the filter doesn't recompute on every keystroke. View layer
+    /// writes here from a debounced `.onChange(of: searchText)` pulse.
+    /// Initialised empty to match `searchText`'s default.
+    var effectiveSearchText: String = ""
+
+    /// Memoised filter result so back-to-back reads of `filteredItems`
+    /// (e.g. List body re-evaluation under @Observable) don't re-run
+    /// the filter when nothing changed. Cache is wiped on every
+    /// `items` reassignment via `didSet` above (SCA-101 review W1),
+    /// so the only same-state hit comes from a stable `effectiveSearchText`
+    /// across consecutive reads — exactly the case worth memoising.
+    /// SCA-101 (c).
+    private var filteredItemsCache: FilteredCacheEntry?
+
+    private struct FilteredCacheKey: Equatable {
+        let count: Int
+        let query: String
+    }
+
+    private struct FilteredCacheEntry {
+        let key: FilteredCacheKey
+        let value: [PantryItem]
+    }
+
     var filteredItems: [PantryItem] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return items }
-        return items.filter { ($0.displayName ?? "").lowercased().contains(q) }
+        let q = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let key = FilteredCacheKey(count: items.count, query: q)
+        if let cached = filteredItemsCache, cached.key == key {
+            return cached.value
+        }
+        let value: [PantryItem]
+        if q.isEmpty {
+            value = items
+        } else {
+            value = items.filter { ($0.displayName ?? "").lowercased().contains(q) }
+        }
+        filteredItemsCache = FilteredCacheEntry(key: key, value: value)
+        return value
     }
 
     /// Live count of items that count against the standing pantry cap

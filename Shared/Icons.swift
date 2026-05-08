@@ -274,4 +274,10 @@ extension CGFloat.Stir {
     static let iconLg: CGFloat = 28
     /// 44pt — hero icons on empty states, mic button.
     static let iconXl: CGFloat = 44
+    /// 80pt — hero icon TILE (the rounded ember-tint square that
+    /// frames an inner glyph). Used on first-use empty states:
+    /// PantryListView empty, TonightHomeView first-use empty.
+    /// Distinct from `iconXl` (the inner glyph) — `iconHero` is the
+    /// SQUARE, not the symbol inside it. SCA-102.
+    static let iconHero: CGFloat = 80
 }

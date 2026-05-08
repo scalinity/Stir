@@ -619,7 +619,7 @@ struct TonightHomeView: View {
                     .font(.system(size: emptyStateCameraSize, weight: .regular)) // justification: 36pt hero camera inside the 80pt tile — one-off per §4.1, scaled via @ScaledMetric
                     .foregroundStyle(Color.Stir.ember600)
             }
-            .frame(width: 80, height: 80)
+            .frame(width: CGFloat.Stir.iconHero, height: CGFloat.Stir.iconHero)
 
             VStack(spacing: CGFloat.Stir.space2) {
                 Text("Let's see what you've got.")

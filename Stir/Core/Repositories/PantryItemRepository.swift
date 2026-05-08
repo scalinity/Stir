@@ -18,6 +18,13 @@ import OSLog
 
 @MainActor
 final class PantryItemRepository {
+    /// SCA-101 (a) review S2: page size for `fetchAll`'s row faulting.
+    /// 50 ≈ a typical screen of pantry rows on Pro at ~16pt row
+    /// height + section headers; tunable. Tighten if Instruments
+    /// shows the in-view set is consistently smaller; widen if the
+    /// scroll-to-load delay becomes visible.
+    private static let pantryFaultBatchSize = 50
+
     private let controller: PersistenceController
 
     init(controller: PersistenceController = .shared) {
@@ -453,6 +460,13 @@ final class PantryItemRepository {
             NSSortDescriptor(key: "lastSeenAt", ascending: false),
             NSSortDescriptor(key: "displayName", ascending: true),
         ]
+        // SCA-101 (a): fault rows in pages of `pantryFaultBatchSize`.
+        // Pro-tier 1000-row pantries pay only for what scrolls into
+        // view; faulting cost dominated the warm-cache profile
+        // pre-batch. Free / Premium (≤250 rows) are unaffected —
+        // the array still materialises in one fetch round-trip, the
+        // difference is per-row property realisation.
+        request.fetchBatchSize = Self.pantryFaultBatchSize
         do {
             return try controller.viewContext.fetch(request)
         } catch {

@@ -46,82 +46,41 @@ ON CONFLICT (key) DO NOTHING;
 -- Sentry via pg_net, marks alerted_at. Runs every 1 min.
 -- ---------------------------------------------------------------------------
 
+-- SCA-139 / telemetry audit G12 (W25): function body stubbed in-place.
+-- The original implementation here emitted the full SENTRY_DSN (including
+-- the public key, which is auth-bearing on Sentry's store ingest endpoint)
+-- to the Postgres log on the malformed-parse path:
+--   RAISE WARNING 'SENTRY_DSN malformed: %', v_dsn
+-- Superseded by `20260424000004_cost_anomaly_two_phase_dispatch.sql` which:
+--   1. Adds two-phase dispatched_at / sentry_request_id / confirmed_at /
+--      confirm_attempts columns to cost_anomalies (the active execution
+--      shape the new dispatch function relies on)
+--   2. Truncates the DSN log to `length + left(v_dsn, 20)` so the public
+--      key never reaches the function log
+-- This stub stays in place so re-applying `000001` standalone produces no
+-- log emission at all (vs re-introducing the pre-W25 leak). The pg_cron
+-- schedule below registers `stir-cost-anomaly-alert-dispatch` to call this
+-- function every minute; until `000004`'s CREATE OR REPLACE runs, the
+-- function is a no-op returning 0. Migrations apply sequentially within a
+-- single `supabase db reset`, so cron does not fire between `000001` and
+-- `000004` — the active body is in place before the first scheduled tick.
+-- Immutable-migration policy exception: security fix is the only allowed
+-- in-place edit class (see CLAUDE.md, ticket SCA-139 acceptance criteria).
 CREATE OR REPLACE FUNCTION public.stir_ops_cost_anomaly_alert_dispatch()
 RETURNS INTEGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
-DECLARE
-  v_dsn        TEXT;
-  v_parsed     TEXT[];
-  v_public_key TEXT;
-  v_host       TEXT;
-  v_project_id TEXT;
-  v_store_url  TEXT;
-  v_row        RECORD;
-  v_body       JSONB;
-  v_sent       INTEGER := 0;
 BEGIN
-  SELECT value INTO v_dsn FROM app_settings WHERE key = 'SENTRY_DSN';
-  IF v_dsn IS NULL OR length(v_dsn) = 0 THEN
-    -- No DSN configured (local dev, or pre-beta) — skip quietly.
-    RETURN 0;
-  END IF;
-
-  -- Parse DSN: https://<public_key>@<host>/<project_id>
-  v_parsed := regexp_match(v_dsn, '^https?://([^@]+)@([^/]+)/(.+)$');
-  IF v_parsed IS NULL OR array_length(v_parsed, 1) <> 3 THEN
-    RAISE WARNING 'SENTRY_DSN malformed: %', v_dsn;
-    RETURN 0;
-  END IF;
-  v_public_key := v_parsed[1];
-  v_host       := v_parsed[2];
-  v_project_id := v_parsed[3];
-  v_store_url  := format('https://%s/api/%s/store/?sentry_key=%s&sentry_version=7',
-                         v_host, v_project_id, v_public_key);
-
-  -- Iterate unsent anomalies, up to 50 per tick to bound pg_net queue depth.
-  FOR v_row IN (
-    SELECT id, canonical_user_key_hash, anomaly_type, severity, details_json, detected_at
-    FROM cost_anomalies
-    WHERE alerted_at IS NULL
-    ORDER BY detected_at ASC
-    LIMIT 50
-  ) LOOP
-    v_body := jsonb_build_object(
-      'event_id',  replace(v_row.id::text, '-', ''),
-      'timestamp', v_row.detected_at,
-      'level',     CASE v_row.severity WHEN 'critical' THEN 'error' ELSE 'warning' END,
-      'logger',    'stir.cost_anomaly',
-      'message',   format('cost anomaly: %s (severity=%s) for user %s',
-                          v_row.anomaly_type, v_row.severity, v_row.canonical_user_key_hash),
-      'tags',      jsonb_build_object(
-                     'anomaly_type', v_row.anomaly_type::text,
-                     'severity',     v_row.severity::text,
-                     'user_hash',    v_row.canonical_user_key_hash),
-      'extra',     v_row.details_json
-    );
-
-    PERFORM net.http_post(
-      url := v_store_url,
-      body := v_body,
-      headers := jsonb_build_object('content-type', 'application/json'),
-      timeout_milliseconds := 3000
-    );
-
-    UPDATE cost_anomalies SET alerted_at = now() WHERE id = v_row.id;
-    v_sent := v_sent + 1;
-  END LOOP;
-
-  RETURN v_sent;
+  RETURN 0;
 END $$;
 
 REVOKE ALL ON FUNCTION public.stir_ops_cost_anomaly_alert_dispatch() FROM PUBLIC, authenticated, anon;
 GRANT EXECUTE ON FUNCTION public.stir_ops_cost_anomaly_alert_dispatch() TO service_role;
 
 COMMENT ON FUNCTION public.stir_ops_cost_anomaly_alert_dispatch() IS
-  'Cron-invoked every 1 min. Reads cost_anomalies rows with alerted_at IS NULL (up to 50 per tick), posts one Sentry store event per row via pg_net, stamps alerted_at. Decoupled from scan so Sentry outages do not block detection.';
+  'STUB — superseded by 20260424000004. Original body emitted full SENTRY_DSN to log on malformed parse (telemetry audit G12 / SCA-139). Stripped in-place under immutable-migration security-fix exception. Active definition lives in 20260424000004_cost_anomaly_two_phase_dispatch.sql.';
 
 -- ---------------------------------------------------------------------------
 -- pg_cron: 1-min alert dispatch (supplements the 15-min scan from P1.6).

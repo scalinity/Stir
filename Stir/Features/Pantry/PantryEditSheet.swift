@@ -112,7 +112,7 @@ struct PantryEditSheet: View {
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
                     .foregroundStyle(Color.Stir.ember600)
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(name.pantryTrimmed.isEmpty)
                 }
             }
             .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
@@ -150,7 +150,7 @@ struct PantryEditSheet: View {
 
     private var nameField: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            fieldLabel("Ingredient")
+            pantryFieldLabel("Ingredient")
             InputField(
                 placeholder: "e.g. olive oil",
                 text: $name,
@@ -165,7 +165,7 @@ struct PantryEditSheet: View {
 
     private var amountField: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            fieldLabel("Amount (optional)")
+            pantryFieldLabel("Amount (optional)")
             InputField(
                 placeholder: "e.g. 2 tbsp, 500g, half a bottle",
                 text: $amount,
@@ -180,7 +180,7 @@ struct PantryEditSheet: View {
 
     private var memoryStateField: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            fieldLabel("Keep on hand")
+            pantryFieldLabel("Keep on hand")
             Picker("Memory state", selection: $pickerSelection) {
                 Text("Today").tag(PantryItem.MemoryState.ephemeral)
                 Text("Standing").tag(PantryItem.MemoryState.remembered)
@@ -214,21 +214,6 @@ struct PantryEditSheet: View {
 
     // MARK: - Helpers
 
-    private func fieldLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.ink500)
-    }
-
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var trimmedAmount: String? {
-        let t = amount.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
-    }
-
     /// Helper subtitle copy — flips with `pickerSelection`. Same
     /// string pair as `PantryAddSheet`; intentionally duplicated
     /// rather than extracted because pulling a shared helper
@@ -245,13 +230,13 @@ struct PantryEditSheet: View {
     }
 
     private func commit() {
-        let trimmed = trimmedName
+        let trimmed = name.pantryTrimmed
         guard !trimmed.isEmpty else { return }
         // memoryState = nil means "preserve the row's existing
         // memoryState" — sent only when the user actually moved the
         // picker. Otherwise an `.expired` row that the user merely
         // renamed would silently flip to `.remembered` (review C3).
         let memoryStateToCommit: PantryItem.MemoryState? = pickerWasMoved ? pickerSelection : nil
-        onSave(trimmed, trimmedAmount, memoryStateToCommit)
+        onSave(trimmed, amount.pantryTrimmedOrNil, memoryStateToCommit)
     }
 }

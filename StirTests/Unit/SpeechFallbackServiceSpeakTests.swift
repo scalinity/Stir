@@ -249,6 +249,13 @@ private final class MockSpeechSynthesizer: SpeechSynthesizing {
     var delegate: AVSpeechSynthesizerDelegate?
     private(set) var lastUtterance: AVSpeechUtterance?
 
+    /// SCA-142: tests can flip this to model "synthesis is mid-flight"
+    /// for cancel-path coverage. Default false matches the
+    /// constructed-but-never-used state.
+    var isSpeakingOverride: Bool = false
+    var isSpeaking: Bool { isSpeakingOverride }
+    private(set) var stopSpeakingCalls: [AVSpeechBoundary] = []
+
     let speakCalls: AsyncStream<AVSpeechUtterance>
     private let speakContinuation: AsyncStream<AVSpeechUtterance>.Continuation
 
@@ -261,6 +268,26 @@ private final class MockSpeechSynthesizer: SpeechSynthesizing {
     func speak(_ utterance: AVSpeechUtterance) {
         self.lastUtterance = utterance
         self.speakContinuation.yield(utterance)
+    }
+
+    @discardableResult
+    func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool {
+        stopSpeakingCalls.append(boundary)
+        let wasSpeaking = isSpeakingOverride
+        // Mirror AVSpeechSynthesizer behavior: a successful stop
+        // resets isSpeaking to false. Tests that want to assert the
+        // pre-stop state should snapshot before calling.
+        //
+        // Review W3: the Bool return is "wasSpeaking" (pre-state) which
+        // coincides with AVSpeechSynthesizer's "stopped speech" return
+        // for the simple single-utterance case used by tests. For a
+        // real synth with a queued-utterance pipeline the two
+        // semantics could diverge, but production callsites all use
+        // `@discardableResult` and ignore the return — so this
+        // simplification is contract-safe today. Revisit if a future
+        // assertion threads the return value.
+        isSpeakingOverride = false
+        return wasSpeaking
     }
 
     deinit {
