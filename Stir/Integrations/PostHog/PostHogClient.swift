@@ -270,8 +270,11 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// via `SolveRepository.createLeftoversSolveWithDish`. Properties:
     /// `rank` (1..3), `leftovers_items_count`, `prompt_version`,
     /// `source_recipe_plan_id` (the meal that produced the leftovers),
-    /// `new_recipe_plan_id` (the persisted leftover plan). Pairs with
-    /// the `meal_rated.leftovers_handoff_*` properties for the full
+    /// `new_recipe_plan_id` (the persisted leftover plan), `persist_ms`
+    /// (SCA-106 — background-context save latency for the leftovers
+    /// solve persist; powers the long-tail dashboard signal that
+    /// motivated the bg-context migration). Pairs with the
+    /// `meal_rated.leftovers_handoff_*` properties for the full
     /// Premium-side conversion funnel; Free-side conversion lives on
     /// `paywall_viewed.trigger=leftovers_gate` → `purchase_completed`.
     case leftoversDishSelected = "leftovers_dish_selected"

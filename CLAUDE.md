@@ -721,8 +721,10 @@ grocery_list_exported, favorite_saved,
 # persists it as a new RecipePlan (which becomes latestTonightPick per
 # the LeftoversSolveView "adds it to tomorrow's Tonight" promise).
 # Properties: rank (1..3), leftovers_items_count, prompt_version,
-# source_recipe_plan_id, new_recipe_plan_id. Pairs with meal_rated's
-# leftovers_handoff_* for the full Premium-side conversion funnel.
+# source_recipe_plan_id, new_recipe_plan_id, persist_ms (SCA-106 —
+# background-NSManagedObjectContext save latency in ms; typical ~5-15,
+# p95 > 50 = revisit). Pairs with meal_rated's leftovers_handoff_* for
+# the full Premium-side conversion funnel.
 leftovers_dish_selected,
 recipe_import_started, recipe_import_completed,
 paywall_viewed, trial_started,
