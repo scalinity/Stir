@@ -36,7 +36,8 @@ export type RateLimitPolicyKey =
   | 'user:dinner_solve_hourly'
   | 'user:voice_turn_usage_hourly'
   | 'user:cook_turn_hourly'
-  | 'user:realtime_session_hourly';
+  | 'user:realtime_session_hourly'
+  | 'user:ops_admin_minutely';
 
 export interface RateLimitPolicy {
   windowSeconds: number;
@@ -106,8 +107,18 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   // users.list / flagged_outputs.list. 30/min = 1800/hour per IP caps an
   // attacker at 30 rpm — enough headroom for legit active triage (rarely
   // exceeds 5-10 rpm) while cutting enumeration from thousands/sec to
-  // 30/min. Per-admin bucket is a step-9 follow-up per CLAUDE.md §Deferred.
+  // 30/min.
   'ip:ops_admin_hourly': { windowSeconds: 3600, maxCount: 1800 },
+  // SCA-117: per-admin bucket layered on top of `ip:ops_admin_hourly`.
+  // The IP cap defends against single-IP enumeration; this defends
+  // against a single-admin-account compromise that rotates IPs (e.g.
+  // distributed attack that bypasses the IP cap by scraping from
+  // multiple egress points). 60/min/admin gives the same headroom as
+  // the IP cap (legit active triage rarely exceeds ~10/min) while
+  // hard-capping any single compromised admin to 60 calls/min
+  // regardless of source IP. Both gates run; first-to-trip wins —
+  // RATE-01 `scope` distinguishes which fired.
+  'user:ops_admin_minutely': { windowSeconds: 60, maxCount: 60 },
   // users_delete_request (SCA-61): legitimate caller submits exactly 1
   // deletion request per session, and the endpoint is idempotent on
   // (canonical_user_key, in-flight state) so repeat POSTs return the
