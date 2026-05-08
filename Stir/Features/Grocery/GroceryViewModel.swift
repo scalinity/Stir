@@ -94,7 +94,7 @@ final class GroceryViewModel {
         recipePlan: RecipePlan,
         household: HouseholdProfile,
         aiDispatch: AIDispatch,
-        groceryRepo: GroceryRepository = GroceryRepository(),
+        groceryRepo: GroceryRepository = GroceryRepository(controller: .shared),
         reminders: GroceryRemindersService = GroceryRemindersService(),
         analytics: PostHogClient = .shared,
     ) {

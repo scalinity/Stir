@@ -89,8 +89,8 @@ struct SavedMealsView: View {
     init(
         household: HouseholdProfile,
         aiDispatch: AIDispatch,
-        repository: CookingSessionRepository = CookingSessionRepository(),
-        solveRepository: SolveRepository = SolveRepository(),
+        repository: CookingSessionRepository = CookingSessionRepository(controller: .shared),
+        solveRepository: SolveRepository = SolveRepository(controller: .shared),
     ) {
         self.household = household
         self.aiDispatch = aiDispatch

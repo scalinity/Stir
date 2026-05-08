@@ -70,7 +70,7 @@ struct RepeatCandidateCard: View {
     init(
         recipePlan: RecipePlan,
         entitlements: EntitlementService,
-        solveRepository: SolveRepository = SolveRepository(),
+        solveRepository: SolveRepository = SolveRepository(controller: .shared),
         analytics: PostHogClient = .shared,
         suppressionStore: RepeatCandidateSuppressionStore = .shared,
         presentPaywall: @escaping (PaywallTrigger) -> Void,

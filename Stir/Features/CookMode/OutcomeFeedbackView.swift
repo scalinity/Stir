@@ -70,7 +70,7 @@ struct OutcomeFeedbackView: View {
     init(
         session: CookingSession,
         onSubmitted: @escaping (PostSubmitIntent) -> Void,
-        repository: OutcomeFeedbackRepository = OutcomeFeedbackRepository(),
+        repository: OutcomeFeedbackRepository = OutcomeFeedbackRepository(controller: .shared),
         analytics: PostHogClient = .shared,
         entitlements: EntitlementService? = nil,
     ) {

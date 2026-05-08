@@ -68,8 +68,8 @@ final class TimerService {
         notificationCenter: UNUserNotificationCenterClient = DefaultUNUserNotificationCenter(),
         liveActivityManager: LiveActivityManager?,
     ) {
-        self.repository = repository ?? CookTimerRepository()
-        self.sessionRepository = sessionRepository ?? CookingSessionRepository()
+        self.repository = repository ?? CookTimerRepository(controller: .shared)
+        self.sessionRepository = sessionRepository ?? CookingSessionRepository(controller: .shared)
         self.notificationCenter = notificationCenter
         self.liveActivityManager = liveActivityManager
     }

@@ -125,9 +125,9 @@ final class OnboardingViewModel {
 
     init(
         profile: HouseholdProfile,
-        dietaryRepo: DietaryRuleRepository = DietaryRuleRepository(),
-        equipmentRepo: KitchenEquipmentRepository = KitchenEquipmentRepository(),
-        profileRepo: HouseholdProfileRepository = HouseholdProfileRepository(),
+        dietaryRepo: DietaryRuleRepository = DietaryRuleRepository(controller: .shared),
+        equipmentRepo: KitchenEquipmentRepository = KitchenEquipmentRepository(controller: .shared),
+        profileRepo: HouseholdProfileRepository = HouseholdProfileRepository(controller: .shared),
     ) {
         self.profile = profile
         self.dietaryRepo = dietaryRepo

@@ -82,7 +82,7 @@ final class RealtimeSessionIdentityTests: XCTestCase {
         return RealtimeSession(
             testingOnlyMintResponse: mint,
             aiDispatch: aiDispatch,
-            voiceTurnRepository: VoiceTurnRepository(),
+            voiceTurnRepository: VoiceTurnRepository(controller: controller),
             cookingSession: session,
         )
     }

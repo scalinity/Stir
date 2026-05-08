@@ -354,10 +354,10 @@ final class CookModeViewModel {
         self.household = household
         self.currentStepIndex = Int(session.currentStepIndex)
         self.startedAtWallClock = Date()
-        self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository()
-        self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository()
-        self.substitutionRepository = substitutionRepository ?? SubstitutionRepository()
-        self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository()
+        self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository(controller: .shared)
+        self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository(controller: .shared)
+        self.substitutionRepository = substitutionRepository ?? SubstitutionRepository(controller: .shared)
+        self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository(controller: .shared)
         // Resolve LiveActivityManager FIRST so the same instance can be
         // injected into TimerService below. Without sharing, VM-side
         // `startLiveActivity()` populated dict A while TimerService's

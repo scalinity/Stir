@@ -20,7 +20,7 @@ import Foundation
 final class SubstitutionRepository {
     private let controller: PersistenceController
 
-    init(controller: PersistenceController = .shared) {
+    init(controller: PersistenceController) {
         self.controller = controller
     }
 

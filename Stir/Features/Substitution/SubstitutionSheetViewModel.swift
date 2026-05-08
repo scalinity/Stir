@@ -67,8 +67,8 @@ final class SubstitutionSheetViewModel {
         self.session = session
         self.currentStep = currentStep
         self.aiDispatch = aiDispatch
-        self.repository = repository ?? SubstitutionRepository()
-        self.pantryRepository = pantryRepository ?? PantryItemRepository()
+        self.repository = repository ?? SubstitutionRepository(controller: .shared)
+        self.pantryRepository = pantryRepository ?? PantryItemRepository(controller: .shared)
         self.analytics = analytics
         self.onFinished = onFinished
     }

@@ -80,7 +80,7 @@ final class PreferenceMemoryService {
     private let now: () -> Date
 
     init(
-        sessionRepo: CookingSessionRepository = CookingSessionRepository(),
+        sessionRepo: CookingSessionRepository = CookingSessionRepository(controller: .shared),
         entitlementService: EntitlementService,
         now: @escaping () -> Date = Date.init,
     ) {

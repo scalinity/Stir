@@ -56,8 +56,8 @@ final class UseSoonScheduler {
         center: any UserNotificationCenterClient = UNUserNotificationCenter.current(),
         calendar: Calendar = .current,
         defaults: UserDefaults = .standard,
-        pantry: PantryItemRepository = PantryItemRepository(),
-        cookingSessions: CookingSessionRepository = CookingSessionRepository(),
+        pantry: PantryItemRepository = PantryItemRepository(controller: .shared),
+        cookingSessions: CookingSessionRepository = CookingSessionRepository(controller: .shared),
         telemetry: PostHogClient = .shared,
     ) {
         self.center = center
