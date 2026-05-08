@@ -24,8 +24,11 @@ import type { FieldError } from './errors.ts';
 //   an attacker can still claim a valid-looking canonical_user_key if they
 //   know another user's CK record name, but arbitrary-string abuse and
 //   malformed-client bugs fail at the boundary with a structured VAL-01.
-//   Full server-to-server CK verification is deferred — see spec §12 and
-//   CLAUDE.md §"Deferred". Optional — absent on local-only users.
+// cloudkit_web_auth_token: Short-lived token minted on-device via
+//   CKFetchWebAuthTokenOperation. Server spends it against CloudKit Web
+//   Services before trusting cloudkit_user_record_name. Optional so old
+//   clients/local-only users still bootstrap; unverified CK claims fall back
+//   to install:<uuid> in session-bootstrap instead of being trusted.
 // build: iOS build string, e.g. "1.0.0 (42)". Required for telemetry.
 // os_version: iOS version string, e.g. "17.5.1". Required for telemetry.
 
@@ -38,6 +41,7 @@ export const SessionBootstrapRequest = z.object({
   cloudkit_user_record_name: z.string()
     .regex(CK_RECORD_NAME_REGEX, 'must match `_` + 32 lowercase hex chars')
     .optional(),
+  cloudkit_web_auth_token: z.string().min(16).max(4096).optional(),
   build: z.string().min(1).max(64),
   os_version: z.string().min(1).max(64),
 }).strict();

@@ -4,6 +4,7 @@
 // Body:
 //   { installation_id: UUID,
 //     cloudkit_user_record_name?: string,
+//     cloudkit_web_auth_token?: string,
 //     build: string,
 //     os_version: string }
 //
@@ -53,6 +54,10 @@ import {
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { ZodError } from 'zod';
+import {
+  bodyWithVerifiedCloudKitOnly,
+  verifyCloudKitIdentity,
+} from '../_shared/cloudkit_identity.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -107,13 +112,17 @@ Deno.serve(async (req) => {
   }
 
   // -----------------------------------------------------------------------
-  // 2. Resolve canonical key + scope logger to the user
+  // 2. Verify CloudKit claim, then resolve canonical key + scope logger
   // -----------------------------------------------------------------------
-  const resolution = resolveCanonicalKey(parsed);
+  const cloudKitVerification = await verifyCloudKitIdentity(parsed);
+  const identityBody = bodyWithVerifiedCloudKitOnly(parsed, cloudKitVerification);
+  const resolution = resolveCanonicalKey(identityBody);
   const userLog = await createLogger(requestId, endpoint, resolution.canonical_user_key);
   userLog.info('canonical_key_resolved', {
     source_type: resolution.source_type,
     has_cloudkit: Boolean(resolution.ck_canonical_key),
+    cloudkit_verification: cloudKitVerification.reason,
+    cloudkit_upstream_status: cloudKitVerification.upstreamStatus,
   });
 
   // -----------------------------------------------------------------------
@@ -337,7 +346,7 @@ Deno.serve(async (req) => {
           properties: {
             request_id: requestId,
             actor_id: 'system:server',
-            has_cloudkit_record: parsed.cloudkit_user_record_name != null,
+            has_cloudkit_record: resolution.source_type === 'cloudkit',
             tier,
           },
         });

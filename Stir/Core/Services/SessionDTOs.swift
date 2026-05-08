@@ -16,12 +16,14 @@ import Foundation
 struct BootstrapRequest: Encodable, Sendable, Equatable {
     let installationID: String
     let cloudKitUserRecordName: String?
+    let cloudKitWebAuthToken: String?
     let build: String
     let osVersion: String
 
     enum CodingKeys: String, CodingKey {
         case installationID = "installation_id"
         case cloudKitUserRecordName = "cloudkit_user_record_name"
+        case cloudKitWebAuthToken = "cloudkit_web_auth_token"
         case build
         case osVersion = "os_version"
     }

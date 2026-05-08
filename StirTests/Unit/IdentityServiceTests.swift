@@ -92,6 +92,26 @@ final class IdentityServiceTests: XCTestCase {
         XCTAssertNotNil(try keychain.read(key: .installUUID))
     }
 
+    func test_cloudKitWebAuthToken_returnsTokenFromProvider() async throws {
+        let cloudKit = MockCloudKitAccountProvider(.available(recordName: "_recordA"))
+        cloudKit.setWebAuthToken(.success("web-auth-token"))
+        let service = IdentityService(cloudKit: cloudKit, keychain: MockKeychain())
+
+        let token = await service.cloudKitWebAuthToken(apiToken: "api-token")
+
+        XCTAssertEqual(token, "web-auth-token")
+    }
+
+    func test_cloudKitWebAuthToken_returnsNilOnProviderFailure() async throws {
+        let cloudKit = MockCloudKitAccountProvider(.available(recordName: "_recordA"))
+        cloudKit.setWebAuthToken(.failure(NSError(domain: "CloudKit", code: 1)))
+        let service = IdentityService(cloudKit: cloudKit, keychain: MockKeychain())
+
+        let token = await service.cloudKitWebAuthToken(apiToken: "api-token")
+
+        XCTAssertNil(token)
+    }
+
     // MARK: - CanonicalUserKey.parse round-trip
 
     func test_parse_cloudKit_roundTripsStringValue() {

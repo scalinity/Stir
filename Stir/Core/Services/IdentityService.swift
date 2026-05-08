@@ -119,6 +119,18 @@ actor IdentityService {
         return .install(uuid: uuid)
     }
 
+    func cloudKitWebAuthToken(apiToken: String) async -> String? {
+        guard !apiToken.isEmpty else { return nil }
+        do {
+            let token = try await cloudKit.webAuthToken(apiToken: apiToken)
+            Logger.identity.info("cloudkit web auth token minted")
+            return token
+        } catch {
+            Logger.identity.error("cloudkit web auth token failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     /// Bridges `.CKAccountChanged` to an AsyncStream that yields a freshly
     /// resolved key every time iCloud availability flips. RootCoordinator
     /// observes this and may re-run the bootstrap sequence when a flip lands.

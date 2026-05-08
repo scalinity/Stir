@@ -30,6 +30,7 @@ actor SupabaseSessionClient {
     private let urlSession: URLSession
     private let sentry: any SentryReporting
     private let clock: any Clock<Duration>
+    private let cloudKitWebAuthTokenProvider: (@Sendable (String) async -> String?)?
 
     /// Cached session JWT (mirrors Keychain `.sessionJWT`).
     private var cachedJWT: String?
@@ -43,12 +44,14 @@ actor SupabaseSessionClient {
         urlSession: URLSession = .shared,
         sentry: any SentryReporting = NoOpSentryReporter(),
         clock: any Clock<Duration> = ContinuousClock(),
+        cloudKitWebAuthTokenProvider: (@Sendable (String) async -> String?)? = nil,
     ) {
         self.config = config
         self.keychain = keychain
         self.urlSession = urlSession
         self.sentry = sentry
         self.clock = clock
+        self.cloudKitWebAuthTokenProvider = cloudKitWebAuthTokenProvider
 
         // Prime cachedJWT from Keychain so authenticated calls can run across
         // app relaunches without a mandatory re-bootstrap on every cold start.
@@ -66,10 +69,15 @@ actor SupabaseSessionClient {
     func bootstrap(
         installationID: String,
         cloudKitRecordName: String?,
+        cloudKitWebAuthToken: String? = nil,
     ) async throws -> BootstrapResponse {
         let body = BootstrapRequest(
             installationID: installationID,
             cloudKitUserRecordName: cloudKitRecordName,
+            cloudKitWebAuthToken: await resolveCloudKitWebAuthToken(
+                explicitToken: cloudKitWebAuthToken,
+                cloudKitRecordName: cloudKitRecordName,
+            ),
             build: config.build,
             osVersion: config.osVersion,
         )
@@ -112,6 +120,18 @@ actor SupabaseSessionClient {
             authenticated: true,
         )
         return try await perform(request, attempt: 0, retriedAuth: false)
+    }
+
+    private func resolveCloudKitWebAuthToken(
+        explicitToken: String?,
+        cloudKitRecordName: String?,
+    ) async -> String? {
+        if let explicitToken { return explicitToken }
+        guard cloudKitRecordName != nil,
+              let apiToken = config.cloudKit?.apiToken,
+              !apiToken.isEmpty,
+              let cloudKitWebAuthTokenProvider else { return nil }
+        return await cloudKitWebAuthTokenProvider(apiToken)
     }
 
     /// Used by step 3+ AI endpoints. Shapes the same AUTH-01 silent-retry +

@@ -43,6 +43,37 @@ final class SupabaseSessionClientTests: XCTestCase {
         XCTAssertEqual(keychain.snapshot[.sessionJWT], "test.jwt.value")
     }
 
+    func test_bootstrap_withCloudKitRecord_fetchesWebAuthTokenForBody() async throws {
+        let tokenCalls = CallsBox()
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/functions/v1/session-bootstrap")
+            let payload = try XCTUnwrap(Self.jsonBody(request))
+            XCTAssertEqual(payload["cloudkit_user_record_name"] as? String, "_1234567890abcdef1234567890abcdef")
+            XCTAssertEqual(payload["cloudkit_web_auth_token"] as? String, "web-token-1")
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["content-type": "application/json"])!,
+                    Self.bootstrapResponseJSON())
+        }
+        let client = SupabaseSessionClient(
+            config: Self.config(cloudKitAPIKey: "cloudkit-api-token"),
+            keychain: MockKeychain(),
+            urlSession: MockURLProtocol.stubSession(),
+            sentry: NoOpSentryReporter(),
+            clock: ImmediateClock(),
+            cloudKitWebAuthTokenProvider: { apiToken in
+                XCTAssertEqual(apiToken, "cloudkit-api-token")
+                tokenCalls.append("token")
+                return "web-token-1"
+            },
+        )
+
+        _ = try await client.bootstrap(
+            installationID: "iid",
+            cloudKitRecordName: "_1234567890abcdef1234567890abcdef",
+        )
+
+        XCTAssertEqual(tokenCalls.snapshot, ["token"])
+    }
+
     func test_configBootstrap_AUTH01_retriesAfterReBootstrap() async throws {
         let callsBox = CallsBox()
         MockURLProtocol.handler = { request in
@@ -177,6 +208,42 @@ final class SupabaseSessionClientTests: XCTestCase {
             build: "1.0.0 (1)",
             osVersion: "17.5",
         )
+    }
+
+    private static func config(cloudKitAPIKey: String) -> AppConfig {
+        AppConfig(
+            supabase: AppConfig.Supabase(
+                url: URL(string: "https://test.supabase.co")!,
+                anonKey: "test-anon",
+            ),
+            posthog: nil,
+            sentry: nil,
+            revenueCat: nil,
+            cloudKit: AppConfig.CloudKit(apiToken: cloudKitAPIKey),
+            build: "1.0.0 (1)",
+            osVersion: "17.5",
+        )
+    }
+
+    private static func jsonBody(_ request: URLRequest) -> [String: Any]? {
+        let data: Data
+        if let httpBody = request.httpBody {
+            data = httpBody
+        } else if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            var collected = Data()
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                collected.append(buffer, count: read)
+            }
+            data = collected
+        } else {
+            return nil
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private static func bootstrapResponseJSON(jwt: String = "test.jwt.value") -> Data {
