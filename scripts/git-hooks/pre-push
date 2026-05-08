@@ -1,91 +1,161 @@
 #!/bin/bash
 #
-# Pre-push hook — runs the full xcodebuild test suite before allowing a push.
-# Installed by Scripts/install-git-hooks.sh into .git/hooks/pre-push.
+# Pre-push hook — runs the full xcodebuild test suite before allowing
+# a push. Wired in via `git config core.hooksPath scripts/git-hooks/`
+# (see scripts/install-git-hooks.sh).
 #
 # Rationale (SCA-181): SCA-176 (PaywallTelemetry source key) and
 # SCA-177 (PantryListVM searchText vs effectiveSearchText) both shipped
-# to main during parallel sprint-A work without the affected tests being
-# run, surfacing only later in the SCA-158 final-verify pass. The full
-# StirTests suite takes ~17s — small enough for a pre-push gate.
+# to main during parallel sprint-A work without the affected tests
+# being run, surfacing only later in the SCA-158 final-verify pass.
+# The full StirTests suite takes ~17s — small enough for a pre-push
+# gate.
 #
 # Behavior:
 #   - Runs xcodebuild test -scheme Stir on iPhone 17 Pro simulator.
-#   - On any test failure: blocks the push and prints the failed test list.
-#   - Skipped if pushing tags only (no commits being pushed).
-#   - Skipped if SKIP_PREPUSH_TESTS=1 is set in the environment — escape
-#     hatch for emergency hot-fixes that the agent has manually verified.
-#
-# Skip with care: the whole point of the gate is that "I'll run tests
-# locally first" hasn't been reliable. If you need to skip, document why
-# in the commit message.
+#   - Skipped on tag-only pushes and on delete-only pushes.
+#   - Aborts the push if any test fails OR if zero tests executed
+#     (a passing build with zero tests means the gate is broken;
+#     SCA-185 review-CR-C2).
+#   - SKIP_PREPUSH_TESTS=1 + SKIP_PREPUSH_REASON='…' bypasses; both
+#     are required (SCA-188 review-CR-W4 makes the audit trail loud
+#     so override fatigue can't drift unnoticed).
 
 set -euo pipefail
 
-# Bail early on tag-only pushes (no commits being pushed).
-if [ -t 0 ]; then
+# Match git's ref pattern for "delete" (all-zero local SHA).
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+# SCA-186 (review-CR-W1): drop the `[ -t 0 ]` branch entirely. Per
+# `man 5 githooks`, git ALWAYS pipes ref-update lines on stdin to
+# pre-push, even on tag-only pushes (the lines are tag refs) and
+# delete-only pushes (lines have ZERO_SHA). The earlier check was
+# inverted and treated TTY-attached manual runs as "has commits",
+# which is the opposite of useful. Decide purely on the ref content
+# we see on stdin.
+HAS_COMMITS=0
+while read -r local_ref local_sha _ _; do
+    # Skip delete refs (no commits being pushed for this ref).
+    [ "$local_sha" = "$ZERO_SHA" ] && continue
+    # Skip tag refs (tag-only pushes don't introduce new commits
+    # against the test plan; a tagged release was tested at the
+    # commit already, by an earlier push to its branch).
+    case "$local_ref" in
+        refs/tags/*) continue ;;
+    esac
     HAS_COMMITS=1
-else
-    HAS_COMMITS=0
-    while read local_ref local_sha remote_ref remote_sha; do
-        # local_sha = '0000...' on a delete; skip.
-        if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
-            HAS_COMMITS=1
-            break
-        fi
-    done
-fi
+    break
+done
 
 if [ "$HAS_COMMITS" = "0" ]; then
-    echo "[pre-push] no commits being pushed; skipping xcodebuild test"
+    echo "[pre-push] no non-tag commits being pushed; skipping xcodebuild test"
     exit 0
 fi
 
+# SCA-188 (review-CR-W4): override requires both env vars. Without
+# the reason, the override fails — the audit trail is the reason
+# string surfacing in the terminal log + the bash history.
 if [ "${SKIP_PREPUSH_TESTS:-0}" = "1" ]; then
-    echo "[pre-push] SKIP_PREPUSH_TESTS=1; bypassing xcodebuild test"
+    if [ -z "${SKIP_PREPUSH_REASON:-}" ]; then
+        echo "[pre-push] SKIP_PREPUSH_TESTS=1 requires SKIP_PREPUSH_REASON='…'"
+        echo "  example:"
+        echo "    SKIP_PREPUSH_TESTS=1 SKIP_PREPUSH_REASON='sim flake — manually verified 692/692' git push"
+        exit 1
+    fi
+    echo "[pre-push] ⚠️  BYPASSING xcodebuild test — reason: $SKIP_PREPUSH_REASON"
     exit 0
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-echo "[pre-push] running xcodebuild test on iPhone 17 Pro simulator (~20s)…"
+echo "[pre-push] running xcodebuild test on iPhone 17 Pro simulator (~17s)…"
 
-# Capture stderr+stdout into a temp file so we can scan for failures
-# while still piping a summary to the user. Quiet mode hides the per-
-# file build chatter; we surface only test results + warnings + errors.
 TMPLOG="$(mktemp -t stir-prepush-XXXXXX)"
 trap 'rm -f "$TMPLOG"' EXIT
 
-if xcodebuild test \
-        -scheme Stir \
-        -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-        -quiet \
-        > "$TMPLOG" 2>&1; then
-    # `-quiet` strips per-`Test Case` lines but the
-    # "Test Suite 'StirTests.xctest' passed ... Executed N tests"
-    # summary survives. Parse that for the count.
-    SUMMARY="$(grep -E 'Executed [0-9]+ tests, with [0-9]+ failures' "$TMPLOG" | tail -1 | sed -E 's/.*(Executed [0-9]+ tests, with [0-9]+ failures).*/\1/' || true)"
-    if [ -z "$SUMMARY" ]; then
-        echo "[pre-push] ✅ tests passed"
-    else
-        echo "[pre-push] ✅ $SUMMARY"
-    fi
+set +e
+xcodebuild test \
+    -scheme Stir \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -quiet \
+    > "$TMPLOG" 2>&1
+EXIT="$?"
+set -e
+
+# SCA-185 (review-CR-C2): a passing exit code with zero tests
+# executed means the gate is broken — refactored test scheme,
+# narrowed -only-testing, simulator hiccup that didn't surface.
+# Treat this as a failure regardless of exit code.
+COUNT_LINE="$(grep -E 'Executed [0-9]+ tests' "$TMPLOG" | tail -1 || true)"
+COUNT="$(echo "$COUNT_LINE" | sed -E 's/.*Executed ([0-9]+) tests.*/\1/' 2>/dev/null || echo "")"
+
+if [ "$EXIT" = "0" ] && [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]; then
+    SUMMARY="$(echo "$COUNT_LINE" | sed -E 's/.*(Executed [0-9]+ tests, with [0-9]+ failures).*/\1/' || true)"
+    echo "[pre-push] ✅ ${SUMMARY:-tests passed}"
     exit 0
 fi
 
-echo "[pre-push] ❌ test failures — push blocked"
+# Failure path. Reason out which kind and what failed.
+echo "[pre-push] ❌ push blocked"
 echo
-echo "--- failed tests ---"
-grep -E '^Test Case .* failed' "$TMPLOG" || true
-echo
-echo "--- last 20 lines of test log ---"
-tail -n 20 "$TMPLOG"
+
+if [ "$EXIT" = "0" ] && [ "${COUNT:-0}" = "0" ]; then
+    echo "  reason: xcodebuild reported success but ran 0 tests."
+    echo "  this means the gate is broken — investigate the test scheme,"
+    echo "  -only-testing filter, or the simulator state before retrying."
+    echo
+    echo "--- last 60 lines of test log ---"
+    tail -n 60 "$TMPLOG"
+elif [ "$EXIT" = "0" ]; then
+    # Shouldn't reach: exit=0, count present, but >0 was false. Guard.
+    echo "  reason: xcodebuild exited 0 with unparseable test count."
+    echo
+    echo "--- last 60 lines of test log ---"
+    tail -n 60 "$TMPLOG"
+else
+    echo "  reason: $COUNT_LINE"
+    echo
+
+    # SCA-187 (review-CR-W2): -quiet strips per-`Test Case` lines, so
+    # the in-log grep is empty for failed-test enumeration. The
+    # xcresult bundle has the structural data — extract via xcresulttool.
+    DERIVED="$(xcodebuild -scheme Stir -showBuildSettings 2>/dev/null \
+                | awk -F' = ' '/^[[:space:]]*BUILD_DIR =/ {print $2; exit}' \
+                | sed 's|/Build/Products$||')"
+    if [ -n "$DERIVED" ] && [ -d "$DERIVED/Logs/Test" ]; then
+        LATEST_RESULT="$(ls -td "$DERIVED"/Logs/Test/*.xcresult/ 2>/dev/null | head -1)"
+        if [ -n "$LATEST_RESULT" ]; then
+            echo "--- failures (from xcresult) ---"
+            xcrun xcresulttool get test-results summary --path "$LATEST_RESULT" 2>/dev/null \
+                | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    failures = data.get('testFailures', []) or []
+    if not failures:
+        print('  (no structured failure list — see tail below)')
+    for f in failures[:20]:
+        ident = f.get('testIdentifierString', '?')
+        text = (f.get('failureText') or '').replace(chr(10), ' ')[:180]
+        print(f'  - {ident}')
+        if text:
+            print(f'    -> {text}')
+except Exception as exc:
+    print(f'  (xcresulttool parse failed: {exc})')
+" 2>/dev/null || echo "  (xcresulttool extraction failed — see tail)"
+            echo
+        fi
+    fi
+
+    echo "--- last 60 lines of test log ---"
+    tail -n 60 "$TMPLOG"
+fi
 echo
 echo "Re-run locally with:"
 echo "  xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro'"
 echo
-echo "Emergency override (use sparingly, document in commit):"
-echo "  SKIP_PREPUSH_TESTS=1 git push"
+echo "Emergency override (requires reason; documented in commit):"
+echo "  SKIP_PREPUSH_TESTS=1 SKIP_PREPUSH_REASON='…' git push"
 
 exit 1
