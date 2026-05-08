@@ -201,7 +201,19 @@ struct SavedMealsView: View {
         // existing repository fetch is cheap enough (~5-10 ms in-memory
         // cache hits) that filtering by entity type isn't worth the
         // complexity. The 300ms debounce is the real noise-suppressor.
-        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
+        //
+        // SCA-193: `.receive(on: DispatchQueue.main)` is load-bearing.
+        // `NSManagedObjectContextDidSave` posts on whichever queue the
+        // saving context is bound to — SCA-106's leftovers persist runs
+        // on a private-queue background context, so this notification
+        // arrives off-main. Without the explicit hop, `scheduleReload`
+        // (which mutates `@State var reloadDebounceTask`) would be
+        // racing the SwiftUI runtime; under Swift 6 strict concurrency
+        // that's undefined behavior.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)
+                .receive(on: DispatchQueue.main),
+        ) { _ in
             scheduleReload()
         }
         // SCA-152: re-load when CloudKit pushes a remote change to the
@@ -214,7 +226,16 @@ struct SavedMealsView: View {
         // SCA-152 ticket: device A flips a favorite, device B has the
         // Saved tab foregrounded, B's row updates within the debounce
         // window of the CloudKit push.
-        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+        //
+        // SCA-193: same `.receive(on: DispatchQueue.main)` rationale as
+        // the didSave observer above — Apple's docs note that
+        // `NSPersistentStoreRemoteChange` is delivered on a private
+        // queue chosen by the coordinator, so the publisher's receive
+        // handler ends up off-main without the explicit hop.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+                .receive(on: DispatchQueue.main),
+        ) { _ in
             scheduleReload()
         }
         .fullScreenCover(item: $cookAgainPlan) { plan in
