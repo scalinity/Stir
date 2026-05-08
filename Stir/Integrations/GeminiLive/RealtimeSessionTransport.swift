@@ -1,17 +1,37 @@
 // RealtimeSessionTransport
 //
-// SCA-79 — extracted from RealtimeSession.swift. Owns the WebSocket
-// transport plumbing: token-mint request building, household-context
-// projection (with TTL cache), the inbound receive dispatcher,
-// `awaitSetupComplete` continuation pattern, transport-error recovery
-// glue, and the outbound tool-call round-trip (handleToolCall +
-// dispatchTool + dispatchSubstitution + their helpers).
+// SCA-79 — extracted from RealtimeSession.swift. Owns two related but
+// distinct concerns (after SCA-161 moved handleTransportError out into
+// the StateMachine bucket):
+//
+//   - **WS transport plumbing**: token-mint request building,
+//     household-context projection (with TTL cache),
+//     `startReceiveDispatcher` (the inbound frame Task),
+//     `awaitSetupComplete` continuation pattern.
+//   - **Tool-call round-trip**: `handleToolCall` + `dispatchTool` +
+//     `dispatchSubstitution` + the timer-snapshot helpers
+//     (`snapshotToDict`, `makeNoneTimerSnapshot`, `makeStepResponse`).
+//     Tool-call dispatch is application-layer behavior — it touches
+//     `turnContainedToolCall` / `lastToolCallName`, the substitution
+//     callbacks, the timer callbacks, and the recipe domain. The trigger
+//     just happens to arrive over the wire.
+//
+// SCA-79 review W4 (CR1): tool-call dispatch is ~70% of this file.
+// Eventual extraction into a dedicated `RealtimeSessionTools.swift` is
+// tracked in `docs/deferred-work.md` (trigger: this file > ~1,800 LOC,
+// OR Gemini Live moves to GA, OR a third bucket needs cross-coupling).
+// Until then, the `// MARK: - tool-call round-trip` section header at
+// the boundary lets Xcode's symbol jumper navigate cleanly.
 //
 // All instance stored properties (transport, dispatcherGeneration,
 // receiveDispatcherTask, cachedHouseholdContext + ...At,
 // setupCompleteContinuation, setupCompleteGeneration, etc.) live on
 // the main RealtimeSession class declaration in RealtimeSession.swift.
 // Methods here read them via `self`.
+//
+// Logger.voice is declared in `Speech/AVAudioSessionConfigurator.swift`
+// (cross-bucket dependency); a future Speech-bucket relocation must
+// keep the `static let voice` declaration reachable from this file.
 
 import Foundation
 import OSLog
