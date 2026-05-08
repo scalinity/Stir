@@ -185,6 +185,104 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
         XCTAssertEqual(driver.currentState, .closed)
     }
 
+    // MARK: - SCA-171 / S7 — cross-bucket interaction guards
+    //
+    // These tests pin the new cross-file dispatch paths introduced by
+    // the SCA-79 file split (commits 441563e..646d0a3..105ef55). The
+    // existing 38 tests exercise individual hooks; these two add a
+    // regression guard for the cross-bucket call resolution itself, so
+    // a future refactor that moves or renames a method on either side
+    // of a bucket boundary doesn't silently break the integration.
+
+    /// Pins the StateMachine.handleInboundFrame → Transport.handleToolCall
+    /// cross-file route. `handleInboundFrame` lives in
+    /// `RealtimeSessionStateMachine.swift`; its `.toolCall` switch arm
+    /// dispatches to `handleToolCall` in `RealtimeSessionTransport.swift`.
+    /// If a future refactor breaks the cross-extension dispatch (e.g.
+    /// renaming, moving to a different file with a stricter access
+    /// modifier, or accidentally introducing a private overload),
+    /// `lastToolCallName` will not get latched and this test fails.
+    ///
+    /// Distinct from `test_watchdog_latches_tool_call_name_from_preceding_tool_frame`,
+    /// which exercises the same path but is conceptually about watchdog
+    /// payload accuracy. This test's promise is the cross-bucket
+    /// dispatch contract specifically.
+    func test_handleInboundFrame_routesToolCall_throughTransportBucket() async throws {
+        let driver = makeDriverAt(state: .ready)
+
+        XCTAssertNil(
+            driver._testLastToolCallName,
+            "precondition: no tool call has fired yet",
+        )
+
+        let toolCall = LiveToolCall(functionCalls: [
+            LiveFunctionCall(id: "tc-cross-bucket-1", name: "advance_step", args: [:]),
+        ])
+        await driver._testInjectFrame(.toolCall(toolCall))
+
+        XCTAssertEqual(
+            driver._testLastToolCallName,
+            "advance_step",
+            "handleInboundFrame.toolCall must dispatch to handleToolCall (Transport bucket) and latch lastToolCallName",
+        )
+        XCTAssertEqual(
+            driver.currentState,
+            .toolCalling,
+            "Transport.handleToolCall must advance the state machine to .toolCalling — confirms the cross-bucket effect, not just the latch",
+        )
+    }
+
+    /// Pins the StateMachine bucket's transport-error persist surface
+    /// (`recordTurnAsTransportError`). Both `AudioIO.handleAudioInterruption`
+    /// (cross-bucket: AudioIO → StateMachine) and the receive
+    /// dispatcher's catch-block via `handleTransportError`
+    /// (in-StateMachine since SCA-161) reach into this method. This test
+    /// pins the persist contract directly: a non-nil `turnStartedAt`
+    /// causes both VoiceTurn rows (user + model) to land with
+    /// `.error` + errorCode "transport_error".
+    ///
+    /// If `recordTurnAsTransportError` ever gets refactored back into
+    /// `private` or moved out of StateMachine, the AudioIO interruption
+    /// path silently loses ADR 0015 cap-reversal trigger visibility
+    /// (the failing turns stop being counted). This test catches that.
+    func test_recordTurnAsTransportError_persistsErrorPairWithCorrectErrorCode() async throws {
+        let driver = makeDriverAt(state: .userSpeaking)
+
+        // Simulate an in-flight turn: production sets `turnStartedAt`
+        // inside `beginTurn()`, which we don't drive here (it requires
+        // a real AudioPipeline). The flag is non-private post-SCA-159
+        // so direct mutation is fine under `@testable import`. The
+        // audio-chunk frame below populates the per-turn anchors that
+        // `finalizeTurn` would normally consume — recordTurnAsTransportError
+        // doesn't read them, but the symmetry pins that the helper's
+        // guard depends ONLY on `turnStartedAt` (the contract under test).
+        driver.turnStartedAt = Date()
+        var withAudio = LiveServerContent()
+        withAudio.audioChunks = [LiveAudioChunk(base64: "AA==", mimeType: "audio/pcm;rate=24000")]
+        await driver._testInjectFrame(.serverContent(withAudio))
+
+        let repo = VoiceTurnRepository(controller: controller)
+        let preTurns = repo.turns(for: cookingSession)
+
+        driver.recordTurnAsTransportError()
+
+        let postTurns = repo.turns(for: cookingSession)
+        XCTAssertEqual(
+            postTurns.count,
+            preTurns.count + 2,
+            "recordTurnAsTransportError must persist user + model VoiceTurn rows",
+        )
+        let modelRow = try XCTUnwrap(postTurns.last { $0.typedSpeaker == .model })
+        let userRow = try XCTUnwrap(postTurns.last { $0.typedSpeaker == .user })
+        XCTAssertEqual(modelRow.typedResultType, .error,
+                       "model row must be .error on transport_error path")
+        XCTAssertEqual(modelRow.errorCode, "transport_error",
+                       "errorCode must match ADR 0015 trigger signal string")
+        XCTAssertEqual(userRow.typedResultType, .error,
+                       "user row must ALSO be .error (unlike watchdog where user row stays .normal — both directions are compromised on transport-error)")
+        XCTAssertEqual(userRow.errorCode, "transport_error")
+    }
+
     // MARK: - Helpers
 
     private func makeDriver() -> RealtimeSession {
