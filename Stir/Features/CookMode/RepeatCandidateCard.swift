@@ -24,9 +24,12 @@ import SwiftUI
 
 /// Identifiable wrapper around a recipePlanId so CookModeRoot can use
 /// `.sheet(item: $repeatCandidateContext)`. Lives at file scope so
-/// any future host (Saved, Tonight) can also present this card with
-/// the same Identifiable handle.
-struct RepeatCandidateContext: Identifiable, Equatable {
+/// future hosts can present this card with the same Identifiable
+/// handle. SCA-126: dropped Equatable conformance — `.sheet(item:)`
+/// only requires Identifiable, and CookModeRoot only ever assigns
+/// `repeatCandidateContext = RepeatCandidateContext(id: …)` or `nil`,
+/// never compares two instances.
+struct RepeatCandidateContext: Identifiable {
     let id: UUID
 }
 
@@ -120,7 +123,7 @@ struct RepeatCandidateCard: View {
         .presentationDragIndicator(.visible)
         .onAppear {
             analytics.capture(.repeatCandidateCardShown, properties: [
-                "recipe_plan_id": recipePlan.id?.uuidString ?? "",
+                "recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
                 "tier": entitlements.effectiveTier.rawValue,
             ])
         }
@@ -186,10 +189,17 @@ struct RepeatCandidateCard: View {
                 // helper so this callsite shares the same property
                 // shape as DishPreview / SavedMealsView; SourceKit
                 // catches drift instead of the inline literal dict.
+                // SCA-126: guard empty-string `origin` so PostHog
+                // dashboards filtering by recipe_origin don't silently
+                // drop the event (matches the `?? "unknown"` pattern
+                // used for IDs).
+                let origin = (recipePlan.origin?.isEmpty == false)
+                    ? recipePlan.origin!
+                    : "ai"
                 analytics.capture(
                     .favoriteSaved,
                     properties: BillingTelemetryProperties.favoriteSaved(
-                        recipeOrigin: recipePlan.origin ?? "ai",
+                        recipeOrigin: origin,
                         source: .postMealFeedback,
                     ),
                 )
@@ -213,7 +223,7 @@ struct RepeatCandidateCard: View {
             }
         case .blockedByTier, .blockedByBilling, .blockedByQuota:
             analytics.capture(.repeatCandidateCardDismissed, properties: [
-                "recipe_plan_id": recipePlan.id?.uuidString ?? "",
+                "recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
                 "outcome": "paywall_routed",
             ])
             onDismiss()
@@ -248,7 +258,7 @@ struct RepeatCandidateCard: View {
         guard !isResolving else { return }
         isResolving = true
         analytics.capture(.repeatCandidateCardDismissed, properties: [
-            "recipe_plan_id": recipePlan.id?.uuidString ?? "",
+            "recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
             "outcome": "deferred",
         ])
         onDismiss()
@@ -261,7 +271,7 @@ struct RepeatCandidateCard: View {
             suppressionStore.suppress(recipePlanId: id)
         }
         analytics.capture(.repeatCandidateCardDismissed, properties: [
-            "recipe_plan_id": recipePlan.id?.uuidString ?? "",
+            "recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
             "outcome": "suppressed",
         ])
         onDismiss()

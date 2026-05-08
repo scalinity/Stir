@@ -54,6 +54,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .dismiss,
         )
@@ -67,6 +68,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .dismiss,
         )
@@ -80,6 +82,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .openPaywall(.leftoversGate),
         )
@@ -93,6 +96,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .openLeftovers,
         )
@@ -108,6 +112,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .openLeftovers,
         )
@@ -123,6 +128,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: entitlements,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .openPaywall(.leftoversGate),
         )
@@ -140,6 +146,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
                 rating: 0,
                 recipePlan: nil,
                 entitlements: nil,
+                repeatCandidateSuppression: makeFreshSuppressionStore(),
             ),
             .dismiss,
         )
@@ -147,7 +154,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
 
     // MARK: - SCA-66: rating ≥ 4 on un-saved recipe → suggestSave
 
-    func test_suggestSave_premium_ratingFourUnsaved_returnsSuggestSave() {
+    func test_suggestSave_premium_ratingFourUnsaved_returnsSuggestSave() throws {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
@@ -158,10 +165,11 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
             entitlements: entitlements,
             repeatCandidateSuppression: suppression,
         )
-        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+        let planId = try XCTUnwrap(plan.id)
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: planId))
     }
 
-    func test_suggestSave_freeTier_ratingFiveUnsaved_returnsSuggestSave() {
+    func test_suggestSave_freeTier_ratingFiveUnsaved_returnsSuggestSave() throws {
         // Free still gets the card — the card itself routes "Yes" to
         // the savedFavoritesGate paywall.
         let entitlements = makeEntitlements(tier: .free, billingState: .none)
@@ -174,7 +182,8 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
             entitlements: entitlements,
             repeatCandidateSuppression: suppression,
         )
-        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+        let planId = try XCTUnwrap(plan.id)
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: planId))
     }
 
     func test_suggestSave_ratingThree_returnsDismiss() {
@@ -213,7 +222,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     /// branch dead code in production. Verify the post-fix gate
     /// (`isFavorite`) correctly routes to suggestSave when ONLY isSaved
     /// is true (the real production state) and isFavorite is still false.
-    func test_suggestSave_isSavedTrueButNotFavorited_stillReturnsSuggestSave() {
+    func test_suggestSave_isSavedTrueButNotFavorited_stillReturnsSuggestSave() throws {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         // Simulate the real production state right before OutcomeFeedback
         // submit() runs: markCompleted has set isSaved=true, but the
@@ -228,7 +237,8 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
             entitlements: entitlements,
             repeatCandidateSuppression: suppression,
         )
-        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+        let planId = try XCTUnwrap(plan.id)
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: planId))
     }
 
     func test_suggestSave_suppressed_returnsDismiss() {

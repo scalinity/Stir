@@ -383,11 +383,15 @@ struct OutcomeFeedbackView: View {
                 notes: notes.isEmpty ? nil : notes,
                 leftoverCount: leftoverCount,
             ))
+            // SCA-126: pass `.shared` explicitly. Was a default-arg
+            // before; the SCA-56 CR1 S8 finding called out the same
+            // pattern as a fragile test seam.
             let intent = Self.postSubmitIntent(
                 leftoverCount: leftoverCount,
                 rating: rating,
                 recipePlan: session.recipePlan,
                 entitlements: entitlements,
+                repeatCandidateSuppression: .shared,
             )
             analytics.capture(.mealRated, properties: [
                 "rating": rating,
@@ -446,7 +450,7 @@ struct OutcomeFeedbackView: View {
                 context: [
                     "screen": "outcome_feedback",
                     "rating": String(rating),
-                    "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "",
+                    "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "unknown",
                 ],
             )
             submitError = "We couldn't save your feedback. Try again or tap Skip."
@@ -466,27 +470,41 @@ struct OutcomeFeedbackView: View {
     /// they didn't ask for.
     private func skipAndDismiss() {
         analytics.capture(.mealRatingSkipped, properties: [
-            "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "",
+            "recipe_plan_id": session.recipePlan?.id?.uuidString ?? "unknown",
         ])
         onSubmitted(.dismiss)
     }
 
-    /// Decide which intent to bubble up after a successful submit. Free
-    /// + leftoverCount>0 → paywall (per SCA-55 D2 — don't defer);
-    /// Premium+ + leftoverCount>0 → leftovers; everything else → dismiss.
+    /// Decide which intent to bubble up after a successful submit.
+    ///
+    /// Decision priority (top wins; mutually exclusive at exit):
+    ///   1. `leftoverCount > 0` → leftovers handoff (Premium+) OR
+    ///      leftovers-gate paywall (Free). SCA-55 D2 — don't defer.
+    ///   2. `rating ≥ 4` on a not-yet-favorited recipe (gate on
+    ///      `isFavorite`, NOT `isSaved` — SCA-109) AND not in the
+    ///      per-recipe suppression set → suggestSave card. SCA-66.
+    ///   3. Else → dismiss.
+    ///
     /// Pulled out so unit tests can assert the intent matrix without
     /// driving the full submit path through Core Data. `internal` (not
-    /// `private`) because `OutcomeFeedbackViewIntentTests` exercises it
-    /// directly via @testable import — driving `submit()` end-to-end
-    /// would require a full Core Data fixture per case for a 3-line
-    /// decision function.
+    /// `private`) because `OutcomeFeedbackViewIntentTests` exercises
+    /// it directly via @testable import — driving `submit()`
+    /// end-to-end would require a full Core Data fixture per case for
+    /// a small decision function.
+    ///
+    /// SCA-126: `repeatCandidateSuppression` is now REQUIRED — no
+    /// default value. The prior `= .shared` default repeated the
+    /// SCA-56 CR1 S8 antipattern: production hit `.shared`, tests
+    /// injected a fresh suite, and the default-arg branch was never
+    /// validated against the test path. Production callsite at
+    /// `submit()` passes `.shared` explicitly; tests inject their own.
     @MainActor
     static func postSubmitIntent(
         leftoverCount: Int,
         rating: Int,
         recipePlan: RecipePlan?,
         entitlements: EntitlementService?,
-        repeatCandidateSuppression: RepeatCandidateSuppressionStore = .shared,
+        repeatCandidateSuppression: RepeatCandidateSuppressionStore,
     ) -> PostSubmitIntent {
         // 1. Leftovers handoff wins when present — single tap to next
         //    meal is more actionable than a save prompt.
