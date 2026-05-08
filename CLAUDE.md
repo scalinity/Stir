@@ -626,6 +626,19 @@ Notes on DB column types/constraints that init migration COMMENTs and first-glan
 
 iOS `/v1/push/register` must send exactly `'production'` or `'sandbox'` — `'development'` is rejected with VAL-01 (Zod ideally, DB CHECK as last line).
 
+### Immutable-migration policy
+
+Once a migration has applied to any environment (local, staging, prod), its file on disk is immutable. Forward-only fixes via a new dated migration that supersedes via `CREATE OR REPLACE` / `ALTER TABLE` / etc. The new migration takes the next sequential timestamp; supersession is documented in both files (the old one's COMMENT block points at the new file; the new one's header notes what it replaces).
+
+**Security-fix exception.** A landed migration whose body itself constitutes a live exposure surface (e.g. emits a secret to the Postgres log, drops a permissions check, hard-codes a credential) MAY be edited in place to neutralize the leak — provided:
+
+1. The active definition still lives in a forward-dated migration (so re-applying the original from scratch produces correct post-fix state)
+2. The in-place edit replaces the leak's mechanism with a benign no-op (e.g. `RETURN 0;` stub for a function body) — never silently changes semantics in a way that could mask a regression
+3. The original COMMENT block is preserved or extended to name the leak literal, the superseder migration filename, and the immutable-migration exception itself
+4. The commit message states the security-fix exception applies and which class of leak (DSN, credential, permissions) is the trigger
+
+This is the only allowed in-place edit class. Cosmetic fixes (typos, formatting, comment polish) on landed migrations are forbidden — file a new migration even for tiny corrections. Examples to date: SCA-139 (`20260424000001` SENTRY_DSN log redaction).
+
 ---
 
 ## Billing model

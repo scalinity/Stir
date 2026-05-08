@@ -637,7 +637,18 @@ struct CookModeRoot: View {
                 // on activeCookLaunch ensures the paywall doesn't fire
                 // onto TonightHome with no Cook Mode context. No-op in
                 // the happy path.
-                guard coordinator.activeCookLaunch != nil else { return }
+                guard coordinator.activeCookLaunch != nil else {
+                    // Review W4: log the suppression so the rate is
+                    // observable. If this fires regularly in production,
+                    // the underlying race needs a different fix
+                    // (e.g. gate-trip earlier in findFollowUpIdea
+                    // before the async hop, or a VM-local isDismissing
+                    // flag). >1% of leftovers gates = revisit.
+                    Logger.coordinator.info(
+                        "leftovers_paywall_suppressed: trigger=\(trigger.telemetryValue, privacy: .public) reason=cover_unwinding",
+                    )
+                    return
+                }
                 coordinator.presentPaywall(trigger)
             },
         )

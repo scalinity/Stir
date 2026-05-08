@@ -28,6 +28,12 @@ import OSLog
 import SwiftUI
 
 struct PantryListView: View {
+    /// SCA-101 (d) review S3: name the debounce so a future tuner
+    /// finds it immediately. 150ms is the lower bound where typeahead
+    /// still feels responsive on iPhone 17 Pro at 1000-row Pro
+    /// pantries; tighten only if Instruments shows otherwise.
+    private static let searchDebounce: Duration = .milliseconds(150)
+
     let coordinator: RootCoordinator
 
     @Environment(EntitlementService.self) private var entitlements
@@ -130,28 +136,36 @@ struct PantryListView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search pantry",
         )
-        // SCA-101 (d): debounce filter recompute by 150ms. The text
-        // field stays responsive (binding above writes per keystroke)
-        // but `effectiveSearchText` — which `filteredItems` reads —
-        // only catches up after the user stops typing for 150ms.
-        // Pro-tier 1000-row pantries pay the filter cost once per
-        // pause instead of per keystroke. Cancellation via `.task(id:)`
-        // ensures only the latest sleep wins.
+        // SCA-101 (d): debounce filter recompute by `searchDebounce`.
+        // The text field stays responsive (binding above writes per
+        // keystroke) but `effectiveSearchText` — which `filteredItems`
+        // reads — only catches up after the user stops typing for
+        // 150ms. Pro-tier 1000-row pantries pay the filter cost once
+        // per pause instead of per keystroke. Cancellation via
+        // `.task(id:)` ensures only the latest sleep wins.
         .task(id: viewModel?.searchText) {
             guard let vm = viewModel else { return }
             // Capture the current value to compare after the sleep.
             let pending = vm.searchText
             do {
-                try await Task.sleep(for: .milliseconds(150))
+                try await Task.sleep(for: Self.searchDebounce)
             } catch {
                 return // task cancelled by next keystroke
             }
-            // Only commit if the text hasn't changed during the sleep.
-            // The .task(id:) cancellation makes this redundant in
-            // practice but defends against a stale write should the
-            // task scheduler decide to run two siblings briefly.
-            if vm.searchText == pending {
-                vm.effectiveSearchText = pending
+            // Review W2: re-bind `viewModel` post-sleep and ensure the
+            // VM identity hasn't changed — if the parent reassigns
+            // `viewModel` mid-debounce (e.g. household swap, profile
+            // re-init), the captured `vm` would be the orphaned
+            // instance and writing to it would silently lose the
+            // debounced text. The `===` check skips the stale write
+            // and lets the new VM's own .task fire on its own
+            // searchText id. The `searchText == pending` re-check
+            // defends against the (mostly theoretical) case where
+            // .task(id:) fired but cancellation was lost between
+            // siblings.
+            guard let liveVM = viewModel, liveVM === vm else { return }
+            if liveVM.searchText == pending {
+                liveVM.effectiveSearchText = pending
             }
         }
         // SCA-19 / SCA-28 — full-screen in-list Pantry walkthrough.

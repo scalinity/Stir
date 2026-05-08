@@ -277,6 +277,15 @@ private final class MockSpeechSynthesizer: SpeechSynthesizing {
         // Mirror AVSpeechSynthesizer behavior: a successful stop
         // resets isSpeaking to false. Tests that want to assert the
         // pre-stop state should snapshot before calling.
+        //
+        // Review W3: the Bool return is "wasSpeaking" (pre-state) which
+        // coincides with AVSpeechSynthesizer's "stopped speech" return
+        // for the simple single-utterance case used by tests. For a
+        // real synth with a queued-utterance pipeline the two
+        // semantics could diverge, but production callsites all use
+        // `@discardableResult` and ignore the return — so this
+        // simplification is contract-safe today. Revisit if a future
+        // assertion threads the return value.
         isSpeakingOverride = false
         return wasSpeaking
     }
