@@ -474,6 +474,27 @@ final class PantryItemRepository {
         }
     }
 
+    /// Fetch one live pantry row by stable UUID, scoped to the household.
+    /// SCA-86 uses this to resolve `stir://tonight?use_first=<id>`
+    /// notification taps without trusting a cross-household identifier.
+    func fetch(
+        id: UUID,
+        for household: HouseholdProfile,
+    ) throws -> PantryItem? {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.fetchLimit = 1
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt == nil"),
+            NSPredicate(format: "id == %@", id as CVarArg),
+        ])
+        do {
+            return try controller.viewContext.fetch(request).first
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+    }
+
     /// Counts rows that count against the standing pantry cap (Free 25 /
     /// Premium 250 / Pro 1000 — CLAUDE.md authoritative). Counts only
     /// `.remembered`, non-deleted rows; everything else (`.ephemeral`,
