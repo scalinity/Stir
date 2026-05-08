@@ -308,24 +308,24 @@ final class RealtimeSession: VoiceSessionDriver {
 
     // MARK: - Deps
 
-    private let aiDispatch: AIDispatch
-    private let voiceTurnRepository: VoiceTurnRepository
-    private let cookingSession: CookingSession
-    private let stateMachine = VoiceSessionStateMachine()
+    let aiDispatch: AIDispatch
+    let voiceTurnRepository: VoiceTurnRepository
+    let cookingSession: CookingSession
+    let stateMachine = VoiceSessionStateMachine()
 
     // Transport + audio
-    private var transport: LiveWebSocketTransport?
-    private var audioPipeline: LiveAudioPipeline?
+    var transport: LiveWebSocketTransport?
+    var audioPipeline: LiveAudioPipeline?
     /// P0-D (2026-04-23): observes AVAudioSession interruption /
     /// route-change / media-services-reset events and forwards them to
     /// `handleAudioInterruption(_:)` so we can tear down cleanly on
     /// phone-call / Siri / AirPods-yank / OS-media-graph-reset.
-    private var audioInterruptionObserver: AudioInterruptionObserver?
+    var audioInterruptionObserver: AudioInterruptionObserver?
     /// P0-F (2026-04-23): observer for `UIApplication.willEnterForegroundNotification`
     /// so we can re-check mic permission. If the user revoked mic access
     /// in Settings while backgrounded, the engine happily returns all-
     /// zero buffers indefinitely — we need to detect + fast-fail.
-    private var foregroundObserver: NSObjectProtocol?
+    var foregroundObserver: NSObjectProtocol?
     /// Monotonic counter bumped every time `startReceiveDispatcher()`
     /// starts a new receive loop. Each dispatcher Task captures its own
     /// generation at spawn. When the dispatcher's for-try-await exits
@@ -340,7 +340,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// race window where the flag could be cleared before the stale
     /// dispatcher's error handler ran (review 2026-04-22 Critical #2).
     /// Generation-based suppression is flag-state-independent. ADR 0014.
-    private var dispatcherGeneration: Int = 0
+    var dispatcherGeneration: Int = 0
 
     /// Wall-clock timestamp of the most recent inbound server audio
     /// chunk. Used by `startMicForwarding` to extend the post-speech playback tail + room-reverb
@@ -350,7 +350,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// adapted — observed 2026-04-22 producing garbage `transcription.user`
     /// frames ("자", "la", "in") that were transcriptions of the model's
     /// own echo.
-    private var lastInboundAudioAt: Date?
+    var lastInboundAudioAt: Date?
 
     /// Seconds to continue muting the mic AFTER playback has finished
     /// draining (pendingPlaybackBuffers reaches 0). Now that the
@@ -367,33 +367,33 @@ final class RealtimeSession: VoiceSessionDriver {
     // echoCooldownSec moved to LiveSessionBudget.echoCooldownSec (P2-F).
 
     // Session state
-    private var mintResponse: RealtimeSessionResponse?
-    private var turnCount: Int = 0
+    var mintResponse: RealtimeSessionResponse?
+    var turnCount: Int = 0
 
     // Mic forwarding task — reads mic frames from pipeline and sends
     // to the WebSocket. Started at beginTurn, cancelled at endTurn.
-    private var micForwardTask: Task<Void, Never>?
+    var micForwardTask: Task<Void, Never>?
 
     // Receive dispatcher task — reads inbound frames from transport
     // and updates state / plays audio / handles tool calls. Started
     // after preWarm succeeds.
-    private var receiveDispatcherTask: Task<Void, Never>?
+    var receiveDispatcherTask: Task<Void, Never>?
 
     // Per-turn accumulator. Reset at `flushPendingReport()`. so hands-free
     // turns (which never re-enter beginTurn) get clean slate per turn.
-    private var currentTurnInlineText: String?
+    var currentTurnInlineText: String?
     /// Per-turn accumulator for what the SERVER heard the user say —
     /// concatenation of every `inputTranscription.text` delta delivered
     /// during the turn. Reset alongside `currentTurnInlineText`. Drained
     /// into the `onTurnTranscriptFinalized` callback when the turn
     /// finalizes; UI uses it to render the YOU SAID side of the
     /// voice-active transcript card.
-    private var currentTurnUserTranscript: String?
-    private var turnCompleteContinuation: CheckedContinuation<Void, Error>?
+    var currentTurnUserTranscript: String?
+    var turnCompleteContinuation: CheckedContinuation<Void, Error>?
     /// Accumulates per-chunk `usageMetadata` deltas across the current
     /// turn. Reset at `flushPendingReport()`. See `TurnUsageAccumulator`
     /// docstring for the Gemini Live streaming-delta shape.
-    private var turnUsageAccumulator = TurnUsageAccumulator()
+    var turnUsageAccumulator = TurnUsageAccumulator()
     // `lastUsageMetadata` was replaced by `turnUsageAccumulator` above —
     // the single-value design overwrote real token counts every time
     // Gemini sent its empty `usageMetadata: {}` turnComplete envelope.
@@ -404,13 +404,13 @@ final class RealtimeSession: VoiceSessionDriver {
     /// turn starts implicitly after previous finalizes). Used to stamp
     /// backendLatencyMs in the CookTurnResult — approximate since iOS
     /// can't detect the server's speech-start VAD event in hands-free.
-    private var turnStartedAt: Date?
+    var turnStartedAt: Date?
     /// Snapshot of the most recently finalized turn. Published by
     /// `finalizeTurn()` so `endTurn()` (when the VM's tap-to-end path
     /// lands after the hands-free auto-loop already resolved the turn)
     /// has something concrete to return. Nil before the first turn
     /// completes.
-    private var lastTurnResult: CookTurnResult?
+    var lastTurnResult: CookTurnResult?
     /// Wall-clock when the server's input-transcription finalized for
     /// the CURRENT turn (i.e., server VAD detected end-of-utterance and
     /// emitted `inputTranscription.finished = true`). Paired with
@@ -421,19 +421,19 @@ final class RealtimeSession: VoiceSessionDriver {
     /// turns, or very short utterances where the server races past
     /// transcription) — TTFA is zeroed in that case and the turn shows
     /// up on the dashboard as "unmeasurable" rather than a fake 0 s.
-    private var userTurnEndAt: Date?
+    var userTurnEndAt: Date?
     /// Wall-clock of the first non-empty `audioChunks` arrival within
     /// the current turn. Set once per turn (subsequent chunks don't
     /// overwrite) so TTFA captures the model-first-byte moment, not the
     /// streaming-steady-state arrival. Reset on every `finalizeTurn()`.
-    private var firstModelAudioAt: Date?
+    var firstModelAudioAt: Date?
     /// True if the current turn invoked any tool call (substitution_check,
     /// start_timer, advance_step, set_step, etc.). Set in `handleToolCall`,
     /// latched into `PendingTurnReport.containedToolCall` by `finalizeTurn()`
     /// before the per-turn reset. Drives `cook_turn_resolved.result_type`
     /// downstream, which gates ADR 0012's split TTFA thresholds
     /// (normal p95 < 500 ms vs tool_call p95 < 1500 ms).
-    private var turnContainedToolCall: Bool = false
+    var turnContainedToolCall: Bool = false
     /// Name of the most recent tool call in the current turn
     /// ("start_timer", "advance_step", "substitution_check", "set_step",
     /// "restart_timer"). Set by `handleToolCall`; latched into the
@@ -441,14 +441,14 @@ final class RealtimeSession: VoiceSessionDriver {
     /// rate with tool-call type. 3.1 Flash Live is synchronous one-in-
     /// flight (CLAUDE.md §sharp-edge #12), so "most recent" = "only one
     /// this turn" in practice. Reset on every `finalizeTurn()` + close.
-    private var lastToolCallName: String?
+    var lastToolCallName: String?
 
     /// True when the current `finalizeTurn()` is running as a watchdog
     /// synthetic-turnComplete. Changes the model-turn persist path to
     /// `resultType: .error, errorCode: "turnComplete_timeout"` so the
     /// session history audit trail reflects the stuck recovery per
     /// spec §4.12. Reset at the end of finalizeTurn + close.
-    private var finalizeWasWatchdogFire: Bool = false
+    var finalizeWasWatchdogFire: Bool = false
 
     /// Outcome of a `refreshSession` call. Returned so callers (in
     /// particular `handleTransportError`) can distinguish "refresh
@@ -490,7 +490,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// (preview-API bug), transport-error means "WebSocket died" (network
     /// hiccup / cellular stall / Gemini outage). Review finding
     /// P0-H / Critical #8.
-    private var finalizeWasTransportError: Bool = false
+    var finalizeWasTransportError: Bool = false
 
     /// Watchdog Task that force-advances state when Gemini Live drops
     /// a `turnComplete` frame. Observed 2026-04-23 device test: on a
@@ -510,7 +510,7 @@ final class RealtimeSession: VoiceSessionDriver {
     ///     .ready + finalizeTurn) with a warning log so ops can track
     ///     how often Gemini drops turnComplete. Uses a dedicated
     ///     `ended_reason: .watchdog` downstream.
-    private var turnStuckWatchdog: Task<Void, Never>?
+    var turnStuckWatchdog: Task<Void, Never>?
     // turnStuckWatchdogSec moved to LiveSessionBudget.turnStuckWatchdogSec (P2-F).
     /// Turn index at which the most recent successful session refresh
     /// completed. Refresh triggers off `turnCount - lastRefreshedAtTurn
@@ -518,12 +518,12 @@ final class RealtimeSession: VoiceSessionDriver {
     /// every N turns across the session lifetime rather than exactly once.
     /// Starts at 0; the first refresh at turn 10 sets this to 10, after
     /// which the next fires at turn 20, and so on. ADR 0014.
-    private var lastRefreshedAtTurn: Int = 0
+    var lastRefreshedAtTurn: Int = 0
     /// True while a refresh is in flight (mint → new WS open → handshake
     /// → swap → old close). Guards re-entry — mid-refresh turn boundaries
     /// shouldn't trigger a second refresh. Cleared in the refresh path's
     /// defer block so a failed refresh doesn't wedge the session.
-    private var isRefreshing: Bool = false
+    var isRefreshing: Bool = false
 
     /// Pre-minted refresh token, kicked off one turn before the refresh
     /// cadence fires (at `turnsSinceRefresh == refreshAtTurnCount - 1`).
@@ -535,14 +535,14 @@ final class RealtimeSession: VoiceSessionDriver {
     /// would have started anyway. If it fails, we fall back to sync
     /// mint. Cleared after consumption or after staleness (see
     /// `pendingPreMintStartedAt`).
-    private var pendingPreMintTask: Task<RealtimeSessionResponse, Error>?
+    var pendingPreMintTask: Task<RealtimeSessionResponse, Error>?
     /// Wall-clock when `pendingPreMintTask` was kicked off. Backend's
     /// `new_session_expire_time` is 60s from mint (sharp-edge #5), so a
     /// pre-minted token older than ~45s (leaving 15s of handshake
     /// headroom) is discarded in favor of a fresh sync mint. Typical
     /// gap between pre-mint (turn N-1 finalize) and refresh (turn N
     /// finalize) is 8-20s of conversation — well within the budget.
-    private var pendingPreMintStartedAt: Date?
+    var pendingPreMintStartedAt: Date?
     // Conversation-history ring buffers REMOVED 2026-04-22 PM.
     // Rationale: Daniel observed the model isn't referencing prior-turn
     // context post-refresh anyway ("conversation is moving forward, not
@@ -568,7 +568,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// prod events with $ai_input_tokens=0 despite parseAll fix,
     /// indicating Gemini routinely uses path (3) on audio-mode
     /// sessions.
-    private struct PendingTurnReport: Sendable {
+    struct PendingTurnReport: Sendable {
         let turnIndex: Int
         let latencyMs: Int
         /// TTFA computed by `finalizeTurn()` at the moment of
@@ -597,7 +597,7 @@ final class RealtimeSession: VoiceSessionDriver {
         /// observability, summary numbers gate cap math.
         let transcript: LiveTurnTranscript?
     }
-    private var pendingReport: PendingTurnReport?
+    var pendingReport: PendingTurnReport?
 
 
     // Tool-call side-effect callbacks. Set by CookModeViewModel at
@@ -2606,8 +2606,8 @@ final class RealtimeSession: VoiceSessionDriver {
     /// P3-H (2026-04-23): TTL-cached household snapshot. Invalidated
     /// naturally after 60 s; preWarm + close both clear it via
     /// `clearHouseholdContextCache()` as a belt-and-suspenders reset.
-    private var cachedHouseholdContext: RealtimeHouseholdContext?
-    private var cachedHouseholdContextAt: Date?
+    var cachedHouseholdContext: RealtimeHouseholdContext?
+    var cachedHouseholdContextAt: Date?
     private static let householdContextTTLSec: TimeInterval = 60
 
     private func clearHouseholdContextCache() {
@@ -2654,7 +2654,7 @@ final class RealtimeSession: VoiceSessionDriver {
         }
     }
 
-    private var setupCompleteContinuation: CheckedContinuation<Void, Error>?
+    var setupCompleteContinuation: CheckedContinuation<Void, Error>?
 
     /// Monotonic counter bumped every time a new `turnComplete` /
     /// `setupComplete` await begins. Each timeout task captures the
@@ -2669,8 +2669,8 @@ final class RealtimeSession: VoiceSessionDriver {
     /// and resume-throw `.turnDrained` on it — surfacing as a spurious
     /// "voice turn failed" in the middle of an otherwise-working
     /// session (review 2026-04-22 §Critical #3).
-    private var turnCompleteGeneration: Int = 0
-    private var setupCompleteGeneration: Int = 0
+    var turnCompleteGeneration: Int = 0
+    var setupCompleteGeneration: Int = 0
 
     /// Await the server's `setupComplete` handshake frame. Returns when
     /// `handleInboundFrame` resumes the continuation; throws
@@ -3542,100 +3542,6 @@ final class RealtimeSession: VoiceSessionDriver {
         }
     }
 
-    /// Register the AudioInterruptionObserver so AVAudioSession
-    /// interruption / route-change / media-services-reset events are
-    /// routed to `handleAudioInterruption(_:)`. Idempotent — if an
-    /// observer already exists (shouldn't happen given preWarm semantics,
-    /// but defensive), we stop the prior one first.
-    private func startAudioInterruptionObserver() {
-        audioInterruptionObserver?.stop()
-        audioInterruptionObserver = AudioInterruptionObserver { [weak self] event in
-            self?.handleAudioInterruption(event)
-        }
-        audioInterruptionObserver?.start()
-
-        // P0-F (2026-04-23): foreground-mic-permission re-check. Users
-        // can revoke mic access in Settings while Cook Mode is
-        // backgrounded; on return the AVAudioEngine continues reporting
-        // zero-peak buffers forever with no error. On foreground,
-        // re-query `AVAudioApplication.shared.recordPermission` and
-        // force-close if denied.
-        if foregroundObserver == nil {
-            foregroundObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.willEnterForegroundNotification,
-                object: nil,
-                queue: .main,
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.checkMicPermissionOnForeground()
-                }
-            }
-        }
-    }
-
-    private func checkMicPermissionOnForeground() {
-        let status = AVAudioApplication.shared.recordPermission
-        guard status == .denied else { return }
-        Logger.voice.warning(
-            "voice_live_mic_permission_revoked — closing session on foreground; user must re-grant in Settings",
-        )
-        #if DEBUG
-        VoiceSessionLog.log("mic_permission_revoked_on_foreground")
-        #endif
-        // Treat as interruption-class event: tear down + surface .error
-        // so VM routes to C.3 (which will itself check permission and
-        // also hard-fail, but that's the existing VM path).
-        handleAudioInterruption(.mediaServicesReset)
-    }
-
-    /// React to system audio events. Scope is deliberately narrow: we
-    /// tear down the Live path cleanly and let the VM's existing
-    /// fallback-to-C.3 flow (via `.error` state) handle the user-facing
-    /// recovery. Attempting an in-place refresh on `.interruptionEnded`
-    /// is risky — the OS may be mid-interruption on the AVAudioSession
-    /// even after announcing end, and forcing Gemini Live audio through
-    /// a half-valid session produces worse UX than a clean "tap again
-    /// to re-start voice" cue.
-    private func handleAudioInterruption(_ event: AudioInterruptionObserver.Event) {
-        Logger.voice.info(
-            "voice_live_audio_interruption event=\(String(describing: event), privacy: .public)",
-        )
-        #if DEBUG
-        VoiceSessionLog.log("audio_interruption", [
-            "event": String(describing: event),
-            "state": stateMachine.state.rawValue,
-        ])
-        #endif
-        switch event {
-        case .interruptionBegan, .routeOldDeviceUnavailable, .mediaServicesReset:
-            // Treat all three as "the session is unrecoverable, tear
-            // down and let VM fall back." Mid-turn VoiceTurn persist
-            // runs via `recordTurnAsTransportError` so ai_request_log
-            // + the session's $ai_trace get the aborted-turn row for
-            // ADR 0015 cap-reversal trigger visibility.
-            if turnStartedAt != nil {
-                recordTurnAsTransportError()
-            }
-            // Cancel in-flight playback so the speaker goes quiet
-            // immediately — the interruption handler (OS-level audio
-            // pause) has already muted our output but our local
-            // pendingPlaybackBuffers may still be scheduling sound
-            // that'd surge back when the interruption clears.
-            audioPipeline?.cancelPlayback()
-            if stateMachine.state != .closed && stateMachine.state != .error {
-                stateMachine.advance(to: .error)
-            }
-        case .interruptionEnded(let shouldResume):
-            // Log + leave session in its current state. The user's next
-            // tap triggers a fresh preWarm via the VM rebuild path,
-            // which gets a clean session + re-activated audio session.
-            // Auto-resuming in-place adds risk without clear UX value.
-            Logger.voice.info(
-                "voice_live_interruption_ended shouldResume=\(shouldResume, privacy: .public) — session stays in error; next tap rebuilds",
-            )
-        }
-    }
-
     /// Record the in-flight turn as a transport-error row and flush any
     /// pending usage report. Distinct from `finalizeTurn` which handles
     /// happy + watchdog paths — transport-error semantics are different:
@@ -3649,7 +3555,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// Review finding P0-H / Critical #8 (2026-04-23). Prior behavior
     /// dropped the turn from both VoiceTurn history AND `ai_request_log`
     /// — ADR 0015's cap-reversal trigger query missed these entirely.
-    private func recordTurnAsTransportError() {
+    func recordTurnAsTransportError() {
         guard turnStartedAt != nil else { return }
         let now = Date()
         let startedAt = turnStartedAt ?? now
@@ -3702,183 +3608,5 @@ final class RealtimeSession: VoiceSessionDriver {
         firstModelAudioAt = nil
         turnContainedToolCall = false
         lastToolCallName = nil
-    }
-
-    // MARK: - Private: mic forwarding
-
-    private func startMicForwarding() {
-        guard let pipeline = audioPipeline else { return }
-        // P1-F (2026-04-23): guard against stacking forwarders. Without
-        // this, a defensive re-invoke (e.g. belt-and-suspenders
-        // `beginTurn` call after error recovery) would assign a new
-        // Task to `micForwardTask` while the prior one still holds
-        // the `for await pipeline.micFrames` single-consumer iterator.
-        // The new Task sees `.finished` immediately and exits; the OLD
-        // one keeps forwarding but is no longer referenced — leaked
-        // until `close()`. Silent bug class; match the refresh step-10
-        // pattern (line 1265: `if micForwardTask == nil`).
-        guard micForwardTask == nil else {
-            #if DEBUG
-            VoiceSessionLog.log("mic_forwarder.start_skipped_already_running")
-            #endif
-            return
-        }
-        // Self-capture (weak) so the Task reads `self.transport` on
-        // every iteration. `pipeline.micFrames` is a single-consumer
-        // AsyncStream created once in LiveAudioPipeline.init; starting
-        // a second iteration after cancellation returns immediately
-        // with `.finished`. So the forwarder must stay ALIVE across
-        // refreshes and pick up the swapped transport dynamically —
-        // cancelling + restarting was the bug that stopped mic sends
-        // after turn 10's refresh (observed 2026-04-22: mic_tap_fired
-        // continued firing but zero mic.sent entries post-refresh).
-        micForwardTask = Task { [weak self] in
-            guard let self else { return }
-            #if DEBUG
-            var framesSent = 0
-            var bytesSent = 0
-            var framesMuted: UInt64 = 0
-            var nextLogAtFrame = 50 // ~1 s at 20 ms per frame
-            #endif
-            // Track the playerNode's running state so we can detect
-            // the instant playback transitions from playing→stopped.
-            // The cooldown window is measured from THAT transition,
-            // not from the server's last audio chunk, because the
-            // local AVAudioPlayerNode continues draining buffered
-            // audio for 1-2s after the server stops sending chunks.
-            // Without this, the cooldown expired while the speaker
-            // was still emitting audio and the mic captured the tail
-            // (observed 2026-04-22: "heat until", "step", "stick",
-            // "then", "kiri" — model transcribing its own playback).
-            var wasPlayingBack = false
-            var lastPlaybackEndedAt: Date?
-            for await frame in pipeline.micFrames {
-                if Task.isCancelled { break }
-                // Dynamically fetch the CURRENT transport. Nil during
-                // the brief window between old-close and new-ready in
-                // a refresh; we drop those frames (acceptable — the
-                // user is typically silent at turn boundaries).
-                guard let transport = self.transport else { continue }
-                // Three-part half-duplex gate:
-                //
-                //   A. state == .modelSpeaking — server reports it's
-                //      mid-utterance. Explicit, fast.
-                //   B. pipeline.isPlayingBack — local player has
-                //      scheduled buffers still draining. Covers the
-                //      gap between last server chunk and speaker
-                //      silence.
-                //   C. now - lastPlaybackEndedAt < echoCooldownSec —
-                //      AEC adapt window + room reverb tail after the
-                //      speaker actually stopped.
-                //
-                // AEC (via AVAudioSession mode = .voiceChat) attenuates
-                // the echo signal, but server-side VAD can still fire
-                // on a -30dB residual given enough time. This gate is
-                // the hard backstop.
-                //
-                // Cost: user can't barge in while model is speaking.
-                // Acceptable for MVP — can be re-enabled later if AEC
-                // quality proves sufficient in D.1 validation.
-                let isPlayingNow = pipeline.isPlayingBack
-                if wasPlayingBack && !isPlayingNow {
-                    lastPlaybackEndedAt = Date()
-                }
-                wasPlayingBack = isPlayingNow
-
-                let inModelSpeaking = self.stateMachine.state == .modelSpeaking
-                let inPostPlaybackCooldown: Bool = {
-                    guard let ended = lastPlaybackEndedAt else { return false }
-                    return Date().timeIntervalSince(ended) < LiveSessionBudget.echoCooldownSec
-                }()
-                // Fourth mute path: active session refresh. During the
-                // ~1.7-3.6s handoff we must NOT forward mic audio across
-                // the transport swap — if we do, frames land on the new
-                // session mid-stream without a clean silence-to-speech
-                // VAD boundary, and semantic VAD never fires end-of-speech
-                // on the first utterance. Symptom: user speaks after
-                // refresh, nothing happens; says it again and it works.
-                // Observed 2026-04-22 PM: 43s of mic.sent events post-
-                // refresh with zero transcription.user / serverContent,
-                // then a second utterance transcribed normally.
-                // Dropping frames during refresh means the user's words
-                // spoken mid-handoff are lost — but that's a tiny window
-                // (~2s at best, ~4s at worst) at a turn boundary where
-                // the user is typically silent anyway, and it's vastly
-                // preferable to the current 43s dead zone.
-                let inRefresh = self.isRefreshing
-                let muted = inModelSpeaking || isPlayingNow || inPostPlaybackCooldown || inRefresh
-                if muted {
-                    #if DEBUG
-                    framesMuted &+= 1
-                    if framesMuted % 50 == 1 {
-                        VoiceSessionLog.log("mic.muted_half_duplex", [
-                            "frames_muted": framesMuted,
-                            "state": self.stateMachine.state.rawValue,
-                            "playing": isPlayingNow,
-                            "cooldown": inPostPlaybackCooldown,
-                            "refresh": inRefresh,
-                        ])
-                    }
-                    #endif
-                    // P3-C (2026-04-23): brief sleep instead of tight
-                    // read-and-drop during mute. Without the sleep, the
-                    // forwarder wakes on every 20 ms mic frame (50 Hz)
-                    // and burns MainActor contention while the user
-                    // hears 5-15 s of model speech. With the sleep we
-                    // release the MainActor for SwiftUI/other work and
-                    // re-check gate conditions on the next tick. 100 ms
-                    // is a balance: short enough that post-mute mic
-                    // resumption doesn't perceptibly lag (user has to
-                    // react to model finishing speaking anyway — their
-                    // utterance starts well after the 100 ms window),
-                    // long enough to materially reduce wake-ups during
-                    // a ~10 s model turn (~100 wakes vs ~500 without).
-                    try? await Task.sleep(for: .milliseconds(100))
-                    continue
-                }
-                do {
-                    try await transport.send(.realtimeInputAudio(
-                        base64: frame.base64,
-                        mimeType: frame.mimeType,
-                    ))
-                    #if DEBUG
-                    framesSent += 1
-                    bytesSent += frame.base64.count
-                    // Log every ~1 s of audio so we can see in the
-                    // console whether the mic pipeline is actually
-                    // pushing bytes. If this log never appears while
-                    // user is obviously speaking, the AVAudioEngine
-                    // tap callback isn't firing and the whole
-                    // "silence from Gemini" problem is on iOS side.
-                    if framesSent >= nextLogAtFrame {
-                        VoiceSessionLog.log("mic.sent", [
-                            "frames": framesSent,
-                            "b64_bytes": bytesSent,
-                        ])
-                        nextLogAtFrame = framesSent + 50
-                    }
-                    #endif
-                } catch {
-                    // Don't `break` — a send failure is typically a
-                    // refresh-swap teardown of the OLD transport. The
-                    // next iteration reads `self.transport` fresh and
-                    // picks up the new one. Breaking killed the forwarder
-                    // forever post-refresh (observed 2026-04-22, turn 10
-                    // onward: zero `mic.sent` events after handoff).
-                    Logger.voice.warning(
-                        "live_mic_send_failed error=\(error.localizedDescription, privacy: .private)",
-                    )
-                    #if DEBUG
-                    VoiceSessionLog.logError("mic.send_failed", error: error)
-                    #endif
-                    continue
-                }
-            }
-        }
-    }
-
-    private func stopMicForwarding() {
-        micForwardTask?.cancel()
-        micForwardTask = nil
     }
 }
