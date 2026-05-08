@@ -254,6 +254,17 @@ struct SavedMealsView: View {
         // visit explaining how meals end up saved, the search/sort/
         // favorites filter, and the Cook Again CTA.
         .tutorial(key: .savedMeals) { SavedMealsTutorial() }
+        // SCA-195: cancel any pending reload Task when the view leaves
+        // the tree (tab switch, nav push, app background-kill). The
+        // Task survives @State teardown otherwise and would fire a
+        // load() against a no-longer-rendered view — wasted work, and
+        // during the SCA-106 bg-save burst it could land after the
+        // user has navigated away. Mirrors the leftoversTimeoutTask /
+        // postSubmitPresentationTask cleanup in CookModeRoot.
+        .onDisappear {
+            reloadDebounceTask?.cancel()
+            reloadDebounceTask = nil
+        }
     }
 
     // MARK: - Filter bar
