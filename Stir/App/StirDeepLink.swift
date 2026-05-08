@@ -12,6 +12,7 @@
 //   stir://paywall/widget
 //   stir://leftovers?source=notification          (SCA-65)
 //   stir://tonight?use_first=<pantryItemId>        (SCA-64)
+//   stir://settings/manage-subscription            (SCA-77)
 //
 // Unknown paths fall through to `.unknown` and the app opens to its
 // default destination — widgets failing silently is strictly better
@@ -26,6 +27,7 @@
 
 import Foundation
 import OSLog
+import UIKit
 
 enum StirDeepLink: Equatable {
     case scanStart
@@ -42,6 +44,10 @@ enum StirDeepLink: Equatable {
     /// constraints sheet with "use first this ingredient" when the
     /// item is still in the pantry.
     case useSoon(useFirstPantryItemId: UUID?)
+    /// SCA-77 — billing_grace push tap. Routes to Manage Subscription
+    /// in Settings (the existing openManageSubscriptions() at
+    /// SettingsRootView.swift:811).
+    case manageSubscription
     case unknown(raw: String)
 
     /// Parse a URL into a typed destination. Returns `.unknown` for
@@ -74,6 +80,8 @@ enum StirDeepLink: Equatable {
             let source = components.queryItems?
                 .first(where: { $0.name == "source" })?.value ?? "notification"
             return .leftoversFollowup(source: source)
+        case ("settings", let parts) where parts == ["manage-subscription"]:
+            return .manageSubscription
         case ("tonight", _):
             // SCA-64: stir://tonight?use_first=<uuid> from the use-soon
             // notification. UUID parse-failure falls through to nil
@@ -115,6 +123,7 @@ enum StirDeepLink: Equatable {
         case .paywallWidget:   return "widget.paywall"
         case .leftoversFollowup: return "notification.leftovers_followup"
         case .useSoon:           return "notification.use_soon"
+        case .manageSubscription: return "notification.manage_subscription"
         case .unknown:         return "deeplink.unknown"
         }
     }
@@ -171,6 +180,17 @@ enum StirDeepLinkHandler {
             // Home use-soon card surface (see SCA-86). Until then the
             // user sees a familiar Tonight + can manually solve.
             UseSoonScheduler.shared.recordAction()
+        case .manageSubscription:
+            // SCA-77 — billing_grace push tap. Open Apple's Manage
+            // Subscriptions URL directly. iOS handles the rest (StoreKit
+            // takes over the UI for updating billing). Skipping the
+            // in-app Settings round-trip lets the user fix billing in
+            // one tap rather than two.
+            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                Task { @MainActor in
+                    await UIApplication.shared.open(url)
+                }
+            }
         case .solve, .dishPreview, .cookTimer, .unknown:
             // v1: widget/Live-Activity tap foregrounds the app; the
             // user lands on their last-active screen. Specific

@@ -380,6 +380,27 @@ Deno.serve(async (req) => {
               err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
             });
           }
+
+          // SCA-77: billing_grace push-job lifecycle. Two hooks gated
+          // on the new billing_state:
+          //   * 'grace' → enqueue immediate + 48h push_send jobs.
+          //   * 'active' → cancel any pending billing_grace pushes
+          //                (recovery via RENEWAL / UNCANCELLATION).
+          // iOS-side billing_retry_banner already covers the in-app
+          // surface; spec §8 row 950 requires a push as well.
+          if (action.billing_state === 'grace') {
+            await enqueueBillingGracePushes(
+              client,
+              action.canonical_user_key,
+              userLog,
+            );
+          } else if (action.billing_state === 'active') {
+            await cancelPendingBillingGracePushes(
+              client,
+              action.canonical_user_key,
+              userLog,
+            );
+          }
         }
         break;
       }
@@ -567,3 +588,129 @@ async function writeWebhookLog(
 // All ensure-app-user writes now live inside the RPC transaction that
 // needs them, removing the TOCTOU window where the handler crashed
 // between materialization and RPC execution.
+
+// ---------------------------------------------------------------------------
+// SCA-77 — billing_grace push job lifecycle
+// ---------------------------------------------------------------------------
+
+/**
+ * Enqueue 2 push_send jobs when the user enters BILLING_ISSUE
+ * (billing_state='grace'): one for immediate dispatch, one for +48h.
+ * Per spec §8 row 950 the cap is "one push at state entry, one at 48h"
+ * — the dispatcher's `scheduled_at <= now()` claim filter naturally
+ * defers the 48h job until then; the 'active' recovery hook deletes
+ * it when the user pays before that.
+ *
+ * Reads device_installations for the user's most-recent push token +
+ * environment + opt-in. No-ops cleanly when the user is opted-out
+ * (notifications_enabled=false) or has no push_token registered. The
+ * caller treats this as best-effort; failures here don't fail the
+ * webhook.
+ */
+async function enqueueBillingGracePushes(
+  client: ReturnType<typeof createServiceClient>,
+  canonicalUserKey: string,
+  log: {
+    info: (msg: string, meta?: Record<string, unknown>) => void;
+    warn: (msg: string, meta?: Record<string, unknown>) => void;
+  },
+): Promise<void> {
+  const { data: install, error: readErr } = await client
+    .from('device_installations')
+    .select('push_token, apns_environment, notifications_enabled, notification_prefs_json')
+    .eq('canonical_user_key', canonicalUserKey)
+    .not('push_token', 'is', null)
+    .order('last_seen_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      push_token: string | null;
+      apns_environment: string | null;
+      notifications_enabled: boolean | null;
+      notification_prefs_json: Record<string, unknown> | null;
+    }>();
+  if (readErr || !install || install.notifications_enabled !== true) {
+    log.info('billing_grace_push_skipped', {
+      reason: readErr ? 'read_error' : !install ? 'no_install' : 'notifications_off',
+    });
+    return;
+  }
+
+  const title = 'Update your billing';
+  const body =
+    "Your Stir plan is still active, but Apple couldn't renew it. Update billing to keep Premium features.";
+  const deepLink = 'stir://settings/manage-subscription';
+
+  const now = new Date();
+  const plus48h = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+
+  const rows = [
+    {
+      canonical_user_key: canonicalUserKey,
+      kind: 'push_send' as const,
+      state: 'pending' as const,
+      scheduled_at: now.toISOString(),
+      payload_json: {
+        template: 'billing_grace',
+        title,
+        body,
+        deep_link: deepLink,
+        apns_token: install.push_token,
+        environment: install.apns_environment,
+      },
+    },
+    {
+      canonical_user_key: canonicalUserKey,
+      kind: 'push_send' as const,
+      state: 'pending' as const,
+      scheduled_at: plus48h.toISOString(),
+      payload_json: {
+        template: 'billing_grace',
+        title,
+        body,
+        deep_link: deepLink,
+        apns_token: install.push_token,
+        environment: install.apns_environment,
+      },
+    },
+  ];
+
+  const { error: insErr } = await client.from('notification_jobs').insert(rows);
+  if (insErr) {
+    log.warn('billing_grace_push_insert_failed', { err: String(insErr) });
+    return;
+  }
+  log.info('billing_grace_push_enqueued', { count: 2, plus48h: plus48h.toISOString() });
+}
+
+/**
+ * Delete pending billing_grace push_send rows when the user transitions
+ * back to billing_state='active' (RENEWAL or UNCANCELLATION). Soft-delete
+ * via DELETE since the rows haven't fired yet — preserving them as
+ * 'completed' with a "cancelled by recovery" marker would inflate the
+ * push_send funnel without analytic value.
+ *
+ * Idempotent: if no pending rows match, this is a no-op.
+ */
+async function cancelPendingBillingGracePushes(
+  client: ReturnType<typeof createServiceClient>,
+  canonicalUserKey: string,
+  log: {
+    info: (msg: string, meta?: Record<string, unknown>) => void;
+    warn: (msg: string, meta?: Record<string, unknown>) => void;
+  },
+): Promise<void> {
+  const { error, count } = await client
+    .from('notification_jobs')
+    .delete({ count: 'exact' })
+    .eq('canonical_user_key', canonicalUserKey)
+    .eq('kind', 'push_send')
+    .eq('state', 'pending')
+    .filter('payload_json->>template', 'eq', 'billing_grace');
+  if (error) {
+    log.warn('billing_grace_push_cancel_failed', { err: String(error) });
+    return;
+  }
+  if ((count ?? 0) > 0) {
+    log.info('billing_grace_push_cancelled', { cancelled: count });
+  }
+}
