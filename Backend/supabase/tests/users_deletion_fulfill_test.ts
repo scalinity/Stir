@@ -14,6 +14,22 @@
 //      the audit_log after_json snapshot.
 
 import './_helpers/env.ts';
+
+// SCA-228 test isolation: ensure external-service paths take the
+// `requires_manual_action` branch deterministically. Local
+// `Backend/supabase/.env` may carry staging tokens for these services
+// and `_helpers/env.ts` loads everything wholesale; without these
+// deletes the tests would issue real DELETEs against Sentry / RC for
+// `install:test:sca88-...` users — wasted API calls at best, real
+// cleanup against a staging account at worst. POSTHOG_PUBLIC_API_KEY
+// is intentionally left set so the `$delete_person` event still fires
+// (PostHog ingest is fire-and-forget and the test asserts the success
+// path; clearing the key would silently no-op the call).
+Deno.env.delete('SENTRY_AUTH_TOKEN');
+Deno.env.delete('SENTRY_ORG_SLUG');
+Deno.env.delete('SENTRY_PROJECT_SLUG');
+Deno.env.delete('REVENUECAT_SECRET_API_KEY');
+
 import { assert, assertEquals } from 'jsr:@std/assert';
 import { createServiceClient } from '../functions/_shared/db.ts';
 import { createLogger } from '../functions/_shared/logger.ts';
