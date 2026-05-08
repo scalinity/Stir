@@ -4,6 +4,17 @@
 // Network-path tests (grocery-generate streaming, Reminders EventKit
 // export) live in the backend Deno suite + device manual verification
 // — EKEventStore + real network are outside unit-test scope.
+//
+// SCA-180 footgun reminder: `GroceryRepository()` defaults to
+// `PersistenceController.shared`. When constructing `GroceryViewModel`
+// here, ALWAYS pass `groceryRepo: GroceryRepository(controller:
+// <test-controller>)` so the repo writes to the test's in-memory
+// store, NOT `.shared` (which is the production CloudKit container
+// and isn't fully wired during unit-test load — entity-class mapping
+// crashes shaped like the 4 ImportVM SIGABRTs in SCA-179). Today the
+// tests below all bypass `groceryRepo` via `vm._debugApplyReady(list:)`,
+// but adding any generate-path test without this wiring will reproduce
+// SCA-179. Pattern lives in `seedRecipePlan` — keep it.
 
 import CoreData
 import XCTest
@@ -14,11 +25,12 @@ final class GroceryViewModelTests: XCTestCase {
     // MARK: - Initial state
 
     func test_initialStage_isGenerating() throws {
-        let (plan, household) = try seedRecipePlan(ingredients: [("Rice", "rice", "1 cup")])
+        let (plan, household, controller) = try seedRecipePlan(ingredients: [("Rice", "rice", "1 cup")])
         let vm = GroceryViewModel(
             recipePlan: plan,
             household: household,
             aiDispatch: AIDispatch.stub,
+            groceryRepo: GroceryRepository(controller: controller),
         )
         XCTAssertEqual(vm.stage, .generating)
         XCTAssertNil(vm.list, "list only materializes after successful generate")
@@ -71,6 +83,7 @@ final class GroceryViewModelTests: XCTestCase {
             recipePlan: plan,
             household: household,
             aiDispatch: AIDispatch.stub,
+            groceryRepo: GroceryRepository(controller: controller),
         )
         vm._debugApplyReady(list: list)
 
@@ -117,6 +130,7 @@ final class GroceryViewModelTests: XCTestCase {
             recipePlan: plan,
             household: household,
             aiDispatch: AIDispatch.stub,
+            groceryRepo: GroceryRepository(controller: controller),
         )
         vm._debugApplyReady(list: list)
 
@@ -148,7 +162,7 @@ final class GroceryViewModelTests: XCTestCase {
 
     private func seedRecipePlan(
         ingredients: [(String, String?, String?)],
-    ) throws -> (RecipePlan, HouseholdProfile) {
+    ) throws -> (RecipePlan, HouseholdProfile, PersistenceController) {
         let controller = PersistenceController(inMemory: true)
         let ctx = controller.viewContext
         let household = HouseholdProfile(context: ctx)
@@ -169,7 +183,11 @@ final class GroceryViewModelTests: XCTestCase {
             ing.recipePlan = plan
         }
         try ctx.save()
-        return (plan, household)
+        // SCA-180: returned alongside the seeded objects so callers
+        // can pass `GroceryRepository(controller: controller)` into
+        // the VM. Dropping the controller reference would let the
+        // production-defaulted repo write to the wrong store.
+        return (plan, household, controller)
     }
 }
 
