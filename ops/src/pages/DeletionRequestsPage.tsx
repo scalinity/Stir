@@ -78,11 +78,16 @@ export default function DeletionRequestsPage() {
       {dialog}
       <h1 className="text-2xl font-semibold mb-4">Deletion Requests</h1>
 
-      <div className="flex flex-wrap gap-2 mb-4 text-sm">
+      <div
+        className="flex flex-wrap gap-2 mb-4 text-sm"
+        role="group"
+        aria-label="Filter deletion requests by state"
+      >
         {(['pending', 'approved', 'processing', 'failed', ''] as StateFilter[]).map((s) => (
           <button
             key={s || 'all'}
             onClick={() => setStateFilter(s)}
+            aria-pressed={stateFilter === s}
             className={`px-3 py-1 rounded ${
               stateFilter === s ? 'bg-amber-500 text-neutral-950' : 'bg-neutral-800'
             }`}

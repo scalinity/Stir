@@ -186,21 +186,26 @@ private struct ScanPrimerBody: View {
             Spacer()
 
             VStack(spacing: CGFloat.Stir.space3) {
-                PrimaryButton(
-                    title: cameraService.currentPermission == .authorized
-                        ? "Start scanning"
-                        : "Allow camera access",
-                    action: { Task { await grantAndContinue() } },
-                )
+                // FD1-19: when permission is `.denied`, iOS won't re-prompt
+                // — the PrimaryButton "Allow camera access" silently no-ops.
+                // Reorder so the actually-usable path ("See sample dinner
+                // ideas") becomes Primary and "Open Settings to enable
+                // camera" drops to Secondary. The `.notDetermined` /
+                // `.authorized` paths keep the original Primary affordance.
                 if cameraService.currentPermission == .denied {
-                    // SCA-69: explicit deny-state escape hatch. When
-                    // `.notDetermined`, the PrimaryButton above triggers
-                    // the OS prompt and `grantAndContinue` will route
-                    // forward on .authorized; only show the showcase
-                    // CTA when iOS will no longer re-prompt.
-                    TextButton(title: "See sample dinner ideas") {
+                    PrimaryButton(title: "See sample dinner ideas") {
                         showSampleShowcase = true
                     }
+                    TextButton(title: "Open Settings to enable camera") {
+                        Task { await grantAndContinue() }
+                    }
+                } else {
+                    PrimaryButton(
+                        title: cameraService.currentPermission == .authorized
+                            ? "Start scanning"
+                            : "Allow camera access",
+                        action: { Task { await grantAndContinue() } },
+                    )
                 }
                 TextButton(title: "Not now", action: onCancel)
             }

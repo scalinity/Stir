@@ -97,6 +97,11 @@ enum BillingTelemetryProperties {
             "from_state": fromState.rawValue,
             "to_state": toState.rawValue,
             "billing_state": billingState.rawValue,
+            // CA1-S4: explicit source disambiguator. The server-side
+            // emitter from revenuecat-webhook sets source='server_webhook';
+            // setting 'ios' here keeps PostHog from coalescing the two
+            // surfaces into a single null-source funnel.
+            "source": "ios",
         ]
     }
 

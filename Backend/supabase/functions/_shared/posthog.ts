@@ -187,3 +187,48 @@ export function capturePosthogEvent(
   }
   // Else: task is running on the event loop; we intentionally do NOT await.
 }
+
+/**
+ * Defense-in-depth wrapper around `capturePosthogEvent` for callers that
+ * compute the `distinctId` via `await hashCanonicalKey(...)` (i.e., the
+ * argument-construction itself is async-throwable). The bare
+ * `capturePosthogEvent` is already non-throwing (internal try/catch +
+ * EdgeRuntime.waitUntil), but the `await hashCanonicalKey(...)` call at
+ * the callsite can throw on a runtime upgrade or unexpected key shape.
+ *
+ * This helper internalizes the repeated try/catch + log.warn pattern
+ * that was previously copied across every server-side emit site
+ * (`session-bootstrap`, `revenuecat-webhook`, `users-delete-request`,
+ * `ops-flag-output`, `ops-admin`). CR1-S1 from the multi-agent review.
+ *
+ * Usage:
+ *   await captureSafe(log, {
+ *     event: 'app_users_bootstrapped',
+ *     distinctIdSource: () => hashCanonicalKey(claims.canonical_user_key),
+ *     properties: { ... },
+ *   });
+ */
+export async function captureSafe(
+  log: Logger,
+  body: {
+    event: string;
+    distinctIdSource: () => Promise<string>;
+    properties: Record<string, unknown>;
+    timestamp?: string;
+  },
+): Promise<void> {
+  try {
+    const distinctId = await body.distinctIdSource();
+    capturePosthogEvent(log, {
+      event: body.event,
+      distinctId,
+      properties: body.properties,
+      ...(body.timestamp !== undefined ? { timestamp: body.timestamp } : {}),
+    });
+  } catch (err) {
+    log.warn('posthog_emit_failed', {
+      event: body.event,
+      err: err instanceof Error ? err.message.slice(0, 200) : 'non_error_thrown',
+    });
+  }
+}

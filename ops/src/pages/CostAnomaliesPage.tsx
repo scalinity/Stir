@@ -38,10 +38,32 @@ export default function CostAnomaliesPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-4">Cost Anomalies</h1>
-      <div className="flex flex-wrap gap-2 mb-4 text-sm">
-        <button onClick={() => setSeverity('')} className={`px-3 py-1 rounded ${!severity ? 'bg-amber-500 text-neutral-950' : 'bg-neutral-800'}`}>All</button>
-        <button onClick={() => setSeverity('warn')} className={`px-3 py-1 rounded ${severity === 'warn' ? 'bg-amber-500 text-neutral-950' : 'bg-neutral-800'}`}>Warn</button>
-        <button onClick={() => setSeverity('critical')} className={`px-3 py-1 rounded ${severity === 'critical' ? 'bg-red-500 text-white' : 'bg-neutral-800'}`}>Critical</button>
+      <div
+        className="flex flex-wrap gap-2 mb-4 text-sm"
+        role="group"
+        aria-label="Filter cost anomalies by severity"
+      >
+        <button
+          onClick={() => setSeverity('')}
+          aria-pressed={!severity}
+          className={`px-3 py-1 rounded ${!severity ? 'bg-amber-500 text-neutral-950' : 'bg-neutral-800'}`}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setSeverity('warn')}
+          aria-pressed={severity === 'warn'}
+          className={`px-3 py-1 rounded ${severity === 'warn' ? 'bg-amber-500 text-neutral-950' : 'bg-neutral-800'}`}
+        >
+          Warn
+        </button>
+        <button
+          onClick={() => setSeverity('critical')}
+          aria-pressed={severity === 'critical'}
+          className={`px-3 py-1 rounded ${severity === 'critical' ? 'bg-red-500 text-white' : 'bg-neutral-800'}`}
+        >
+          Critical
+        </button>
       </div>
       {err && <p className="text-red-400 text-sm mb-4" role="alert">{err}</p>}
       <section aria-label={`${severity || 'all'} open cost anomalies`} className="space-y-2">
