@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,15 +30,15 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options.</string>
+	<string>Stir uses the camera to scan your kitchen and turn ingredients into tonight&apos;s dinner options.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Stir listens hands-free during Cook Mode so you can ask questions without touching your phone.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Stir reads recipe screenshots you pick so it can turn them into steps you can cook from.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Stir writes your missing-ingredients list to Reminders so it shows up next time you're at the store.</string>
+	<string>Stir writes your missing-ingredients list to Reminders so it shows up next time you&apos;re at the store.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
