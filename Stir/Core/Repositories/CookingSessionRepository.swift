@@ -80,7 +80,8 @@ final class CookingSessionRepository {
     ///
     /// Also flips `recipePlan.isSaved = true` so a cooked dish stays in
     /// Saved even if the user never starred it (SCA-10 — sticky save
-    /// flag is the new gate alongside isFavorite/cooked-once).
+    /// flag is the primary durable gate; completed-session fallback covers
+    /// older rows that predate the marker).
     func markCompleted(_ session: CookingSession) throws {
         session.typedStatus = .completed
         session.endedAt = Date()
@@ -188,11 +189,8 @@ final class CookingSessionRepository {
         // Only surface plans the user has actually engaged with:
         //   - sticky `isSaved` flag (set by setFavorite + markCompleted —
         //     SCA-10); OR
-        //   - currently starred (`isFavorite == YES` — kept for pre-SCA-10
-        //     rows that haven't passed through setFavorite/markCompleted
-        //     since the fix landed); OR
-        //   - has at least one non-deleted completed cook session (kept
-        //     for the same backward-compat reason).
+        //   - has at least one non-deleted completed cook session (kept for
+        //     older rows that predate the durable `isSaved` marker).
         //
         // Without this guard every dinner-solve's three RecipePlans land
         // in the Saved tab automatically — observed as duplicate /
@@ -205,7 +203,7 @@ final class CookingSessionRepository {
         request.predicate = NSPredicate(
             format: """
             household == %@ AND deletedAt == nil AND \
-            (isSaved == YES OR isFavorite == YES OR \
+            (isSaved == YES OR \
             SUBQUERY(cookingSessions, $s, $s.deletedAt == nil AND $s.sessionStatus == %@).@count > 0)
             """,
             household,
