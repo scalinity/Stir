@@ -1,4 +1,12 @@
-import { useEffect, useState } from 'react';
+// SCA-82 — TanStack Query migration of CostAnomaliesPage. The
+// previous useEffect+useState fetch dance violated the global
+// "Never use `useEffect` directly" rule with an explicit
+// /* eslint-disable-next-line */ escape hatch. The new shape uses
+// useQuery keyed on the severity filter; switching tabs re-runs the
+// fetch via key change, no manual setState dance.
+
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { callAdmin } from '../lib/api';
 
 interface AnomalyRow {
@@ -13,21 +21,19 @@ interface AnomalyRow {
 }
 
 export default function CostAnomaliesPage() {
-  const [rows, setRows] = useState<AnomalyRow[]>([]);
   const [severity, setSeverity] = useState<string>('');
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const params: Record<string, unknown> = { limit: 100, resolved: false };
-    if (severity) params.severity = severity;
-    setLoading(true);
-    setErr(null);
-    callAdmin<{ rows: AnomalyRow[] }>('cost_anomalies.list', params)
-      .then((r) => setRows(r.rows))
-      .catch((e) => setErr(String(e)))
-      .finally(() => setLoading(false));
-  }, [severity]);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['cost_anomalies', { severity }],
+    queryFn: async () => {
+      const params: Record<string, unknown> = { limit: 100, resolved: false };
+      if (severity) params.severity = severity;
+      return callAdmin<{ rows: AnomalyRow[] }>('cost_anomalies.list', params);
+    },
+  });
+
+  const rows = data?.rows ?? [];
+  const err = error ? String(error) : null;
 
   return (
     <div>
@@ -39,8 +45,8 @@ export default function CostAnomaliesPage() {
       </div>
       {err && <p className="text-red-400 text-sm mb-4" role="alert">{err}</p>}
       <section aria-label={`${severity || 'all'} open cost anomalies`} className="space-y-2">
-        {loading && <p className="text-neutral-400 text-sm">Loading…</p>}
-        {!loading && rows.map((r) => (
+        {isLoading && <p className="text-neutral-400 text-sm">Loading…</p>}
+        {!isLoading && rows.map((r: AnomalyRow) => (
           <article
             key={r.id}
             aria-label={`${r.severity} ${r.anomaly_type}`}
@@ -59,7 +65,7 @@ export default function CostAnomaliesPage() {
         ))}
         {/* S20 (DB1 #20): gate empty-state on !err so a failed fetch
             doesn't show "No open anomalies" when the fetch actually errored. */}
-        {!loading && !err && rows.length === 0 && (
+        {!isLoading && !err && rows.length === 0 && (
           <p className="text-neutral-400 text-sm">No open anomalies in this filter.</p>
         )}
       </section>

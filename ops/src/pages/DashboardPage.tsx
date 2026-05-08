@@ -1,4 +1,9 @@
-import { useEffect, useState } from 'react';
+// SCA-82 — TanStack Query migration of DashboardPage. The 3 KPI cards
+// each get their own useQuery so a single endpoint failure shows as a
+// per-card error without blanking the whole dashboard (matching the
+// prior W42 Promise.allSettled invariant).
+
+import { useQuery } from '@tanstack/react-query';
 import { callAdmin } from '../lib/api';
 
 interface UsersListResponse {
@@ -17,8 +22,7 @@ type CardState =
   | { status: 'loaded'; value: number }
   | { status: 'error'; message: string };
 
-// Tiered severity (review W29): a backlog of 3 pending flags shouldn't
-// scream the same as 50 critical anomalies.
+// Tiered severity (review W29).
 const FLAG_WARN_THRESHOLD = 5;
 const FLAG_CRITICAL_THRESHOLD = 25;
 const ANOMALY_WARN_THRESHOLD = 1;
@@ -34,46 +38,39 @@ function severityFor(value: number | null, warn: number, critical: number): Seve
 type Severity = 'normal' | 'warn' | 'critical';
 
 export default function DashboardPage() {
-  const [users, setUsers] = useState<CardState>({ status: 'loading' });
-  const [flags, setFlags] = useState<CardState>({ status: 'loading' });
-  const [anomalies, setAnomalies] = useState<CardState>({ status: 'loading' });
+  const usersQ = useQuery({
+    queryKey: ['dashboard', 'users'],
+    queryFn: () => callAdmin<UsersListResponse>('users.list', { limit: 1 }),
+  });
+  const flagsQ = useQuery({
+    queryKey: ['dashboard', 'flags'],
+    queryFn: () => callAdmin<FlaggedListResponse>('flagged_outputs.list', { state: 'open', limit: 1 }),
+  });
+  const anomaliesQ = useQuery({
+    queryKey: ['dashboard', 'anomalies'],
+    queryFn: () => callAdmin<AnomaliesResponse>('cost_anomalies.list', { resolved: false, limit: 1 }),
+  });
 
-  useEffect(() => {
-    // W42 (DB1 #14): Promise.allSettled so a single endpoint failure doesn't
-    // blank the whole dashboard during the exact moment an admin needs it.
-    Promise.allSettled([
-      callAdmin<UsersListResponse>('users.list', { limit: 1 }),
-      callAdmin<FlaggedListResponse>('flagged_outputs.list', { state: 'open', limit: 1 }),
-      callAdmin<AnomaliesResponse>('cost_anomalies.list', { resolved: false, limit: 1 }),
-    ]).then(([u, f, a]) => {
-      setUsers(u.status === 'fulfilled'
-        ? { status: 'loaded', value: u.value.total_count }
-        : { status: 'error', message: String(u.reason) });
-      setFlags(f.status === 'fulfilled'
-        ? { status: 'loaded', value: f.value.total_count }
-        : { status: 'error', message: String(f.reason) });
-      setAnomalies(a.status === 'fulfilled'
-        ? { status: 'loaded', value: a.value.total_count }
-        : { status: 'error', message: String(a.reason) });
-    });
-  }, []);
+  const usersCard = toCardState(usersQ);
+  const flagsCard = toCardState(flagsQ);
+  const anomaliesCard = toCardState(anomaliesQ);
 
-  const flagValue = flags.status === 'loaded' ? flags.value : null;
-  const anomalyValue = anomalies.status === 'loaded' ? anomalies.value : null;
+  const flagValue = flagsCard.status === 'loaded' ? flagsCard.value : null;
+  const anomalyValue = anomaliesCard.status === 'loaded' ? anomaliesCard.value : null;
 
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-6">Dashboard</h1>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <KpiCard label="Active users" state={users} />
+        <KpiCard label="Active users" state={usersCard} />
         <KpiCard
           label="Open flagged outputs"
-          state={flags}
+          state={flagsCard}
           severity={severityFor(flagValue, FLAG_WARN_THRESHOLD, FLAG_CRITICAL_THRESHOLD)}
         />
         <KpiCard
           label="Open cost anomalies"
-          state={anomalies}
+          state={anomaliesCard}
           severity={severityFor(anomalyValue, ANOMALY_WARN_THRESHOLD, ANOMALY_CRITICAL_THRESHOLD)}
         />
       </div>
@@ -84,6 +81,15 @@ export default function DashboardPage() {
       </p>
     </div>
   );
+}
+
+function toCardState<T extends { total_count: number }>(
+  q: { isLoading: boolean; data: T | undefined; error: unknown },
+): CardState {
+  if (q.isLoading) return { status: 'loading' };
+  if (q.error) return { status: 'error', message: String(q.error) };
+  if (q.data) return { status: 'loaded', value: q.data.total_count };
+  return { status: 'loading' };
 }
 
 function KpiCard(

@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+// SCA-82 — TanStack Query migration of FlaggedOutputsPage.
+
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callAdmin } from '../lib/api';
 import { useConfirm } from '../components/ConfirmDialog';
 
@@ -14,30 +17,32 @@ interface FlaggedRow {
 }
 
 export default function FlaggedOutputsPage() {
-  const [rows, setRows] = useState<FlaggedRow[]>([]);
   const [state, setState] = useState<'open' | 'resolved' | 'all'>('open');
-  const [err, setErr] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const { ask, dialog } = useConfirm();
+  const queryClient = useQueryClient();
 
-  async function load() {
-    setErr(null);
-    setLoading(true);
-    try {
-      const r = await callAdmin<{ rows: FlaggedRow[]; total_count: number }>(
-        'flagged_outputs.list',
-        { state, limit: 100 },
-      );
-      setRows(r.rows);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [state]);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['flagged_outputs', { state }],
+    queryFn: () =>
+      callAdmin<{ rows: FlaggedRow[]; total_count: number }>('flagged_outputs.list', {
+        state,
+        limit: 100,
+      }),
+  });
+  const rows = data?.rows ?? [];
+
+  const resolveMutation = useMutation({
+    mutationFn: (params: Record<string, unknown>) =>
+      callAdmin('flagged_outputs.resolve', params),
+    onSuccess: (_data: unknown, vars: Record<string, unknown>) => {
+      queryClient.invalidateQueries({ queryKey: ['flagged_outputs'] });
+      setActionMsg(`Resolved (${String(vars.action ?? 'unknown')}).`);
+    },
+  });
+
+  const err = error ? String(error) : (resolveMutation.error ? String(resolveMutation.error) : null);
 
   async function resolve(id: string, action: 'dismissed' | 'withdrawn' | 'canned_fallback_pinned') {
     const params: Record<string, unknown> = { id, action };
@@ -60,7 +65,6 @@ export default function FlaggedOutputsPage() {
       });
       if (!confirmResult.confirmed) return;
     } else {
-      // dismissed — low-friction confirmation only.
       const confirmResult = await ask({
         title: 'Dismiss flag',
         description: 'Mark this flag as reviewed, no cache mutation.',
@@ -73,11 +77,7 @@ export default function FlaggedOutputsPage() {
     setBusy(id);
     setActionMsg(null);
     try {
-      await callAdmin('flagged_outputs.resolve', params);
-      await load();
-      setActionMsg(`Resolved (${action}).`);
-    } catch (e) {
-      setErr(String(e));
+      await resolveMutation.mutateAsync(params);
     } finally {
       setBusy(null);
     }
@@ -104,8 +104,8 @@ export default function FlaggedOutputsPage() {
       {err && <p className="text-red-400 text-sm mb-4">{err}</p>}
       {actionMsg && <p className="text-green-400 text-sm mb-4" role="status">{actionMsg}</p>}
       <section aria-label={`${state} flagged outputs`} className="space-y-3">
-        {loading && <p className="text-neutral-400 text-sm">Loading…</p>}
-        {!loading && rows.map((r) => (
+        {isLoading && <p className="text-neutral-400 text-sm">Loading…</p>}
+        {!isLoading && rows.map((r: FlaggedRow) => (
           <article
             key={r.id}
             aria-label={`${r.feature_key} flag by ${r.flagged_by}: ${r.flag_reason.slice(0, 80)}`}
@@ -138,7 +138,7 @@ export default function FlaggedOutputsPage() {
             )}
           </article>
         ))}
-        {!loading && rows.length === 0 && !err && <p className="text-neutral-400 text-sm">No flagged outputs in this state.</p>}
+        {!isLoading && rows.length === 0 && !err && <p className="text-neutral-400 text-sm">No flagged outputs in this state.</p>}
       </section>
       {dialog}
     </div>

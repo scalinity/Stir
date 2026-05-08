@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
-import { callAdmin } from '../lib/api';
+// SCA-82 — TanStack Query migration of UsersPage.
+
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { callAdmin, type AdminActionName } from '../lib/api';
 import { useConfirm } from '../components/ConfirmDialog';
 
 interface UserRow {
@@ -20,29 +23,46 @@ interface UsersListResponse {
 }
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [total, setTotal] = useState(0);
   const [tier, setTier] = useState<string>('');
   const [search, setSearch] = useState('');
-  const [err, setErr] = useState<string | null>(null);
+  const [searchSubmitted, setSearchSubmitted] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const { ask, dialog } = useConfirm();
+  const queryClient = useQueryClient();
 
-  async function load() {
-    setErr(null);
-    try {
+  const { data, error, refetch } = useQuery({
+    queryKey: ['users', { tier, search: searchSubmitted }],
+    queryFn: () => {
       const params: Record<string, unknown> = { limit: 100 };
       if (tier) params.tier = tier;
-      if (search.trim()) params.search = search.trim();
-      const r = await callAdmin<UsersListResponse>('users.list', params);
-      setUsers(r.users);
-      setTotal(r.total_count);
-    } catch (e) {
-      setErr(String(e));
-    }
-  }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+      if (searchSubmitted.trim()) params.search = searchSubmitted.trim();
+      return callAdmin<UsersListResponse>('users.list', params);
+    },
+  });
+  const users = data?.users ?? [];
+  const total = data?.total_count ?? 0;
+
+  // Mutations: each invalidates the users list on success so the row's
+  // status/flag count reflects the action.
+  const userMutation = useMutation({
+    mutationFn: async ({ action, params, successMsg }: {
+      action: AdminActionName;
+      params: Record<string, unknown>;
+      successMsg: string;
+    }) => {
+      await callAdmin(action, params);
+      return { successMsg };
+    },
+    onSuccess: ({ successMsg }: { successMsg: string }) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setActionMsg(successMsg);
+    },
+  });
+
+  const err = error
+    ? String(error)
+    : (userMutation.error ? String(userMutation.error) : null);
 
   async function forceReauth(key: string) {
     const result = await ask({
@@ -60,11 +80,11 @@ export default function UsersPage() {
     setBusyKey(key);
     setActionMsg(null);
     try {
-      await callAdmin('users.force_reauth', { canonical_user_key: key });
-      await load();
-      setActionMsg(`Forced re-auth on ${key}.`);
-    } catch (e) {
-      setErr(String(e));
+      await userMutation.mutateAsync({
+        action: 'users.force_reauth',
+        params: { canonical_user_key: key },
+        successMsg: `Forced re-auth on ${key}.`,
+      });
     } finally {
       setBusyKey(null);
     }
@@ -93,10 +113,11 @@ export default function UsersPage() {
     setBusyKey(key);
     setActionMsg(null);
     try {
-      await callAdmin('users.reset_quota', { canonical_user_key: key, feature_key: result.value });
-      setActionMsg(`Quota reset: ${result.value} for ${key}.`);
-    } catch (e) {
-      setErr(String(e));
+      await userMutation.mutateAsync({
+        action: 'users.reset_quota',
+        params: { canonical_user_key: key, feature_key: result.value },
+        successMsg: `Quota reset: ${result.value} for ${key}.`,
+      });
     } finally {
       setBusyKey(null);
     }
@@ -120,11 +141,11 @@ export default function UsersPage() {
     setBusyKey(key);
     setActionMsg(null);
     try {
-      await callAdmin('users.status', { canonical_user_key: key, status: newStatus });
-      await load();
-      setActionMsg(`${verb}ned ${key}.`);
-    } catch (e) {
-      setErr(String(e));
+      await userMutation.mutateAsync({
+        action: 'users.status',
+        params: { canonical_user_key: key, status: newStatus },
+        successMsg: `${verb}ned ${key}.`,
+      });
     } finally {
       setBusyKey(null);
     }
@@ -144,9 +165,10 @@ export default function UsersPage() {
           placeholder="search canonical_user_key / RC id / install id"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') setSearchSubmitted(search); }}
           className="bg-neutral-800 rounded px-2 py-1 text-sm flex-1 min-w-[12rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         />
-        <button onClick={load} className="bg-amber-500 text-neutral-950 rounded px-3 py-1 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950">
+        <button onClick={() => { setSearchSubmitted(search); refetch(); }} className="bg-amber-500 text-neutral-950 rounded px-3 py-1 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950">
           Refresh
         </button>
       </div>
@@ -168,7 +190,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {users.map((u: UserRow) => (
               <tr key={u.canonical_user_key} className="border-b border-neutral-900 hover:bg-neutral-900/50">
                 <td className="p-2 font-mono text-xs">{u.canonical_user_key}</td>
                 <td className="p-2">{u.tier}</td>
