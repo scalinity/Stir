@@ -124,7 +124,7 @@ struct CookModeRoot: View {
                             session: viewModel.session,
                             currentStep: viewModel.currentStep,
                             aiDispatch: aiDispatch,
-                            substitutionRepository: SubstitutionRepository(controller: .shared),
+                            substitutionRepository: coordinator.substitutionRepository,
                             pantryRepository: coordinator.pantryItemRepository,
                             onDismiss: { viewModel.substitutionPresentationRequested = false },
                         )
@@ -328,7 +328,7 @@ struct CookModeRoot: View {
             defer { timeoutTask.cancel() }
 
             do {
-                let repo = CookingSessionRepository(controller: .shared)
+                let repo = coordinator.cookingSessionRepository
                 let session: CookingSession
                 if let existing = existingSession, existing.isResumable {
                     session = existing
@@ -351,8 +351,8 @@ struct CookModeRoot: View {
                     household: household,
                     source: source,
                     cookingSessionRepository: coordinator.cookingSessionRepository,
-                    cookTimerRepository: CookTimerRepository(controller: .shared),
-                    substitutionRepository: SubstitutionRepository(controller: .shared),
+                    cookTimerRepository: coordinator.cookTimerRepository,
+                    substitutionRepository: coordinator.substitutionRepository,
                     pantryItemRepository: coordinator.pantryItemRepository,
                     entitlements: entitlements,
                     voiceDriver: driverForVM,
@@ -775,7 +775,7 @@ struct CookModeRoot: View {
                 try AVAudioSessionConfigurator.activateForCookMode()
                 let liveDriver = RealtimeSession(
                     aiDispatch: aiDispatch,
-                    voiceTurnRepository: VoiceTurnRepository(controller: .shared),
+                    voiceTurnRepository: coordinator.voiceTurnRepository,
                     cookingSession: session,
                 )
                 try await liveDriver.preWarm()
@@ -948,7 +948,7 @@ struct CookModeRoot: View {
     private func tryC3Fallback(session: CookingSession) async -> (any VoiceSessionDriver)? {
         let driver = SpeechFallbackService(
             aiDispatch: aiDispatch,
-            voiceTurnRepository: VoiceTurnRepository(controller: .shared),
+            voiceTurnRepository: coordinator.voiceTurnRepository,
             cookingSession: session,
         )
         do {

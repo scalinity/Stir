@@ -60,6 +60,13 @@ final class RootCoordinator {
     /// `CookingSessionRepository()` per refresh — asymmetric with every
     /// other read on the screen and not stub-able from tests.
     let cookingSessionRepository: CookingSessionRepository
+    /// SCA-191 W2: surfaced on the coordinator so CookModeRoot's W3
+    /// inline `.shared` constructions can route through one source of
+    /// truth instead of forking via `Repository(controller: .shared)`
+    /// at each view-body construction site.
+    let cookTimerRepository: CookTimerRepository
+    let substitutionRepository: SubstitutionRepository
+    let voiceTurnRepository: VoiceTurnRepository
     /// HouseholdProfile accessor — owns existence checks at fast-path init
     /// and creation in the full-bootstrap path. Injected so tests can stub
     /// the on-disk profile state without touching Core Data directly.
@@ -294,10 +301,18 @@ final class RootCoordinator {
         identityService: IdentityService = IdentityService(),
         sessionClient: SupabaseSessionClient? = nil,
         aiDispatch: AIDispatch? = nil,
-        pantryItemRepository: PantryItemRepository = PantryItemRepository(controller: .shared),
-        solveRepository: SolveRepository = SolveRepository(controller: .shared),
-        cookingSessionRepository: CookingSessionRepository = CookingSessionRepository(controller: .shared),
-        householdRepo: HouseholdProfileRepository = HouseholdProfileRepository(controller: .shared),
+        // SCA-191 W2: single source-of-truth controller. Repo init args
+        // below are nil-defaulted; init body falls back to a repo built
+        // against THIS controller. Production passes `.shared`; tests
+        // can override with one swap.
+        persistenceController: PersistenceController = .shared,
+        pantryItemRepository: PantryItemRepository? = nil,
+        solveRepository: SolveRepository? = nil,
+        cookingSessionRepository: CookingSessionRepository? = nil,
+        cookTimerRepository: CookTimerRepository? = nil,
+        substitutionRepository: SubstitutionRepository? = nil,
+        voiceTurnRepository: VoiceTurnRepository? = nil,
+        householdRepo: HouseholdProfileRepository? = nil,
         sharedStorage: SharedStorage = SharedStorage(),
         revenueCat: (any RevenueCatPurchasing)? = nil,
         fastPathMinLoadingDuration: Duration = .milliseconds(500),
@@ -311,10 +326,13 @@ final class RootCoordinator {
         let client = sessionClient ?? SupabaseSessionClient(config: config, sentry: sentry)
         self.sessionClient = client
         self.aiDispatch = aiDispatch ?? AIDispatch(session: client, config: config)
-        self.pantryItemRepository = pantryItemRepository
-        self.solveRepository = solveRepository
-        self.cookingSessionRepository = cookingSessionRepository
-        self.householdRepo = householdRepo
+        self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository(controller: persistenceController)
+        self.solveRepository = solveRepository ?? SolveRepository(controller: persistenceController)
+        self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository(controller: persistenceController)
+        self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository(controller: persistenceController)
+        self.substitutionRepository = substitutionRepository ?? SubstitutionRepository(controller: persistenceController)
+        self.voiceTurnRepository = voiceTurnRepository ?? VoiceTurnRepository(controller: persistenceController)
+        self.householdRepo = householdRepo ?? HouseholdProfileRepository(controller: persistenceController)
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared
         self.fastPathMinLoadingDuration = fastPathMinLoadingDuration

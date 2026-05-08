@@ -5,16 +5,18 @@
 // export) live in the backend Deno suite + device manual verification
 // — EKEventStore + real network are outside unit-test scope.
 //
-// SCA-180 footgun reminder: `GroceryRepository()` defaults to
-// `PersistenceController.shared`. When constructing `GroceryViewModel`
-// here, ALWAYS pass `groceryRepo: GroceryRepository(controller:
-// <test-controller>)` so the repo writes to the test's in-memory
-// store, NOT `.shared` (which is the production CloudKit container
-// and isn't fully wired during unit-test load — entity-class mapping
-// crashes shaped like the 4 ImportVM SIGABRTs in SCA-179). Today the
-// tests below all bypass `groceryRepo` via `vm._debugApplyReady(list:)`,
-// but adding any generate-path test without this wiring will reproduce
-// SCA-179. Pattern lives in `seedRecipePlan` — keep it.
+// SCA-191 W1 footgun reminder: `GroceryViewModel` still defaults its
+// `groceryRepo` parameter to `GroceryRepository(controller: .shared)`
+// (default-arg expression, not nil-fallback — so the SCA-189 closure
+// doesn't apply here). A test that omits `groceryRepo:` silently
+// writes to `.shared` even when the rest of the VM was wired to a
+// custom controller. Until that VM signature is tightened (could be
+// a follow-up if needed), every GroceryViewModel construction in
+// THIS file must pass `groceryRepo: GroceryRepository(controller:
+// controller)`. The seedRecipePlan helper returns the controller
+// alongside the seeded objects so callers can wire the pair
+// without re-creating the controller. SCA-180 hardened this on
+// 2026-05-08 after the original SCA-179 import crash.
 
 import CoreData
 import XCTest

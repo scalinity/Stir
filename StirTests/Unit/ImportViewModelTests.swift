@@ -74,12 +74,11 @@ final class ImportViewModelTests: XCTestCase {
         household.createdAt = Date()
         household.servingsDefault = 2
         try ctx.save()
-        // SCA-179: pass `importRepo` constructed against the test's
-        // in-memory controller. The default `RecipeImportRepository()`
-        // would fall through to `PersistenceController.shared` and the
-        // rejection-path persist (`recordClientReject`) would crash
-        // because the entity-to-class mapping isn't fully wired in the
-        // shared container at unit-test load time.
+        // SCA-190: both `importRepo` and `controller` are required init
+        // params (no defaults). They MUST share the same controller —
+        // diverging them is the SCA-179 footgun. Tests passing two
+        // independent values would have to do so deliberately and
+        // visibly here, not via a defaulted-arg silent fall-through.
         return ImportViewModel(
             household: household,
             aiDispatch: AIDispatch.stub,

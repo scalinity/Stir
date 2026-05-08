@@ -56,8 +56,9 @@ final class UseSoonScheduler {
         center: any UserNotificationCenterClient = UNUserNotificationCenter.current(),
         calendar: Calendar = .current,
         defaults: UserDefaults = .standard,
-        pantry: PantryItemRepository = PantryItemRepository(controller: .shared),
-        cookingSessions: CookingSessionRepository = CookingSessionRepository(controller: .shared),
+        controller: PersistenceController = .shared,
+        pantry: PantryItemRepository? = nil,
+        cookingSessions: CookingSessionRepository? = nil,
         telemetry: PostHogClient = .shared,
     ) {
         self.center = center
@@ -67,8 +68,12 @@ final class UseSoonScheduler {
             stateKey: "stir.use_soon.history.v1",
             suppressionKey: "stir.use_soon.suppressed_until.v1",
         )
-        self.pantry = pantry
-        self.cookingSessions = cookingSessions
+        // SCA-191 W4: nil-default + controller-aware fallback so a
+        // test passing a custom controller gets repos wired to the
+        // same instance instead of silently falling through to
+        // .shared.
+        self.pantry = pantry ?? PantryItemRepository(controller: controller)
+        self.cookingSessions = cookingSessions ?? CookingSessionRepository(controller: controller)
         self.telemetry = telemetry
     }
 
