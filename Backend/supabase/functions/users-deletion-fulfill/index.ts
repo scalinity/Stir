@@ -24,11 +24,11 @@
 //      notification_jobs, AND deletion_requests itself). The audit_log
 //      row is the surviving anchor.
 //
-// State transitions: approved → processing → completed | failed.
+// State transitions: approved -> processing -> completed | failed.
 // Resume policy: if a previous tick partially succeeded, the
 // external_refs_json marker tells us which subsystems to skip on retry.
-// A failed tick re-enters 'approved' next sweep so the next tick retries
-// from the failure point.
+// Failed rows require ops replay back to 'approved' after triage; the
+// next tick resumes from the preserved external_refs_json.
 //
 // Auth: shared X-Stir-Cron-Secret header gate (same as pgmq-dispatch).
 // Production MUST set STIR_PGMQ_DISPATCH_SECRET; in dev/local without

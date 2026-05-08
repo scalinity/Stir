@@ -60,14 +60,16 @@ async function seedUser(
   };
 }
 
-async function cleanup(client: ReturnType<typeof createServiceClient>) {
+async function cleanup(client: ReturnType<typeof createServiceClient>, targetIds: string[] = []) {
   // Most SCA-88 test rows get hard-deleted via CASCADE during the test
   // itself; this catches partial-failure leftovers.
-  await client
-    .from('audit_log')
-    .delete()
-    .eq('target_table', 'app_users')
-    .like('target_id', '%');
+  if (targetIds.length > 0) {
+    await client
+      .from('audit_log')
+      .delete()
+      .eq('target_table', 'app_users')
+      .in('target_id', targetIds);
+  }
   await client
     .from('deletion_requests')
     .delete()
@@ -121,7 +123,7 @@ Deno.test('users-deletion-fulfill: happy-path approved → completed (with cloud
   assertEquals(refs.cloudkit?.requires_client_action, true);
   assertEquals(typeof refs.cloudkit?.triggered_at, 'string');
 
-  await cleanup(client);
+  await cleanup(client, [seed.canonicalUserKeyHash]);
 });
 
 Deno.test('users-deletion-fulfill: resume skips already-completed subsystems', async () => {
@@ -168,5 +170,5 @@ Deno.test('users-deletion-fulfill: resume skips already-completed subsystems', a
   // overwriting with `now()`.
   assertEquals(refs.posthog?.completed_at, priorPosthogTimestamp);
 
-  await cleanup(client);
+  await cleanup(client, [seed.canonicalUserKeyHash]);
 });

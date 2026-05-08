@@ -196,11 +196,16 @@ PostHog events:
 A spike in `_failed` over 24h means a subsystem (likely RevenueCat or
 Sentry API) is unhealthy — check the dashboards before re-triggering.
 
+Sentry alerts:
+- `stir_deletion_request_sla_alert_dispatch()` runs every 15 minutes.
+- It emits a Sentry store event when a row remains `approved` for more
+  than 24 hours.
+- It emits a Sentry store event when a row remains `failed` for more
+  than 12 hours.
+- Each row/state alerts once; dispatch markers are stored under
+  `external_refs_json.alerts`.
+
 ## What's NOT in scope (yet)
 
 - Email confirmation that fulfillment completed. Privacy Policy §7.7
   promises an email; deferred until SES/Postmark integration lands.
-- Sentry alert when a row sits in `approved` for >24h or `failed` for
-  >12h. Add a cron-scheduled query that emits to Sentry via the
-  existing cost-anomaly two-phase dispatch pattern (migration
-  `20260424000004`) — or as a follow-up sub-issue under SCA-88.
