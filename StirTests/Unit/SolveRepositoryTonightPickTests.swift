@@ -48,6 +48,15 @@ final class SolveRepositoryTonightPickTests: XCTestCase {
         XCTAssertNil(solveRepo.latestTonightPick(for: household))
     }
 
+    // SCA-70: regular dinner-solves carry no sourceRecipePlanId, so
+    // their TonightPick must report isFromLeftovers=false. The
+    // hero-card eyebrow logic in TonightHomeView keys off this flag.
+    func test_latestTonightPick_dinnerSolveReportsNotFromLeftovers() throws {
+        try seedSolve(title: "Regular dinner", servings: 2, estimatedMinutes: 25, rank: 0)
+        let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))
+        XCTAssertFalse(pick.isFromLeftovers)
+    }
+
     func test_latestTonightPick_returnsLatestCompletedSolve() throws {
         try seedSolve(title: "Older Pasta", servings: 2, estimatedMinutes: 25, rank: 0)
         // Slight delay to ensure completedAt ordering is deterministic.

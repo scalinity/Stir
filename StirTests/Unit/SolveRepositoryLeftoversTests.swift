@@ -221,6 +221,28 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         XCTAssertEqual(steps.map(\.instructionText), ["first", "second", "third"])
     }
 
+    // SCA-70: leftovers solves must report isFromLeftovers=true on
+    // TonightPick so TonightHomeView can swap the high-match badge
+    // for a "FROM YOUR LEFTOVERS" eyebrow on the hero card. Pairs
+    // with `test_latestTonightPick_dinnerSolveReportsNotFromLeftovers`
+    // in SolveRepositoryTonightPickTests for the negative case.
+    func test_createLeftoversSolveWithDish_picksUpAsFromLeftoversTrue() throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
+
+        _ = try solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
+        )
+
+        let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))
+        XCTAssertTrue(pick.isFromLeftovers,
+                      "leftovers solve must surface on Tonight with isFromLeftovers=true")
+    }
+
     func test_createLeftoversSolveWithDish_promotesNewPlanToLatestTonightPick() throws {
         // The contract LeftoversSolveView's helper text promises:
         // "Saving one of these adds it to tomorrow's Tonight." Verify

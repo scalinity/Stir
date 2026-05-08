@@ -103,7 +103,12 @@ struct LeftoversSolveView: View {
     }
 
     private var helperText: some View {
-        Text("Saving one of these adds it to tomorrow's Tonight. Change anytime.")
+        // SCA-70: prior copy "Change anytime" implied an in-place undo
+        // affordance that doesn't exist. Tonight tab's Solve again
+        // is the documented re-roll path; the leftovers hero gets a
+        // "From your leftovers" eyebrow so users see what they're
+        // looking at and know how to change it.
+        Text("Saves as tomorrow's pick. Solve again on Tonight to re-roll.")
             .stirFont(.bodySm)
             .foregroundStyle(Color.Stir.ink500)
             .padding(12)
