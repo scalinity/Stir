@@ -664,11 +664,6 @@ extension RealtimeSession {
             turnContainedToolCall = false
             lastToolCallName = nil
             finalizeWasWatchdogFire = false
-            // finalizeWasTransportError is reset by `recordTurnAsTransportError`
-            // rather than finalizeTurn (finalizeTurn only runs on the
-            // normal / watchdog paths — transport errors route through
-            // the dedicated recorder). Reset here defensively anyway.
-            finalizeWasTransportError = false
         }
         let now = Date()
         let startedAt = turnStartedAt ?? now

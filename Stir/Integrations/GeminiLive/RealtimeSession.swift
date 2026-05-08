@@ -493,15 +493,6 @@ final class RealtimeSession: VoiceSessionDriver {
         case postCommitFailure
     }
 
-    /// True when the current `finalizeTurn()`-adjacent persist is running
-    /// because a transport error killed the session mid-turn. Distinct
-    /// from the watchdog flag so dashboards can tell the two error
-    /// classes apart: watchdog means "Gemini dropped turnComplete"
-    /// (preview-API bug), transport-error means "WebSocket died" (network
-    /// hiccup / cellular stall / Gemini outage). Review finding
-    /// P0-H / Critical #8.
-    var finalizeWasTransportError: Bool = false
-
     /// Watchdog Task that force-advances state when Gemini Live drops
     /// a `turnComplete` frame. Observed 2026-04-23 device test: on a
     /// multi-pass tool-call turn (start_timer with post-tool narration),
@@ -1401,7 +1392,6 @@ final class RealtimeSession: VoiceSessionDriver {
         turnContainedToolCall = false
         lastToolCallName = nil
         finalizeWasWatchdogFire = false
-        finalizeWasTransportError = false
         clearHouseholdContextCache()  // P3-H
         currentTurnInlineText = nil
         currentTurnUserTranscript = nil
