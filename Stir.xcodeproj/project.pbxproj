@@ -193,6 +193,7 @@
 		9415FF1F910F082B3335DB3C /* Shadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C360FB0B332A41A4A112ED /* Shadow.swift */; };
 		9449C8F22BC4AE805AE0344A /* LeftoversSessionViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1925C8B72C619B5F85424775 /* LeftoversSessionViewModelTests.swift */; };
 		954E8C39BABBB1896397D9C5 /* CookModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7561615148F2BA3D89570C /* CookModeViewModel.swift */; };
+		A65A001000000015 /* VoiceSessionTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000016 /* VoiceSessionTelemetry.swift */; };
 		95652C866B0E7C7364F21391 /* TimerActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */; };
 		95A7A5D7A7CB21BF9B90C5AF /* StirDeepLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D3B890CF05989A3C8E0E24 /* StirDeepLink.swift */; };
 		9620575AEA6140BAB06ECD5F /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 26F65455A56922BCB77CCFA5 /* ActivityKit.framework */; };
@@ -425,6 +426,7 @@
 		26F65455A56922BCB77CCFA5 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 		288F193547101468063792F0 /* AppIntentsGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentsGateTests.swift; sourceTree = "<group>"; };
 		2D7561615148F2BA3D89570C /* CookModeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeViewModel.swift; sourceTree = "<group>"; };
+		A65A001000000016 /* VoiceSessionTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionTelemetry.swift; sourceTree = "<group>"; };
 		2EDAE0E9803C2BAAD4590059 /* PaywallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallViewModel.swift; sourceTree = "<group>"; };
 		31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackView.swift; sourceTree = "<group>"; };
 		A65A00100000000A /* RepeatCandidateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepeatCandidateCard.swift; sourceTree = "<group>"; };
@@ -1121,6 +1123,7 @@
 				CE134A139A7012C16D913543 /* StepCardView.swift */,
 				6A66A56A43AFBAC2E42363C7 /* TimerCountdownView.swift */,
 				8CB530DD2814DD0EFB375613 /* VoiceActiveStepView.swift */,
+				A65A001000000016 /* VoiceSessionTelemetry.swift */,
 			);
 			path = CookMode;
 			sourceTree = "<group>";
@@ -1729,6 +1732,7 @@
 				E3E7BDB43BA459ACD8D44C08 /* ConstraintsSheet.swift in Sources */,
 				71C98BD02CC6A5B1DB8F1F0F /* CookModeRoot.swift in Sources */,
 				954E8C39BABBB1896397D9C5 /* CookModeViewModel.swift in Sources */,
+				A65A001000000015 /* VoiceSessionTelemetry.swift in Sources */,
 				B97E59CA1CB7CF411EDE2A47 /* CookTimer+Extensions.swift in Sources */,
 				1DE71DE3BA24A03F6F819BB8 /* CookTimerRepository.swift in Sources */,
 				C7174B57E6834A9943D9EC24 /* CookingSession+Extensions.swift in Sources */,
