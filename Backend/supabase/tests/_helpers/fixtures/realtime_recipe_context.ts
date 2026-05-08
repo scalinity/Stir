@@ -69,7 +69,12 @@ export function validRealtimeRecipeContext(
       },
     ],
     remaining_ingredients: [
-      { display_name: 'pasta' },
+      // SCA-147 W2: at least one entry sets `canonical_slug` so the
+      // optional-but-rendered path is exercised. A future schema
+      // tighten that promotes the field to required surfaces in
+      // tests instead of staying silent (the original drift class
+      // this factory was created to defend against).
+      { display_name: 'pasta', canonical_slug: 'pasta' },
       { display_name: 'garlic' },
     ],
     ...overrides,
@@ -88,7 +93,9 @@ export function validHouseholdContext(
     dietary_rules: [],
     available_equipment: ['stovetop', 'skillet'],
     pantry_snapshot: [
-      { display_name: 'olive oil' },
+      // SCA-147 W2: same canonical_slug coverage rationale as
+      // remaining_ingredients above.
+      { display_name: 'olive oil', canonical_slug: 'olive-oil' },
       { display_name: 'tomato' },
     ],
     ...overrides,

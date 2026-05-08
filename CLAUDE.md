@@ -694,8 +694,11 @@ voice_session_token_snapshot, voice_session_refreshed,
 # (no_active_prompt path, mint_failed/mint_unexpected_error path) to
 # disambiguate the increment-then-refund branch from never-incremented
 # (both produce identical usage_counters post-state on the placeholder-
-# key CI path). Carries {request_id, reason, is_refresh, upstream_status?}.
+# key CI path). Carries {request_id, reason, upstream_status?}.
 # distinct_id = hashCanonicalKey(canonical_user_key). NOT iOS-emitted.
+# request_id is a request-scoped log correlator only — refund branches
+# return BEFORE logAIRequest() so no ai_request_log row joins; find
+# refunded requests via PostHog Insight on this event.
 voice_quota_refund,
 voice_turn_stuck_watchdog_fired,
 substitution_requested, substitution_accepted,

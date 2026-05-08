@@ -157,8 +157,28 @@ Deno.test('realtime-session: voice_quota_refund emit declared at module scope', 
   assertStringIncludes(
     src,
     "event: 'voice_quota_refund'",
-    "voice_quota_refund event literal must appear in capturePosthogEvent call",
+    "voice_quota_refund event literal must appear in captureSafe call",
   );
+});
+
+Deno.test('realtime-session: voice_quota_refund actually invoked from both refund sites', async () => {
+  // Sprint-B-review W3: bare assertStringIncludes on the helper name +
+  // event literal would pass on commented-out code or a
+  // declared-but-uncalled helper. This test counts ACTUAL `await`
+  // invocations of the helper at non-declaration callsites — must
+  // be exactly 2 (no_active_prompt + mint-failure). Counting matches
+  // for `await emitVoiceQuotaRefund(userLog,` (note: trailing comma
+  // is intentional — distinguishes the call from any comment that
+  // mentions the helper name).
+  const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
+  const callPattern = /await emitVoiceQuotaRefund\(userLog,/g;
+  const matches = src.match(callPattern);
+  const count = matches ? matches.length : 0;
+  if (count !== 2) {
+    throw new Error(
+      `expected exactly 2 invocations of emitVoiceQuotaRefund(userLog, ...), got ${count}`,
+    );
+  }
 });
 
 Deno.test('realtime-session: voice_quota_refund emitted from no_active_prompt refund site', async () => {
@@ -190,13 +210,14 @@ Deno.test('realtime-session: voice_quota_refund emitted from mint-failure refund
   );
 });
 
-Deno.test('realtime-session: voice_quota_refund declares is_refresh + upstream_status properties', async () => {
+Deno.test('realtime-session: voice_quota_refund declares request_id + reason + upstream_status properties', async () => {
   const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
   // The helper's properties shape pins the contract documented in
-  // spec §15 (request_id, reason, is_refresh, upstream_status?).
-  // distinct_id is the hashed canonical_user_key, not a property.
+  // spec §15 (request_id, reason, upstream_status?). distinct_id is
+  // the hashed canonical_user_key, not a property. is_refresh was
+  // dropped in Sprint-B-review W6 — structurally unreachable as
+  // `true` and decorative-without-alarm; do NOT re-introduce.
   assertStringIncludes(src, 'request_id: args.requestId');
   assertStringIncludes(src, 'reason: args.reason');
-  assertStringIncludes(src, 'is_refresh: args.isRefresh');
   assertStringIncludes(src, 'upstream_status = args.upstreamStatus');
 });

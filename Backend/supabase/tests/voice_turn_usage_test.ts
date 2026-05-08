@@ -383,6 +383,32 @@ Deno.test(
 // P1-B / SA2-W4: session_id ownership binding
 // ---------------------------------------------------------------------------
 
+Deno.test('voice-turn-usage 403 ENT-VOICE-01 for Free user (entitlement gate)', async () => {
+  // Sprint-B-review C1: SCA-146 promoted users to Premium in the
+  // session_missing + owner_mismatch tests. As a side-effect, Free →
+  // ENT-VOICE-01 coverage on this handler dropped to zero (the only
+  // remaining ENT-VOICE-01 assertions in tests/ live under
+  // realtime_session_test.ts and cook_turn_test.ts, neither of which
+  // exercise the voice-turn-usage handler). This test restores the
+  // coverage explicitly: a Free-tier bootstrap (no entitlement
+  // promotion) calls voice-turn-usage with a valid JWT and a
+  // session_id; the entitlement gate must fire BEFORE owner-binding,
+  // returning 403 ENT-VOICE-01.
+  //
+  // session_id is intentionally a random UUID so a future flip of the
+  // gate-ordering (owner-binding before entitlement) wouldn't silently
+  // pass via session_missing (different error code) — it would
+  // surface a clear assertion failure.
+  const boot = await quickBootstrap();
+  const sessionId = crypto.randomUUID();
+  const result = await callVoiceTurnUsage(
+    validBody({ session_id: sessionId }),
+    boot.session_jwt,
+  );
+  assertEquals(result.status, 403);
+  assertEquals((result.body as { error: string }).error, 'ENT-VOICE-01');
+});
+
 Deno.test('voice-turn-usage 403 VOICE-SESSION-01 session_missing when no owner row exists (unbooted session)', async () => {
   // SCA-146: migrated from ENT-VOICE-01 to VOICE-SESSION-01 per ADR
   // 0017. The pre-migration assertion passed via entitlement-gate-
