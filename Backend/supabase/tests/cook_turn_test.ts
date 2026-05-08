@@ -7,6 +7,10 @@
 
 import { assertEquals } from '@std/assert';
 import { quickBootstrap, testIPHeaders } from './_helpers/factory.ts';
+import {
+  validHouseholdContext,
+  validRealtimeRecipeContext,
+} from './_helpers/fixtures/realtime_recipe_context.ts';
 import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
 
 await clearRateLimitBuckets();
@@ -46,31 +50,12 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     recipe_plan_id: crypto.randomUUID(),
     current_step_number: 1,
     transcript: 'how hot should the oil be',
-    recipe_context: {
-      title: 'Tomato Cream Pasta',
-      servings: 2,
-      estimated_minutes: 20,
-      total_steps: 5,
-      current_step_text: 'Heat olive oil in a skillet over medium heat.',
-      current_step_timer_seconds: 120,
-      // all_steps added to shared `RealtimeRecipeContext` on 2026-04-22
-      // (validation.ts:267-275) after a production hallucination.
-      // Same drift pattern fixed for realtime_session_test.ts in
-      // 5348383; cook-turn shares the schema so it needs the same field.
-      all_steps: [
-        { step_number: 1, text: 'Heat olive oil in a skillet over medium heat.', timer_seconds: 120 },
-        { step_number: 2, text: 'Add garlic and sauté until fragrant.', timer_seconds: 60 },
-        { step_number: 3, text: 'Add tomato paste and cook down.', timer_seconds: 180 },
-        { step_number: 4, text: 'Stir in pasta and cream; toss to coat.', timer_seconds: 240 },
-        { step_number: 5, text: 'Serve immediately with fresh basil.', timer_seconds: 0 },
-      ],
-      remaining_ingredients: [{ display_name: 'pasta' }],
-    },
-    household_context: {
-      dietary_rules: [],
-      available_equipment: ['stovetop', 'skillet'],
-      pantry_snapshot: [{ display_name: 'olive oil' }],
-    },
+    // SCA-147: shared `RealtimeRecipeContext` + `HouseholdContext`
+    // sub-shapes from `_helpers/fixtures/realtime_recipe_context.ts`.
+    // See `realtime_session_test.ts` for the same usage and the
+    // schema-drift rationale that motivates the shared factory.
+    recipe_context: validRealtimeRecipeContext(),
+    household_context: validHouseholdContext(),
     ...overrides,
   };
 }

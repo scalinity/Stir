@@ -345,6 +345,15 @@ export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
 // household_context: same shape as substitution, for hard-rule and
 //   pantry/equipment substitution decisions the model may make.
 
+// SCA-147: when this schema tightens (new required field, narrowed
+// bound, etc.), ALSO update
+// `tests/_helpers/fixtures/realtime_recipe_context.ts`. That fixture
+// factory is consumed by every voice-path handler test (currently
+// `realtime_session_test.ts` + `cook_turn_test.ts`); keeping the
+// fixture in lockstep with the schema means a single edit catches
+// all consumers, vs the pre-SCA-147 pattern where each test file's
+// `validBody()` carried an independent copy and drifted silently
+// (`all_steps` add on 2026-04-22 fixed twice — `5348383`, `e117af4`).
 const RealtimeRecipeContext = z.object({
   title: z.string().min(1).max(256),
   servings: z.number().int().min(1).max(12),
