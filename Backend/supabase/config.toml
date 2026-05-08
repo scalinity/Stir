@@ -452,6 +452,14 @@ verify_jwt = false
 [functions.users-delete-request]
 verify_jwt = false
 
+# SCA-88. users-deletion-fulfill is the cron-driven worker that walks
+# `approved` deletion_requests rows through the subsystem cleanup chain
+# (PostHog → Sentry → RevenueCat → CloudKit marker → Postgres sweep).
+# Auth is the same `X-Stir-Cron-Secret` shared secret as pgmq-dispatch;
+# Kong's JWT gate is bypassed.
+[functions.users-deletion-fulfill]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
