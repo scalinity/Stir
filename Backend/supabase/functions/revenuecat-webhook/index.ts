@@ -31,6 +31,7 @@
 
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
+import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import {
   HANDLED_EVENT_TYPES,
@@ -351,6 +352,34 @@ Deno.serve(async (req) => {
             expires_at: action.expires_at,
             app_user_created: Boolean(result.app_user_created),
           });
+
+          // SCA-62: server-side counterpart to iOS
+          // entitlement_state_changed. iOS-side fires on next
+          // foreground only; this is the immediate-truth signal
+          // for the billing dashboard tile. `source` distinguishes
+          // server emits from iOS emits (same event name, different
+          // origin).
+          try {
+            const distinctIdHash = await hashCanonicalKey(action.canonical_user_key);
+            capturePosthogEvent(userLog, {
+              event: 'entitlement_state_changed',
+              distinctId: distinctIdHash,
+              properties: {
+                request_id: requestId,
+                actor_id: 'system:webhook',
+                source: 'server_webhook',
+                event_type: event.type,
+                tier: action.tier,
+                billing_state: action.billing_state,
+                is_trial: action.is_trial,
+              },
+            });
+          } catch (telemetryErr) {
+            userLog.warn('posthog_emit_failed', {
+              event: 'entitlement_state_changed',
+              err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+            });
+          }
         }
         break;
       }

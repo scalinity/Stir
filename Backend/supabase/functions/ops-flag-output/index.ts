@@ -38,6 +38,7 @@ import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
 
 const CONTEXT_SNAPSHOT_MAX_BYTES = 4096;
@@ -205,6 +206,30 @@ Deno.serve(async (req) => {
     feature_key: parsed.feature_key,
     had_cached_output: cacheRow !== null,
   });
+
+  // SCA-62: emit ops_admin.flagged_outputs.created so the flag-rate
+  // dashboard tile populates per-feature. Extends the ADR 0027
+  // ops_admin.* surface namespace with a user-side counterpart.
+  // distinct_id is the user's canonical-key hash (not the admin
+  // hash that the ops-admin emits use) so user-cohort funnels work.
+  try {
+    capturePosthogEvent(log, {
+      event: 'ops_admin.flagged_outputs.created',
+      distinctId: userHash,
+      properties: {
+        request_id: requestId,
+        actor_id: 'user',
+        feature_key: parsed.feature_key,
+        flagged_output_id: inserted.id,
+        had_cached_output: cacheRow !== null,
+      },
+    });
+  } catch (telemetryErr) {
+    log.warn('posthog_emit_failed', {
+      event: 'ops_admin.flagged_outputs.created',
+      err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+    });
+  }
 
   return jsonOk({ ok: true, flagged_output_id: inserted.id, dedup: false }, requestId);
 });

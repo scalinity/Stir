@@ -50,6 +50,8 @@ import {
   extractSourceIP,
   ipBucket,
 } from '../_shared/rate_limiter.ts';
+import { capturePosthogEvent } from '../_shared/posthog.ts';
+import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { ZodError } from 'zod';
 
 Deno.serve(async (req) => {
@@ -322,6 +324,43 @@ Deno.serve(async (req) => {
       alias_performed: aliasPerformed,
       tier,
     });
+
+    // SCA-62: emit identity-state events from the server. iOS-side
+    // entitlement_state_changed runs on next foreground only — this
+    // is the immediate-truth signal for the bootstrap dashboard tile.
+    try {
+      const distinctIdHash = await hashCanonicalKey(winningKey);
+      if (body.is_new_user) {
+        capturePosthogEvent(userLog, {
+          event: 'app_users_bootstrapped',
+          distinctId: distinctIdHash,
+          properties: {
+            request_id: requestId,
+            actor_id: 'system:server',
+            has_cloudkit_record: parsed.cloudkit_user_record_name != null,
+            tier,
+          },
+        });
+      }
+      if (aliasPerformed) {
+        capturePosthogEvent(userLog, {
+          event: 'app_users_merged',
+          distinctId: distinctIdHash,
+          properties: {
+            request_id: requestId,
+            actor_id: 'system:server',
+            tier,
+          },
+        });
+      }
+    } catch (telemetryErr) {
+      // Telemetry failure must not fail the request. Logged at warn
+      // so ops can spot patterns without paging.
+      userLog.warn('posthog_emit_failed', {
+        err: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+      });
+    }
+
     return jsonOk(body, requestId);
   } catch (err) {
     userLog.error('internal_error', err, {

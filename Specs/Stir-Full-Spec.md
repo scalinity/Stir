@@ -1718,9 +1718,13 @@ See §12.3. In addition:
 | `sample_showcase_exited`           | outcome ∈ {continued_to_onboarding, back_to_welcome}                                           | onboarding sample funnel   | Onboarding              |
 | `widget_nudge_shown`               | (none)                                                                                         | widget adoption funnel     | Engagement              |
 | `widget_nudge_dismissed`           | outcome ∈ {acted, deferred, suppressed}                                                        | widget adoption funnel     | Engagement              |
+| `app_users_bootstrapped`           | has_cloudkit_record, tier                                                                      | identity funnel            | Identity                |
+| `app_users_merged`                 | tier                                                                                           | identity funnel            | Identity                |
+| `entitlement_state_changed`        | from_state, to_state, billing_state, source ∈ {ios_foreground, server_webhook}, [event_type, tier, is_trial] | churn / recovery           | Billing                 |
+| `ops_admin.flagged_outputs.created` | feature_key, flagged_output_id, had_cached_output                                             | ops flag-rate              | Ops                     |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
-| `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |
+<!-- entitlement_state_changed extended with `source` per SCA-62 — see row above with full property set -->
 | `reactivation_notification_opened` | trigger_kind                                                                                   | reactivation effectiveness | Retention               |
 | `widget_added`                     | source                                                                                         | entry-point adoption       | Retention               |
 | `shortcut_run`                     | intent_name                                                                                    | entry-point adoption       | Retention               |
