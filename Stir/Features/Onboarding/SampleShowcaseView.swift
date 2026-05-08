@@ -171,14 +171,27 @@ struct SampleSolveFixture: Codable, Equatable {
     /// to a hardcoded 3-dish shape if the bundle copy is missing —
     /// preferable to a crash on an installer-corrupted bundle, and
     /// the showcase still works in offline / first-launch states.
-    static var bundled: SampleSolveFixture {
-        if let url = Bundle.main.url(forResource: "sample_solve", withExtension: "json"),
-           let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode(SampleSolveFixture.self, from: data) {
-            return decoded
+    /// CA3-02: memoized as `static let` (closure-evaluated once per
+    /// process). The previous `static var` re-decoded the bundle JSON
+    /// on every parent recompute via the default-arg evaluation site.
+    static let bundled: SampleSolveFixture = {
+        guard let url = Bundle.main.url(forResource: "sample_solve", withExtension: "json") else {
+            // CA1-S5: in DEBUG, fail loudly so a build-system bug (resource
+            // not in target) is caught at first launch rather than masked
+            // by the silent fallback in shipped builds.
+            assertionFailure("sample_solve.json missing from bundle — falling back to hardcoded fixture")
+            return .fallback
         }
-        return .fallback
-    }
+        do {
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(SampleSolveFixture.self, from: data)
+        } catch {
+            assertionFailure(
+                "sample_solve.json decode failed: \(error.localizedDescription) — falling back to hardcoded fixture",
+            )
+            return .fallback
+        }
+    }()
 
     /// Hardcoded fallback identical to the JSON shape so the showcase
     /// renders something even if the bundle copy is missing. Mirrors

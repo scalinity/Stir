@@ -202,7 +202,8 @@ User-visible messages live in spec §6; codes here.
 
 ```swift
 enum ErrorCode: String {
-    case net01       = "NET-01"         // network unreachable
+    case net01       = "NET-01"         // network unreachable (URLSession layer; no response received)
+    case internal01  = "INTERNAL-01"    // 500-class server error (response received, server failed)
     case ai01        = "AI-01"          // AI temporarily unavailable
     case ai02        = "AI-02"          // low confidence / needs review
     case ai03        = "AI-03"          // taking longer than expected
@@ -724,6 +725,7 @@ repeat_candidate_card_shown, repeat_candidate_card_dismissed,
 sample_showcase_viewed, sample_showcase_exited,
 widget_nudge_shown, widget_nudge_dismissed,
 app_users_bootstrapped, app_users_merged,
+deletion_request_submitted,
 widget_added, shortcut_run,
 ai_request_completed, ai_request_failed,
 screen_error_shown, sync_state_changed,

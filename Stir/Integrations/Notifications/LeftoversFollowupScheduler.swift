@@ -23,7 +23,7 @@
 //     it.
 //
 // Telemetry (spec §15 + CLAUDE.md):
-//   * `leftovers_followup_scheduled` { fire_at, suppressed }
+//   * `leftovers_followup_scheduled` { fire_at }
 //   * `leftovers_followup_fired` (delivery; via StirNotificationDelegate)
 //   * `leftovers_followup_tapped` (deep-link tap)
 //   * `leftovers_followup_suppressed` { reason: "weekly_cap" | "unactioned_streak" }
@@ -71,9 +71,16 @@ final class LeftoversFollowupScheduler {
             return
         }
 
+        // CA1-03: anchor cap + suppression checks on `Date()` (the actual
+        // policy clock), not on the caller-supplied `submittedAt`. The
+        // submittedAt parameter is for fire-time computation only —
+        // backdated submittedAt values (test fixtures, CloudKit replay,
+        // future caller refactor) must not bypass the policy.
+        let policyNow = Date()
+
         // Suppression checks — emit telemetry on skip so we can size the
         // suppression rate in the funnel.
-        if let suppressedUntil = history.suppressedUntil, suppressedUntil > submittedAt {
+        if let suppressedUntil = history.suppressedUntil, suppressedUntil > policyNow {
             telemetry.capture(.leftoversFollowupSuppressed, properties: [
                 "reason": "unactioned_streak",
             ])
@@ -82,7 +89,7 @@ final class LeftoversFollowupScheduler {
             )
             return
         }
-        if history.firesInLastWeek(asOf: submittedAt).count >= 2 {
+        if history.firesInLastWeek(asOf: policyNow).count >= NotificationHistoryStore.weeklyCap {
             telemetry.capture(.leftoversFollowupSuppressed, properties: [
                 "reason": "weekly_cap",
             ])
@@ -132,10 +139,20 @@ final class LeftoversFollowupScheduler {
             )
         } catch {
             Logger.leftoversFollowup.warning(
-                "add failed: \(error.localizedDescription, privacy: .public) — rolling back",
+                "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
             )
+            // CA2-08: don't silently swallow rollback failure. If the
+            // re-add fails (auth state changing mid-call, system pressure),
+            // the user ends up with no leftovers followup at all and we
+            // need a signal — not silent discard.
             if let prior {
-                try? await center.add(prior)
+                do {
+                    try await center.add(prior)
+                } catch {
+                    Logger.leftoversFollowup.error(
+                        "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending followup",
+                    )
+                }
             }
         }
     }
@@ -203,7 +220,17 @@ final class LeftoversFollowupScheduler {
         case .denied:
             return false
         case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            // CA2-09: don't silently collapse a thrown auth error to "denied".
+            // If the system genuinely throws (authorization service down,
+            // parental restriction shape, etc.), capture so we have signal.
+            do {
+                return try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                Logger.leftoversFollowup.warning(
+                    "requestAuthorization threw: \(error.localizedDescription, privacy: .private)",
+                )
+                return false
+            }
         @unknown default:
             return false
         }

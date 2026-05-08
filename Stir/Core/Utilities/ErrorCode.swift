@@ -11,7 +11,8 @@
 import Foundation
 
 enum ErrorCode: String, Sendable, Codable, CaseIterable {
-    case net01 = "NET-01"          // network unreachable (or 500-class server)
+    case net01 = "NET-01"          // network unreachable (URLSession layer; no response received)
+    case internal01 = "INTERNAL-01" // 500-class server error (response received, server failed). Distinct from NET-01 so iOS copy can say "server" not "network".
     case ai01 = "AI-01"            // AI temporarily unavailable
     case ai02 = "AI-02"            // low confidence / needs review
     case ai03 = "AI-03"            // taking longer than expected

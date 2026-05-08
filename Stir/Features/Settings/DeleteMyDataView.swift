@@ -33,15 +33,23 @@ struct DeleteMyDataView: View {
     @State private var confirmationText: String = ""
     @State private var submissionState: SubmissionState = .idle
     @FocusState private var confirmFocused: Bool
+    // CR3-10 / FD1-03: move VoiceOver focus to the inline error message
+    // when submission fails so dismissing-keyboard-after-error doesn't
+    // strand assistive-tech users without an announcement.
+    @AccessibilityFocusState private var errorFocus: Bool
 
     private static let confirmationPhrase = "DELETE MY DATA"
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
-                explanationCard
-                confirmationCard
-                actionRow
+                if case .submitted = submissionState {
+                    submittedCard
+                } else {
+                    explanationCard
+                    confirmationCard
+                    actionRow
+                }
                 fallbackCard
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
@@ -92,18 +100,26 @@ struct DeleteMyDataView: View {
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.textPrimary)
 
+            // FD1-01 / FD1-18: explicit accessibilityLabel + accessibilityHint
+            // so VoiceOver announces the destructive-action confirmation
+            // expectation. Without these the field reads as
+            // "Text field, edit text" with no clue what to type.
             TextField("", text: $confirmationText)
                 .stirFont(.bodyLg)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled(true)
                 .focused($confirmFocused)
+                .accessibilityLabel("Confirmation phrase")
+                .accessibilityHint(
+                    "Type \(Self.confirmationPhrase) in capital letters to enable the submit button.",
+                )
                 .padding(CGFloat.Stir.space3)
                 .background(Color.Stir.paper100)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(
-                            confirmationMatches ? Color.Stir.ember600 : Color.Stir.ink300,
+                            confirmationMatches ? Color.Stir.danger : Color.Stir.ink300,
                             lineWidth: 1,
                         ),
                 )
@@ -112,13 +128,48 @@ struct DeleteMyDataView: View {
                 Text(message)
                     .stirFont(.bodySm)
                     .foregroundStyle(Color.Stir.danger)
+                    .accessibilityFocused($errorFocus)
             }
+        }
+        .padding(CGFloat.Stir.space4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .stirCard()
+    }
 
-            if case .submitted = submissionState {
-                Text("Submitted. We'll email you when deletion is complete (within 30 days).")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.textSecondary)
+    // FD1-02: dedicated success card. Replaces the inline subline that
+    // previously sat under a now-dead form. Tells the user exactly what
+    // happens next + offers an explicit Close affordance instead of
+    // leaving them on a dead screen.
+    private var submittedCard: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            HStack(spacing: CGFloat.Stir.space2) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.Stir.ember600)
+                    .imageScale(.large)
+                    .accessibilityHidden(true)
+                Text("Request submitted")
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.textPrimary)
             }
+            Text("We'll email a confirmation when deletion is complete — within 30 days at the email tied to your subscription. Subscription auto-renew has been canceled.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textSecondary)
+            Text("Need to retract this request, or have a question? Email privacy@getstir.app within the 30-day window.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.textSecondary)
+            Button {
+                dismiss()
+            } label: {
+                Text("Close")
+                    .stirFont(.labelLg)
+                    .foregroundStyle(Color.Stir.paper50)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, CGFloat.Stir.space3Half)
+                    .background(Color.Stir.ember600)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close deletion confirmation")
         }
         .padding(CGFloat.Stir.space4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -188,7 +239,14 @@ struct DeleteMyDataView: View {
     }
 
     private var confirmationMatches: Bool {
-        confirmationText.trimmingCharacters(in: .whitespacesAndNewlines) == Self.confirmationPhrase
+        // DB1-W2 / FD1-01: case-forgiving comparison after trim. Matches
+        // user intent ("type the phrase") rather than exact-case ("type
+        // the phrase verbatim with no autocorrect"). VoiceControl /
+        // dictation can yield mixed-case strings; the compare via
+        // .uppercased() is the friendly UX without weakening the gate.
+        confirmationText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() == Self.confirmationPhrase
     }
 
     private var actionEnabled: Bool {
@@ -220,26 +278,43 @@ struct DeleteMyDataView: View {
         submissionState = .submitting
         do {
             let response = try await coordinator.submitDeletionRequest()
-            Logger.settings.info("deletion request accepted; id=\(response.deletionRequestID, privacy: .public) state=\(response.state, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)")
+            Logger.settings.info(
+                "deletion request accepted; id=\(response.deletionRequestID.uuidString, privacy: .public) state=\(response.state.rawValue, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
+            )
             submissionState = .submitted
         } catch {
+            // CR3-10: cover the StirError cases users can plausibly hit.
+            // Default-fallback copy is intentionally generic; we don't
+            // leak server-shape details to user-facing copy.
             let message: String
             if let stir = error as? StirError {
                 switch stir {
                 case .rateLimited:
-                    message = "Too many attempts. Please try again later."
+                    message = "Already submitted recently. Check your email or try again later."
                 case .networkUnreachable:
                     message = "Couldn't reach Stir. Check your connection and try again."
-                case let .auth(reason, _):
-                    message = "Session issue (\(reason.rawValue)). Please reopen the app."
+                case .timeout:
+                    message = "The request timed out. Please try again."
+                case .server(code: .internal01, _, _):
+                    message = "Stir hit an unexpected error. Please try again in a moment."
+                case .auth:
+                    // CR3-09: don't surface the raw AUTH-01 reason to the user;
+                    // it's a server protocol detail. Logger.error below
+                    // captures the typed reason for debug/Sentry.
+                    message = "Session issue. Please reopen the app and try again."
                 default:
                     message = "Submission failed. Please try again."
                 }
             } else {
                 message = "Submission failed. Please try again."
             }
-            Logger.settings.error("deletion request failed: \(error.localizedDescription, privacy: .public)")
+            // SA3-L2 (CWE-209): drop privacy: .public on the error description.
+            // For non-StirError (raw URLError) the description can include
+            // host names / TLS detail that shouldn't land in the public
+            // unified-log retention bucket.
+            Logger.settings.error("deletion request failed: \(error.localizedDescription, privacy: .private)")
             submissionState = .failed(message)
+            errorFocus = true
         }
     }
 }

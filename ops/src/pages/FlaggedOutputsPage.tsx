@@ -86,11 +86,16 @@ export default function FlaggedOutputsPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-4">Flagged Outputs</h1>
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div
+        className="flex flex-wrap gap-2 mb-4"
+        role="group"
+        aria-label="Filter flagged outputs by state"
+      >
         {(['open', 'resolved', 'all'] as const).map((s) => (
           <button
             key={s}
             onClick={() => setState(s)}
+            aria-pressed={state === s}
             className={`text-sm px-3 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 ${
               state === s
                 ? s === 'open' ? 'bg-amber-500 text-neutral-950 focus-visible:ring-amber-500' : 'bg-neutral-600 focus-visible:ring-neutral-500'

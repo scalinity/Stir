@@ -11,6 +11,12 @@
 export enum ErrorCode {
   // Network / infra
   NET_01 = 'NET-01',
+  // 500-class server error (response received, server failed). Distinct
+  // from NET-01 (which iOS interprets as "no response received / network
+  // unreachable") so dashboards can separate edge-network problems from
+  // server-side bugs and so user-facing copy can say "server" instead of
+  // "your connection". See spec §6 + CLAUDE.md §Error code matrix.
+  INTERNAL_01 = 'INTERNAL-01',
   AI_01 = 'AI-01',
   AI_02 = 'AI-02',
   AI_03 = 'AI-03',
@@ -58,6 +64,7 @@ export enum ErrorCode {
 // here so later handlers don't re-duplicate copy.
 const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.NET_01]: "Couldn't reach Stir right now. Check your connection and try again.",
+  [ErrorCode.INTERNAL_01]: 'Stir hit an unexpected error. Please try again in a moment.',
   [ErrorCode.AI_01]: 'Dinner planning is temporarily unavailable.',
   [ErrorCode.AI_02]: "I'm not confident about a few ingredients.",
   [ErrorCode.AI_03]: 'This is taking longer than expected.',

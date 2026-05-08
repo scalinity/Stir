@@ -29,7 +29,7 @@
 // payloads, auth header typos) should not generate retry storms on RC's
 // side. Only signature verify (a real security boundary) returns 401.
 
-import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
+import { createLogger, type Logger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { createServiceClient } from '../_shared/db.ts';
@@ -610,10 +610,7 @@ async function writeWebhookLog(
 async function enqueueBillingGracePushes(
   client: ReturnType<typeof createServiceClient>,
   canonicalUserKey: string,
-  log: {
-    info: (msg: string, meta?: Record<string, unknown>) => void;
-    warn: (msg: string, meta?: Record<string, unknown>) => void;
-  },
+  log: Logger,
 ): Promise<void> {
   const { data: install, error: readErr } = await client
     .from('device_installations')
@@ -633,6 +630,38 @@ async function enqueueBillingGracePushes(
       reason: readErr ? 'read_error' : !install ? 'no_install' : 'notifications_off',
     });
     return;
+  }
+
+  // CR1-W4: per-category opt-out. The `pgmq-dispatch.maybeSendImport
+  // CompletionPush` checks both `notifications_enabled` AND
+  // `notification_prefs_json.import_completion`; mirror that contract
+  // here so billing_grace doesn't bypass the per-category gate. Default
+  // to true when the field is missing (BILLING_ISSUE is service-class
+  // information; users only "opted out" if they explicitly toggled it).
+  const billingPrefRaw =
+    (install.notification_prefs_json as Record<string, unknown> | null)?.['billing_grace'];
+  const billingPrefEnabled = billingPrefRaw === undefined || billingPrefRaw === true;
+  if (!billingPrefEnabled) {
+    log.info('billing_grace_push_skipped', { reason: 'category_opt_out' });
+    return;
+  }
+
+  // CA2-03: idempotent on repeat BILLING_ISSUE events. Apple retries
+  // grace-renewal every ~24h during the grace window, producing repeat
+  // BILLING_ISSUE events with distinct event_ids — both pass the upper
+  // idempotency check (processed_webhook_events) but each invokes this
+  // function. Without a pre-insert sweep we'd accumulate 2N pending
+  // rows for N retries; user gets duplicate pushes.
+  const { error: prePurgeErr } = await client
+    .from('notification_jobs')
+    .delete()
+    .eq('canonical_user_key', canonicalUserKey)
+    .eq('state', 'pending')
+    .filter('payload_json->>template', 'eq', 'billing_grace');
+  if (prePurgeErr) {
+    log.warn('billing_grace_push_prepurge_failed', { err: String(prePurgeErr) });
+    // Continue — best-effort; the worst case is duplicate pushes,
+    // which is annoying but not broken.
   }
 
   const title = 'Update your billing';
@@ -676,7 +705,12 @@ async function enqueueBillingGracePushes(
 
   const { error: insErr } = await client.from('notification_jobs').insert(rows);
   if (insErr) {
-    log.warn('billing_grace_push_insert_failed', { err: String(insErr) });
+    // CA2-04: elevate to error severity so Sentry surfaces the
+    // observability gap. The webhook still returns 200 to RC because
+    // the entitlement_snapshots write succeeded — but if APNs
+    // delivery is broken systemically, the warn path was invisible
+    // until users complained.
+    log.error('billing_grace_push_insert_failed', insErr);
     return;
   }
   log.info('billing_grace_push_enqueued', { count: 2, plus48h: plus48h.toISOString() });

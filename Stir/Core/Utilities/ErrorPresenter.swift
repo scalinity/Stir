@@ -42,6 +42,15 @@ enum ErrorPresenter {
                 secondaryAction: "Go Back",
                 blocking: false,
             )
+        case .internal01:
+            return UserFacingError(
+                code: .internal01,
+                title: "Stir hit a snag",
+                message: "Stir hit an unexpected error on our end. Please try again in a moment.",
+                primaryAction: "Retry",
+                secondaryAction: "Go Back",
+                blocking: false,
+            )
         case .ai01:
             return UserFacingError(
                 code: .ai01,

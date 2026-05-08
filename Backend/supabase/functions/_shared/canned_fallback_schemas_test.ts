@@ -48,10 +48,28 @@ Deno.test('validateCannedFallback: cook_mode_realtime is unsupported (live audio
   assert(errors[0]!.issue.includes('does not support canned fallbacks'));
 });
 
-Deno.test('validateCannedFallback: pantry_parse with optional parse_quality passes', () => {
+Deno.test('validateCannedFallback: pantry_parse with full wire shape passes', () => {
   const errors = validateCannedFallback('pantry_parse', {
-    items: [{ display_name: 'tomato', confidence: 0.92 }],
-    parse_quality: 'high',
+    parse_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    ingredients: [{ display_name: 'tomato', confidence: 'high' }],
+    overall_confidence: 0.92,
+    prompt_version: '1.0.0',
+    latency_ms: 1200,
+    retry_count: 0,
+  });
+  assertEquals(errors, []);
+});
+
+Deno.test('validateCannedFallback: pantry_parse with empty-pantry result passes', () => {
+  // ingredients[] empty is legal (empty pantry); parse_id is the
+  // anchor key.
+  const errors = validateCannedFallback('pantry_parse', {
+    parse_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    ingredients: [],
+    overall_confidence: 1.0,
+    prompt_version: '1.0.0',
+    latency_ms: 800,
+    retry_count: 0,
   });
   assertEquals(errors, []);
 });
@@ -64,16 +82,34 @@ Deno.test('validateCannedFallback: recipe_import with status=queued passes', () 
   assertEquals(errors, []);
 });
 
-Deno.test('validateCannedFallback: grocery_generate with reminders_export_url passes', () => {
+Deno.test('validateCannedFallback: grocery_generate with full wire shape passes', () => {
   const errors = validateCannedFallback('grocery_generate', {
-    items: [{ name: 'milk', priority: 'high' }],
-    reminders_export_url: 'x-apple-reminderkit://REMCDReminder/abc',
+    source_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    source_type: 'recipe',
+    missing_items: [{ display_name: 'milk', priority: 'high' }],
+    already_have: [{ display_name: 'butter' }],
+    total_item_count: 5,
+    prompt_version: '1.0.0',
+    retry_count: 0,
   });
   assertEquals(errors, []);
 });
 
-Deno.test('validateCannedFallback: cook_turn requires reply_text', () => {
-  const errors = validateCannedFallback('cook_turn', { intent: 'next_step' });
+Deno.test('validateCannedFallback: cook_turn requires spoken_response', () => {
+  // suggested_action without spoken_response is incomplete on the wire.
+  const errors = validateCannedFallback('cook_turn', { suggested_action: 'advance_step' });
   assert(errors.length > 0);
   assert(errors.some((e) => e.issue.includes('missing required key')));
+});
+
+Deno.test('validateCannedFallback: cook_turn full wire shape passes', () => {
+  const errors = validateCannedFallback('cook_turn', {
+    spoken_response: 'Next step: chop the onions.',
+    suggested_action: 'advance_step',
+    action_params: null,
+    prompt_version: '1.0.0',
+    latency_ms: 800,
+    retry_count: 0,
+  });
+  assertEquals(errors, []);
 });

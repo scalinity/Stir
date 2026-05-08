@@ -33,6 +33,41 @@ extension RealtimeSession {
     /// defensively on server goAway frames (server signalled 30-min
     /// hard cap approach). Also guards against race re-entry via
     /// `isRefreshing`.
+    ///
+    /// Dance (order matters — a wrong order leaks either audio frames
+    /// into the wrong transport or state updates against a stale
+    /// mintResponse):
+    ///   1. Guard state + set `isRefreshing = true` in defer-unset block
+    ///   2. Build minimal recap — step position only (ADR 0014 PM amendment)
+    ///   3. Mint new token with `is_refresh: true, recap: <recap>`
+    ///      (backend skips quota increment; systemInstruction gets
+    ///      recap suffix for continuity)
+    ///   4. Open new WS transport (local var — not yet assigned to self)
+    ///   5. Cancel old receive dispatcher ONLY. The mic forwarder stays
+    ///      alive across refresh — `pipeline.micFrames` is a single-
+    ///      consumer AsyncStream and cancel+restart would wedge it to
+    ///      `.finished` permanently. The forwarder instead reads
+    ///      `self.transport` dynamically each iteration and picks up
+    ///      the swap done in step 6 automatically.
+    ///      `startReceiveDispatcher` bumps `dispatcherGeneration` when
+    ///      the new one starts in step 7 — the old dispatcher's
+    ///      cancellation error is suppressed in its catch block by
+    ///      generation check (structural, race-free).
+    ///   6. Swap `self.transport` + `self.mintResponse` to new
+    ///   7. Restart receive dispatcher on new transport (bumps gen)
+    ///   8. Send setup frame on new transport
+    ///   9. Await setupComplete (shared continuation; new dispatcher
+    ///      drives it)
+    ///  10. (Mic forwarder continues; if nil because it never started,
+    ///      start it here)
+    ///  11. Close old transport
+    ///  12. Reset per-turn state + bump `lastRefreshedAtTurn`
+    ///
+    /// Failure mode: if any step throws, we fall back to the old
+    /// transport IF it's still open (i.e., we failed before the swap).
+    /// After the swap the old transport is gone and a failure leaves
+    /// us in an unrecoverable state — transition to .error and the VM
+    /// downgrades to C.3. Rare path; logs allow post-hoc triage.
     @discardableResult
     func refreshSession(reason: String) async -> RefreshOutcome {
         guard !isRefreshing else {
@@ -221,7 +256,6 @@ extension RealtimeSession {
             if stateMachine.state == .refreshing {
                 stateMachine.advance(to: .ready)
             }
-            _ = preRefreshState // preserved for future restore-prior-state logic if needed
             return .success
         } catch {
             let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -241,7 +275,13 @@ extension RealtimeSession {
             // fall back to C.3 on the next tap.
             let isPreCommitFailure = (self.transport === oldTransport)
             if isPreCommitFailure {
+                // Still on old transport — no state change needed.
                 Logger.voice.info("refresh_failed_on_old_transport session_continues")
+                // P1-J: back to whatever state we entered refresh from.
+                // The old transport is healthy; session continues as
+                // if refresh never happened. Self-transition is a no-op
+                // if preRefreshState == .refreshing (shouldn't happen —
+                // guard blocks re-entry — but safe either way).
                 if stateMachine.state == .refreshing {
                     stateMachine.advance(to: preRefreshState)
                 }
@@ -266,17 +306,39 @@ extension RealtimeSession {
                 // restart it cleanly.
                 micForwardTask?.cancel()
                 micForwardTask = nil
+                // P1-J: route via .fallingBack → .error so the grammar
+                // records the failure path explicitly. .fallingBack is
+                // the canonical "Live → C.3 handoff" state per
+                // VoiceSessionState.swift.
                 if stateMachine.state == .refreshing {
                     stateMachine.advance(to: .fallingBack)
                 }
                 stateMachine.advance(to: .error)
                 // P1-K (2026-04-23): tell the VM that any future voice
                 // rebuild within this Cook Mode session should skip
-                // Live and go straight to C.3.
+                // Live and go straight to C.3. Fresh Live preWarm on
+                // the same device + same network after a post-commit
+                // handshake failure has a high probability of failing
+                // the same way; pinning fallback avoids the ping-pong
+                // latency the user would otherwise perceive on every
+                // subsequent tap.
                 onVoiceFallbackRequired?("refresh_post_commit_failure")
             }
+            // Spec §15 voice_session_refreshed — FAILURE path. Emitting
+            // on failure is what lets the Voice session health dashboard
+            // compute a real refresh success rate (prior design fired on
+            // request only so failures went telemetry-invisible).
+            //
             // session_id semantics — report the session that "owned" the
-            // failure so dashboard triage is actionable.
+            // failure so dashboard triage is actionable:
+            //   pre-commit failure (mint / WS open / setup-send threw
+            //     before self.transport was swapped) → OLD id; the
+            //     destination never came up and the old session is
+            //     still live.
+            //   post-commit failure (swap assigned, awaitSetupComplete
+            //     or later threw) → NEW id; old session is already torn
+            //     down and the failure is attached to the destination
+            //     that didn't handshake.
             let failureSessionID: String
             if self.transport === oldTransport {
                 failureSessionID = oldSessionID
@@ -320,7 +382,6 @@ extension RealtimeSession {
     /// speak again. Re-checks state under MainActor because a real
     /// `turnComplete` could have arrived between the Task.sleep wake
     /// and the fire handler (rare but possible).
-    @MainActor
     func turnStuckWatchdogFired() {
         guard stateMachine.state == .modelSpeaking else { return }
         let now = Date()
@@ -436,6 +497,15 @@ extension RealtimeSession {
         }
         let age = pendingPreMintStartedAt.map { Date().timeIntervalSince($0) } ?? .infinity
         guard age < LiveSessionBudget.preMintStalenessSec else {
+            // SCA-168 S13 (CR3 / SA2): Swift `Task.cancel()` is cooperative —
+            // `aiDispatch.realtimeSession(request:)`'s underlying URLSession
+            // call may not preempt mid-request, so the mint HTTP call could
+            // still complete and Google issues a token nobody uses. The
+            // resulting orphan token is bounded by Gemini's 35-min `expire_time`
+            // TTL (CLAUDE.md sharp-edge #5), so the leak self-heals; the cost
+            // floor is one unused auth_tokens slot per stale-discard. No
+            // security impact — the token has `uses: 1` and is locked to the
+            // mint-baked setup-frame.
             task.cancel()
             Logger.voice.info(
                 "refresh_premint_stale_discarded age_sec=\(age, privacy: .public)",
@@ -482,8 +552,17 @@ extension RealtimeSession {
     /// own reply), both lower-risk than arbitrary user input, but
     /// echoing "Ignore prior instructions" into the next session's
     /// systemInstruction is cheap to defend against. `nonisolated` so
-    /// unit tests can exercise it without @MainActor wrapping — the
-    /// method is a pure string transform with no instance-state access.
+    /// unit tests can exercise it without @MainActor wrapping.
+    ///
+    /// SCA-168 S5 (SA1): even though `buildRecap()` is currently
+    /// step-position-only and does not feed user-derived text into the
+    /// recap (so the sanitizer has no live caller path today), the
+    /// sanitizer is kept armed and unit-tested as defense-in-depth for
+    /// the moment a future change to `buildRecap()` reintroduces user
+    /// transcript fragments. The hot-path performance work in P3-J
+    /// (`injectionRegexes` static-let with a one-shot compile) is part
+    /// of that posture — don't bypass the sanitizer "because it's not
+    /// currently in the production path."
     nonisolated static func sanitizeForRecap(_ raw: String) -> String {
         let oneLine = raw
             .replacingOccurrences(of: "\n", with: " ")
@@ -526,43 +605,15 @@ extension RealtimeSession {
 
     // MARK: - VoiceTurn persist helpers
 
-    /// Persist a VoiceTurn row with an observable error path (P0-G fix).
-    /// Used by `finalizeTurn` (happy + watchdog) and
-    /// `recordTurnAsTransportError` (transport-error recovery). Replaces
-    /// the prior `try?` pattern that silently discarded Core Data save
-    /// failures — losing the persist is the exact signal ADR 0015's
-    /// cap-reversal trigger query keys off, so silent drop defeated
-    /// the observability the whole watchdog was instrumented to provide.
-    ///
-    /// `context` is a static short string (e.g. "finalize_turn_model",
-    /// "transport_error_recovery") that goes into the log line so
-    /// dashboards can attribute persist failures by call site.
-    private func persistVoiceTurnSafely(
-        _ input: VoiceTurnRepository.PersistInput,
-        context: String,
-    ) {
-        do {
-            try voiceTurnRepository.persist(input)
-        } catch {
-            Logger.voice.error(
-                "voice_turn_persist_failed context=\(context, privacy: .public) turn=\(self.turnCount, privacy: .public) speaker=\(input.speaker.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .private)",
-            )
-            #if DEBUG
-            VoiceSessionLog.logError("voice_turn.persist_failed", error: error, [
-                "context": context,
-                "turn": turnCount,
-                "speaker": input.speaker.rawValue,
-            ])
-            #endif
-        }
-    }
-
-    /// P3-F (2026-04-23): batch variant used by `finalizeTurn` and
-    /// `recordTurnAsTransportError` so the user + model VoiceTurn rows
-    /// land in a single `context.save()` instead of two. Halves Core
-    /// Data write overhead + CloudKit push rate per turn. Error
-    /// handling mirrors `persistVoiceTurnSafely` — observable, non-
-    /// re-throwing.
+    /// P3-F (2026-04-23): batch persistence of the user + model VoiceTurn
+    /// rows used by `finalizeTurn` and `recordTurnAsTransportError` so
+    /// the pair lands in a single `context.save()` instead of two —
+    /// halves Core Data write overhead + CloudKit push rate per turn.
+    /// Error handling is observable + non-rethrowing (P0-G fix): persist
+    /// failures surface to OSLog → Sentry breadcrumbs (powering the
+    /// ADR 0015 cap-reversal trigger query) without corrupting the
+    /// state-machine unwinding paths that call this from `finalizeTurn`'s
+    /// synchronous body.
     private func persistVoiceTurnPairSafely(
         user: VoiceTurnRepository.PersistInput,
         model: VoiceTurnRepository.PersistInput,
@@ -588,16 +639,20 @@ extension RealtimeSession {
     private func finalizeTurn() {
         // Per-turn flag resets run via `defer` so any future early-return
         // (e.g. added guard clauses) can't leak a stale watchdog / tool-
-        // call flag into the next turn's finalize.
+        // call flag into the next turn's finalize. Current body has no
+        // early returns, but the invariant is structurally enforced now
+        // rather than positionally — surviving refactors without silent
+        // data-corruption (stray `.error` row persisted on a normal turn).
+        //
+        // `turnContainedToolCall` is latched into a local below before
+        // this defer fires; `lastToolCallName` was read by the watchdog
+        // fire path BEFORE it invoked finalizeTurn; `finalizeWasWatchdogFire`
+        // is read during the VoiceTurn persist block below. All three
+        // have been captured or consumed by the time defer runs.
         defer {
             turnContainedToolCall = false
             lastToolCallName = nil
             finalizeWasWatchdogFire = false
-            // finalizeWasTransportError is reset by `recordTurnAsTransportError`
-            // rather than finalizeTurn (finalizeTurn only runs on the
-            // normal / watchdog paths — transport errors route through
-            // the dedicated recorder). Reset here defensively anyway.
-            finalizeWasTransportError = false
         }
         let now = Date()
         let startedAt = turnStartedAt ?? now
@@ -803,6 +858,15 @@ extension RealtimeSession {
 
     /// Reason the pending report is being drained. Affects diagnostic
     /// logging only — the payload shape is the same regardless.
+    ///
+    /// SCA-168 S4 (CR1): non-private (no modifier) because
+    /// `flushPendingReport(dueTo:)` is called cross-file from
+    /// `RealtimeSession.close()` (main file) — Swift requires the
+    /// parameter type's visibility ≥ the function's visibility. Treat
+    /// as `private` to non-extension callers; a future change that
+    /// adds a new `case` should think hard about whether external
+    /// callers depend on the wire-level semantic mapping inside
+    /// `flushPendingReport` (they currently don't).
     enum PendingReportDrainReason {
         case usageArrived
         case timeout
@@ -835,7 +899,9 @@ extension RealtimeSession {
         if case .timeout = reason {
             // The timer fired — regardless of whether usage arrived just
             // before we ran, the fact that we hit the deadline at all is
-            // diagnostic-worthy.
+            // diagnostic-worthy (Gemini is slow enough to threaten the
+            // 2s budget). Differentiate "never arrived" from "arrived
+            // late" in the log so ops can trend separately.
             if usageForReport == nil {
                 Logger.voice.warning(
                     "usage_metadata_never_arrived turn=\(pending.turnIndex, privacy: .public) — firing report with zero tokens",
@@ -880,12 +946,19 @@ extension RealtimeSession {
         // Implicit-cache hit portion — nil when the accumulator was zero
         // (either caching didn't fire, or the field wasn't in the usage
         // frame at all). Forwarded to backend only when positive to keep
-        // the wire tight on the common non-cached path.
+        // the wire tight on the common non-cached path. Powers the spec §9
+        // cap-reversal trigger ("cachedContentTokenCount ≥ 50% of prompt
+        // across 100 sessions").
         let promptCachedTotal = usageForReport?.cachedContentTokenCount
 
         // Map drain reason to wire-level endedReason so dashboards can
         // distinguish normal turn completions from timeouts, drops, and
-        // supersedes.
+        // supersedes. `usageArrived`, `supersededByNextTurn`, and
+        // `supersededByRefresh` all represent successful turn boundaries
+        // (Gemini completed the turn), so they map to `.turnComplete`.
+        // `timeout` and `sessionClosed` map to `.error` — the turn
+        // technically completed but we either lost usage data (timeout)
+        // or the session tore down mid-stream (sessionClosed).
         let endedReason: VoiceTurnUsageRequest.TurnUsage.EndedReason = {
             switch reason {
             case .usageArrived, .supersededByNextTurn, .supersededByRefresh:
@@ -1248,6 +1321,102 @@ extension RealtimeSession {
                 turnCompleteContinuation = nil
                 cont.resume()
             }
+        }
+    }
+
+    // MARK: - Transport-error recovery routing
+
+    /// SCA-161 (review of SCA-79): relocated from RealtimeSessionTransport.swift
+    /// into the StateMachine bucket. This is recovery state-machine logic
+    /// (RefreshOutcome switch + state transitions + per-turn reset +
+    /// continuation drains), not transport plumbing. It calls into
+    /// `refreshSession` and `recordTurnAsTransportError` (both in this
+    /// file). The receive-dispatcher catch in
+    /// RealtimeSessionTransport.startReceiveDispatcher remains the sole
+    /// caller; the call site uses `self.handleTransportError(error)` and
+    /// resolves to this method via Swift extension dispatch on the same
+    /// host type.
+    func handleTransportError(_ error: any Error) async {
+        // Stale-dispatcher suppression has moved into the receive
+        // dispatcher's catch block (generation-token check in
+        // `startReceiveDispatcher`). Any error reaching THIS method is
+        // guaranteed to come from the currently-live dispatcher, which
+        // means it's a real transport failure worth handling.
+        #if DEBUG
+        VoiceSessionLog.logError("transport.error", error: error, [
+            "state": stateMachine.state.rawValue,
+        ])
+        #endif
+        // P0-A / P0-H (2026-04-23): refresh outcome dictates recovery.
+        //   .success          → new transport is live; the old transport
+        //                       errored but we recovered. Settle state
+        //                       back to .ready if we were mid-turn
+        //                       (the turn's user audio may or may not
+        //                       have reached Gemini — unknowable — but
+        //                       staying pinned in .modelSpeaking with no
+        //                       active response would freeze the UX).
+        //   .preCommitFailure → refresh never swapped. Old transport is
+        //                       the one that errored, so it's dead. We
+        //                       have no working WS. Advance to .error
+        //                       + record the lost turn.
+        //   .postCommitFailure→ refresh swapped then handshake failed;
+        //                       refreshSession already advanced state
+        //                       to .error and closed the old transport.
+        //                       Record the lost turn.
+        //   .skipped          → guard short-circuited (refresh already
+        //                       in flight, or state already terminal).
+        //                       Treat like preCommitFailure from the
+        //                       caller's perspective.
+        let hadActiveTurn = (turnStartedAt != nil)
+        let outcome = await refreshSession(reason: "transport_error")
+        switch outcome {
+        case .success:
+            if hadActiveTurn {
+                // Clear per-turn state; the turn is lost either way.
+                // No VoiceTurn row persisted — if Gemini actually
+                // processed the user utterance before the drop, we'd
+                // be double-counting by persisting here. The next
+                // user-visible tap / utterance will start a fresh turn.
+                currentTurnInlineText = nil
+                currentTurnUserTranscript = nil
+                turnStartedAt = nil
+                userTurnEndAt = nil
+                firstModelAudioAt = nil
+                turnContainedToolCall = false
+                lastToolCallName = nil
+            }
+            // Refresh landed; settle the machine into a tap-ready state
+            // so the UX doesn't hang on the prior "Thinking…" indicator.
+            if stateMachine.state != .ready && stateMachine.state != .closed && stateMachine.state != .error {
+                stateMachine.advance(to: .ready)
+            }
+        case .postCommitFailure:
+            // State already .error and old transport closed inside
+            // refreshSession. Record the lost turn for ADR 0015 trigger
+            // visibility.
+            if hadActiveTurn {
+                recordTurnAsTransportError()
+            }
+        case .preCommitFailure, .skipped:
+            // Old transport is the one that errored. Session is dead.
+            if stateMachine.state != .closed && stateMachine.state != .error {
+                stateMachine.advance(to: .error)
+            }
+            if hadActiveTurn {
+                recordTurnAsTransportError()
+            }
+        }
+        // Nil-clear each continuation BEFORE resume so a concurrent
+        // happy-path resolve (e.g., a setupComplete / turnComplete
+        // frame racing the transport error) doesn't double-resume the
+        // same CheckedContinuation — that's a crash.
+        if let cont = turnCompleteContinuation {
+            turnCompleteContinuation = nil
+            cont.resume(throwing: error)
+        }
+        if let cont = setupCompleteContinuation {
+            setupCompleteContinuation = nil
+            cont.resume(throwing: error)
         }
     }
 

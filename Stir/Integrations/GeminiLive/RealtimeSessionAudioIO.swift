@@ -1,15 +1,47 @@
 // RealtimeSessionAudioIO
 //
-// SCA-79 — extracted from RealtimeSession.swift. Owns the outbound mic
-// path (PCM16 → base64 → realtimeInput.audio frames), the half-duplex
-// mute window during model speech / playback drain / refresh handoff,
-// AVAudioSession interruption + route-change + media-services-reset
-// handling, and the foreground mic-permission re-check.
+// SCA-79 — extracted from RealtimeSession.swift. Owns:
 //
-// All instance stored properties (audioPipeline, audioInterruptionObserver,
-// foregroundObserver, micForwardTask, lastInboundAudioAt, transport,
-// stateMachine, etc.) live on the main RealtimeSession class declaration
-// in RealtimeSession.swift. Methods here read them via `self`.
+//   - **Outbound mic forwarding**: PCM16 → base64 →
+//     `realtimeInput.audio` frames pushed onto the live transport,
+//     with the half-duplex mute window during model speech / playback
+//     drain / refresh handoff.
+//   - **AVAudioSession event handling**: interruption, route change,
+//     media-services-reset routing into a clean teardown.
+//   - **Foreground mic-permission re-check**: detects mid-session
+//     revocation in Settings and force-closes.
+//
+// SCA-168 S6 (CR2): bucket *ownership* matters for ad-hoc reasoning
+// about who-touches-what — clarifying:
+//
+//   Owns (read + write):
+//     - `audioPipeline`           (instantiated by the main file's
+//                                  preWarm; this bucket calls into it)
+//     - `micForwardTask`          (created/cancelled here; also
+//                                  cancelled by main close + StateMachine
+//                                  refresh post-commit failure)
+//     - `audioInterruptionObserver`, `foregroundObserver`
+//                                 (start here; stop in main close)
+//
+//   Consumes (read-only from this file):
+//     - `transport`               (read on every mic-frame iteration to
+//                                  pick up a refresh-time swap dynamically)
+//     - `stateMachine.state`      (mute-gate condition)
+//     - `isRefreshing`            (mute-gate condition during the
+//                                  ~1.7-3.6s refresh handoff)
+//     - per-turn anchors (`turnStartedAt` etc.) — only read from
+//       `handleAudioInterruption` to decide if a turn must be recorded
+//       as transport-error before tearing down.
+//
+// All instance stored properties live on the main `RealtimeSession`
+// class declaration (Swift extensions in separate files cannot host
+// stored properties). Methods here read them via `self`.
+//
+// SCA-168 S10 (CR3): `Logger.voice` is declared in
+// `Speech/AVAudioSessionConfigurator.swift`. A future relocation of
+// the Speech bucket must keep the `static let voice` declaration
+// reachable from this file; same applies to the other three GeminiLive
+// files that use the logger.
 
 import AVFoundation
 import Foundation
@@ -285,10 +317,5 @@ extension RealtimeSession {
                 }
             }
         }
-    }
-
-    private func stopMicForwarding() {
-        micForwardTask?.cancel()
-        micForwardTask = nil
     }
 }

@@ -1,17 +1,37 @@
 // RealtimeSessionTransport
 //
-// SCA-79 — extracted from RealtimeSession.swift. Owns the WebSocket
-// transport plumbing: token-mint request building, household-context
-// projection (with TTL cache), the inbound receive dispatcher,
-// `awaitSetupComplete` continuation pattern, transport-error recovery
-// glue, and the outbound tool-call round-trip (handleToolCall +
-// dispatchTool + dispatchSubstitution + their helpers).
+// SCA-79 — extracted from RealtimeSession.swift. Owns two related but
+// distinct concerns (after SCA-161 moved handleTransportError out into
+// the StateMachine bucket):
+//
+//   - **WS transport plumbing**: token-mint request building,
+//     household-context projection (with TTL cache),
+//     `startReceiveDispatcher` (the inbound frame Task),
+//     `awaitSetupComplete` continuation pattern.
+//   - **Tool-call round-trip**: `handleToolCall` + `dispatchTool` +
+//     `dispatchSubstitution` + the timer-snapshot helpers
+//     (`snapshotToDict`, `makeNoneTimerSnapshot`, `makeStepResponse`).
+//     Tool-call dispatch is application-layer behavior — it touches
+//     `turnContainedToolCall` / `lastToolCallName`, the substitution
+//     callbacks, the timer callbacks, and the recipe domain. The trigger
+//     just happens to arrive over the wire.
+//
+// SCA-79 review W4 (CR1): tool-call dispatch is ~70% of this file.
+// Eventual extraction into a dedicated `RealtimeSessionTools.swift` is
+// tracked in `docs/deferred-work.md` (trigger: this file > ~1,800 LOC,
+// OR Gemini Live moves to GA, OR a third bucket needs cross-coupling).
+// Until then, the `// MARK: - tool-call round-trip` section header at
+// the boundary lets Xcode's symbol jumper navigate cleanly.
 //
 // All instance stored properties (transport, dispatcherGeneration,
 // receiveDispatcherTask, cachedHouseholdContext + ...At,
 // setupCompleteContinuation, setupCompleteGeneration, etc.) live on
 // the main RealtimeSession class declaration in RealtimeSession.swift.
 // Methods here read them via `self`.
+//
+// Logger.voice is declared in `Speech/AVAudioSessionConfigurator.swift`
+// (cross-bucket dependency); a future Speech-bucket relocation must
+// keep the `static let voice` declaration reachable from this file.
 
 import Foundation
 import OSLog
@@ -23,11 +43,26 @@ extension RealtimeSession {
     /// Shared coercion mirror of `CookModeViewModel.safeInstructionText`.
     /// Keeps buildMintRequest's allSteps + currentStepText Zod-safe
     /// without depending on the VM class.
+    ///
+    /// SCA-168 S15 (DB1): file-scoped `private static`. Must stay
+    /// co-located with `buildMintRequest` (sole caller). A future
+    /// refactor that moves `buildMintRequest` out of this file must
+    /// move this helper alongside, OR the move will orphan the call
+    /// sites and break compilation.
     private static func safeInstructionText(_ raw: String?) -> String {
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "(step instruction unavailable)" : trimmed
     }
 
+    /// SCA-168 S16 (SA2): security invariant — this routine MUST read
+    /// `cookingSession.id` / `recipePlan.id` from the bound `cookingSession`
+    /// and never accept caller-supplied substitutes. The
+    /// `init(testingOnlyMintResponse:...)` DEBUG-only initializer in
+    /// the main file pre-populates `mintResponse` directly without
+    /// hitting this code path, so the invariant is intact in release
+    /// builds. A future caller that wants to mint against a different
+    /// cooking session must construct a separate `RealtimeSession`
+    /// instance — do not parameterize this method.
     func buildMintRequest(
         recap: String? = nil,
         isRefresh: Bool = false,
@@ -118,7 +153,7 @@ extension RealtimeSession {
         return ctx
     }
 
-    private static let householdContextTTLSec: TimeInterval = 60
+    private static let householdContextTTLSec: TimeInterval = 60  // SCA-168 S15: file-scoped private; must stay co-located with buildHouseholdContext.
 
     func clearHouseholdContextCache() {
         cachedHouseholdContext = nil
@@ -643,92 +678,6 @@ extension RealtimeSession {
                 "error": "upstream_failed",
                 "message": "Tell the user substitution check failed and to tap the Substitution Sheet.",
             ]
-        }
-    }
-
-    // MARK: - transport error recovery
-
-    private func handleTransportError(_ error: any Error) async {
-        // Stale-dispatcher suppression has moved into the receive
-        // dispatcher's catch block (generation-token check in
-        // `startReceiveDispatcher`). Any error reaching THIS method is
-        // guaranteed to come from the currently-live dispatcher, which
-        // means it's a real transport failure worth handling.
-        #if DEBUG
-        VoiceSessionLog.logError("transport.error", error: error, [
-            "state": stateMachine.state.rawValue,
-        ])
-        #endif
-        // P0-A / P0-H (2026-04-23): refresh outcome dictates recovery.
-        //   .success          → new transport is live; the old transport
-        //                       errored but we recovered. Settle state
-        //                       back to .ready if we were mid-turn
-        //                       (the turn's user audio may or may not
-        //                       have reached Gemini — unknowable — but
-        //                       staying pinned in .modelSpeaking with no
-        //                       active response would freeze the UX).
-        //   .preCommitFailure → refresh never swapped. Old transport is
-        //                       the one that errored, so it's dead. We
-        //                       have no working WS. Advance to .error
-        //                       + record the lost turn.
-        //   .postCommitFailure→ refresh swapped then handshake failed;
-        //                       refreshSession already advanced state
-        //                       to .error and closed the old transport.
-        //                       Record the lost turn.
-        //   .skipped          → guard short-circuited (refresh already
-        //                       in flight, or state already terminal).
-        //                       Treat like preCommitFailure from the
-        //                       caller's perspective.
-        let hadActiveTurn = (turnStartedAt != nil)
-        let outcome = await refreshSession(reason: "transport_error")
-        switch outcome {
-        case .success:
-            if hadActiveTurn {
-                // Clear per-turn state; the turn is lost either way.
-                // No VoiceTurn row persisted — if Gemini actually
-                // processed the user utterance before the drop, we'd
-                // be double-counting by persisting here. The next
-                // user-visible tap / utterance will start a fresh turn.
-                currentTurnInlineText = nil
-                currentTurnUserTranscript = nil
-                turnStartedAt = nil
-                userTurnEndAt = nil
-                firstModelAudioAt = nil
-                turnContainedToolCall = false
-                lastToolCallName = nil
-            }
-            // Refresh landed; settle the machine into a tap-ready state
-            // so the UX doesn't hang on the prior "Thinking…" indicator.
-            if stateMachine.state != .ready && stateMachine.state != .closed && stateMachine.state != .error {
-                stateMachine.advance(to: .ready)
-            }
-        case .postCommitFailure:
-            // State already .error and old transport closed inside
-            // refreshSession. Record the lost turn for ADR 0015 trigger
-            // visibility.
-            if hadActiveTurn {
-                recordTurnAsTransportError()
-            }
-        case .preCommitFailure, .skipped:
-            // Old transport is the one that errored. Session is dead.
-            if stateMachine.state != .closed && stateMachine.state != .error {
-                stateMachine.advance(to: .error)
-            }
-            if hadActiveTurn {
-                recordTurnAsTransportError()
-            }
-        }
-        // Nil-clear each continuation BEFORE resume so a concurrent
-        // happy-path resolve (e.g., a setupComplete / turnComplete
-        // frame racing the transport error) doesn't double-resume the
-        // same CheckedContinuation — that's a crash.
-        if let cont = turnCompleteContinuation {
-            turnCompleteContinuation = nil
-            cont.resume(throwing: error)
-        }
-        if let cont = setupCompleteContinuation {
-            setupCompleteContinuation = nil
-            cont.resume(throwing: error)
         }
     }
 }

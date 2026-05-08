@@ -31,8 +31,8 @@
 //   * `use_soon_scheduled` { fire_at, item_display_name }
 //   * `use_soon_fired`     (delivery; via StirNotificationDelegate)
 //   * `use_soon_tapped`    (deep-link tap)
-//   * `use_soon_suppressed` { reason: "weekly_cap" | "no_candidate" |
-//                                     "recent_session" }
+//   * `use_soon_suppressed` { reason: "weekly_cap" | "unactioned_streak" |
+//                                     "recent_session" | "no_candidate" }
 
 import CoreData
 import Foundation
@@ -90,7 +90,7 @@ final class UseSoonScheduler {
             ])
             return
         }
-        if history.firesInLastWeek(asOf: now).count >= 2 {
+        if history.firesInLastWeek(asOf: now).count >= NotificationHistoryStore.weeklyCap {
             telemetry.capture(.useSoonSuppressed, properties: [
                 "reason": "weekly_cap",
             ])
@@ -168,10 +168,19 @@ final class UseSoonScheduler {
             )
         } catch {
             Logger.useSoon.warning(
-                "add failed: \(error.localizedDescription, privacy: .public) — rolling back",
+                "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
             )
+            // CA2-08: log rollback re-add failure rather than silently
+            // discarding via `try?` — leaves the user with no pending
+            // use-soon at all and we need a signal.
             if let prior {
-                try? await center.add(prior)
+                do {
+                    try await center.add(prior)
+                } catch {
+                    Logger.useSoon.error(
+                        "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending use-soon",
+                    )
+                }
             }
         }
     }
@@ -232,7 +241,15 @@ final class UseSoonScheduler {
         case .denied:
             return false
         case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            // CA2-09: don't silently collapse a thrown auth error to "denied".
+            do {
+                return try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                Logger.useSoon.warning(
+                    "requestAuthorization threw: \(error.localizedDescription, privacy: .private)",
+                )
+                return false
+            }
         @unknown default:
             return false
         }

@@ -16,16 +16,26 @@
 //   * stir.widget_nudge.lastShown.v1       (Date)
 //   * stir.widget_nudge.permanently_dismissed.v1 (Bool)
 //
-// Telemetry:
+// Telemetry (matches CLAUDE.md telemetry events list):
 //   * widget_nudge_shown        — capture on visible-presentation
 //   * widget_nudge_dismissed    {outcome ∈ {acted, deferred, suppressed}}
-//   * widget_nudge_acted        — call when user taps "Show me how"
+//                                — "acted" outcome is the user-tapped-Show-me-how
+//                                  path; emit `widget_nudge_dismissed { outcome: "acted" }`,
+//                                  NOT a separate widget_nudge_acted event.
+//
+// DI: `WidgetNudgeService` is coordinator-injectable per the SCA-56
+// CR1-S8 anti-pattern callout. The `.shared` singleton is retained as
+// a default arg for the StirDeepLink call site (which has no
+// coordinator handle) but new consumers should reach for
+// `coordinator.widgetNudgeService` and avoid the singleton.
 
 import Foundation
 import OSLog
 
 @MainActor
 final class WidgetNudgeService {
+    /// Default-arg fallback for the StirDeepLink site only. New
+    /// consumers should inject through RootCoordinator.
     static let shared = WidgetNudgeService()
 
     private let defaults: UserDefaults

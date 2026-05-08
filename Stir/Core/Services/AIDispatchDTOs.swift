@@ -1293,15 +1293,34 @@ struct PushRegisterResponse: Decodable, Sendable {
 // "submitted" vs "already pending" without a separate GET.
 
 struct UsersDeleteRequestResponse: Decodable, Sendable {
-    let deletionRequestID: String
-    let state: String
+    /// CR1 review: typed enum mirrors the DB `deletion_request_state`
+    /// ENUM (migration 20260508000002) + the ops-admin Zod schema. A
+    /// backend-side state addition (e.g., 'cancelled') would otherwise
+    /// go unnoticed by iOS until a surface tried to match.
+    enum State: String, Decodable, Sendable {
+        case pending
+        case approved
+        case processing
+        case completed
+        case failed
+    }
+
+    let deletionRequestID: UUID
+    let state: State
     let requestedAt: String
+    /// Surfaced when the server returned the most-recent `failed` row
+    /// for this user (idempotent retry after a fulfillment-worker
+    /// failure). iOS can show the user the prior reason; logged-only
+    /// for now per CCPA-friendly UX (we don't want to dwell on a past
+    /// failure when the SLA clock is what matters).
+    let failureReason: String?
     let idempotent: Bool
 
     enum CodingKeys: String, CodingKey {
         case deletionRequestID = "deletion_request_id"
         case state
         case requestedAt = "requested_at"
+        case failureReason = "failure_reason"
         case idempotent
     }
 }

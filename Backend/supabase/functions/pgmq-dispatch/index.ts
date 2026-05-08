@@ -515,9 +515,12 @@ async function maybeSendImportCompletionPush(
       notification_prefs_json: { import_completion?: boolean } | null;
     }>();
   if (error || !installRow) {
-    log.info('no_push_install_for_user', {
-      canonical_user_key_hint: canonicalUserKey.slice(0, 12),
-    });
+    // SA3-M1 (CWE-200): never emit raw canonical_user_key (or partial
+    // prefix). The log line's `request_id` + `endpoint` make it
+    // locatable; the per-user join is via the canonical_key_hash field
+    // that createLogger attaches automatically when the user-scoped
+    // logger is in use. Don't add a `_hint` field.
+    log.info('no_push_install_for_user');
     return;
   }
   if (
