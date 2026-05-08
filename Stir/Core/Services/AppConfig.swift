@@ -33,10 +33,15 @@ struct AppConfig: Sendable, Equatable {
         let publicAPIKey: String
     }
 
+    struct CloudKit: Sendable, Equatable {
+        let apiToken: String
+    }
+
     let supabase: Supabase
     let posthog: PostHog?
     let sentry: Sentry?
     let revenueCat: RevenueCat?
+    let cloudKit: CloudKit?
 
     /// Build identifier surfaced in telemetry + the bootstrap body.
     /// Format: "<CFBundleShortVersionString> (<CFBundleVersion>)".
@@ -44,6 +49,24 @@ struct AppConfig: Sendable, Equatable {
 
     /// iOS version string at launch, surfaced in telemetry + bootstrap body.
     let osVersion: String
+
+    init(
+        supabase: Supabase,
+        posthog: PostHog?,
+        sentry: Sentry?,
+        revenueCat: RevenueCat?,
+        cloudKit: CloudKit? = nil,
+        build: String,
+        osVersion: String,
+    ) {
+        self.supabase = supabase
+        self.posthog = posthog
+        self.sentry = sentry
+        self.revenueCat = revenueCat
+        self.cloudKit = cloudKit
+        self.build = build
+        self.osVersion = osVersion
+    }
 }
 
 extension AppConfig {
@@ -91,6 +114,13 @@ extension AppConfig {
             return RevenueCat(publicAPIKey: key)
         }()
 
+        // --- CloudKit Web Services API token (public, optional) ---
+        let cloudKit: CloudKit? = {
+            let token = Self.optionalString(info, key: "CloudKitAPIToken")
+            guard let token, !token.hasPrefix("$("), !token.isEmpty else { return nil }
+            return CloudKit(apiToken: token)
+        }()
+
         // --- Build metadata ---
         let short = Self.optionalString(info, key: "CFBundleShortVersionString") ?? "0.0.0"
         let bundleVersion = Self.optionalString(info, key: "CFBundleVersion") ?? "0"
@@ -103,6 +133,7 @@ extension AppConfig {
             posthog: posthog,
             sentry: sentry,
             revenueCat: revenueCat,
+            cloudKit: cloudKit,
             build: build,
             osVersion: osVersion,
         )

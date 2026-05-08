@@ -14,6 +14,7 @@ import Foundation
 protocol CloudKitAccountProviding: Sendable {
     func accountStatus() async throws -> CKAccountStatus
     func userRecordID() async throws -> CKRecord.ID
+    func webAuthToken(apiToken: String) async throws -> String
 }
 
 /// Thin real-world implementation backed by `CKContainer.default()`.
@@ -30,6 +31,17 @@ struct CloudKitAccountProvider: CloudKitAccountProviding {
 
     func userRecordID() async throws -> CKRecord.ID {
         try await container.userRecordID()
+    }
+
+    func webAuthToken(apiToken: String) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let operation = CKFetchWebAuthTokenOperation(apiToken: apiToken)
+            operation.qualityOfService = .utility
+            operation.fetchWebAuthTokenResultBlock = { result in
+                continuation.resume(with: result)
+            }
+            container.privateCloudDatabase.add(operation)
+        }
     }
 }
 

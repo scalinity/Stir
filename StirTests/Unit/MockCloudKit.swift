@@ -16,6 +16,7 @@ final class MockCloudKitAccountProvider: CloudKitAccountProviding, @unchecked Se
 
     private let lock = NSLock()
     private var _behavior: AccountBehavior
+    private var _webAuthToken: Result<String, any Error> = .success("mock-web-auth-token")
 
     init(_ behavior: AccountBehavior = .status(.noAccount)) {
         self._behavior = behavior
@@ -24,6 +25,11 @@ final class MockCloudKitAccountProvider: CloudKitAccountProviding, @unchecked Se
     func setBehavior(_ behavior: AccountBehavior) {
         lock.lock(); defer { lock.unlock() }
         self._behavior = behavior
+    }
+
+    func setWebAuthToken(_ result: Result<String, any Error>) {
+        lock.lock(); defer { lock.unlock() }
+        self._webAuthToken = result
     }
 
     func accountStatus() async throws -> CKAccountStatus {
@@ -51,5 +57,13 @@ final class MockCloudKitAccountProvider: CloudKitAccountProviding, @unchecked Se
         case .failure(let e):
             throw e
         }
+    }
+
+    func webAuthToken(apiToken: String) async throws -> String {
+        let result: Result<String, any Error> = {
+            lock.lock(); defer { lock.unlock() }
+            return _webAuthToken
+        }()
+        return try result.get()
     }
 }

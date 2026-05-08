@@ -355,7 +355,13 @@ final class RootCoordinator {
         self.household = household
         self.sentry = sentry
         self.identityService = identityService
-        let client = sessionClient ?? SupabaseSessionClient(config: config, sentry: sentry)
+        let client = sessionClient ?? SupabaseSessionClient(
+            config: config,
+            sentry: sentry,
+            cloudKitWebAuthTokenProvider: { apiToken in
+                await identityService.cloudKitWebAuthToken(apiToken: apiToken)
+            },
+        )
         self.sessionClient = client
         self.aiDispatch = aiDispatch ?? AIDispatch(session: client, config: config)
         self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository(controller: persistenceController)

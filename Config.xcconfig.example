@@ -19,6 +19,12 @@ SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 // SDK; this slot exists for step 5 and is safe to leave empty until then.
 REVENUECAT_PUBLIC_API_KEY =
 
+// --- CloudKit Web Services --------------------------------------------------
+// Public API token used by CKFetchWebAuthTokenOperation. Create in CloudKit
+// Dashboard for iCloud.com.scalinity.stir / production. The matching backend
+// verifier reads CLOUDKIT_API_TOKEN from Supabase secrets.
+CLOUDKIT_API_TOKEN =
+
 // --- PostHog ---------------------------------------------------------------
 // Public project API key (starts with phc_). US host default; if the Stir
 // PostHog project is EU, POSTHOG_HOST below overrides.
