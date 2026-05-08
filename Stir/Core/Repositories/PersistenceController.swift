@@ -24,6 +24,15 @@ import OSLog
 final class PersistenceController {
     static let shared = PersistenceController()
 
+    /// SCA-98 privacy contract: the shape of the runtime save-failure log
+    /// line. Exposed as a constant so `PersistenceControllerSaveTests`
+    /// can assert it never embeds `error.localizedDescription` (Core Data's
+    /// `NSValidationError` userInfo includes user-supplied attribute
+    /// values verbatim, which would publish to system logs at `.public`).
+    /// Any change to the catch-block log line below MUST be reflected
+    /// here, or the regression test will fail.
+    internal static let saveFailureLogFormat = "viewContext save failed: domain=<domain> code=<code>"
+
     let container: NSPersistentCloudKitContainer
 
     var viewContext: NSManagedObjectContext { container.viewContext }
@@ -83,7 +92,17 @@ final class PersistenceController {
         do {
             try context.save()
         } catch {
-            Logger.coreData.error("viewContext save failed: \(error.localizedDescription, privacy: .public)")
+            // SCA-98: log domain+code only. NSError.localizedDescription on Core Data
+            // validation failures embeds the rejected attribute value verbatim
+            // (e.g. `"<displayName>" is not a valid value for the attribute "displayName"`)
+            // — that's user-supplied content, and `.public` interpolation publishes it
+            // to system logs. domain+code preserves enough signal to debug while
+            // keeping any user-typed string out of the log stream. Sentry still
+            // gets the wrapped StirError.coreData(underlying:) below with full context.
+            let nserror = error as NSError
+            Logger.coreData.error(
+                "viewContext save failed: domain=\(nserror.domain, privacy: .public) code=\(nserror.code, privacy: .public)"
+            )
             context.rollback()
             throw StirError.coreData(underlying: error)
         }
