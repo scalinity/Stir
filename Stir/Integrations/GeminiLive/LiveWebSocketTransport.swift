@@ -58,7 +58,15 @@ actor AsyncSemaphore {
 }
 
 @MainActor
-final class LiveWebSocketTransport {
+protocol LiveTransporting: AnyObject {
+    var inbound: AsyncThrowingStream<LiveInboundFrame, Error> { get }
+    func open(url: URL) throws
+    func close()
+    func send(_ frame: LiveOutboundFrame) async throws
+}
+
+@MainActor
+final class LiveWebSocketTransport: LiveTransporting {
     #if DEBUG
     /// Toggle to log every inbound envelope's top-level keys + full
     /// JSON dump (audio base64 redacted) on turnComplete. Off by
@@ -73,7 +81,7 @@ final class LiveWebSocketTransport {
     /// Inbound frame stream. Consumers take this once at open time and
     /// iterate with `for try await`. The stream terminates on close or
     /// on an unrecoverable transport error.
-    private(set) var inbound: AsyncThrowingStream<LiveInboundFrame, Error>!
+    private(set) var inbound: AsyncThrowingStream<LiveInboundFrame, Error>
     private var inboundContinuation: AsyncThrowingStream<LiveInboundFrame, Error>.Continuation!
 
     private let urlSession: URLSession

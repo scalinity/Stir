@@ -23,6 +23,9 @@
 //     exercise the StateMachine pre-mint API surface deterministically.
 //   - Field accessors (`_testMostRecentTtfaMs`, `_testLastToolCallName`)
 //     — tests assert against last-finalized turn state.
+//   - Mock harnesses (`MockMintResponse`, `MockLiveTransport`) — tests can
+//     construct valid mint payloads and drive transport send/receive paths
+//     without touching Gemini Live.
 //
 // What does NOT live here: the `init(testingOnlyMintResponse:...)`
 // initializer remains in `RealtimeSession.swift` inside its own
@@ -172,6 +175,80 @@ extension RealtimeSession {
     /// wiring test (close-invokes-extraction).
     func _testTearDownPreMintSlot() {
         cancelAndClearPreMintSlot()
+    }
+
+    /// SCA-132 test hook: install a caller-owned mock transport without
+    /// opening a URLSessionWebSocketTask. Tests can then start the receive
+    /// dispatcher and yield frames through `MockLiveTransport`.
+    func _testInstallLiveTransport(_ transport: any LiveTransporting) {
+        self.transport = transport
+    }
+}
+
+/// SCA-132: canonical mock mint payload builder. Keeps voice tests from
+/// hand-writing subtly different `RealtimeSessionResponse` fixtures.
+enum MockMintResponse {
+    static func make(
+        authToken: String = "auth_tokens/test",
+        expiresAt: String = "2027-01-01T00:00:00Z",
+        sessionID: String = UUID().uuidString,
+        wsURL: String = "wss://generativelanguage.googleapis.com/v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=auth_tokens/test",
+        promptVersion: String = "1.0.0",
+        setupFrameJSON: String = "{\"setup\":{}}",
+    ) -> RealtimeSessionResponse {
+        RealtimeSessionResponse(
+            authToken: authToken,
+            expiresAt: expiresAt,
+            sessionID: sessionID,
+            wsURL: wsURL,
+            promptVersion: promptVersion,
+            setupFrameJSON: setupFrameJSON,
+        )
+    }
+}
+
+/// SCA-132: deterministic in-memory Live transport. It records opened URLs
+/// and outbound frames, and lets tests yield inbound frames directly into
+/// RealtimeSession's normal receive dispatcher.
+@MainActor
+final class MockLiveTransport: LiveTransporting {
+    private(set) var inbound: AsyncThrowingStream<LiveInboundFrame, Error>
+    private var continuation: AsyncThrowingStream<LiveInboundFrame, Error>.Continuation!
+
+    private(set) var openedURLs: [URL] = []
+    private(set) var sentFrames: [LiveOutboundFrame] = []
+    private(set) var isClosed = false
+
+    var openError: Error?
+    var sendError: Error?
+
+    init() {
+        let pair = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
+        inbound = pair.stream
+        continuation = pair.continuation
+    }
+
+    func open(url: URL) throws {
+        if let openError { throw openError }
+        openedURLs.append(url)
+    }
+
+    func close() {
+        isClosed = true
+        continuation.finish()
+    }
+
+    func send(_ frame: LiveOutboundFrame) async throws {
+        if let sendError { throw sendError }
+        sentFrames.append(frame)
+    }
+
+    func yield(_ frame: LiveInboundFrame) {
+        continuation.yield(frame)
+    }
+
+    func finish(throwing error: Error? = nil) {
+        continuation.finish(throwing: error)
     }
 }
 

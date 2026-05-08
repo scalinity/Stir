@@ -173,14 +173,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         // Task<T, Error>'s body runs on creation; by the time
         // `_testSetPreMintTask` returns, `.value` is already resolved.
         let ready = Task<RealtimeSessionResponse, Error> {
-            RealtimeSessionResponse(
-                authToken: "auth_tokens/test-ready",
-                expiresAt: "2027-01-01T00:00:00Z",
-                sessionID: stubSessionID,
-                wsURL: "wss://test.invalid",
-                promptVersion: "1.0.0",
-                setupFrameJSON: "{\"setup\":{}}",
-            )
+            MockMintResponse.make(sessionID: stubSessionID)
         }
         session._testSetPreMintTask(ready, startedAt: Date())
         XCTAssertTrue(session._testPendingPreMintIsSet, "precondition: slot set")
@@ -232,13 +225,9 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         let session = makeDriver()
         let stubSessionID = UUID().uuidString
         let ready = Task<RealtimeSessionResponse, Error> {
-            RealtimeSessionResponse(
+            MockMintResponse.make(
                 authToken: "auth_tokens/test-boundary-fresh",
-                expiresAt: "2027-01-01T00:00:00Z",
                 sessionID: stubSessionID,
-                wsURL: "wss://test.invalid",
-                promptVersion: "1.0.0",
-                setupFrameJSON: "{\"setup\":{}}",
             )
         }
         let staleBoundary = LiveSessionBudget.preMintStalenessSec
@@ -309,6 +298,33 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         }
     }
 
+    func test_preMintTask_exactStalenessBoundary_returnsNilAndCancels() async throws {
+        let baseline = Date(timeIntervalSinceReferenceDate: 10_000)
+        let session = makeDriver(now: {
+            baseline.addingTimeInterval(LiveSessionBudget.preMintStalenessSec)
+        })
+        let sentinel = Task<RealtimeSessionResponse, Error> {
+            try await Task.sleep(for: .seconds(60))
+            XCTFail("sentinel should have been cancelled at the exact staleness boundary")
+            throw CancellationError()
+        }
+        session._testSetPreMintTask(sentinel, startedAt: baseline)
+
+        let consumed = session._testConsumePreMintedTaskIfFresh()
+
+        XCTAssertNil(consumed, "age == preMintStalenessSec must be stale because production uses a strict fresh-age comparison")
+        XCTAssertFalse(session._testPendingPreMintIsSet, "slot must clear after exact-boundary stale discard")
+        XCTAssertNil(session._testPendingPreMintStartedAt, "timestamp must clear after exact-boundary stale discard")
+        do {
+            _ = try await sentinel.value
+            XCTFail("exact-boundary stale discard must cancel the task")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("sentinel threw unexpected error: \(error)")
+        }
+    }
+
     // MARK: - P1-P.4 — in-flight-await (Behavior A contract)
 
     /// The in-flight case: consume is called while the pre-mint task is
@@ -365,13 +381,10 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         // Task body's `for try await` loop returns the first yielded
         // value; `continuation.finish()` closes the stream so the
         // implicit `throw CancellationError()` path isn't taken.
-        continuation.yield(RealtimeSessionResponse(
+        continuation.yield(MockMintResponse.make(
             authToken: "auth_tokens/test-in-flight",
-            expiresAt: "2027-01-01T00:00:00Z",
             sessionID: stubSessionID,
             wsURL: "wss://test.invalid",
-            promptVersion: "1.0.0",
-            setupFrameJSON: "{\"setup\":{}}",
         ))
         continuation.finish()
 
@@ -470,6 +483,28 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         )
     }
 
+    // MARK: - SCA-132 — mock live transport harness
+
+    func test_mockLiveTransport_yieldsSetupCompleteThroughReceiveDispatcher() async throws {
+        let session = makeDriver()
+        let transport = MockLiveTransport()
+        session._testInstallLiveTransport(transport)
+        session.startReceiveDispatcher()
+
+        let waiter = Task { @MainActor in
+            try await session.awaitSetupComplete(timeoutSec: 1)
+        }
+        await Task.yield()
+
+        transport.yield(.setupComplete)
+        try await waiter.value
+
+        try await transport.send(.setupRawJSON("{\"setup\":{}}"))
+        XCTAssertEqual(transport.sentFrames.count, 1, "mock transport must capture outbound frames")
+        transport.close()
+        XCTAssertTrue(transport.isClosed, "mock transport must record close state")
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
@@ -479,7 +514,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
     /// HTTP, the fail-fast protocol surfaces it via XCTFail. The
     /// integration test (5, commit 6) uses a sibling helper that routes
     /// through MockURLProtocol for scripted responses.
-    private func makeDriver() -> RealtimeSession {
+    private func makeDriver(now: @escaping @Sendable () -> Date = Date.init) -> RealtimeSession {
         let config = AppConfig(
             supabase: AppConfig.Supabase(url: URL(string: "https://test.invalid")!, anonKey: "x"),
             posthog: nil, sentry: nil, revenueCat: nil,
@@ -492,19 +527,13 @@ final class RealtimeSessionPreMintTests: XCTestCase {
             sentry: NoOpSentryReporter(),
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
-        let mint = RealtimeSessionResponse(
-            authToken: "auth_tokens/test",
-            expiresAt: "2027-01-01T00:00:00Z",
-            sessionID: UUID().uuidString,
-            wsURL: "wss://test.invalid",
-            promptVersion: "1.0.0",
-            setupFrameJSON: "{\"setup\":{}}",
-        )
+        let mint = MockMintResponse.make(wsURL: "wss://test.invalid")
         return RealtimeSession(
             testingOnlyMintResponse: mint,
             aiDispatch: aiDispatch,
             voiceTurnRepository: VoiceTurnRepository(controller: controller),
             cookingSession: cookingSession,
+            now: now,
         )
     }
 
@@ -528,14 +557,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
             sentry: NoOpSentryReporter(),
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
-        let mint = RealtimeSessionResponse(
-            authToken: "auth_tokens/test",
-            expiresAt: "2027-01-01T00:00:00Z",
-            sessionID: UUID().uuidString,
-            wsURL: "wss://test.invalid",
-            promptVersion: "1.0.0",
-            setupFrameJSON: "{\"setup\":{}}",
-        )
+        let mint = MockMintResponse.make(wsURL: "wss://test.invalid")
         return RealtimeSession(
             testingOnlyMintResponse: mint,
             aiDispatch: aiDispatch,

@@ -321,10 +321,11 @@ final class RealtimeSession: VoiceSessionDriver {
     let aiDispatch: AIDispatch
     let voiceTurnRepository: VoiceTurnRepository
     let cookingSession: CookingSession
+    let now: @Sendable () -> Date
     let stateMachine = VoiceSessionStateMachine()
 
     // Transport + audio
-    var transport: LiveWebSocketTransport?  // SCA-159 non-private: refresh swap in StateMachine, open in main file
+    var transport: (any LiveTransporting)?  // SCA-159 non-private: refresh swap in StateMachine, open in main file
     var audioPipeline: LiveAudioPipeline?  // SCA-159 non-private: read by AudioIO mic forwarder
     /// P0-D (2026-04-23): observes AVAudioSession interruption /
     /// route-change / media-services-reset events and forwards them to
@@ -803,10 +804,12 @@ final class RealtimeSession: VoiceSessionDriver {
         aiDispatch: AIDispatch,
         voiceTurnRepository: VoiceTurnRepository,
         cookingSession: CookingSession,
+        now: @escaping @Sendable () -> Date = Date.init,
     ) {
         self.aiDispatch = aiDispatch
         self.voiceTurnRepository = voiceTurnRepository
         self.cookingSession = cookingSession
+        self.now = now
     }
 
     #if DEBUG
@@ -820,10 +823,12 @@ final class RealtimeSession: VoiceSessionDriver {
         aiDispatch: AIDispatch,
         voiceTurnRepository: VoiceTurnRepository,
         cookingSession: CookingSession,
+        now: @escaping @Sendable () -> Date = Date.init,
     ) {
         self.aiDispatch = aiDispatch
         self.voiceTurnRepository = voiceTurnRepository
         self.cookingSession = cookingSession
+        self.now = now
         self.mintResponse = testingOnlyMintResponse
     }
     #endif
@@ -1011,7 +1016,7 @@ final class RealtimeSession: VoiceSessionDriver {
         currentTurnInlineText = nil
         currentTurnUserTranscript = nil
         turnUsageAccumulator.reset()
-        turnStartedAt = Date()
+        turnStartedAt = now()
 
         stateMachine.advance(to: .userSpeaking)
         try pipeline.startCapture()
