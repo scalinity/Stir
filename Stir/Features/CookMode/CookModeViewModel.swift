@@ -1793,6 +1793,18 @@ final class CookModeViewModel {
     /// SCA-204 empty-string footgun from leaking to callers.
     private func matchIngredient(named query: String) -> IngredientMatchResult {
         let q = query.lowercased()
+        // SCA-204 (/review-2 S6): defensive empty-string guard.
+        // `applyVoiceSubstitution` already upstream-guards via
+        // `trimmedMissing.isEmpty`, but if a future caller skips the
+        // upstream guard, `name.contains("")` would return true for
+        // every non-empty ingredient name — every ingredient would
+        // qualify as a substring match, ties would form on the longest
+        // single name length, and the result would be a non-empty
+        // `.tie([…])` of all the longest ingredients. SCA-201 made
+        // this method `private` so the realistic blast radius is
+        // small, but the guard is one line and removes the footgun
+        // class entirely.
+        guard !q.isEmpty else { return .none }
         let candidates = recipePlan.ingredientArray
         if let exact = candidates.first(where: {
             ($0.displayName ?? "").caseInsensitiveCompare(query) == .orderedSame

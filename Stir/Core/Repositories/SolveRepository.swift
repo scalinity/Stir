@@ -358,7 +358,15 @@ final class SolveRepository {
                 bg.rollback()
                 throw StirError.coreData(underlying: error)
             }
-            let persistMs = Int((Date().timeIntervalSince(saveStart) * 1000).rounded())
+            // SCA-202 (/review-2 S4): clamp to ≥0. `Date().timeIntervalSince(_:)`
+            // can return a negative value if the wall clock NTPs backwards
+            // mid-save (rare but possible on devices that sync large clock
+            // corrections). A negative `persist_ms` would land on PostHog
+            // and noise up the long-tail dashboard signal the property
+            // exists to surface. Clamping here keeps the telemetry honest
+            // — a "0 ms" reading on a clock-skew event is more useful
+            // than a negative one.
+            let persistMs = max(0, Int((Date().timeIntervalSince(saveStart) * 1000).rounded()))
             return (recipe.objectID, persistMs)
         }
 
