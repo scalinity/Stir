@@ -13,10 +13,28 @@
 //     the top. Free users see the filter but its "Favorites" side is
 //     gated with a paywall tap.
 //
+// SCA-152 (2026-05-08): added Core Data observation. Pre-SCA-152 the
+// view loaded once via `.task` and only re-loaded on Cook Mode cover
+// dismissal. Cross-device CloudKit pushes (e.g. another device flips
+// a favorite or soft-deletes a plan) left the foregrounded list
+// stale until the user navigated away and back. The view now listens
+// to two notifications:
+//   - `.NSManagedObjectContextDidSave` — in-process saves (Cook Mode
+//     finishing, favorite toggle from elsewhere, leftovers solve
+//     persistence)
+//   - `.NSPersistentStoreRemoteChange` — CloudKit-pushed remote
+//     changes that auto-merge into viewContext via the container's
+//     `automaticallyMergesChangesFromParent`. Only fires for store-
+//     level changes (cross-device or extension writes), not for the
+//     in-process save case (didSave covers those).
+// Both feed a single 300ms-debounced reload so a flurry of changes
+// reduces to one load() call.
+//
 // Read path goes through CookingSessionRepository.savedMealEntries —
 // the view doesn't open NSFetchRequest itself (kept layering clean so
 // step 7's full favorites + filters work doesn't have to refactor).
 
+import CoreData
 import OSLog
 import SwiftUI
 
@@ -43,6 +61,14 @@ struct SavedMealsView: View {
     /// re-walked rows × ingredients. Rebuilt via .onChange on its
     /// inputs (rows / debouncedSearchQuery / sortOption / favorites).
     @State private var filteredRows: [CookingSessionRepository.SavedMealEntry] = []
+    /// SCA-152: debounce handle for the Core Data reload pipeline.
+    /// CloudKit pushes can fire several `NSPersistentStoreRemoteChange`
+    /// notifications in quick succession when a multi-row CloudKit
+    /// transaction lands; debouncing collapses them into a single
+    /// `load()` call after a quiet 300ms window. The window is short
+    /// enough that the AC's "row disappears within 5s of CloudKit push"
+    /// holds easily — push latency dominates anyway.
+    @State private var reloadDebounceTask: Task<Void, Never>?
 
     /// Filter + sort pipeline. Consults pre-computed searchBlobs so each
     /// keystroke is a dictionary lookup + substring match — no per-row
@@ -169,6 +195,28 @@ struct SavedMealsView: View {
         .onChange(of: debouncedSearchQuery) { rebuildFilteredRows() }
         .onChange(of: sortOption) { rebuildFilteredRows() }
         .onChange(of: showFavoritesOnly) { rebuildFilteredRows() }
+        // SCA-152: re-load when ANY in-process Core Data save lands.
+        // Filter is broad on purpose — saved-meal entries depend on
+        // RecipePlan + CookingSession + OutcomeFeedback joins, and the
+        // existing repository fetch is cheap enough (~5-10 ms in-memory
+        // cache hits) that filtering by entity type isn't worth the
+        // complexity. The 300ms debounce is the real noise-suppressor.
+        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
+            scheduleReload()
+        }
+        // SCA-152: re-load when CloudKit pushes a remote change to the
+        // store. NSPersistentCloudKitContainer auto-merges these into
+        // viewContext via `automaticallyMergesChangesFromParent`, but
+        // the merge fires `NSManagedObjectContextObjectsDidChange` on
+        // viewContext, NOT didSave — so a foregrounded view won't see
+        // the new state without listening here. This is the load-
+        // bearing notification for the cross-device test in the
+        // SCA-152 ticket: device A flips a favorite, device B has the
+        // Saved tab foregrounded, B's row updates within the debounce
+        // window of the CloudKit push.
+        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+            scheduleReload()
+        }
         .fullScreenCover(item: $cookAgainPlan) { plan in
             CookModeRoot(
                 recipePlan: plan,
@@ -392,6 +440,26 @@ struct SavedMealsView: View {
     }
 
     // MARK: - Load
+
+    /// SCA-152: debounced reload trigger for Core Data save notifications.
+    /// Each call cancels the prior pending Task and starts a new 300ms
+    /// sleep; only the latest fires `load()`. Hits any of the source
+    /// notifications (`NSManagedObjectContextDidSave`,
+    /// `NSPersistentStoreRemoteChange`) coalesce to one reload regardless
+    /// of how many fire inside the window. Notifications can arrive on
+    /// any thread; the @MainActor Task hop pins the load to the main
+    /// actor matching the existing `.task { await load() }` contract.
+    private func scheduleReload() {
+        reloadDebounceTask?.cancel()
+        reloadDebounceTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 300_000_000)
+            } catch {
+                return // cancelled by next save event — intended
+            }
+            await load()
+        }
+    }
 
     @MainActor
     private func load() async {
