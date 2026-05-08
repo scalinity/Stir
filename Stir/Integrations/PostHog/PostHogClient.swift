@@ -229,6 +229,14 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case leftoversFollowupFired      = "leftovers_followup_fired"
     case leftoversFollowupTapped     = "leftovers_followup_tapped"
     case leftoversFollowupSuppressed = "leftovers_followup_suppressed"
+    // SCA-64 — use-soon notification lifecycle. Same shape as
+    // leftovers_followup_*; spec §15 + CLAUDE.md canonical. _suppressed
+    // carries `reason ∈ {weekly_cap, unactioned_streak, recent_session,
+    // no_candidate}`. _scheduled carries {fire_at, item_display_name}.
+    case useSoonScheduled  = "use_soon_scheduled"
+    case useSoonFired      = "use_soon_fired"
+    case useSoonTapped     = "use_soon_tapped"
+    case useSoonSuppressed = "use_soon_suppressed"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
     // are spec §15 canonical (destination NOT export_target; parse_quality
     // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`

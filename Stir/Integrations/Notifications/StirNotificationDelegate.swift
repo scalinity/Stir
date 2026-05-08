@@ -8,6 +8,8 @@
 //     reminder fires (delivery or tap-through; spec §15 canonical).
 //   - Emitting `leftovers_followup_fired` when the +20h leftovers
 //     followup fires (delivery only; SCA-65, spec §15 canonical).
+//   - Emitting `use_soon_fired` when the use-soon ingredient
+//     notification fires (delivery only; SCA-64, spec §15 canonical).
 //
 // The delegate is installed at launch by StirApp via
 // `StirNotificationDelegate.register()`. It's a singleton because
@@ -69,6 +71,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     ) {
         emitTelemetryIfReactivation(notification)
         emitTelemetryIfLeftoversFollowup(notification)
+        emitTelemetryIfUseSoon(notification)
 
         let userInfo = notification.request.content.userInfo
         if TimerNotification.isTimer(from: userInfo) {
@@ -90,6 +93,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     ) {
         emitTelemetryIfReactivation(response.notification)
         emitTelemetryIfLeftoversFollowup(response.notification)
+        emitTelemetryIfUseSoon(response.notification)
         completionHandler()
     }
 
@@ -131,5 +135,20 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         guard shouldEmit else { return }
 
         telemetry.capture(.leftoversFollowupFired, properties: [:])
+    }
+
+    /// Emit `use_soon_fired` when the SCA-64 ingredient-expiry
+    /// notification reaches the device. Same dedupe pattern.
+    private func emitTelemetryIfUseSoon(_ notification: UNNotification) {
+        let userInfo = notification.request.content.userInfo
+        guard UseSoonNotification.isUseSoon(from: userInfo) else { return }
+
+        let id = notification.request.identifier
+        emitLock.lock()
+        let shouldEmit = emittedReminderIDs.insert(id).inserted
+        emitLock.unlock()
+        guard shouldEmit else { return }
+
+        telemetry.capture(.useSoonFired, properties: [:])
     }
 }

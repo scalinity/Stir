@@ -103,6 +103,27 @@ final class CookingSessionRepository {
 
     // MARK: - Reads
 
+    /// Most recent `endedAt` for a completed cooking session in this
+    /// household, if any. Used by SCA-64's UseSoonScheduler to suppress
+    /// the use-soon nudge when the user has cooked in the trailing
+    /// 24h (a recent cook satisfies the "use it soon" goal already).
+    func mostRecentCompletedAt(for household: HouseholdProfile) throws -> Date? {
+        let request = NSFetchRequest<CookingSession>(entityName: "CookingSession")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "recipePlan.household == %@", household),
+            NSPredicate(format: "status == %@", CookingSession.Status.completed.rawValue),
+            NSPredicate(format: "endedAt != nil"),
+        ])
+        request.sortDescriptors = [NSSortDescriptor(key: "endedAt", ascending: false)]
+        request.fetchLimit = 1
+        let context = controller.viewContext
+        do {
+            return try context.fetch(request).first?.endedAt
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+    }
+
     /// Most recent resumable session for a household (active, not
     /// deleted, endedAt == nil). Drives the Tonight Home resume-card.
     /// Nil if nothing to resume.

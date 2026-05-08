@@ -632,6 +632,44 @@ final class PantryItemRepository {
         return nextMorningStart.addingTimeInterval(6 * 3600)
     }
 
+    /// Fetch ephemeral rows whose `expiresAt` is in the trailing 48-hour
+    /// window — i.e. not yet expired but close enough that the user
+    /// should burn them soon (SCA-64). Pre-existing soft-deletion sweep
+    /// covers `expiresAt < now`; this carves out the lookahead window.
+    /// Caller (UseSoonScheduler) decides what "soon" means; we accept
+    /// it as a parameter so future tunings don't re-touch the
+    /// repository surface.
+    ///
+    /// Spec §8 row 944 says "remembered item with `expiresAt <= 48h`",
+    /// but `.remembered` rows leave `expiresAt` nil per the
+    /// `.ephemeral` carve-out below — the spec text was approximate.
+    /// The use-soon trigger applies to ephemeral (freshness-tracked)
+    /// rows; remembered staples don't have a freshness clock and are
+    /// out of scope.
+    func fetchExpiringSoon(
+        within window: TimeInterval = 48 * 3600,
+        now: Date = Date(),
+        for household: HouseholdProfile,
+    ) throws -> [PantryItem] {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt == nil"),
+            NSPredicate(format: "memoryState == %@", PantryItem.MemoryState.ephemeral.rawValue),
+            NSPredicate(
+                format: "expiresAt != nil AND expiresAt > %@ AND expiresAt <= %@",
+                now as NSDate,
+                now.addingTimeInterval(window) as NSDate,
+            ),
+        ])
+        request.sortDescriptors = [NSSortDescriptor(key: "expiresAt", ascending: true)]
+        do {
+            return try controller.viewContext.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+    }
+
     /// Bulk-soft-delete ephemeral pantry rows past their expiresAt.
     /// Wired to the foreground sweep at app `.scenePhase == .active`
     /// (SCA-22). Idempotent — re-call within the same minute returns

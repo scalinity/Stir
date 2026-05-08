@@ -77,7 +77,11 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     // MARK: - HistoryStore
 
     func test_historyStore_capPerWeek_returnsRecentFires() {
-        let store = HistoryStore(defaults: defaults)
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
         store.recordScheduled(fireAt: Date().addingTimeInterval(-3 * 86_400))
         store.recordScheduled(fireAt: Date().addingTimeInterval(-1 * 86_400))
         store.recordScheduled(fireAt: Date().addingTimeInterval(-10 * 86_400))  // outside window
@@ -86,7 +90,11 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     }
 
     func test_historyStore_unactionedStreakSetsSuppression() {
-        let store = HistoryStore(defaults: defaults)
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
         store.recordScheduled(fireAt: Date().addingTimeInterval(-2 * 86_400))
         store.recordScheduled(fireAt: Date().addingTimeInterval(-1 * 86_400))
         XCTAssertNil(store.suppressedUntil, "two unactioned in history; the THIRD scheduling triggers suppression")
@@ -95,7 +103,11 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     }
 
     func test_historyStore_actionClearsSuppression() {
-        let store = HistoryStore(defaults: defaults)
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
         store.recordScheduled(fireAt: Date().addingTimeInterval(-2 * 86_400))
         store.recordScheduled(fireAt: Date().addingTimeInterval(-1 * 86_400))
         store.recordScheduled(fireAt: Date())  // suppression armed
@@ -105,7 +117,11 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     }
 
     func test_historyStore_actionedRunResetsStreak() {
-        let store = HistoryStore(defaults: defaults)
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
         store.recordScheduled(fireAt: Date().addingTimeInterval(-3 * 86_400))
         store.markMostRecentActioned(at: Date())
         store.recordScheduled(fireAt: Date().addingTimeInterval(-1 * 86_400))

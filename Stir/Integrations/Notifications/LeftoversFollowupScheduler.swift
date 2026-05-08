@@ -40,7 +40,7 @@ final class LeftoversFollowupScheduler {
 
     private let center: any UserNotificationCenterClient
     private let calendar: Calendar
-    private let history: HistoryStore
+    private let history: NotificationHistoryStore
     private let telemetry: PostHogClient
 
     init(
@@ -51,7 +51,11 @@ final class LeftoversFollowupScheduler {
     ) {
         self.center = center
         self.calendar = calendar
-        self.history = HistoryStore(defaults: defaults)
+        self.history = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
         self.telemetry = telemetry
     }
 
@@ -203,90 +207,6 @@ final class LeftoversFollowupScheduler {
         @unknown default:
             return false
         }
-    }
-}
-
-// MARK: - HistoryStore
-
-/// UserDefaults-backed history of fire/action events. Bounded to the
-/// last 5 entries so the storage stays trivially small.
-@MainActor
-final class HistoryStore {
-    private let defaults: UserDefaults
-    private static let key = "stir.leftovers_followup.history.v1"
-    private static let suppressionKey = "stir.leftovers_followup.suppressed_until.v1"
-    private static let maxEntries = 5
-
-    struct Entry: Codable, Equatable {
-        let fireAt: Date
-        var actioned: Bool
-    }
-
-    init(defaults: UserDefaults) {
-        self.defaults = defaults
-    }
-
-    var suppressedUntil: Date? {
-        defaults.object(forKey: Self.suppressionKey) as? Date
-    }
-
-    /// Returns fire timestamps within the trailing 7-day window from
-    /// `asOf`. Used for the 2-per-week cap check.
-    func firesInLastWeek(asOf: Date) -> [Date] {
-        let cutoff = asOf.addingTimeInterval(-7 * 86_400)
-        return load()
-            .filter { $0.fireAt >= cutoff }
-            .map { $0.fireAt }
-    }
-
-    /// Append a scheduled-fire entry. Also evaluates the unactioned
-    /// streak — if the prior 2 entries were both unactioned, set the
-    /// 14-day suppression starting now.
-    func recordScheduled(fireAt: Date) {
-        var entries = load()
-        let prior = entries.suffix(2)
-        if prior.count == 2, prior.allSatisfy({ !$0.actioned }) {
-            // Two unactioned in a row → suppress 14 days from now.
-            // Don't append the new entry under suppression; the caller
-            // shouldn't have reached recordScheduled if suppressed,
-            // but defend against an out-of-order call by tagging the
-            // suppression first.
-            defaults.set(
-                Date().addingTimeInterval(14 * 86_400),
-                forKey: Self.suppressionKey,
-            )
-        }
-        entries.append(Entry(fireAt: fireAt, actioned: false))
-        if entries.count > Self.maxEntries {
-            entries = Array(entries.suffix(Self.maxEntries))
-        }
-        save(entries)
-    }
-
-    /// Mark the most recent fire as actioned. Also clears any active
-    /// suppression — the user just demonstrated engagement.
-    func markMostRecentActioned(at _: Date) {
-        var entries = load()
-        guard let last = entries.indices.last else { return }
-        entries[last].actioned = true
-        save(entries)
-        defaults.removeObject(forKey: Self.suppressionKey)
-    }
-
-    /// For tests — clear all state.
-    func reset() {
-        defaults.removeObject(forKey: Self.key)
-        defaults.removeObject(forKey: Self.suppressionKey)
-    }
-
-    private func load() -> [Entry] {
-        guard let data = defaults.data(forKey: Self.key) else { return [] }
-        return (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
-    }
-
-    private func save(_ entries: [Entry]) {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        defaults.set(data, forKey: Self.key)
     }
 }
 

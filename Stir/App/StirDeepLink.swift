@@ -11,6 +11,7 @@
 //   stir://cook/timer/<timerId>
 //   stir://paywall/widget
 //   stir://leftovers?source=notification          (SCA-65)
+//   stir://tonight?use_first=<pantryItemId>        (SCA-64)
 //
 // Unknown paths fall through to `.unknown` and the app opens to its
 // default destination — widgets failing silently is strictly better
@@ -36,6 +37,11 @@ enum StirDeepLink: Equatable {
     /// `source` is the originating surface ("notification" today; future
     /// in-app entry points may add new values without breaking the parse).
     case leftoversFollowup(source: String)
+    /// SCA-64 — use-soon notification tapped. Carries the optional
+    /// `useFirstPantryItemId` so Tonight Home can prefill the
+    /// constraints sheet with "use first this ingredient" when the
+    /// item is still in the pantry.
+    case useSoon(useFirstPantryItemId: UUID?)
     case unknown(raw: String)
 
     /// Parse a URL into a typed destination. Returns `.unknown` for
@@ -68,6 +74,14 @@ enum StirDeepLink: Equatable {
             let source = components.queryItems?
                 .first(where: { $0.name == "source" })?.value ?? "notification"
             return .leftoversFollowup(source: source)
+        case ("tonight", _):
+            // SCA-64: stir://tonight?use_first=<uuid> from the use-soon
+            // notification. UUID parse-failure falls through to nil
+            // (the user still lands on Tonight Home; just no prefill).
+            let raw = components.queryItems?
+                .first(where: { $0.name == "use_first" })?.value
+            let id = raw.flatMap(UUID.init(uuidString:))
+            return .useSoon(useFirstPantryItemId: id)
         case ("solve", let parts) where parts.count == 1:
             guard let solveID = UUID(uuidString: parts[0]) else {
                 return .unknown(raw: url.absoluteString)
@@ -100,6 +114,7 @@ enum StirDeepLink: Equatable {
         case .cookTimer:       return "liveactivity.timer"
         case .paywallWidget:   return "widget.paywall"
         case .leftoversFollowup: return "notification.leftovers_followup"
+        case .useSoon:           return "notification.use_soon"
         case .unknown:         return "deeplink.unknown"
         }
     }
@@ -141,6 +156,13 @@ enum StirDeepLinkHandler {
             // recent leftover-eligible cook and routes straight to
             // LeftoversRoot — see follow-up filed at SCA-65 close-out.
             LeftoversFollowupScheduler.shared.recordAction()
+        case .useSoon:
+            // SCA-64 v1: record the action and land on Tonight. The
+            // ConstraintsSheet prefill from `useFirstPantryItemId` is
+            // out of scope for SCA-64 — it ships alongside the Tonight
+            // Home use-soon card surface (see SCA-86). Until then the
+            // user sees a familiar Tonight + can manually solve.
+            UseSoonScheduler.shared.recordAction()
         case .solve, .dishPreview, .cookTimer, .unknown:
             // v1: widget/Live-Activity tap foregrounds the app; the
             // user lands on their last-active screen. Specific

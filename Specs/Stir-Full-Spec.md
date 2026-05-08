@@ -1708,6 +1708,10 @@ See §12.3. In addition:
 | `leftovers_followup_fired`         | (none)                                                                                         | leftovers retention loop   | Engagement              |
 | `leftovers_followup_tapped`        | (none)                                                                                         | leftovers retention loop   | Engagement              |
 | `leftovers_followup_suppressed`    | reason ∈ {weekly_cap, unactioned_streak}                                                       | leftovers retention loop   | Engagement              |
+| `use_soon_scheduled`               | fire_at, item_display_name                                                                     | use-soon retention loop    | Engagement              |
+| `use_soon_fired`                   | (none)                                                                                         | use-soon retention loop    | Engagement              |
+| `use_soon_tapped`                  | (none)                                                                                         | use-soon retention loop    | Engagement              |
+| `use_soon_suppressed`              | reason ∈ {weekly_cap, unactioned_streak, recent_session, no_candidate}                         | use-soon retention loop    | Engagement              |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
 | `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |

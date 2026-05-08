@@ -157,6 +157,8 @@
 		8138014FAFF13F77C895A6A8 /* ConfigurationErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40092CAC050DF5BA95E9711C /* ConfigurationErrorView.swift */; };
 		817B86409212D9D46EB748BF /* UserNotificationCenterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0D72B1E8BC34F51F6DD0059 /* UserNotificationCenterClient.swift */; };
 		A65A001000000001 /* LeftoversFollowupScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000002 /* LeftoversFollowupScheduler.swift */; };
+		A65A001000000005 /* UseSoonScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000006 /* UseSoonScheduler.swift */; };
+		A65A001000000007 /* NotificationHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000008 /* NotificationHistoryStore.swift */; };
 		819E44609CB366A4A791A839 /* TimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F4A1DD9C752F0E6F25ADFC /* TimerLiveActivity.swift */; };
 		82079A96A7F44851F2DBAC7C /* RealtimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37216544E460CDD56A4AFF6D /* RealtimeSession.swift */; };
 		825AC9F3318A1AC1D5EFCFAE /* PaywallCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E18E95A0E72D3D285F84F70F /* PaywallCard.swift */; };
@@ -612,6 +614,8 @@
 		EFF64AB19CD4B07E54B0EF7B /* SanityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanityTest.swift; sourceTree = "<group>"; };
 		F0D72B1E8BC34F51F6DD0059 /* UserNotificationCenterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserNotificationCenterClient.swift; sourceTree = "<group>"; };
 		A65A001000000002 /* LeftoversFollowupScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoversFollowupScheduler.swift; sourceTree = "<group>"; };
+		A65A001000000006 /* UseSoonScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseSoonScheduler.swift; sourceTree = "<group>"; };
+		A65A001000000008 /* NotificationHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryStore.swift; sourceTree = "<group>"; };
 		F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChip.swift; sourceTree = "<group>"; };
 		F2075E34D782898B6DAC024A /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F22AE7BFB6D533E20798A3C4 /* StartNewDinnerSolveIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartNewDinnerSolveIntent.swift; sourceTree = "<group>"; };
@@ -1055,9 +1059,11 @@
 			isa = PBXGroup;
 			children = (
 				A65A001000000002 /* LeftoversFollowupScheduler.swift */,
+				A65A001000000008 /* NotificationHistoryStore.swift */,
 				9BCD3DF9316F0867951228BB /* NotificationPreferencesStore.swift */,
 				5BA5D3B10982CD095498B875 /* ReactivationScheduler.swift */,
 				761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */,
+				A65A001000000006 /* UseSoonScheduler.swift */,
 				F0D72B1E8BC34F51F6DD0059 /* UserNotificationCenterClient.swift */,
 			);
 			path = Notifications;
@@ -1829,6 +1835,8 @@
 				A3F7C6232C29044444C18041 /* Typography.swift in Sources */,
 				817B86409212D9D46EB748BF /* UserNotificationCenterClient.swift in Sources */,
 				A65A001000000001 /* LeftoversFollowupScheduler.swift in Sources */,
+				A65A001000000005 /* UseSoonScheduler.swift in Sources */,
+				A65A001000000007 /* NotificationHistoryStore.swift in Sources */,
 				AD737537FFA0AD5C5980B072 /* VoiceActiveStepView.swift in Sources */,
 				616D0F1FDAD72EC8FC0F7496 /* VoiceSessionDriver.swift in Sources */,
 				D27F838D6C3061E0534FF8BD /* VoiceSessionLog.swift in Sources */,
