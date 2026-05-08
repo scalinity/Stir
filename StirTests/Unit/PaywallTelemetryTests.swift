@@ -20,7 +20,7 @@ final class PaywallTelemetryTests: XCTestCase {
         .purchaseStarted: ["sku", "origin"],
         .purchaseCompleted: ["sku", "price", "trial", "intro_offer"],
         .restorePurchasesTapped: ["origin"],
-        .entitlementStateChanged: ["from_state", "to_state", "billing_state"],
+        .entitlementStateChanged: ["from_state", "to_state", "billing_state", "source"],
         // SCA-120: `source` added to the canonical-keys snapshot so
         // the typed BillingTelemetryProperties.favoriteSaved(...:source:)
         // overload locks in the spec §15:1701 enum
