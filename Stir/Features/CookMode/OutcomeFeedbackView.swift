@@ -508,12 +508,25 @@ struct OutcomeFeedbackView: View {
             }
         }
 
-        // 2. SCA-66: rating ≥ 4 on an un-saved recipe → suggest save.
+        // 2. SCA-66: rating ≥ 4 on a NOT-yet-favorited recipe → suggest save.
         //    Per-recipePlanId suppression honored ("never nag again for
         //    same recipe" per spec §8 row 947 fallback).
+        //
+        //    SCA-109 fix: gate on `isFavorite`, NOT `isSaved`. Per
+        //    CLAUDE.md "Save for later = isFavorite — Tonight and Saved
+        //    Share the Same Bit". `CookingSessionRepository.markCompleted`
+        //    flips `isSaved=true` synchronously BEFORE
+        //    `finishPresentationRequested` is set, so by the time submit()
+        //    runs and reads the recipe state, `isSaved` is always true.
+        //    The pre-fix gate was dead code in production: SCA-66 unit
+        //    tests passed because they construct a fresh RecipePlan that
+        //    never goes through markCompleted, but real cook flows never
+        //    saw the suggestSave card. `isFavorite` is set ONLY by
+        //    explicit `SolveRepository.setFavorite`, matching the intent
+        //    "user hasn't favorited yet."
         if rating >= 4,
            let plan = recipePlan,
-           plan.isSaved == false,
+           plan.isFavorite == false,
            let planId = plan.id,
            !repeatCandidateSuppression.isSuppressed(recipePlanId: planId) {
             return .suggestSave(recipePlanId: planId)

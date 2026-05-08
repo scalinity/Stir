@@ -149,7 +149,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
 
     func test_suggestSave_premium_ratingFourUnsaved_returnsSuggestSave() {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
-        let plan = makeRecipePlan(isSaved: false)
+        let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
         let intent = OutcomeFeedbackView.postSubmitIntent(
             leftoverCount: 0,
@@ -165,7 +165,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         // Free still gets the card — the card itself routes "Yes" to
         // the savedFavoritesGate paywall.
         let entitlements = makeEntitlements(tier: .free, billingState: .none)
-        let plan = makeRecipePlan(isSaved: false)
+        let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
         let intent = OutcomeFeedbackView.postSubmitIntent(
             leftoverCount: 0,
@@ -179,7 +179,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
 
     func test_suggestSave_ratingThree_returnsDismiss() {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
-        let plan = makeRecipePlan(isSaved: false)
+        let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
         let intent = OutcomeFeedbackView.postSubmitIntent(
             leftoverCount: 0,
@@ -191,9 +191,11 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         XCTAssertEqual(intent, .dismiss)
     }
 
-    func test_suggestSave_alreadySaved_returnsDismiss() {
+    func test_suggestSave_alreadyFavorited_returnsDismiss() {
+        // SCA-109: gate reads `isFavorite`, NOT `isSaved`. A user who's
+        // already favorited the recipe shouldn't be re-prompted to save.
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
-        let plan = makeRecipePlan(isSaved: true)
+        let plan = makeRecipePlan(isFavorite: true)
         let suppression = makeFreshSuppressionStore()
         let intent = OutcomeFeedbackView.postSubmitIntent(
             leftoverCount: 0,
@@ -205,9 +207,33 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         XCTAssertEqual(intent, .dismiss)
     }
 
+    /// SCA-109 regression: `CookingSessionRepository.markCompleted()`
+    /// flips `isSaved=true` synchronously before OutcomeFeedback presents.
+    /// The pre-fix gate read `isSaved`, which made the entire suggestSave
+    /// branch dead code in production. Verify the post-fix gate
+    /// (`isFavorite`) correctly routes to suggestSave when ONLY isSaved
+    /// is true (the real production state) and isFavorite is still false.
+    func test_suggestSave_isSavedTrueButNotFavorited_stillReturnsSuggestSave() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        // Simulate the real production state right before OutcomeFeedback
+        // submit() runs: markCompleted has set isSaved=true, but the
+        // user has NOT explicitly favorited via setFavorite, so
+        // isFavorite is still false. The card MUST surface here.
+        let plan = makeRecipePlan(isFavorite: false, isSaved: true)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 5,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+    }
+
     func test_suggestSave_suppressed_returnsDismiss() {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
-        let plan = makeRecipePlan(isSaved: false)
+        let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
         suppression.suppress(recipePlanId: plan.id!)
         let intent = OutcomeFeedbackView.postSubmitIntent(
@@ -224,7 +250,7 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         // Conflict matrix: when both leftovers AND high-rating fire,
         // leftovers wins (more actionable; spec implicit).
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
-        let plan = makeRecipePlan(isSaved: false)
+        let plan = makeRecipePlan(isFavorite: false)
         let suppression = makeFreshSuppressionStore()
         let intent = OutcomeFeedbackView.postSubmitIntent(
             leftoverCount: 2,
@@ -267,12 +293,22 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeRecipePlan(isSaved: Bool) -> RecipePlan {
+    /// SCA-109: helper now exposes `isFavorite` (the gate's actual bit)
+    /// AND `isSaved` (still surfaced because some integration tests want
+    /// to seed the post-`markCompleted` state). `isSaved` defaults to
+    /// `isFavorite`'s value to match `SolveRepository.setFavorite`'s
+    /// sticky behavior — a real Core Data row would have both bits flip
+    /// together. Callers that need to test the divergent state
+    /// (`isSaved=true, isFavorite=false`, i.e. "the cook session marked
+    /// it complete but the user hasn't explicitly favorited") pass
+    /// explicit values for both.
+    private func makeRecipePlan(isFavorite: Bool, isSaved: Bool? = nil) -> RecipePlan {
         let context = controller.viewContext
         let plan = RecipePlan(context: context)
         plan.id = UUID()
         plan.title = "Miso-Glazed Salmon"
-        plan.isSaved = isSaved
+        plan.isFavorite = isFavorite
+        plan.isSaved = isSaved ?? isFavorite
         plan.origin = "ai"
         return plan
     }
