@@ -60,6 +60,7 @@ final class ScanViewModelTests: XCTestCase {
                 expiresAt: nil,
                 voiceEnabled: tier != .free,
                 billingRetryBanner: false,
+                standingPantryCap: nil,
                 quotas: [],
             ))
         }

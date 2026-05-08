@@ -1155,6 +1155,8 @@ Apple's current docs confirm Billing Grace Period behavior, support for offer co
 | **Voice Cook Sessions / month** | **0**  |       **13** |       **27** |
 | Recipe Imports / month   |        2 | unlimited | unlimited |
 | Remembered pantry items  |       25 |       250 |     1,000 |
+
+The "Remembered pantry items" cap is shipped to iOS on `entitlements.standing_pantry_cap` (bootstrap + config-bootstrap; SCA-100). iOS reads the wire value via `EntitlementService.rememberedPantryCap`, which falls back to `Tier.rememberedPantryCap` (constant table) when the field is absent (pre-SCA-100 server response or cold-launch-before-bootstrap). Server-side resolution goes through `effectiveTier()` so a stale RevenueCat row with `billing_state IN ('none','expired')` correctly demotes to the Free cap. Cap is enforced client-side only — user content lives in CloudKit per north-star #3, not Postgres — so the iOS gate (`PantryListViewModel`, `ScanViewModel`) is the only enforcement point. Future cap changes (marketing A/B, per-user override) ship via the bootstrap response without an iOS release; values stay in lockstep with the table above.
 | **Cook Mode voice**      |     **no** |     **yes** |     **yes** |
 | Substitution Sheet (text) |      yes |       yes |       yes |
 | Saved favorites          |       no |       yes |       yes |

@@ -12,10 +12,21 @@ enum Tier: String, Codable, Sendable, CaseIterable, Equatable {
 
     /// Standing-pantry-item cap per tier — CLAUDE.md §Tier-entitlements
     /// is the authoritative source. Centralized here so the value table
-    /// has one home; `EntitlementService.rememberedPantryCap` routes
-    /// through `effectiveTier` to apply the stale-snapshot demotion.
-    /// PaywallTrigger.subheadline references the values inline because
-    /// it's user-facing copy, not a programmatic constant.
+    /// has one home.
+    ///
+    /// SCA-100: this constant table is now the FALLBACK path; the
+    /// authoritative runtime value ships from the server on
+    /// `entitlements.standing_pantry_cap` (bootstrap + config-bootstrap).
+    /// `EntitlementService.rememberedPantryCap` prefers the server
+    /// value and falls back to this table only when the field is
+    /// absent (pre-SCA-100 server response or cold-launch-before-
+    /// bootstrap). Once the SCA-100 deploy has been live for a release
+    /// cycle and the iOS field is non-optional, this table can shrink
+    /// to a "panic value" or be deleted.
+    ///
+    /// PaywallTrigger.subheadline still references the values inline
+    /// because it's user-facing copy, not a programmatic constant —
+    /// that copy stays in lockstep with the server values manually.
     var rememberedPantryCap: Int {
         switch self {
         case .free:    return 25

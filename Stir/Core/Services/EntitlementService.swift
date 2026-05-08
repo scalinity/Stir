@@ -86,6 +86,13 @@ final class EntitlementService {
     /// shape). iOS surfaces this when Apple is retrying a failed renewal and
     /// the user still has paid access in the grace window.
     private(set) var billingRetryBanner: Bool = false
+    /// SCA-100: server-shipped standing-pantry-cap. Nil only between
+    /// init and the first hydrate (or when the server omitted the field
+    /// in a pre-SCA-100 response — see `standingPantryCap` getter for
+    /// the fallback). Stored separately from `Tier.rememberedPantryCap`
+    /// so a future server-side override (marketing A/B, per-user
+    /// experiment) doesn't need an iOS release.
+    private(set) var serverStandingPantryCap: Int?
     private(set) var quotas: [FeatureKey: QuotaSnapshot] = [:]
     private(set) var featureFlags: [String: BootstrapResponse.FeatureFlag] = [:]
     private(set) var hydrationState: HydrationState = .loading
@@ -129,6 +136,7 @@ final class EntitlementService {
         self.expiresAt = entitlements.expiresAt
         self.voiceEnabled = entitlements.voiceEnabled
         self.billingRetryBanner = entitlements.billingRetryBanner
+        self.serverStandingPantryCap = entitlements.standingPantryCap
         // Mirror the tier into the App Group so StirWidgets can gate
         // Premium content without a Supabase round-trip from the widget
         // process. Written on every hydrate so webhook/tier-change
@@ -252,6 +260,14 @@ final class EntitlementService {
         let expiresAt: Date?
         let voiceEnabled: Bool
         let billingRetryBanner: Bool
+        /// SCA-100: cached so a Keychain-restore path (24h offline
+        /// fallback) carries the server-resolved cap instead of falling
+        /// back to the static `Tier.rememberedPantryCap` table. Optional
+        /// to tolerate v2 snapshots written before this field landed —
+        /// the SCA-100 deploy slot is short enough (one release cycle)
+        /// that bumping the snapshot key to V3 just to add an optional
+        /// field would burn the cache for every existing user.
+        let serverStandingPantryCap: Int?
         let quotas: [FeatureKey: QuotaSnapshot]
         let cachedAt: Date
     }
@@ -266,6 +282,7 @@ final class EntitlementService {
             expiresAt: expiresAt,
             voiceEnabled: voiceEnabled,
             billingRetryBanner: billingRetryBanner,
+            serverStandingPantryCap: serverStandingPantryCap,
             quotas: quotas,
             cachedAt: Date(),
         )
@@ -306,6 +323,7 @@ final class EntitlementService {
             self.expiresAt = snapshot.expiresAt
             self.voiceEnabled = snapshot.voiceEnabled
             self.billingRetryBanner = snapshot.billingRetryBanner
+            self.serverStandingPantryCap = snapshot.serverStandingPantryCap
             self.quotas = snapshot.quotas
             self.hydrationState = .hydrated(source: .cachedSnapshot)
             Logger.entitlement.info("restored entitlement snapshot from cache (age \(Int(age), privacy: .public)s)")
@@ -358,13 +376,29 @@ final class EntitlementService {
 }
 
 extension EntitlementService {
-    /// Standing-pantry-item cap per tier. Sourced from
-    /// `Tier.rememberedPantryCap` (single value table) and routed
-    /// through `effectiveTier` so a stale Keychain snapshot
+    /// Standing-pantry-item cap per tier. SCA-100: prefers the server-
+    /// shipped value from the bootstrap response so a future cap
+    /// override (marketing A/B, per-user experiment) ships without an
+    /// iOS release. Falls back to `Tier.rememberedPantryCap` (the
+    /// constant table) when the server omitted the field — covers the
+    /// pre-SCA-100 server response case (in-flight rolling deploy) and
+    /// the cold-launch-before-bootstrap window.
+    ///
+    /// Effective-tier routing applies to BOTH the server value AND the
+    /// fallback: a stale Keychain snapshot
     /// `(tier=.premium, billingState=.none)` correctly demotes to the
-    /// Free cap — same defense the rest of the file relies on for
-    /// every other entitlement decision. Used by `PantryListViewModel`
-    /// for client-side quota gating on manual adds (cap is not
-    /// enforced server-side because user content is CloudKit-only).
-    var rememberedPantryCap: Int { effectiveTier.rememberedPantryCap }
+    /// Free cap on the fallback path. The server value is already
+    /// effective-tier-resolved by `standingPantryCap()` in the Edge
+    /// Function — no double-resolution risk.
+    ///
+    /// Used by `PantryListViewModel` and `ScanViewModel` for client-
+    /// side quota gating on manual adds and scan upserts (the cap is
+    /// not enforced server-side because user content lives in
+    /// CloudKit per north-star #3).
+    var rememberedPantryCap: Int {
+        if let serverValue = serverStandingPantryCap {
+            return serverValue
+        }
+        return effectiveTier.rememberedPantryCap
+    }
 }

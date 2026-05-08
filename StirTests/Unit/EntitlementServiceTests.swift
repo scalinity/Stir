@@ -367,6 +367,57 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertEqual(Tier.pro.rememberedPantryCap, 1_000)
     }
 
+    // MARK: - SCA-100 — server-shipped standing_pantry_cap
+
+    /// Server value wins over the Tier-table fallback. Sanity-check the
+    /// migration's primary contract: `entitlements.standing_pantry_cap`
+    /// from the wire is what `rememberedPantryCap` returns when present.
+    func test_rememberedPantryCap_prefersServerValueWhenPresent() {
+        let service = EntitlementService(keychain: MockKeychain())
+        // Tier=.free would normally cap at 25; server says 75 (a future
+        // marketing A/B). The service must return the server value.
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 75,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 75,
+                       "server-shipped cap MUST override the Tier constant table")
+    }
+
+    /// Pre-SCA-100 server response (or in-flight rolling deploy) omits
+    /// the field. The fallback path uses `Tier.rememberedPantryCap`
+    /// keyed on the EFFECTIVE tier so a stale RevenueCat row still
+    /// demotes correctly.
+    func test_rememberedPantryCap_fallsBackToTierTableWhenServerOmits() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: nil,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 250,
+                       "missing server field falls back to Tier.rememberedPantryCap")
+
+        let staleService = EntitlementService(keychain: MockKeychain())
+        staleService.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .expired, standingPantryCap: nil,
+        ))
+        XCTAssertEqual(staleService.rememberedPantryCap, 25,
+                       "fallback path STILL routes through effectiveTier — expired premium → free cap")
+    }
+
+    /// The server value is taken at face value — including for
+    /// effective-tier-demoted users — because the Edge Function already
+    /// resolves via `effectiveTier(entitlement)` before shipping the
+    /// number. Double-resolution would risk drift if the two
+    /// implementations diverge.
+    func test_rememberedPantryCap_serverValueTakenAtFaceValueForExpiredPremium() {
+        let service = EntitlementService(keychain: MockKeychain())
+        // Hypothetical: server demoted to free's 25 because billingState=expired.
+        // iOS does NOT re-resolve to a different value — it trusts the wire.
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .expired, standingPantryCap: 25,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 25)
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [
@@ -380,6 +431,7 @@ final class EntitlementServiceTests: XCTestCase {
         billingState: BillingState,
         voiceEnabled: Bool = false,
         billingRetryBanner: Bool = false,
+        standingPantryCap: Int? = nil,
         quotas: [BootstrapResponse.Quota]? = nil,
     ) -> BootstrapResponse.Entitlements {
         BootstrapResponse.Entitlements(
@@ -389,6 +441,7 @@ final class EntitlementServiceTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: voiceEnabled,
             billingRetryBanner: billingRetryBanner,
+            standingPantryCap: standingPantryCap,
             quotas: quotas ?? Self.defaultQuotas,
         )
     }

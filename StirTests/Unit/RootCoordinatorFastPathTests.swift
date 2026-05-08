@@ -70,6 +70,7 @@ final class RootCoordinatorFastPathTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: false,
             billingRetryBanner: false,
+            standingPantryCap: nil,
             quotas: [],
         ))
         return EntitlementService(keychain: keychain)

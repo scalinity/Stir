@@ -27,6 +27,7 @@ import {
   MissingQuotaRowError,
   readEntitlement,
   readQuotasForWire,
+  standingPantryCap,
   toIsoDate,
 } from '../_shared/entitlements.ts';
 import type { QuotaWire } from '../_shared/entitlements.ts';
@@ -228,6 +229,13 @@ Deno.serve(async (req) => {
         expires_at: entitlement.expires_at,
         voice_enabled: voiceEnabled,
         billing_retry_banner: billingRetryBanner,
+        // SCA-100: standing-pantry-cap value table moved server-side.
+        // iOS reads this off the wire instead of computing from
+        // `Tier.rememberedPantryCap`, so future cap changes ship without
+        // an iOS release. `standingPantryCap` routes through
+        // `effectiveTier` so a stale RevenueCat row with
+        // `billing_state = expired` correctly demotes to Free's cap.
+        standing_pantry_cap: standingPantryCap(entitlement),
         quotas,
       },
       feature_flags: flags,

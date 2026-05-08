@@ -379,6 +379,7 @@ One round trip, no race, no join. Empty return = capped.
     "expires_at": "2027-04-18T00:00:00Z" | null,
     "voice_enabled": true | false,
     "billing_retry_banner": true | false,
+    "standing_pantry_cap": 25 | 250 | 1000,
     "quotas": [
       { "feature_key": "dinner_solve", "used": 3, "cap": 6, "period_end": "2026-05-17" }
     ]
@@ -394,6 +395,7 @@ One round trip, no race, no join. Empty return = capped.
 Shape rules:
 
 - `voice_enabled` is **SERVER-COMPUTED** (`tier IN ('premium','pro') AND billing_state IN ('active','trial','grace','cancelled_active')`), never derived on iOS.
+- `standing_pantry_cap` (SCA-100) is **SERVER-RESOLVED** off `effectiveTier` (Free 25 / Premium 250 / Pro 1000 — same source as the `Tier entitlements` table below). iOS reads this off the wire instead of computing from a constant table; future cap changes (marketing A/B, per-user override) ship without an iOS release. Optional on the iOS DTO during the SCA-100 rollout window so a pre-SCA-100 server response decodes cleanly — `EntitlementService.rememberedPantryCap` falls back to `Tier.rememberedPantryCap` when the field is nil.
 - `quotas` is an **array** (iterable), not a keyed object. Fields are `used`/`cap`/`period_end` — not `used_count`/`cap_count`/`period_start`.
 - `period_end` is **always included**, never client-computed.
 - `feature_flags` is an **array of metadata objects** (`key`, `value`, `is_enabled`, `rollout_pct`) — not a flat map.
