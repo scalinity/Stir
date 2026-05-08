@@ -154,6 +154,10 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      // SCA-224: 8s timeout. Edge Function wall is ~150s and rows
+      // process serially; without a per-fetch cap a single hung TLS
+      // handshake wedges every subsequent row.
+      signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok && resp.status !== 404) {
       return { error: truncate(`sentry_http_${resp.status}`, 200) };
@@ -163,6 +167,13 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
       user_id_hash: ctx.canonicalUserKeyHash,
     };
   } catch (err) {
+    // AbortError on timeout shouldn't block the postgres sweep — the
+    // privacy-promise minimum is server-side data erasure. Surface it
+    // as requires_manual_action so the failure is observable + retryable
+    // by ops without stranding the row in 'failed' on a transient stall.
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return { requires_manual_action: true, error: 'sentry_timeout_8s' };
+    }
     return { error: truncate(String(err), 200) };
   }
 }
@@ -190,6 +201,10 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+      // SCA-224: 8s timeout — RC's DELETE /v1/subscribers/{id} has 5–30s
+      // p99 latency on hash misses. Without a cap a slow row wedges the
+      // serial loop and exhausts the 150s tick wall.
+      signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok && resp.status !== 404) {
       return { error: truncate(`revenuecat_http_${resp.status}`, 200) };
@@ -199,6 +214,9 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
       app_user_id_hash: ctx.canonicalUserKeyHash,
     };
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return { requires_manual_action: true, error: 'revenuecat_timeout_8s' };
+    }
     return { error: truncate(String(err), 200) };
   }
 }
