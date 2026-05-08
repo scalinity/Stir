@@ -151,7 +151,23 @@ struct CookModeRoot: View {
                     // fullScreenCover) so the user keeps context on the
                     // underlying surface; medium presentationDetent
                     // applied inside the card view itself.
-                    .sheet(item: $repeatCandidateContext) { ctx in
+                    .sheet(
+                        item: $repeatCandidateContext,
+                        // SCA-116: route the parent CookMode dismiss
+                        // through the .sheet onDismiss parameter so
+                        // EVERY dismissal path closes Cook Mode —
+                        // button taps AND swipe-down-to-dismiss.
+                        // Pre-fix the close lived only in the card's
+                        // onDismiss closure, which `.sheet(item:)`
+                        // does NOT invoke on swipe-down (the binding
+                        // setter nils the item directly without
+                        // running the closure body). Result: card
+                        // disappeared but Cook Mode stayed open
+                        // underneath, trapping the user.
+                        onDismiss: {
+                            onDismiss()
+                        },
+                    ) { ctx in
                         RepeatCandidateCard(
                             recipePlan: recipePlan,
                             entitlements: entitlements,
@@ -173,13 +189,15 @@ struct CookModeRoot: View {
                                     coordinator.presentPaywall(trigger)
                                 }
                             },
+                            // SCA-116: card-action close path nils the
+                            // binding only. The parent CookMode dismiss
+                            // runs from the .sheet `onDismiss:` above,
+                            // so both swipe-down and explicit button
+                            // taps converge on the same close. Avoids
+                            // double-firing onDismiss() when the
+                            // binding-set + closure-call both run.
                             onDismiss: {
                                 repeatCandidateContext = nil
-                                // Dismiss CookModeRoot itself once the
-                                // user has acted on (or skipped) the
-                                // save prompt — same terminal behavior
-                                // as the .dismiss case in handlePostSubmit.
-                                onDismiss()
                             },
                         )
                         .id(ctx.id)  // force fresh view per recipe
