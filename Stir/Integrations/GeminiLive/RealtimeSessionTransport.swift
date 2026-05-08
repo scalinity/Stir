@@ -43,11 +43,26 @@ extension RealtimeSession {
     /// Shared coercion mirror of `CookModeViewModel.safeInstructionText`.
     /// Keeps buildMintRequest's allSteps + currentStepText Zod-safe
     /// without depending on the VM class.
+    ///
+    /// SCA-168 S15 (DB1): file-scoped `private static`. Must stay
+    /// co-located with `buildMintRequest` (sole caller). A future
+    /// refactor that moves `buildMintRequest` out of this file must
+    /// move this helper alongside, OR the move will orphan the call
+    /// sites and break compilation.
     private static func safeInstructionText(_ raw: String?) -> String {
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "(step instruction unavailable)" : trimmed
     }
 
+    /// SCA-168 S16 (SA2): security invariant — this routine MUST read
+    /// `cookingSession.id` / `recipePlan.id` from the bound `cookingSession`
+    /// and never accept caller-supplied substitutes. The
+    /// `init(testingOnlyMintResponse:...)` DEBUG-only initializer in
+    /// the main file pre-populates `mintResponse` directly without
+    /// hitting this code path, so the invariant is intact in release
+    /// builds. A future caller that wants to mint against a different
+    /// cooking session must construct a separate `RealtimeSession`
+    /// instance — do not parameterize this method.
     func buildMintRequest(
         recap: String? = nil,
         isRefresh: Bool = false,
@@ -138,7 +153,7 @@ extension RealtimeSession {
         return ctx
     }
 
-    private static let householdContextTTLSec: TimeInterval = 60
+    private static let householdContextTTLSec: TimeInterval = 60  // SCA-168 S15: file-scoped private; must stay co-located with buildHouseholdContext.
 
     func clearHouseholdContextCache() {
         cachedHouseholdContext = nil

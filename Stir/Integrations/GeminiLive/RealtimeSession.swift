@@ -1002,6 +1002,13 @@ final class RealtimeSession: VoiceSessionDriver {
         // VM method call). `[weak self]` because the state machine
         // holds the closure and would otherwise retain the session
         // past its natural lifetime.
+        //
+        // SCA-168 S12 (CA2): `rearmTurnStuckWatchdog` /
+        // `cancelTurnStuckWatchdog` referenced inside the closure live
+        // on the StateMachine extension (RealtimeSessionStateMachine.swift) —
+        // they are NOT in this file even though the call site is. Same
+        // pattern as `onVoiceStateChange?(to)` (a callback declared on
+        // this class but typically wired from the VM in CookModeRoot).
         stateMachine.onTransition = { [weak self] from, to in
             #if DEBUG
             VoiceSessionLog.log("state.advance", [

@@ -497,6 +497,15 @@ extension RealtimeSession {
         }
         let age = pendingPreMintStartedAt.map { Date().timeIntervalSince($0) } ?? .infinity
         guard age < LiveSessionBudget.preMintStalenessSec else {
+            // SCA-168 S13 (CR3 / SA2): Swift `Task.cancel()` is cooperative —
+            // `aiDispatch.realtimeSession(request:)`'s underlying URLSession
+            // call may not preempt mid-request, so the mint HTTP call could
+            // still complete and Google issues a token nobody uses. The
+            // resulting orphan token is bounded by Gemini's 35-min `expire_time`
+            // TTL (CLAUDE.md sharp-edge #5), so the leak self-heals; the cost
+            // floor is one unused auth_tokens slot per stale-discard. No
+            // security impact — the token has `uses: 1` and is locked to the
+            // mint-baked setup-frame.
             task.cancel()
             Logger.voice.info(
                 "refresh_premint_stale_discarded age_sec=\(age, privacy: .public)",
@@ -543,8 +552,17 @@ extension RealtimeSession {
     /// own reply), both lower-risk than arbitrary user input, but
     /// echoing "Ignore prior instructions" into the next session's
     /// systemInstruction is cheap to defend against. `nonisolated` so
-    /// unit tests can exercise it without @MainActor wrapping — the
-    /// method is a pure string transform with no instance-state access.
+    /// unit tests can exercise it without @MainActor wrapping.
+    ///
+    /// SCA-168 S5 (SA1): even though `buildRecap()` is currently
+    /// step-position-only and does not feed user-derived text into the
+    /// recap (so the sanitizer has no live caller path today), the
+    /// sanitizer is kept armed and unit-tested as defense-in-depth for
+    /// the moment a future change to `buildRecap()` reintroduces user
+    /// transcript fragments. The hot-path performance work in P3-J
+    /// (`injectionRegexes` static-let with a one-shot compile) is part
+    /// of that posture — don't bypass the sanitizer "because it's not
+    /// currently in the production path."
     nonisolated static func sanitizeForRecap(_ raw: String) -> String {
         let oneLine = raw
             .replacingOccurrences(of: "\n", with: " ")
@@ -840,6 +858,15 @@ extension RealtimeSession {
 
     /// Reason the pending report is being drained. Affects diagnostic
     /// logging only — the payload shape is the same regardless.
+    ///
+    /// SCA-168 S4 (CR1): non-private (no modifier) because
+    /// `flushPendingReport(dueTo:)` is called cross-file from
+    /// `RealtimeSession.close()` (main file) — Swift requires the
+    /// parameter type's visibility ≥ the function's visibility. Treat
+    /// as `private` to non-extension callers; a future change that
+    /// adds a new `case` should think hard about whether external
+    /// callers depend on the wire-level semantic mapping inside
+    /// `flushPendingReport` (they currently don't).
     enum PendingReportDrainReason {
         case usageArrived
         case timeout
