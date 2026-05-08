@@ -2,7 +2,7 @@
 //
 // SCA-55 — pin SolveRepository.createLeftoversSolveWithDish behavior:
 //   - persists ONE dish, not three
-//   - sets sourceRecipePlanId to link back to the source recipe
+//   - sets sourceRecipePlan to link back to the source recipe
 //   - skips constraints + pantrySnapshot (leftovers solves carry neither)
 //   - marks the suggested dish selected immediately (no separate
 //     selection step downstream — picking the leftovers card IS the
@@ -63,7 +63,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         XCTAssertEqual(dishes.count, 1, "leftovers solve persists ONE dish, not three")
     }
 
-    func test_createLeftoversSolveWithDish_setsSourceRecipePlanId() throws {
+    func test_createLeftoversSolveWithDish_setsSourceRecipePlanRelationship() throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
@@ -77,9 +77,32 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
 
         let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
         XCTAssertEqual(
-            solve.sourceRecipePlanId,
+            solve.sourceRecipePlan?.id,
             source.id,
             "leftovers solve must link back to the meal that produced the leftovers",
+        )
+    }
+
+    func test_sourceRecipePlanRelationshipNullifiesWhenSourcePlanIsDeleted() throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
+
+        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
+        )
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        XCTAssertEqual(solve.sourceRecipePlan?.id, source.id)
+
+        controller.viewContext.delete(source)
+        try controller.save()
+
+        XCTAssertNil(
+            solve.sourceRecipePlan,
+            "deleting the source RecipePlan must nullify the leftovers source relationship",
         )
     }
 

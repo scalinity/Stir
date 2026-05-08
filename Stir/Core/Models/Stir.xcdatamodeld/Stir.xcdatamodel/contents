@@ -100,9 +100,9 @@
         <attribute name="requestedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="selectedSuggestedDishId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="sourceAssetIdsJSON" optional="YES" attributeType="Binary"/>
-        <attribute name="sourceRecipePlanId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="status" optional="YES" attributeType="String" defaultValueString="pending"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="mealSolveRequests" inverseEntity="HouseholdProfile"/>
+        <relationship name="sourceRecipePlan" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="RecipePlan" inverseName="leftoverSolveRequests" inverseEntity="RecipePlan"/>
         <relationship name="suggestedDishes" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SuggestedDish" inverseName="solveRequest" inverseEntity="SuggestedDish"/>
     </entity>
     <entity name="SuggestedDish" representedClassName="SuggestedDish" syncable="YES" codeGenerationType="class">
@@ -142,6 +142,7 @@
         <relationship name="cookingSessions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CookingSession" inverseName="recipePlan" inverseEntity="CookingSession"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="HouseholdProfile" inverseName="recipePlans" inverseEntity="HouseholdProfile"/>
         <relationship name="ingredients" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipeIngredient" inverseName="recipePlan" inverseEntity="RecipeIngredient"/>
+        <relationship name="leftoverSolveRequests" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="MealSolveRequest" inverseName="sourceRecipePlan" inverseEntity="MealSolveRequest"/>
         <relationship name="steps" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="RecipeStep" inverseName="recipePlan" inverseEntity="RecipeStep"/>
         <relationship name="suggestedDishes" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="SuggestedDish" inverseName="recipePlan" inverseEntity="SuggestedDish"/>
     </entity>
