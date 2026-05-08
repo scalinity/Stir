@@ -25,6 +25,13 @@ import OSLog
 
 extension RealtimeSession {
 
+    private func transportIdentityMatches(_ other: (any LiveTransporting)?) -> Bool {
+        guard let current = transport, let other else {
+            return transport == nil && other == nil
+        }
+        return current === other
+    }
+
     // MARK: - Session refresh (ADR 0014)
 
     /// Silent handoff to a fresh Gemini Live session. Triggered at
@@ -100,7 +107,7 @@ extension RealtimeSession {
         let preRefreshState = stateMachine.state
         stateMachine.advance(to: .refreshing)
 
-        let startedAt = Date()
+        let startedAt = now()
         let oldSessionID = mintResponse?.sessionID ?? ""
         // Captured inside the do-block once the new response is minted.
         // On post-commit failure (swap assigned but setup handshake
@@ -230,7 +237,7 @@ extension RealtimeSession {
             currentTurnUserTranscript = nil
             lastRefreshedAtTurn = turnCount
 
-            let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+            let latencyMs = Int(now().timeIntervalSince(startedAt) * 1000)
             Logger.voice.info(
                 "live_session_refresh_complete turn=\(self.turnCount, privacy: .public) new_session=\(newResponse.sessionID, privacy: .public) latency_ms=\(latencyMs, privacy: .public)",
             )
@@ -258,7 +265,7 @@ extension RealtimeSession {
             }
             return .success
         } catch {
-            let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+            let latencyMs = Int(now().timeIntervalSince(startedAt) * 1000)
             Logger.voice.error(
                 "live_session_refresh_failed error=\(error.localizedDescription, privacy: .private) latency_ms=\(latencyMs, privacy: .public)",
             )
@@ -273,7 +280,7 @@ extension RealtimeSession {
             // continues) but functional. If we failed after swap, the
             // session is broken; transition to .error so the VM can
             // fall back to C.3 on the next tap.
-            let isPreCommitFailure = (self.transport === oldTransport)
+            let isPreCommitFailure = transportIdentityMatches(oldTransport)
             if isPreCommitFailure {
                 // Still on old transport — no state change needed.
                 Logger.voice.info("refresh_failed_on_old_transport session_continues")
@@ -340,7 +347,7 @@ extension RealtimeSession {
             //     down and the failure is attached to the destination
             //     that didn't handshake.
             let failureSessionID: String
-            if self.transport === oldTransport {
+            if transportIdentityMatches(oldTransport) {
                 failureSessionID = oldSessionID
             } else {
                 failureSessionID = destinationSessionID ?? oldSessionID
@@ -384,14 +391,14 @@ extension RealtimeSession {
     /// and the fire handler (rare but possible).
     func turnStuckWatchdogFired() {
         guard stateMachine.state == .modelSpeaking else { return }
-        let now = Date()
+        let currentDate = now()
         let elapsedStuckMs: Int = {
             guard let last = lastInboundAudioAt else { return 0 }
-            return Int(now.timeIntervalSince(last) * 1000)
+            return Int(currentDate.timeIntervalSince(last) * 1000)
         }()
         let turnLengthAtStuck: Int = {
             guard let started = turnStartedAt else { return 0 }
-            return Int(now.timeIntervalSince(started) * 1000)
+            return Int(currentDate.timeIntervalSince(started) * 1000)
         }()
         // `turnCount + 1` matches the turn about to finalize. finalizeTurn
         // increments turnCount before persist, so the watchdog PostHog
@@ -464,7 +471,7 @@ extension RealtimeSession {
             return try await dispatch.realtimeSession(request: mintRequest)
         }
         pendingPreMintTask = task
-        pendingPreMintStartedAt = Date()
+        pendingPreMintStartedAt = now()
         #if DEBUG
         VoiceSessionLog.log("refresh.premint_started", ["turn": currentTurn])
         #endif
@@ -495,7 +502,7 @@ extension RealtimeSession {
             pendingPreMintTask = nil
             pendingPreMintStartedAt = nil
         }
-        let age = pendingPreMintStartedAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        let age = pendingPreMintStartedAt.map { now().timeIntervalSince($0) } ?? .infinity
         guard age < LiveSessionBudget.preMintStalenessSec else {
             // SCA-168 S13 (CR3 / SA2): Swift `Task.cancel()` is cooperative —
             // `aiDispatch.realtimeSession(request:)`'s underlying URLSession
@@ -654,9 +661,9 @@ extension RealtimeSession {
             lastToolCallName = nil
             finalizeWasWatchdogFire = false
         }
-        let now = Date()
-        let startedAt = turnStartedAt ?? now
-        let totalMs = Int(now.timeIntervalSince(startedAt) * 1000)
+        let currentDate = now()
+        let startedAt = turnStartedAt ?? currentDate
+        let totalMs = Int(currentDate.timeIntervalSince(startedAt) * 1000)
         turnCount += 1
 
         // TTFA = time from server's VAD-end-of-user-speech to the first
@@ -779,7 +786,7 @@ extension RealtimeSession {
         // it stays populated so `flushPendingReport` can snapshot it.
         currentTurnInlineText = nil
         currentTurnUserTranscript = nil
-        turnStartedAt = now
+        turnStartedAt = currentDate
         // Reset TTFA anchors so the next turn measures fresh.
         userTurnEndAt = nil
         firstModelAudioAt = nil
@@ -834,7 +841,7 @@ extension RealtimeSession {
             latencyTtfaMs: ttfaMs,
             containedToolCall: containedToolCall,
             submittedAt: startedAt,
-            endedAt: now,
+            endedAt: currentDate,
             nonce: nonce,
             transcript: transcriptSnapshot,
         )
@@ -1162,14 +1169,14 @@ extension RealtimeSession {
         if !content.audioChunks.isEmpty {
             // Record timestamp BEFORE state transitions / playback.
             // Mic-forwarder reads this for the echo cooldown gate.
-            let now = Date()
-            lastInboundAudioAt = now
+            let currentDate = now()
+            lastInboundAudioAt = currentDate
             // TTFA capture: stamp "user finished speaking" the moment the
             // server's transcription flips `finished=true`. Only stamp
             // once per turn — partial-transcription frames with
             // `finished=false` shouldn't move the anchor backwards.
             if firstModelAudioAt == nil {
-                firstModelAudioAt = now
+                firstModelAudioAt = currentDate
             }
             #if DEBUG
             VoiceSessionLog.log("audio.chunk", [
@@ -1259,7 +1266,7 @@ extension RealtimeSession {
             // still work identically since they're pre-audio in the
             // normal turn ordering.
             if firstModelAudioAt == nil {
-                userTurnEndAt = Date()
+                userTurnEndAt = now()
             }
             // 2026-04-25: also accumulate into `currentTurnUserTranscript`
             // for the voice-active transcript card. Captured per-turn,
@@ -1437,9 +1444,9 @@ extension RealtimeSession {
     /// — ADR 0015's cap-reversal trigger query missed these entirely.
     func recordTurnAsTransportError() {
         guard turnStartedAt != nil else { return }
-        let now = Date()
-        let startedAt = turnStartedAt ?? now
-        let totalMs = Int(now.timeIntervalSince(startedAt) * 1000)
+        let currentDate = now()
+        let startedAt = turnStartedAt ?? currentDate
+        let totalMs = Int(currentDate.timeIntervalSince(startedAt) * 1000)
         turnCount += 1
 
         let userIdx = voiceTurnRepository.nextTurnIndex(for: cookingSession)

@@ -136,10 +136,10 @@ extension RealtimeSession {
         // another app mid-session waits up to 60 s before the new
         // session-refresh picks it up — acceptable since the stale
         // view still matches what iOS's own Cook Mode UI shows).
-        let now = Date()
+        let currentDate = now()
         if let cached = cachedHouseholdContext,
            let cachedAt = cachedHouseholdContextAt,
-           now.timeIntervalSince(cachedAt) < Self.householdContextTTLSec {
+           currentDate.timeIntervalSince(cachedAt) < Self.householdContextTTLSec {
             return cached
         }
         let ctx: RealtimeHouseholdContext
@@ -149,7 +149,7 @@ extension RealtimeSession {
             ctx = RealtimeHouseholdContext(snapshot: .empty)
         }
         cachedHouseholdContext = ctx
-        cachedHouseholdContextAt = now
+        cachedHouseholdContextAt = currentDate
         return ctx
     }
 

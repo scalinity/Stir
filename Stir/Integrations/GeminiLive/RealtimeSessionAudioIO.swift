@@ -223,14 +223,14 @@ extension RealtimeSession {
                 // quality proves sufficient in D.1 validation.
                 let isPlayingNow = pipeline.isPlayingBack
                 if wasPlayingBack && !isPlayingNow {
-                    lastPlaybackEndedAt = Date()
+                    lastPlaybackEndedAt = self.now()
                 }
                 wasPlayingBack = isPlayingNow
 
                 let inModelSpeaking = self.stateMachine.state == .modelSpeaking
                 let inPostPlaybackCooldown: Bool = {
                     guard let ended = lastPlaybackEndedAt else { return false }
-                    return Date().timeIntervalSince(ended) < LiveSessionBudget.echoCooldownSec
+                    return self.now().timeIntervalSince(ended) < LiveSessionBudget.echoCooldownSec
                 }()
                 // Fourth mute path: active session refresh. During the
                 // ~1.7-3.6s handoff we must NOT forward mic audio across
