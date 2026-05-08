@@ -169,6 +169,7 @@
 		6EBB17D4668566404E93110E /* RealtimeSessionAudioIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A75F5CB3183A15F69F8EFC6 /* RealtimeSessionAudioIO.swift */; };
 		C77E5E423D9AFC3420BDFB31 /* RealtimeSessionTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D0F788F5EA77E4C4147F4E /* RealtimeSessionTransport.swift */; };
 		42AC260F8098B033BC1E4DF3 /* RealtimeSessionStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F861AD77FF6D0A1BCF4B1636 /* RealtimeSessionStateMachine.swift */; };
+		E473FDF539A1C6240861A545 /* RealtimeSessionTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99138CDB5A24A46B1ACB24A7 /* RealtimeSessionTestSupport.swift */; };
 		825AC9F3318A1AC1D5EFCFAE /* PaywallCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E18E95A0E72D3D285F84F70F /* PaywallCard.swift */; };
 		845B820BE9908AE751E38629 /* LeftoversPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D66ABEE50D3262039974DC /* LeftoversPromptView.swift */; };
 		86AA82B314DE7ED038A3DF51 /* SharedTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A126ED8CE06FC62D54163207 /* SharedTier.swift */; };
@@ -436,6 +437,7 @@
 		2A75F5CB3183A15F69F8EFC6 /* RealtimeSessionAudioIO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionAudioIO.swift; sourceTree = "<group>"; };
 		20D0F788F5EA77E4C4147F4E /* RealtimeSessionTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionTransport.swift; sourceTree = "<group>"; };
 		F861AD77FF6D0A1BCF4B1636 /* RealtimeSessionStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionStateMachine.swift; sourceTree = "<group>"; };
+		99138CDB5A24A46B1ACB24A7 /* RealtimeSessionTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionTestSupport.swift; sourceTree = "<group>"; };
 		374669111D98B028BEC3824D /* KeychainStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStorage.swift; sourceTree = "<group>"; };
 		383FBF80C0D47CD3C63E9C75 /* MinTapTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinTapTarget.swift; sourceTree = "<group>"; };
 		392D02601EFD7683030D59D1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -1232,6 +1234,7 @@
 				2A75F5CB3183A15F69F8EFC6 /* RealtimeSessionAudioIO.swift */,
 				20D0F788F5EA77E4C4147F4E /* RealtimeSessionTransport.swift */,
 				F861AD77FF6D0A1BCF4B1636 /* RealtimeSessionStateMachine.swift */,
+				99138CDB5A24A46B1ACB24A7 /* RealtimeSessionTestSupport.swift */,
 				AED17934BF102B6FDEDF9CAD /* VoiceSessionLog.swift */,
 			);
 			path = GeminiLive;
@@ -1818,6 +1821,7 @@
 				6EBB17D4668566404E93110E /* RealtimeSessionAudioIO.swift in Sources */,
 				C77E5E423D9AFC3420BDFB31 /* RealtimeSessionTransport.swift in Sources */,
 				42AC260F8098B033BC1E4DF3 /* RealtimeSessionStateMachine.swift in Sources */,
+				E473FDF539A1C6240861A545 /* RealtimeSessionTestSupport.swift in Sources */,
 				54A7F72080283D4D04C621C1 /* RecipeImport+Extensions.swift in Sources */,
 				7431743367A3C3ADE40AEA26 /* RecipeImportRepository.swift in Sources */,
 				A45696E727E29689E46AA055 /* RecipePlan+Extensions.swift in Sources */,
