@@ -41,6 +41,8 @@ struct SubstitutionSheetView: View {
         session: CookingSession,
         currentStep: RecipeStep?,
         aiDispatch: AIDispatch,
+        substitutionRepository: SubstitutionRepository,
+        pantryRepository: PantryItemRepository,
         onDismiss: @escaping () -> Void,
     ) {
         self.recipePlan = recipePlan
@@ -54,12 +56,19 @@ struct SubstitutionSheetView: View {
         // produced a ProgressView flash on every presentation because
         // .task runs after the first body eval. Matches ScanFlowRoot.
         // Review finding W-D W20 (CA2).
+        //
+        // SCA-189 (review-CR2-C1): repository + pantryRepository are
+        // threaded from the caller (CookModeRoot) so the VM doesn't
+        // fall back to .shared. Closes the substitution surface of
+        // the SCA-179 footgun.
         _viewModel = State(initialValue: SubstitutionSheetViewModel(
             recipePlan: recipePlan,
             household: household,
             session: session,
             currentStep: currentStep,
             aiDispatch: aiDispatch,
+            repository: substitutionRepository,
+            pantryRepository: pantryRepository,
             onFinished: onDismiss,
         ))
     }

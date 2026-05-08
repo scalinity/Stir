@@ -135,6 +135,7 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
             currentStep: nil,
             aiDispatch: aiDispatch,
             repository: SubstitutionRepository(controller: controller),
+            pantryRepository: PantryItemRepository(controller: controller),
             analytics: analytics ?? .shared,
             onFinished: onFinished,
         )

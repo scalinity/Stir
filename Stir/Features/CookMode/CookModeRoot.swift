@@ -124,6 +124,8 @@ struct CookModeRoot: View {
                             session: viewModel.session,
                             currentStep: viewModel.currentStep,
                             aiDispatch: aiDispatch,
+                            substitutionRepository: SubstitutionRepository(controller: .shared),
+                            pantryRepository: coordinator.pantryItemRepository,
                             onDismiss: { viewModel.substitutionPresentationRequested = false },
                         )
                     }
@@ -348,6 +350,9 @@ struct CookModeRoot: View {
                     recipePlan: recipePlan,
                     household: household,
                     source: source,
+                    cookingSessionRepository: coordinator.cookingSessionRepository,
+                    cookTimerRepository: CookTimerRepository(controller: .shared),
+                    substitutionRepository: SubstitutionRepository(controller: .shared),
                     pantryItemRepository: coordinator.pantryItemRepository,
                     entitlements: entitlements,
                     voiceDriver: driverForVM,

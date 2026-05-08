@@ -386,6 +386,8 @@ final class CookModeViewModelTests: XCTestCase {
             source: .solve,
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: timerRepo,
+            substitutionRepository: SubstitutionRepository(controller: controller),
+            pantryItemRepository: PantryItemRepository(controller: controller),
             timerService: timerSvc,
         )
         await vm.startTimerForCurrentStep()
@@ -547,6 +549,8 @@ final class CookModeViewModelTests: XCTestCase {
             source: .solve,
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: timerRepo,
+            substitutionRepository: SubstitutionRepository(controller: controller),
+            pantryItemRepository: PantryItemRepository(controller: controller),
             timerService: timerSvc,
         )
 
@@ -615,6 +619,8 @@ final class CookModeViewModelTests: XCTestCase {
             source: .solve,
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: timerRepo,
+            substitutionRepository: SubstitutionRepository(controller: controller),
+            pantryItemRepository: PantryItemRepository(controller: controller),
             timerService: timerSvc,
         )
     }
@@ -932,6 +938,8 @@ final class CookModeViewModelTests: XCTestCase {
             source: .solve,
             cookingSessionRepository: CookingSessionRepository(controller: controller),
             cookTimerRepository: CookTimerRepository(controller: controller),
+            substitutionRepository: SubstitutionRepository(controller: controller),
+            pantryItemRepository: PantryItemRepository(controller: controller),
             timerService: TimerService(
                 repository: CookTimerRepository(controller: controller),
                 sessionRepository: CookingSessionRepository(controller: controller),

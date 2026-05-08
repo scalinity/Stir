@@ -62,14 +62,22 @@ final class TimerService {
     /// must pass the SAME instance the VM uses, or `nil` deliberately
     /// (unit tests that don't exercise the activity surface). Forcing the
     /// argument at every call site makes the intent reviewable.
+    ///
+    /// SCA-189 (review-CR2-C1 follow-up): `repository` and `sessionRepository`
+    /// are also REQUIRED. The earlier nil-default + `?? Repository(controller: .shared)`
+    /// fallback was the SCA-179 footgun — a test that constructed
+    /// `TimerService(notificationCenter: …, liveActivityManager: nil)` got
+    /// `.shared`-backed repos silently. Forcing explicit injection makes
+    /// the controller-routing visible at every callsite; the bug class
+    /// becomes a compile error instead of a runtime CoreData crash.
     init(
-        repository: CookTimerRepository? = nil,
-        sessionRepository: CookingSessionRepository? = nil,
+        repository: CookTimerRepository,
+        sessionRepository: CookingSessionRepository,
         notificationCenter: UNUserNotificationCenterClient = DefaultUNUserNotificationCenter(),
         liveActivityManager: LiveActivityManager?,
     ) {
-        self.repository = repository ?? CookTimerRepository(controller: .shared)
-        self.sessionRepository = sessionRepository ?? CookingSessionRepository(controller: .shared)
+        self.repository = repository
+        self.sessionRepository = sessionRepository
         self.notificationCenter = notificationCenter
         self.liveActivityManager = liveActivityManager
     }

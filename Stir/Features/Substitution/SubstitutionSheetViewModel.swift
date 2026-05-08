@@ -57,8 +57,8 @@ final class SubstitutionSheetViewModel {
         session: CookingSession,
         currentStep: RecipeStep?,
         aiDispatch: AIDispatch,
-        repository: SubstitutionRepository? = nil,
-        pantryRepository: PantryItemRepository? = nil,
+        repository: SubstitutionRepository,
+        pantryRepository: PantryItemRepository,
         analytics: PostHogClient = .shared,
         onFinished: @escaping () -> Void,
     ) {
@@ -67,8 +67,11 @@ final class SubstitutionSheetViewModel {
         self.session = session
         self.currentStep = currentStep
         self.aiDispatch = aiDispatch
-        self.repository = repository ?? SubstitutionRepository(controller: .shared)
-        self.pantryRepository = pantryRepository ?? PantryItemRepository(controller: .shared)
+        // SCA-189 (review-CR2-C1): repos are required, no `.shared`
+        // fallback. A caller that omits either now fails to compile —
+        // closes the SCA-179 footgun on the substitution surface.
+        self.repository = repository
+        self.pantryRepository = pantryRepository
         self.analytics = analytics
         self.onFinished = onFinished
     }

@@ -336,10 +336,10 @@ final class CookModeViewModel {
         recipePlan: RecipePlan,
         household: HouseholdProfile,
         source: EntrySource,
-        cookingSessionRepository: CookingSessionRepository? = nil,
-        cookTimerRepository: CookTimerRepository? = nil,
-        substitutionRepository: SubstitutionRepository? = nil,
-        pantryItemRepository: PantryItemRepository? = nil,
+        cookingSessionRepository: CookingSessionRepository,
+        cookTimerRepository: CookTimerRepository,
+        substitutionRepository: SubstitutionRepository,
+        pantryItemRepository: PantryItemRepository,
         timerService: TimerService? = nil,
         liveActivityManager: LiveActivityManager? = nil,
         analytics: PostHogClient = .shared,
@@ -354,10 +354,14 @@ final class CookModeViewModel {
         self.household = household
         self.currentStepIndex = Int(session.currentStepIndex)
         self.startedAtWallClock = Date()
-        self.cookingSessionRepository = cookingSessionRepository ?? CookingSessionRepository(controller: .shared)
-        self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository(controller: .shared)
-        self.substitutionRepository = substitutionRepository ?? SubstitutionRepository(controller: .shared)
-        self.pantryItemRepository = pantryItemRepository ?? PantryItemRepository(controller: .shared)
+        // SCA-189 (review-CR2-C1): repos are required, no `.shared`
+        // fallback. A test that omits any of the four now fails to
+        // compile — which is the entire bug-class-closure invariant
+        // SCA-182 claimed but didn't enforce.
+        self.cookingSessionRepository = cookingSessionRepository
+        self.cookTimerRepository = cookTimerRepository
+        self.substitutionRepository = substitutionRepository
+        self.pantryItemRepository = pantryItemRepository
         // Resolve LiveActivityManager FIRST so the same instance can be
         // injected into TimerService below. Without sharing, VM-side
         // `startLiveActivity()` populated dict A while TimerService's
@@ -367,7 +371,15 @@ final class CookModeViewModel {
         // device-side 2026-05-03).
         let resolvedLiveActivityManager = liveActivityManager ?? LiveActivityManager()
         self.liveActivityManager = resolvedLiveActivityManager
-        self.timerService = timerService ?? TimerService(liveActivityManager: resolvedLiveActivityManager)
+        // SCA-189: when the caller doesn't pass an explicit timerService,
+        // construct one against THIS VM's repos rather than letting
+        // TimerService default to .shared. Same controller-routing
+        // invariant as the four repos above.
+        self.timerService = timerService ?? TimerService(
+            repository: cookTimerRepository,
+            sessionRepository: cookingSessionRepository,
+            liveActivityManager: resolvedLiveActivityManager,
+        )
         self.analytics = analytics
         self.sentry = sentry ?? SentryReporter.shared
         self.entitlements = entitlements
