@@ -22,18 +22,26 @@
 //     v1: top-level allowlist; ratchet to deeper validation if
 //     beta surfaces a foot-gun the allowlist missed.
 //
-// Reference shapes (confirmed in handler code):
+// Reference shapes (confirmed in handler code 2026-05-08; CR1-W1 fix):
 //
-//   pantry_parse:        { items: [...] }
-//   dinner_solve:        { events: [...] }   (NDJSON-shaped solve events)
-//   substitution:        { suggestion, why, ... }
-//   recipe_import:       { import_id, status: 'completed', recipe } | { import_id, status: 'queued' }
-//   grocery_generate:    { items: [...], reminders_export_url? }
-//   cook_turn:           { reply_text, intent }
-//   cook_mode_realtime:  // Live API audio chunks; not cache-replayable.
-//                        // Allowlist marks it as "no canned fallback supported"
-//                        // (ops admin should use action='dismissed' or
-//                        // 'withdrawn' for this feature_key).
+//   pantry_parse        WireResponse @ pantry-parse/index.ts:112
+//                       { parse_id, ingredients, overall_confidence,
+//                         prompt_version, latency_ms, retry_count }
+//   dinner_solve        SSE NDJSON of solve events
+//                       { events: [...] }   (NDJSON-shaped solve events)
+//   substitution        { suggestion, why, confidence?, alternative_suggestions?,
+//                         latency_ms?, cost_usd? }
+//   recipe_import       { import_id, status: 'completed' | 'queued', recipe?, error? }
+//   grocery_generate    GroceryResponse @ grocery-generate/index.ts:99
+//                       { missing_items, already_have, total_item_count,
+//                         source_id, source_type, prompt_version, retry_count }
+//   cook_turn           WireResponse @ cook-turn/index.ts:93
+//                       { spoken_response, suggested_action, action_params,
+//                         prompt_version, latency_ms, retry_count }
+//   cook_mode_realtime  Live API audio chunks; not cache-replayable.
+//                       Allowlist marks unsupported=true so any payload is
+//                       rejected. Ops admin should use action='dismissed' or
+//                       'withdrawn' for this feature_key.
 
 export type FeatureKey =
   | 'pantry_parse'
@@ -59,8 +67,17 @@ interface ShapeRule {
 
 const RULES: Record<FeatureKey, ShapeRule> = {
   pantry_parse: {
-    requiredAnyOf: ['items'],
-    allowed: new Set(['items', 'image_count', 'parse_quality']),
+    // Anchors on parse_id (always present). `ingredients` is empty-array
+    // -allowed for empty-pantry results, so it can't be the anchor.
+    requiredAnyOf: ['parse_id'],
+    allowed: new Set([
+      'parse_id',
+      'ingredients',
+      'overall_confidence',
+      'prompt_version',
+      'latency_ms',
+      'retry_count',
+    ]),
   },
   dinner_solve: {
     requiredAnyOf: ['events'],
@@ -82,12 +99,29 @@ const RULES: Record<FeatureKey, ShapeRule> = {
     allowed: new Set(['import_id', 'status', 'recipe', 'error']),
   },
   grocery_generate: {
-    requiredAnyOf: ['items'],
-    allowed: new Set(['items', 'reminders_export_url']),
+    // Anchors on source_id (always present); `missing_items` can be
+    // empty for "you have everything you need" results.
+    requiredAnyOf: ['source_id'],
+    allowed: new Set([
+      'source_id',
+      'source_type',
+      'missing_items',
+      'already_have',
+      'total_item_count',
+      'prompt_version',
+      'retry_count',
+    ]),
   },
   cook_turn: {
-    requiredAnyOf: ['reply_text'],
-    allowed: new Set(['reply_text', 'intent', 'confidence', 'latency_ms']),
+    requiredAnyOf: ['spoken_response'],
+    allowed: new Set([
+      'spoken_response',
+      'suggested_action',
+      'action_params',
+      'prompt_version',
+      'latency_ms',
+      'retry_count',
+    ]),
   },
   cook_mode_realtime: {
     requiredAnyOf: [],
