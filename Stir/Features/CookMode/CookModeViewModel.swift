@@ -1646,7 +1646,41 @@ final class CookModeViewModel {
     ) {
         let trimmedMissing = missingIngredient.trimmingCharacters(in: .whitespaces)
         guard !trimmedMissing.isEmpty, !substitutionText.isEmpty else { return }
-        let matched = matchIngredient(named: trimmedMissing)
+
+        // SCA-148: same-length tie → safe-path fallback. Until we ship
+        // mid-turn user prompting (Owner-step "as triggered" — needs
+        // RealtimeSession state-machine work + a 5s response window),
+        // we route ambiguous matches to the free-text persistence path:
+        // SubstitutionEvent records the swap WITHOUT mutating any
+        // RecipeIngredient row. The model's narration already informed
+        // the user of the swap; the cost is that downstream consumers
+        // (next voice turn's `remainingIngredients`, grocery export)
+        // see the original recipe state for that row. Acceptable
+        // because this code path was previously picking the WRONG
+        // row arbitrarily — free-text under-specifies, but doesn't
+        // mis-mutate.
+        //
+        // Telemetry: emit `voice_substitution_disambiguated` so we
+        // can measure how often this path fires before deciding
+        // whether to build the prompt UX (≥1% of voice subs is the
+        // ticket's documented trigger).
+        let matched: RecipeIngredient?
+        switch matchIngredient(named: trimmedMissing) {
+        case .exact(let row):
+            matched = row
+        case .substring(let row, _):
+            matched = row
+        case .tie(let candidates):
+            matched = nil
+            voiceTelemetry.recordSubstitutionDisambiguated(
+                sessionID: session.id,
+                candidateCount: candidates.count,
+                surface: .voice,
+                resolvedTo: .freeTextFallback,
+            )
+        case .none:
+            matched = nil
+        }
         let stepForEvent = recipePlan.stepArray.first { Int($0.stepNumber) == currentStepIndex + 1 }
 
         // CA1-C1 fix: split into 3 independent do/catch blocks matching the
@@ -1709,20 +1743,52 @@ final class CookModeViewModel {
         }
     }
 
+    /// SCA-148: outcome of a voice-side ingredient match. Distinguishes
+    /// the three cases the caller needs to act on differently:
+    /// - `.exact(row)` / `.substring(row, candidateCount: 1)` — single
+    ///   confident winner, mutate the recipe row.
+    /// - `.substring(row, candidateCount: N>1)` — single longest-length
+    ///   winner among multiple substring matches; safe to mutate
+    ///   (CA1-H2 longest-match preference covers this case).
+    /// - `.tie(rows)` — multiple substring candidates share the SAME
+    ///   longest length (e.g. "ric" vs "rice" + "rind" — equal-length).
+    ///   The CA1-H2 longest-match preference can't disambiguate, and
+    ///   the prior code arbitrarily picked one via `max(by:)`'s stable
+    ///   ordering. Voice-side caller now falls back to the free-text
+    ///   path (no FK mutation) and emits `voice_substitution_disambiguated`
+    ///   so we can MEASURE how often this path fires before investing
+    ///   in mid-turn user-prompt UX.
+    /// - `.none` — no match; free-text path.
+    enum IngredientMatchResult {
+        case exact(RecipeIngredient)
+        case substring(RecipeIngredient, candidateCount: Int)
+        case tie([RecipeIngredient])
+        case none
+    }
+
     /// Case-insensitive match from a model-supplied missing-ingredient
     /// string back to a row in the recipe. Exact-equal first, then
     /// bidirectional substring containment with longest-match preference
     /// (CA1-H2 fix) so "rice" against a recipe with both "white rice"
     /// and "rice noodles" picks the candidate whose displayName length
     /// is largest — Core-Data row order no longer decides which
-    /// ingredient gets swapped. Returns nil for no match (free-text path).
-    private func matchIngredient(named query: String) -> RecipeIngredient? {
+    /// ingredient gets swapped.
+    ///
+    /// SCA-148 promoted the return shape from `RecipeIngredient?` to
+    /// `IngredientMatchResult` so the caller can distinguish a confident
+    /// substring winner from a same-length tie. The tie case (≥2
+    /// candidates with the same longest displayName length) used to
+    /// silently pick whichever Core-Data row Swift's stable `max(by:)`
+    /// handed back; the new caller treats ties as ambiguous and routes
+    /// to the safe path. Internal helper (private) so the new enum
+    /// stays a CookModeViewModel implementation detail.
+    func matchIngredient(named query: String) -> IngredientMatchResult {
         let q = query.lowercased()
         let candidates = recipePlan.ingredientArray
         if let exact = candidates.first(where: {
             ($0.displayName ?? "").caseInsensitiveCompare(query) == .orderedSame
         }) {
-            return exact
+            return .exact(exact)
         }
         let containmentMatches = candidates.compactMap { ing -> (RecipeIngredient, String)? in
             let name = (ing.displayName ?? "").lowercased()
@@ -1730,9 +1796,18 @@ final class CookModeViewModel {
             guard name.contains(q) || q.contains(name) else { return nil }
             return (ing, name)
         }
-        // Longest displayName wins; ties break on Core-Data order
-        // (`max(by:)` is stable on equality and keeps the first match).
-        return containmentMatches.max(by: { $0.1.count < $1.1.count })?.0
+        guard !containmentMatches.isEmpty else { return .none }
+        // SCA-148: detect same-length ties at the LONGEST length. The
+        // CA1-H2 longest-match preference is robust against
+        // "rice" vs "white rice" + "rice noodles" (10 vs 12); it
+        // collapses on "ric" vs "rice" + "rind" (both 4). Tie ⇒ caller
+        // disambiguates; otherwise the longest single match wins.
+        let maxLen = containmentMatches.map { $0.1.count }.max() ?? 0
+        let winners = containmentMatches.filter { $0.1.count == maxLen }
+        if winners.count == 1 {
+            return .substring(winners[0].0, candidateCount: containmentMatches.count)
+        }
+        return .tie(winners.map { $0.0 })
     }
 
     /// Read-only projection of accepted substitution swaps for the

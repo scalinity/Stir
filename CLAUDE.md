@@ -702,6 +702,21 @@ voice_session_token_snapshot, voice_session_refreshed,
 voice_quota_refund,
 voice_turn_stuck_watchdog_fired,
 substitution_requested, substitution_accepted,
+# SCA-148: voice_substitution_disambiguated — fires when
+# CookModeViewModel.matchIngredient detects a same-length tie among
+# substring candidates for a voice substitution (CA1-H2 longest-match
+# preference can't disambiguate equal-length winners). Properties:
+# session_id (UUID string, "unknown" placeholder when nil pre-persist),
+# candidate_count (≥2), surface ∈ {voice, tap}, resolved_to ∈
+# {free_text_fallback, user_picked_first, user_picked_second,
+# timed_out}. v1 emits ONLY free_text_fallback — voice routes
+# ambiguous matches to free-text persistence (no recipe row mutation).
+# Other resolution values reserved for the future "ask the user
+# mid-turn" build-out (Owner-step "as triggered" — needs RealtimeSession
+# state-machine work + 5s response window). Adding a new surface or
+# resolved_to value is a wire-contract change — update
+# VoiceSessionTelemetry.swift enum + spec §15 + this list together.
+voice_substitution_disambiguated,
 cook_session_completed,
 # SCA-55: meal_rated gains `leftovers_handoff_offered` (bool, true iff
 # leftover_count>0 AND the OutcomeFeedback gate routed the user into

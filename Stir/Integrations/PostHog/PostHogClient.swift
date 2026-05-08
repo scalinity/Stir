@@ -278,6 +278,17 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// Premium-side conversion funnel; Free-side conversion lives on
     /// `paywall_viewed.trigger=leftovers_gate` → `purchase_completed`.
     case leftoversDishSelected = "leftovers_dish_selected"
+    /// SCA-148 — fires when CookModeViewModel.matchIngredient detects a
+    /// same-length tie among substring candidates for a voice
+    /// substitution. Properties: `session_id`, `candidate_count`
+    /// (≥2), `surface` ∈ {voice, tap}, `resolved_to` ∈ closed enum
+    /// in `VoiceSessionTelemetry.SubstitutionDisambiguationResolution`.
+    /// Today's only emit path is the voice surface routing ambiguous
+    /// matches to free-text persistence (`resolved_to=free_text_fallback`);
+    /// other resolution values are reserved for the future
+    /// mid-turn-prompt UX. Dashboard: rate of fire vs total voice subs
+    /// — ≥1% justifies the prompt-UX build-out per SCA-148 ticket.
+    case voiceSubstitutionDisambiguated = "voice_substitution_disambiguated"
     // SCA-5 — in-app feature tutorials. Fired once per tutorial-key
     // lifecycle: started on first appear, then exactly one of
     // {completed, skipped} on resolution. `tutorial_step_advanced`

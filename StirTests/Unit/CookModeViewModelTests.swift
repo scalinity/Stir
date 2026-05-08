@@ -144,6 +144,70 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertEqual(pasta.displayName, "rice noodles")
     }
 
+    // SCA-148: same-length tie ⇒ free-text fallback (no recipe row
+    // mutation). Pre-SCA-148 the longest-match preference picked an
+    // arbitrary winner via Swift's stable `max(by:)` ordering; this
+    // test pins the new safe-path behavior. Pairs ingredients of equal
+    // length that both substring-match the query so neither wins.
+    // Matching ticket-mention: real-world cilantro/coriander pair would
+    // not trigger this code path on the same-length rule (different
+    // lengths) — we use rice/rind here for a deterministic tie.
+    func test_applyVoiceSubstitution_sameLengthTie_fallsBackToFreeText() throws {
+        let rice = try addIngredient(named: "rice", amount: "2 cups")
+        let rind = try addIngredient(named: "rind", amount: "1 piece")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        // Query "ri" substring-matches BOTH "rice" (4 chars) and
+        // "rind" (4 chars). The longest-match preference can't
+        // disambiguate; the new behavior routes to free-text.
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "ri",
+            substitutionText: "couscous",
+            amountConversion: nil,
+        )
+
+        // Neither ingredient gets mutated — the safe path doesn't
+        // pretend to know which one the model meant.
+        XCTAssertEqual(rice.displayName, "rice", "tie ⇒ no rice mutation")
+        XCTAssertEqual(rind.displayName, "rind", "tie ⇒ no rind mutation")
+        // The SubstitutionEvent IS persisted (audit trail), as a
+        // free-text event with no FK to either RecipeIngredient.
+        let events = session.substitutionArray
+        XCTAssertEqual(events.count, 1)
+        XCTAssertNil(events.first?.recipeIngredient,
+                     "tie ⇒ free-text event has no FK to a recipe row")
+        XCTAssertEqual(events.first?.missingIngredientDisplayName, "ri")
+    }
+
+    // SCA-148: longest-match preference (CA1-H2) still resolves
+    // unambiguous cases — the tie detection only kicks in when the
+    // longest length is shared by ≥2 candidates. Regression guard
+    // ensuring the new IngredientMatchResult.substring path still
+    // mutates a single confident winner.
+    func test_applyVoiceSubstitution_longestMatchWins_mutatesIngredient() throws {
+        let whiteRice = try addIngredient(named: "white rice", amount: "2 cups")
+        let riceNoodles = try addIngredient(named: "rice noodles", amount: "8 oz")
+        let session = try freshSession()
+        let vm = makeVM(session: session)
+
+        // Query "rice" substring-matches both, but rice noodles (12) >
+        // white rice (10) so rice noodles wins on length. Single
+        // confident winner, no tie.
+        vm.applyVoiceSubstitution(
+            subEventID: UUID(),
+            missingIngredient: "rice",
+            substitutionText: "soba",
+            amountConversion: nil,
+        )
+
+        XCTAssertEqual(riceNoodles.displayName, "soba",
+                       "longest-match winner gets mutated")
+        XCTAssertEqual(whiteRice.displayName, "white rice",
+                       "non-winner is left alone")
+    }
+
     func test_applyVoiceSubstitution_noMatch_recipeUnchanged() throws {
         // User said "I'm out of cilantro" but cilantro isn't in the
         // recipe. Falls through to a free-text SubstitutionEvent — the
