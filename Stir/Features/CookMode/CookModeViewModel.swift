@@ -1759,7 +1759,7 @@ final class CookModeViewModel {
     ///   so we can MEASURE how often this path fires before investing
     ///   in mid-turn user-prompt UX.
     /// - `.none` — no match; free-text path.
-    enum IngredientMatchResult {
+    private enum IngredientMatchResult {
         case exact(RecipeIngredient)
         case substring(RecipeIngredient, candidateCount: Int)
         case tie([RecipeIngredient])
@@ -1780,9 +1780,18 @@ final class CookModeViewModel {
     /// candidates with the same longest displayName length) used to
     /// silently pick whichever Core-Data row Swift's stable `max(by:)`
     /// handed back; the new caller treats ties as ambiguous and routes
-    /// to the safe path. Internal helper (private) so the new enum
-    /// stays a CookModeViewModel implementation detail.
-    func matchIngredient(named query: String) -> IngredientMatchResult {
+    /// to the safe path.
+    ///
+    /// SCA-201 (/review-2 S3): both `matchIngredient` and the
+    /// `IngredientMatchResult` enum it returns are `private` — they're
+    /// CookModeViewModel implementation details. Tests assert via the
+    /// observable post-state of `applyVoiceSubstitution` (recipe row
+    /// mutation, SubstitutionEvent persistence, telemetry emission),
+    /// not via direct match-result inspection. If a future test needs
+    /// direct inspection, prefer adding a thin assertion helper rather
+    /// than relaxing access — keeping the matcher private blocks the
+    /// SCA-204 empty-string footgun from leaking to callers.
+    private func matchIngredient(named query: String) -> IngredientMatchResult {
         let q = query.lowercased()
         let candidates = recipePlan.ingredientArray
         if let exact = candidates.first(where: {
