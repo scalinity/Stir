@@ -65,9 +65,20 @@ struct SavedMealsView: View {
     /// CloudKit pushes can fire several `NSPersistentStoreRemoteChange`
     /// notifications in quick succession when a multi-row CloudKit
     /// transaction lands; debouncing collapses them into a single
-    /// `load()` call after a quiet 300ms window. The window is short
-    /// enough that the AC's "row disappears within 5s of CloudKit push"
-    /// holds easily — push latency dominates anyway.
+    /// `load()` call after a quiet 300ms window.
+    ///
+    /// SCA-197: 300ms specifically because (a) it matches the existing
+    /// keystroke-search debounce (`searchQuery → debouncedSearchQuery`,
+    /// 150ms × 2 ≈ 300ms perceived budget — keeps the two reactive
+    /// pipelines on the same cadence), (b) CloudKit pushes typically
+    /// arrive in <100ms bursts, so 300ms collapses the burst to one
+    /// fetch without dragging visible UX, and (c) the SCA-152 AC's
+    /// "row disappears within 5s of CloudKit push" budget is dominated
+    /// by network + iCloud propagation, leaving the 300ms in the noise.
+    /// SCA-197 also files a triggered-by-next-touch entry in
+    /// `docs/deferred-work.md` to extract this publisher wiring out of
+    /// the view layer when a second consumer (or a widget-process
+    /// save) appears.
     @State private var reloadDebounceTask: Task<Void, Never>?
 
     /// Filter + sort pipeline. Consults pre-computed searchBlobs so each
