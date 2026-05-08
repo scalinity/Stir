@@ -1704,6 +1704,10 @@ See §12.3. In addition:
 | `paywall_viewed`                   | trigger, variant, current_tier                                                                 | paywall funnel             | Billing                 |
 | `trial_started`                    | sku, trigger                                                                                   | monetization funnel        | Billing                 |
 | `purchase_started`                 | sku, origin                                                                                    | checkout funnel            | Billing                 |
+| `leftovers_followup_scheduled`     | fire_at                                                                                        | leftovers retention loop   | Engagement              |
+| `leftovers_followup_fired`         | (none)                                                                                         | leftovers retention loop   | Engagement              |
+| `leftovers_followup_tapped`        | (none)                                                                                         | leftovers retention loop   | Engagement              |
+| `leftovers_followup_suppressed`    | reason ∈ {weekly_cap, unactioned_streak}                                                       | leftovers retention loop   | Engagement              |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
 | `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |

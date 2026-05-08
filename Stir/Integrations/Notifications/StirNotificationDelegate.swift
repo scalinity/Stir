@@ -6,6 +6,8 @@
 //     a Cook Mode timer notification fires while the app is foreground.
 //   - Emitting `reactivation_notification_opened` when the 7-day cook
 //     reminder fires (delivery or tap-through; spec §15 canonical).
+//   - Emitting `leftovers_followup_fired` when the +20h leftovers
+//     followup fires (delivery only; SCA-65, spec §15 canonical).
 //
 // The delegate is installed at launch by StirApp via
 // `StirNotificationDelegate.register()`. It's a singleton because
@@ -66,6 +68,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
     ) {
         emitTelemetryIfReactivation(notification)
+        emitTelemetryIfLeftoversFollowup(notification)
 
         let userInfo = notification.request.content.userInfo
         if TimerNotification.isTimer(from: userInfo) {
@@ -86,6 +89,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping () -> Void,
     ) {
         emitTelemetryIfReactivation(response.notification)
+        emitTelemetryIfLeftoversFollowup(response.notification)
         completionHandler()
     }
 
@@ -110,5 +114,22 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
             .reactivationNotificationOpened,
             properties: StepSevenTelemetry.reactivationNotificationOpened(triggerKind: triggerKind),
         )
+    }
+
+    /// Emit `leftovers_followup_fired` when the SCA-65 +20h notification
+    /// reaches the device. Same dedupe pattern as reactivation — uses the
+    /// shared `emittedReminderIDs` set since the leftovers followup uses
+    /// its own singleton identifier (`stir.leftovers.followup.20h`).
+    private func emitTelemetryIfLeftoversFollowup(_ notification: UNNotification) {
+        let userInfo = notification.request.content.userInfo
+        guard LeftoversFollowupNotification.isFollowup(from: userInfo) else { return }
+
+        let id = notification.request.identifier
+        emitLock.lock()
+        let shouldEmit = emittedReminderIDs.insert(id).inserted
+        emitLock.unlock()
+        guard shouldEmit else { return }
+
+        telemetry.capture(.leftoversFollowupFired, properties: [:])
     }
 }

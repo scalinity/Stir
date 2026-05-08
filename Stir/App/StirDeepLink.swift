@@ -10,6 +10,7 @@
 //   stir://solve/<solveId>/dish/<dishId>
 //   stir://cook/timer/<timerId>
 //   stir://paywall/widget
+//   stir://leftovers?source=notification          (SCA-65)
 //
 // Unknown paths fall through to `.unknown` and the app opens to its
 // default destination — widgets failing silently is strictly better
@@ -31,6 +32,10 @@ enum StirDeepLink: Equatable {
     case dishPreview(solveID: UUID, dishID: UUID)
     case cookTimer(timerID: UUID)
     case paywallWidget
+    /// SCA-65 — leftovers followup notification tapped at +20h post-cook.
+    /// `source` is the originating surface ("notification" today; future
+    /// in-app entry points may add new values without breaking the parse).
+    case leftoversFollowup(source: String)
     case unknown(raw: String)
 
     /// Parse a URL into a typed destination. Returns `.unknown` for
@@ -56,6 +61,13 @@ enum StirDeepLink: Equatable {
             return .scanStart
         case ("paywall", ["widget"]):
             return .paywallWidget
+        case ("leftovers", _):
+            // Path-segment-agnostic: stir://leftovers OR stir://leftovers/<anything>
+            // both route here. `source` lifts off the query string; defaults
+            // to "notification" when absent (the only producer today).
+            let source = components.queryItems?
+                .first(where: { $0.name == "source" })?.value ?? "notification"
+            return .leftoversFollowup(source: source)
         case ("solve", let parts) where parts.count == 1:
             guard let solveID = UUID(uuidString: parts[0]) else {
                 return .unknown(raw: url.absoluteString)
@@ -87,6 +99,7 @@ enum StirDeepLink: Equatable {
         case .dishPreview:     return "widget.dish"
         case .cookTimer:       return "liveactivity.timer"
         case .paywallWidget:   return "widget.paywall"
+        case .leftoversFollowup: return "notification.leftovers_followup"
         case .unknown:         return "deeplink.unknown"
         }
     }
@@ -120,6 +133,14 @@ enum StirDeepLinkHandler {
             Task { @MainActor in
                 coordinator.requestDeepLinkScan()
             }
+        case .leftoversFollowup:
+            // SCA-65 v1: record the action so the unactioned-streak
+            // suppression math doesn't penalize a user who tapped, then
+            // land on Tonight Home (the app's default screen). A future
+            // refactor can add a coordinator hook that looks up the most
+            // recent leftover-eligible cook and routes straight to
+            // LeftoversRoot — see follow-up filed at SCA-65 close-out.
+            LeftoversFollowupScheduler.shared.recordAction()
         case .solve, .dishPreview, .cookTimer, .unknown:
             // v1: widget/Live-Activity tap foregrounds the app; the
             // user lands on their last-active screen. Specific

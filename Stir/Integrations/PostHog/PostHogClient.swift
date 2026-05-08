@@ -219,6 +219,16 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case voiceTurnStuckWatchdogFired = "voice_turn_stuck_watchdog_fired"
     // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
     case reactivationNotificationOpened = "reactivation_notification_opened"
+    // SCA-65 — leftovers followup scheduler lifecycle. Spec §15 +
+    // CLAUDE.md canonical. _scheduled fires once per successful schedule
+    // (post-cap, post-suppression checks); _fired emits at delivery via
+    // StirNotificationDelegate; _tapped on deep-link tap; _suppressed
+    // emits at scheduling time when a cap or unactioned-streak guard
+    // blocks the schedule (carries `reason`).
+    case leftoversFollowupScheduled  = "leftovers_followup_scheduled"
+    case leftoversFollowupFired      = "leftovers_followup_fired"
+    case leftoversFollowupTapped     = "leftovers_followup_tapped"
+    case leftoversFollowupSuppressed = "leftovers_followup_suppressed"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
     // are spec §15 canonical (destination NOT export_target; parse_quality
     // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`

@@ -410,6 +410,22 @@ struct OutcomeFeedbackView: View {
                 "leftovers_eligible_free": leftoverCount > 0
                     && (entitlements?.effectiveTier == .free),
             ])
+            // SCA-65: schedule the +20h leftovers followup notification
+            // when the user logged leftovers AND is Premium+. Free users
+            // never schedule (they can't act on it without upgrading;
+            // the paywall conversion event already fires via the gate
+            // above). The scheduler internally handles cap / suppression
+            // / authorization fallback — this is just the trigger.
+            if leftoverCount > 0,
+               let tier = entitlements?.effectiveTier,
+               tier == .premium || tier == .pro {
+                Task { @MainActor in
+                    await LeftoversFollowupScheduler.shared.scheduleAfterFeedback(
+                        submittedAt: .init(),
+                        tier: tier,
+                    )
+                }
+            }
             submitting = false
             onSubmitted(intent)
         } catch {

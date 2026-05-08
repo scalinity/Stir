@@ -195,6 +195,15 @@ final class LeftoversSessionViewModel: Identifiable {
     func findFollowUpIdea() async {
         guard !selectedItems.isEmpty else { return }
 
+        // SCA-65: a leftovers session has started — record the action +
+        // cancel any pending +20h followup notification so it doesn't
+        // fire later for an already-resolved cook. recordAction() before
+        // cancel() so the unactioned-streak suppression math sees the
+        // engagement signal even if the notification had already fired
+        // and the user is acting late.
+        LeftoversFollowupScheduler.shared.recordAction()
+        LeftoversFollowupScheduler.shared.cancel()
+
         // Client-side Premium+ gate. Server-side ENT-LEFTOVERS-01 is the
         // authoritative check (handles modified clients + direct curl);
         // this snappy local check avoids the round-trip + paywall flash
