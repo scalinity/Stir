@@ -286,9 +286,4 @@ extension RealtimeSession {
             }
         }
     }
-
-    private func stopMicForwarding() {
-        micForwardTask?.cancel()
-        micForwardTask = nil
-    }
 }

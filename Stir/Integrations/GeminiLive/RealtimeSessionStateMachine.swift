@@ -256,7 +256,6 @@ extension RealtimeSession {
             if stateMachine.state == .refreshing {
                 stateMachine.advance(to: .ready)
             }
-            _ = preRefreshState // preserved for future restore-prior-state logic if needed
             return .success
         } catch {
             let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -588,43 +587,15 @@ extension RealtimeSession {
 
     // MARK: - VoiceTurn persist helpers
 
-    /// Persist a VoiceTurn row with an observable error path (P0-G fix).
-    /// Used by `finalizeTurn` (happy + watchdog) and
-    /// `recordTurnAsTransportError` (transport-error recovery). Replaces
-    /// the prior `try?` pattern that silently discarded Core Data save
-    /// failures — losing the persist is the exact signal ADR 0015's
-    /// cap-reversal trigger query keys off, so silent drop defeated
-    /// the observability the whole watchdog was instrumented to provide.
-    ///
-    /// `context` is a static short string (e.g. "finalize_turn_model",
-    /// "transport_error_recovery") that goes into the log line so
-    /// dashboards can attribute persist failures by call site.
-    private func persistVoiceTurnSafely(
-        _ input: VoiceTurnRepository.PersistInput,
-        context: String,
-    ) {
-        do {
-            try voiceTurnRepository.persist(input)
-        } catch {
-            Logger.voice.error(
-                "voice_turn_persist_failed context=\(context, privacy: .public) turn=\(self.turnCount, privacy: .public) speaker=\(input.speaker.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .private)",
-            )
-            #if DEBUG
-            VoiceSessionLog.logError("voice_turn.persist_failed", error: error, [
-                "context": context,
-                "turn": turnCount,
-                "speaker": input.speaker.rawValue,
-            ])
-            #endif
-        }
-    }
-
-    /// P3-F (2026-04-23): batch variant used by `finalizeTurn` and
-    /// `recordTurnAsTransportError` so the user + model VoiceTurn rows
-    /// land in a single `context.save()` instead of two. Halves Core
-    /// Data write overhead + CloudKit push rate per turn. Error
-    /// handling mirrors `persistVoiceTurnSafely` — observable, non-
-    /// re-throwing.
+    /// P3-F (2026-04-23): batch persistence of the user + model VoiceTurn
+    /// rows used by `finalizeTurn` and `recordTurnAsTransportError` so
+    /// the pair lands in a single `context.save()` instead of two —
+    /// halves Core Data write overhead + CloudKit push rate per turn.
+    /// Error handling is observable + non-rethrowing (P0-G fix): persist
+    /// failures surface to OSLog → Sentry breadcrumbs (powering the
+    /// ADR 0015 cap-reversal trigger query) without corrupting the
+    /// state-machine unwinding paths that call this from `finalizeTurn`'s
+    /// synchronous body.
     private func persistVoiceTurnPairSafely(
         user: VoiceTurnRepository.PersistInput,
         model: VoiceTurnRepository.PersistInput,
