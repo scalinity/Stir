@@ -78,16 +78,18 @@ final class SavedMealsFavoriteStickinessTests: XCTestCase {
         // older app build whose setFavorite did NOT touch isSaved. We
         // bypass setFavorite for the initial state so isFavorite=true
         // co-exists with isSaved=false (the impossible state under the
-        // new code path). Unfavoriting must (a) flip isFavorite false,
-        // (b) flip isSaved true so the row stays in Saved, (c) the row
-        // continues to surface in savedMealEntries.
+        // new code path). SCA-151 drops the legacy `isFavorite == YES`
+        // fetch fallback, so this row should not surface until a write
+        // path explicitly migrates it to `isSaved=true`.
         let plan = makePlan(title: "Pre-fix Pierogi")
         plan.isFavorite = true
         plan.isSaved = false
         try controller.viewContext.save()
 
-        // Sanity — visible because of the (now-redundant) isFavorite clause.
-        XCTAssertEqual(try cookRepo.savedMealEntries(for: household).map(\.title), ["Pre-fix Pierogi"])
+        XCTAssertTrue(
+            try cookRepo.savedMealEntries(for: household).isEmpty,
+            "Favorite-only legacy rows should not surface after SCA-151 drops the isFavorite predicate fallback.",
+        )
 
         _ = solveRepo.setFavorite(false, on: plan)
         XCTAssertFalse(plan.isFavorite)
@@ -95,7 +97,7 @@ final class SavedMealsFavoriteStickinessTests: XCTestCase {
 
         XCTAssertEqual(
             try cookRepo.savedMealEntries(for: household).map(\.title), ["Pre-fix Pierogi"],
-            "Pre-fix favorited row must remain in Saved after unfavorite (SCA-10 migration).",
+            "Pre-fix favorited row must remain in Saved after an explicit unfavorite migration.",
         )
     }
 
