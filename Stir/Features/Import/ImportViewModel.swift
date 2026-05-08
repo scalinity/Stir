@@ -391,8 +391,9 @@ final class ImportViewModel {
     /// update and a single controller.save() so the persist + audit-
     /// completion state land atomically. Caution tags + isOptional flags
     /// are deferred (v1 import doesn't extract those; Saved detail view
-    /// can add later).
-    private func buildRecipePlan(
+    /// can add later). Internal so unit tests can assert the imported-plan
+    /// persistence invariants without a network-backed AIDispatch.
+    func buildRecipePlan(
         _ recipe: RecipeImportResponse.ImportedRecipe,
         source: RecipeImportSource,
     ) throws -> UUID {
@@ -406,6 +407,7 @@ final class ImportViewModel {
         plan.estimatedMinutes = Int16(clamping: recipe.estimatedMinutes ?? 30)
         plan.createdAt = Date()
         plan.isFavorite = false
+        plan.isSaved = true
         plan.aiVersion = "recipe_import_v1"
         for (idx, ing) in recipe.ingredients.enumerated() {
             let row = RecipeIngredient(context: ctx)

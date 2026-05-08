@@ -64,9 +64,30 @@ final class ImportViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isReviewing)
     }
 
+    // MARK: - Persist imported recipe
+
+    func test_buildRecipePlan_marksImportedPlanSavedForSavedMeals() throws {
+        let fixture = try makeFixture()
+        let planID = try fixture.vm.buildRecipePlan(sampleImportedRecipe(), source: .pastedText)
+        try fixture.controller.save()
+
+        let entries = try CookingSessionRepository(controller: fixture.controller)
+            .savedMealEntries(for: fixture.household)
+        XCTAssertEqual(entries.map(\.id), [planID])
+        XCTAssertEqual(entries.first?.title, "Weeknight Tomato Pasta")
+        XCTAssertEqual(entries.first?.plan?.isSaved, true)
+        XCTAssertEqual(entries.first?.plan?.isFavorite, false)
+    }
+
     // MARK: - Helpers
 
-    private func makeVM() throws -> ImportViewModel {
+    private struct Fixture {
+        let vm: ImportViewModel
+        let controller: PersistenceController
+        let household: HouseholdProfile
+    }
+
+    private func makeFixture() throws -> Fixture {
         let controller = PersistenceController(inMemory: true)
         let ctx = controller.viewContext
         let household = HouseholdProfile(context: ctx)
@@ -79,11 +100,42 @@ final class ImportViewModelTests: XCTestCase {
         // diverging them is the SCA-179 footgun. Tests passing two
         // independent values would have to do so deliberately and
         // visibly here, not via a defaulted-arg silent fall-through.
-        return ImportViewModel(
+        let vm = ImportViewModel(
             household: household,
             aiDispatch: AIDispatch.stub,
             importRepo: RecipeImportRepository(controller: controller),
             controller: controller,
+        )
+        return Fixture(vm: vm, controller: controller, household: household)
+    }
+
+    private func makeVM() throws -> ImportViewModel {
+        try makeFixture().vm
+    }
+
+    private func sampleImportedRecipe() -> RecipeImportResponse.ImportedRecipe {
+        RecipeImportResponse.ImportedRecipe(
+            title: "Weeknight Tomato Pasta",
+            servings: 2,
+            estimatedMinutes: 25,
+            ingredients: [
+                .init(
+                    displayName: "spaghetti",
+                    canonicalSlug: "spaghetti",
+                    amountText: "8 oz",
+                    group: nil,
+                ),
+            ],
+            steps: [
+                .init(
+                    stepNumber: 1,
+                    instructionText: "Boil the pasta until al dente.",
+                    timerSeconds: 600,
+                    cautionTags: nil,
+                ),
+            ],
+            parseQuality: .high,
+            editHints: nil,
         )
     }
 
