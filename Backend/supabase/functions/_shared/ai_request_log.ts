@@ -78,7 +78,7 @@ export const MODEL_PRICING: Readonly<Record<GeminiModel, ModelPricing>> = {
     // so this rate is a no-op in practice.
     cachedInPer1M: 0.1875,
     audioInPer1M: 3.00,
-    imageInPer1M: 0.75,
+    imageInPer1M: 1.00,
     textOutPer1M: 4.50,
     audioOutPer1M: 12.00,
   },

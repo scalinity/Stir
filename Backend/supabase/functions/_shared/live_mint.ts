@@ -137,11 +137,11 @@ export interface LiveMintConfig {
   thinkingLevel?: 'minimal' | 'low';
   /** Prebuilt voice name. Default "Aoede" per Cook Mode Architecture. */
   voiceName?: string;
-  /** Max output audio tokens per turn. Stir policy: 300 (see CLAUDE.md
+  /** Max output audio tokens per turn. Stir policy: 400 (see CLAUDE.md
    * #8 and ADR 0010). 150 was too tight — 2-sentence responses
    * exceeding 6 seconds of speech (e.g., step instructions with an
-   * amount + a doneness cue) hit the cap mid-sentence. 300 covers
-   * ~12 seconds at 25 tokens/sec, which matches the "2 short sentences"
+   * amount + a doneness cue) hit the cap mid-sentence. 400 covers
+   * ~16 seconds at 25 tokens/sec, which matches the "2 short sentences"
    * prompt budget with a safety margin. */
   maxOutputTokens?: number;
   /** Turn coverage mode. April 2026 default:

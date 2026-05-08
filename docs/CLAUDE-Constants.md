@@ -12,13 +12,13 @@ enum GeminiModel: String {
 }
 ```
 
-Paid tier per 1M tokens (April 2026):
+Paid tier per 1M tokens (April 2026; re-checked 2026-05-08 against https://ai.google.dev/gemini-api/docs/pricing):
 
 | Model | Text in | Audio in | Image in | Text out | Audio out | Cache |
 | --- | --- | --- | --- | --- | --- | --- |
 | flash | $0.50 | $1.00 | $0.50 | $3.00 | — | yes |
 | flash-lite | $0.25 | $0.50 | $0.25 | $1.50 | — | yes |
-| flash-live | $0.75 | $3.00 | $0.75 | $4.50 | $12.00 | **no** |
+| flash-live | $0.75 | $3.00 | $1.00 | $4.50 | $12.00 | **no** |
 
 Live audio: **25 tokens/second** both directions.
 
@@ -105,8 +105,8 @@ Gemini (Edge Functions only; iOS only the Live WebSocket):
 ```
 POST .../v1beta/models/gemini-3-flash-preview:generateContent
 POST .../v1beta/models/gemini-3.1-flash-lite-preview:generateContent
-POST .../v1alpha/authTokens                                # Live mint (v1alpha)
-WSS  wss://.../v1beta.GenerativeService.BidiGenerateContent
+POST .../v1alpha/auth_tokens                               # Live mint (v1alpha)
+WSS  wss://.../v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=auth_tokens/<id>
 ```
 
 ## Error code matrix

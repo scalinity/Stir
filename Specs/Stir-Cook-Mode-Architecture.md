@@ -2,21 +2,23 @@
 
 Validated reference for implementing Cook Mode voice on **Google Gemini 3.1 Flash Live Preview** at `thinkingLevel: minimal`. Supersedes the earlier OpenAI `gpt-realtime-mini` research draft after the decision to consolidate on a single AI vendor (Google Gemini).
 
-Last validated: April 17, 2026.
+Last validated: May 8, 2026.
 
-**Post-spike corrections (April 19, 2026 — step 6 scope-confirmation).** The April 2026 Gemini Live spike findings updated CLAUDE.md but not all sections below. Where this doc disagrees with CLAUDE.md §"Gemini Live — the sharp-edges section" or spec §10 entitlement table, **CLAUDE.md wins**. Known corrections:
+**Post-spike corrections.** The April 2026 Gemini Live spike findings updated CLAUDE.md before this research doc. The May 8, 2026 cheap-half re-check refreshed the mint protocol and pricing notes below. Where this doc disagrees with CLAUDE.md §"Gemini Live — the sharp-edges section" or spec §10 entitlement table, **CLAUDE.md wins**. Known historical corrections:
 
-| Section | Doc says | Correct |
+| Section | Older draft said | Current |
 |---|---|---|
-| §3, §8 | Mint path `/v1beta/auth-tokens` | `/v1alpha/authTokens` (CLAUDE.md #14) |
-| §3 | `Authorization: Bearer <token>` | `Authorization: Token <token>` (CLAUDE.md #13) |
-| §3 | `turn_coverage: TURN_INCLUDES_ALL_INPUT` | `TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO` (new default post-spike) |
+| §3, §8 | Mint path `/v1beta/auth-tokens` or `/v1alpha/authTokens` | `/v1alpha/auth_tokens` |
+| §3 | `Authorization: Bearer <token>` or `Authorization: Token <token>` | Constrained WS URL uses `?access_token=auth_tokens/<id>` |
+| §3 | Token response `{ token, expireTime }` | `{ name: "auth_tokens/<id>" }` |
+| §3 | Config baked into token means no setup frame | Client still sends backend-provided `{ "setup": ... }` first |
+| §3 | `turn_coverage: TURN_INCLUDES_ALL_INPUT` | `TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO` |
 | §3, §8 | `voice_cook_sessions` (plural) | `voice_cook_session` (singular) — matches DB enum `usage_feature_key` |
-| §5, §8 | Pro voice cap = 60/mo | 40/mo (spec §10 entitlement table + CLAUDE.md cost model) |
+| §5, §8 | Pro voice cap = 60/mo | 27/mo; Premium = 13/mo (ADR 0015) |
 | §8 | `disable_cook_realtime` → `{ error: 'DISABLED' }` | `{ error: 'AI-VOICE-01' }` (spec §6 error-code matrix) |
 | §6 | `preamble_present: bool` as a `cook_turn_resolved` PostHog property | Not in spec §15. Track via Sentry breadcrumbs + backend audio-transcript analysis, not a wire property. |
 
-Substantive sections below are otherwise current as of the spike.
+Substantive sections below are current as of the May 8, 2026 cheap-half re-check unless explicitly labeled historical.
 
 ---
 
@@ -31,7 +33,7 @@ Substantive sections below are otherwise current as of the spike.
 | --- | --- | --- | --- |
 | Text | $0.75 | $4.50 | not supported |
 | Audio | $3.00 | $12.00 | not supported |
-| Image / Video | $0.75 | — | not supported |
+| Image / Video | $1.00 | — | not supported |
 
 **Token metering (audio):**
 - Both directions: **25 tokens/second** (1 token per 40ms)
@@ -72,13 +74,13 @@ Substantive sections below are otherwise current as of the spike.
 | Scope | Turns | Cost |
 | --- | --- | --- |
 | One Cook Session (15 turns) | 15 | $0.081 |
-| Premium user (20 sessions/mo) | 300 | **$1.62/mo** |
-| Pro user (60 sessions/mo) | 900 | **$4.86/mo** |
+| Premium user (13 sessions/mo) | 195 | **$1.05/mo** |
+| Pro user (27 sessions/mo) | 405 | **$2.19/mo** |
 
 Voice Cook Mode is ~95% of total Premium AI cost and ~99% of Pro AI cost. Runaway voice cost is the single most likely way unit economics break.
 
 **Cost levers (v1):**
-- `max_output_tokens: 150` at session config — caps assistant audio length per turn, eliminates long-monologue failure modes
+- `max_output_tokens: 400` at session config — caps assistant audio length per turn while leaving room for natural two-sentence answers
 - Session refresh every 10 turns (or on >15k prompt-token bursts) with a ~200-300 token compact recap — the actual cost lever; replaces the conflated "pruning" term used in earlier drafts
 - Session refresh at 10 min / 15 turns — hard reset prevents long sessions from blowing context budget
 - `thinkingLevel: minimal` — lowest latency tier, avoids paying for unnecessary reasoning on conversational routing tasks
@@ -100,51 +102,59 @@ Voice Cook Mode is ~95% of total Premium AI cost and ~99% of Pro AI cost. Runawa
 
 Gemini Live supports short-lived auth tokens minted from the main API key. The Stir backend mints one ephemeral token per Cook Session; the client uses it to open a WebSocket directly to Gemini, scoped to a single session.
 
+Verified 2026-05-08 against production Supabase `realtime-session` with the paid-tier `GEMINI_API_KEY`: API-key auth succeeds, the response carries `name: "auth_tokens/<id>"`, the constrained WebSocket accepts `access_token=<name>`, and Gemini emits `setupComplete`, model audio, `turnComplete`, and `usageMetadata` after the explicit setup frame.
+
 ```
-POST https://generativelanguage.googleapis.com/v1beta/auth-tokens
+POST https://generativelanguage.googleapis.com/v1alpha/auth_tokens
 x-goog-api-key: <main Gemini API key>
 Content-Type: application/json
 
 {
-  "authToken": {
-    "expire_time": "<ISO 8601 timestamp, ~5 min in future>",
-    "new_session_expire_time": "<ISO 8601 timestamp, ~1 min in future>",
-    "uses": 1,
-    "bidi_generate_content_setup": {
-      "model": "models/gemini-3.1-flash-live-preview",
-      "generation_config": {
-        "response_modalities": ["AUDIO"],
-        "speech_config": { "voice_config": { "prebuilt_voice_config": { "voice_name": "Aoede" } } },
-        "max_output_tokens": 150,
-        "thinking_config": { "thinking_level": "minimal" }
-      },
-      "system_instruction": "<Cook Mode system prompt>",
-      "tools": [{ "function_declarations": [ <tool definitions> ] }],
-      "realtime_input_config": {
-        "automatic_activity_detection": { "disabled": false },
-        "turn_coverage": "TURN_INCLUDES_ALL_INPUT"
-      }
-    }
+  "expireTime": "<ISO 8601 timestamp, ~35 min in future>",
+  "newSessionExpireTime": "<ISO 8601 timestamp, ~1 min in future>",
+  "uses": 1,
+  "bidiGenerateContentSetup": {
+    "model": "models/gemini-3.1-flash-live-preview",
+    "generationConfig": {
+      "responseModalities": ["AUDIO"],
+      "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "Aoede" } } },
+      "maxOutputTokens": 400,
+      "thinkingConfig": { "thinkingLevel": "minimal" }
+    },
+    "systemInstruction": { "parts": [{ "text": "<Cook Mode system prompt>" }] },
+    "tools": [{ "functionDeclarations": [ <tool definitions> ] }],
+    "realtimeInputConfig": {
+      "automaticActivityDetection": { "disabled": false },
+      "turnCoverage": "TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO"
+    },
+    "inputAudioTranscription": {},
+    "outputAudioTranscription": {}
   }
 }
 
-→ { "name": "authTokens/<id>", "token": "<bearer value>", "expireTime": "..." }
+-> { "name": "auth_tokens/<id>" }
 ```
 
 Key constraints:
-- `uses: 1` — token can be used to open exactly one session
-- `new_session_expire_time` — token must be used to open a session within ~60 seconds
-- `expire_time` — session itself must conclude before this (used as a backstop beyond the natural 30-min session limit)
-- Session config is baked into the token at mint time — the Gemini API key stays server-side and never reaches the client
+- `uses: 1` - token can be used to open exactly one session
+- `newSessionExpireTime` - token must be used to open a session within ~60 seconds
+- `expireTime` - session itself must conclude before this (used as a backstop beyond the natural 30-min session limit)
+- Session config is baked into the token at mint time, but Gemini still requires the client to send a matching `setup` frame after WebSocket open
+- The Gemini API key stays server-side and never reaches the client
 
 **Client connect (WebSocket):**
 
 ```
-wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent
-Authorization: Bearer <ephemeral token>
+wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=auth_tokens/<id>
 ```
 
-First client message after connect is the `BidiGenerateContentSetup` frame (or it's pre-baked via the token's `bidi_generate_content_setup` field, as shown above). Audio frames follow as `BidiGenerateContentRealtimeInput`.
+First client message after connect is the backend-provided serialized setup frame:
+
+```json
+{ "setup": { "model": "models/gemini-3.1-flash-live-preview", "generationConfig": { } } }
+```
+
+Audio frames follow as `realtimeInput.audio` with `mimeType: "audio/pcm;rate=16000"`.
 
 ---
 
@@ -189,12 +199,12 @@ Net: Gemini Live's WebSocket-only story is materially less resilient on cellular
 2. Supabase Edge Function:
    - Validates session JWT
    - Checks voice entitlement (Premium+) — if missing, returns `403 ENT-VOICE-01`
-   - Checks voice Cook Session quota (20/mo Premium, 60/mo Pro) — if exceeded, returns `429 RATE-01`
+   - Checks voice Cook Session quota (13/mo Premium, 27/mo Pro) — if exceeded, returns `429 RATE-01`
    - Builds session config (system prompt with current recipe/step/pantry/rules, tool definitions, thinking_level, voice, max_output_tokens)
-   - Calls Gemini `auth-tokens` endpoint with baked-in session config
-   - Returns `{ auth_token, expires_at, session_id }` to the client
-3. iOS app opens WebSocket to Gemini with the ephemeral token as Bearer auth
-4. Session is ready; user can speak immediately (no further setup handshake needed — config was baked into the token)
+   - Calls Gemini `auth_tokens` endpoint with baked-in session config
+   - Returns `{ auth_token, ws_url, setup_frame_json, expires_at, session_id }` to the client
+3. iOS app opens WebSocket to Gemini using `ws_url` (`access_token=auth_tokens/<id>`)
+4. iOS sends `setup_frame_json` as the first WebSocket message; session is ready after `setupComplete`
 
 **Protocol messages (client → server):**
 - `BidiGenerateContentSetup` — first message only; session configuration including systemInstruction, tools, generationConfig, realtimeInputConfig. Immutable for the session's lifetime.
@@ -389,7 +399,7 @@ If `constraint_safe: false`, the function output includes a canned safety messag
 ```typescript
 // POST /v1/ai/realtime-session
 // Input: session JWT (from /v1/session/bootstrap) + recipe context in body
-// Output: { auth_token, expires_at, session_id }
+// Output: { auth_token, ws_url, setup_frame_json, expires_at, session_id }
 
 export default async function handler(req: Request) {
   const jwt = await verifySessionJWT(req);
@@ -402,7 +412,7 @@ export default async function handler(req: Request) {
   }
 
   // Quota check — voice Cook Sessions per month
-  const { used, cap } = await getUsage(userKey, 'voice_cook_sessions');
+  const { used, cap } = await getUsage(userKey, 'voice_cook_session');
   if (used >= cap) {
     return json({ error: 'RATE-01' }, 429);
   }
@@ -416,9 +426,29 @@ export default async function handler(req: Request) {
   const sessionOpenDeadline = new Date(now.getTime() + 60_000);   // must open within 60s
   const sessionHardDeadline = new Date(now.getTime() + 35 * 60_000); // 35 min backstop
 
+  const bidiGenerateContentSetup = {
+    model: 'models/gemini-3.1-flash-live-preview',
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: 'Aoede' }
+        }
+      },
+      maxOutputTokens: 400,
+      thinkingConfig: { thinkingLevel: 'minimal' }
+    },
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    tools: [{ functionDeclarations: tools }],
+    realtimeInputConfig: {
+      automaticActivityDetection: { disabled: false },
+      turnCoverage: 'TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO'
+    }
+  };
+
   // Mint ephemeral token
   const mint = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/auth-tokens',
+    'https://generativelanguage.googleapis.com/v1alpha/auth_tokens',
     {
       method: 'POST',
       headers: {
@@ -426,30 +456,10 @@ export default async function handler(req: Request) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        authToken: {
-          expire_time: sessionHardDeadline.toISOString(),
-          new_session_expire_time: sessionOpenDeadline.toISOString(),
-          uses: 1,
-          bidi_generate_content_setup: {
-            model: 'models/gemini-3.1-flash-live-preview',
-            generation_config: {
-              response_modalities: ['AUDIO'],
-              speech_config: {
-                voice_config: {
-                  prebuilt_voice_config: { voice_name: 'Aoede' }
-                }
-              },
-              max_output_tokens: 150,
-              thinking_config: { thinking_level: 'minimal' }
-            },
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            tools: [{ function_declarations: tools }],
-            realtime_input_config: {
-              automatic_activity_detection: { disabled: false },
-              turn_coverage: 'TURN_INCLUDES_ALL_INPUT'
-            }
-          }
-        }
+        expireTime: sessionHardDeadline.toISOString(),
+        newSessionExpireTime: sessionOpenDeadline.toISOString(),
+        uses: 1,
+        bidiGenerateContentSetup,
       }),
     }
   );
@@ -460,15 +470,17 @@ export default async function handler(req: Request) {
     return json({ error: 'AI-01' }, 502);
   }
 
-  const { token, expireTime } = await mint.json();
+  const { name } = await mint.json();
 
   // Increment quota + log for cost observability
-  await incrementUsage(userKey, 'voice_cook_sessions');
+  await incrementUsage(userKey, 'voice_cook_session');
   await logRealtimeSessionStart(userKey, recipeContext.recipe_id);
 
   return json({
-    auth_token: token,
-    expires_at: expireTime,
+    auth_token: name,
+    ws_url: `${WS_BASE}?access_token=${encodeURIComponent(name)}`,
+    setup_frame_json: JSON.stringify({ setup: bidiGenerateContentSetup }),
+    expires_at: sessionHardDeadline.toISOString(),
     session_id: crypto.randomUUID(),
   });
 }
@@ -483,7 +495,7 @@ Called in two contexts:
 Input and output shapes are identical. The hard-rule validator runs on the output regardless of invocation path.
 
 **Feature flags that affect this function:**
-- `disable_cook_realtime` — when true, the function returns `{ error: 'DISABLED' }` immediately; client falls back to text path with `AI-VOICE-01` banner
+- `disable_cook_realtime` — when true, the function returns `{ error: 'AI-VOICE-01' }`; client falls back to text path with `AI-VOICE-01` banner
 - `cook_voice_thinking_level` — `minimal` (default) or `low` (escalation path if reasoning proves insufficient in eval)
 - `voice_turn_detection_mode` — `semantic_vad` (default) or `server_vad` (fallback if semantic VAD misfires in kitchen noise)
 
@@ -509,11 +521,11 @@ Latency: p95 ~2.5s total round-trip (vs 250–500ms TTFA on Live API). Acceptabl
 
 ## 10. Validation checklist before building
 
-- [ ] curl `POST /v1beta/auth-tokens` with `model: "models/gemini-3.1-flash-live-preview"` and confirm 200 response with `token` field
-- [ ] Verify ephemeral token opens WebSocket to `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`
+- [x] 2026-05-08: `POST /v1alpha/auth_tokens` with `model: "models/gemini-3.1-flash-live-preview"` confirmed 200 response with `name: "auth_tokens/<id>"` through production `realtime-session`
+- [x] 2026-05-08: verified ephemeral token opens constrained v1alpha WebSocket via `access_token` query param and emits `setupComplete` after the explicit setup frame
 - [ ] Verify token with `uses: 1` rejects on second use
-- [ ] Verify `new_session_expire_time` enforces the 60-second open window
-- [ ] Verify `expire_time` terminates the session at the hard deadline even mid-turn
+- [ ] Verify `newSessionExpireTime` enforces the 60-second open window
+- [ ] Verify `expireTime` terminates the session at the hard deadline even mid-turn
 - [ ] Test `refreshSession()` mid-session mints a new token and swaps WebSocket with setupComplete handshake under 5s, confirmed by next-turn input tokens resetting to ~baseline after the swap
 - [ ] Test function call preamble pattern end-to-end: filler audio transcript frame arrives before `toolCall` frame
 - [ ] Measure `preamble_present_rate` across 120-turn eval set — target ≥95%
@@ -521,9 +533,9 @@ Latency: p95 ~2.5s total round-trip (vs 250–500ms TTFA on Live API). Acceptabl
 - [ ] Measure end-to-end latency including Supabase Edge Function cold start
 - [ ] Stress test session refresh at the 10-minute / 15-turn boundary — verify silent handoff
 - [ ] Verify token usage reporting in `usageMetadata` frames matches metered billing in Google Cloud Console
-- [ ] Test `disable_cook_realtime` flag: mint endpoint returns `DISABLED`, client falls through to text path, `AI-VOICE-01` banner appears
+- [ ] Test `disable_cook_realtime` flag: mint endpoint returns `AI-VOICE-01`, client falls through to text path, `AI-VOICE-01` banner appears
 - [ ] Test `ENT-VOICE-01` enforcement: Free user session JWT → 403 at mint
-- [ ] Test `RATE-01` enforcement: Premium user at 20/20 voice Cook Sessions → 429 at mint
+- [ ] Test `RATE-01` enforcement: Premium user at 13/13 voice Cook Sessions → 429 at mint
 - [ ] Test barge-in: user speaks mid-response → `serverContent.interrupted` frame → client stops audio playback immediately
 - [ ] Test semantic VAD vs server VAD in noisy kitchen recording — compare false-activation rate
 

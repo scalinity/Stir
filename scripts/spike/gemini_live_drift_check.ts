@@ -2,18 +2,20 @@
 //
 // Run: deno run --allow-net --allow-env --allow-read scripts/spike/gemini_live_drift_check.ts
 //
-// Validates CLAUDE.md §"Gemini Live — the sharp-edges section" points
-// 13-16 before step 6 writes production code. Reports the exact shape
-// of any drift so the decision on fallback design (OAuth service-account
-// vs backend-proxied WebSocket) can be made immediately.
-//
-// Budget: ~$0.005 worst-case (one minted token + one trivial turn).
+// Validates CLAUDE.md Gemini Live sharp edges before step 6 work:
+// - API-key auth mints an ephemeral token server-side.
+// - The constrained v1alpha WebSocket accepts the returned access_token.
+// - The client must send the backend-provided setup frame before turns.
+// - PCM16 16 kHz audio frames are accepted without protocol error.
+// - usageMetadata still emits token accounting for Live turns.
 
 import { load as loadEnv } from 'https://deno.land/std@0.224.0/dotenv/mod.ts';
 
-const MINT_URL   = 'https://generativelanguage.googleapis.com/v1alpha/authTokens';
-const WS_URL     = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const MODEL      = 'models/gemini-3.1-flash-live-preview';
+const MINT_URL = 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens';
+const WS_URL =
+  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+const MODEL = 'models/gemini-3.1-flash-live-preview';
+const TURN_COVERAGE = 'TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO';
 
 interface DriftReport {
   test: string;
@@ -29,58 +31,60 @@ function push(r: DriftReport) {
   report.push(r);
 }
 
-// ---------------------------------------------------------------------------
-// 0. Load API key
-// ---------------------------------------------------------------------------
-
 let apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
 if (!apiKey) {
   try {
     const env = await loadEnv({ envPath: 'Backend/supabase/.env', export: false });
     apiKey = env.GEMINI_API_KEY ?? '';
-  } catch (_) { /* .env absent — handled below */ }
+  } catch (_) {
+    // .env absent - handled below.
+  }
 }
-if (!apiKey) {
-  console.error('GEMINI_API_KEY is not set. Export it or populate Backend/supabase/.env');
+if (!apiKey || apiKey.startsWith('placeholder')) {
+  console.error('GEMINI_API_KEY is not set to a real key. Export it or populate Backend/supabase/.env.');
   Deno.exit(1);
 }
-console.log(`GEMINI_API_KEY loaded (len=${apiKey.length}).`);
+console.log(`GEMINI_API_KEY loaded (len=${apiKey.length}, prefix=${apiKey.slice(0, 4)}...).`);
 
-// ---------------------------------------------------------------------------
-// 1. Mint endpoint — two config variants
-// ---------------------------------------------------------------------------
-//
-// Variant A: new-default turn_coverage = TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO
-// Variant B (fallback): old turn_coverage = TURN_INCLUDES_ALL_INPUT
-//
-// We stop at the first success so we don't burn two mints if A works.
-
-async function mintToken(turnCoverage: string): Promise<{ token: string; raw: unknown } | { error: unknown; status: number }>
-{
-  const now = new Date();
-  const body = {
-    authToken: {
-      expire_time: new Date(now.getTime() + 35 * 60_000).toISOString(),
-      new_session_expire_time: new Date(now.getTime() + 60_000).toISOString(),
-      uses: 1,
-      bidi_generate_content_setup: {
-        model: MODEL,
-        generation_config: {
-          response_modalities: ['AUDIO'],
-          speech_config: { voice_config: { prebuilt_voice_config: { voice_name: 'Aoede' } } },
-          max_output_tokens: 150,
-          thinking_config: { thinking_level: 'minimal' },
-        },
-        system_instruction: {
-          parts: [{ text: 'You are a terse test assistant. Reply with one short sentence.' }],
-        },
-        tools: [],
-        realtime_input_config: {
-          automatic_activity_detection: { disabled: false },
-          turn_coverage: turnCoverage,
-        },
-      },
+function buildSetup() {
+  return {
+    model: MODEL,
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } },
+      maxOutputTokens: 400,
+      thinkingConfig: { thinkingLevel: 'minimal' },
     },
+    systemInstruction: {
+      parts: [{ text: 'You are a terse test assistant. Reply with one short sentence.' }],
+    },
+    tools: [],
+    realtimeInputConfig: {
+      automaticActivityDetection: {
+        disabled: false,
+        silenceDurationMs: 800,
+        prefixPaddingMs: 300,
+        startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+      },
+      turnCoverage: TURN_COVERAGE,
+    },
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
+  };
+}
+
+async function mintToken(): Promise<
+  | { tokenName: string; setupFrameJSON: string; raw: unknown }
+  | { error: unknown; status: number }
+> {
+  const now = new Date();
+  const setup = buildSetup();
+  const body = {
+    expireTime: new Date(now.getTime() + 35 * 60_000).toISOString(),
+    newSessionExpireTime: new Date(now.getTime() + 60_000).toISOString(),
+    uses: 1,
+    bidiGenerateContentSetup: setup,
   };
   const res = await fetch(MINT_URL, {
     method: 'POST',
@@ -92,85 +96,92 @@ async function mintToken(turnCoverage: string): Promise<{ token: string; raw: un
   });
   const text = await res.text();
   let parsed: unknown = text;
-  try { parsed = JSON.parse(text); } catch { /* keep raw */ }
-  if (!res.ok) return { error: parsed, status: res.status };
-  const token = (parsed as { token?: string })?.token;
-  if (!token) return { error: { note: 'response missing token field', body: parsed }, status: res.status };
-  return { token, raw: parsed };
-}
-
-let activeToken: string | null = null;
-let activeTurnCoverage: string | null = null;
-
-for (const tc of ['TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO', 'TURN_INCLUDES_ALL_INPUT']) {
-  const result = await mintToken(tc);
-  if ('token' in result) {
-    push({ test: `mint with turn_coverage=${tc}`, status: 'pass', detail: `minted, token len=${result.token.length}`, raw: result.raw });
-    activeToken = result.token;
-    activeTurnCoverage = tc;
-    break;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // keep raw text
   }
-  push({
-    test: `mint with turn_coverage=${tc}`,
-    status: 'fail',
-    detail: `status=${result.status}`,
-    raw: result.error,
-  });
+  if (!res.ok) return { error: parsed, status: res.status };
+  const tokenName = (parsed as { name?: string })?.name;
+  if (!tokenName?.startsWith('auth_tokens/')) {
+    return { error: { note: 'response missing auth_tokens name field', body: parsed }, status: res.status };
+  }
+  return { tokenName, setupFrameJSON: JSON.stringify({ setup }), raw: parsed };
 }
 
-if (!activeToken) {
-  push({ test: 'mint endpoint auth', status: 'fail', detail: 'no turn_coverage variant accepted; API-key auth likely rejected' });
-  // Capture the state of the report so step-6 backend code can commit to the
-  // fallback design (OAuth service-account vs backend-proxied WebSocket).
+const minted = await mintToken();
+if ('error' in minted) {
+  push({ test: 'mint via API-key auth', status: 'fail', detail: `status=${minted.status}`, raw: minted.error });
   console.log('\nDRIFT CHECK SUMMARY:');
   console.log(JSON.stringify(report, null, 2));
-  console.log('\nFallback paths (choose one before building /v1/ai/realtime-session):');
-  console.log('  A) OAuth service-account credential server-side (still keeps key off client)');
-  console.log('  B) Backend-proxied WebSocket (Edge Function holds Gemini connection; +100-300ms TTFA)');
   Deno.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// 2. WebSocket connect + trivial turn
-// ---------------------------------------------------------------------------
+push({
+  test: 'mint via API-key auth',
+  status: 'pass',
+  detail: `received ${minted.tokenName.slice(0, 'auth_tokens/'.length)}... name`,
+});
 
 interface ProbeResult {
   setupComplete: boolean;
+  audioFrameSent: boolean;
   receivedServerMessage: boolean;
-  sampleFrames: unknown[];
+  receivedModelAudio: boolean;
+  turnComplete: boolean;
+  sampleFrameKeys: string[][];
   usageMetadata: unknown[];
   error?: string;
 }
 
-async function probeWebSocket(token: string): Promise<ProbeResult> {
-  return new Promise<ProbeResult>((resolve) => {
-    const result: ProbeResult = { setupComplete: false, receivedServerMessage: false, sampleFrames: [], usageMetadata: [] };
-    // Deno's WebSocket doesn't accept custom headers. Gemini Live accepts the
-    // token either as `Authorization: Token <value>` (documented) or as an
-    // `access_token` query param. Fall back to the query-param form from
-    // Deno; in production, iOS uses URLSessionWebSocketTask which DOES
-    // support setting the Authorization header.
-    const url = `${WS_URL}?access_token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
+function silencePcm16FrameBase64(): string {
+  // 20 ms, PCM16, 16 kHz, mono: 320 samples * 2 bytes.
+  return btoa(String.fromCharCode(...new Uint8Array(640)));
+}
 
-    // Hard cap: 15s for the full round-trip.
+async function probeWebSocket(tokenName: string, setupFrameJSON: string): Promise<ProbeResult> {
+  return await new Promise<ProbeResult>((resolve) => {
+    const result: ProbeResult = {
+      setupComplete: false,
+      audioFrameSent: false,
+      receivedServerMessage: false,
+      receivedModelAudio: false,
+      turnComplete: false,
+      sampleFrameKeys: [],
+      usageMetadata: [],
+    };
+    const ws = new WebSocket(`${WS_URL}?access_token=${encodeURIComponent(tokenName)}`);
     const timeout = setTimeout(() => {
-      result.error = 'timeout waiting for setup-complete + response';
-      try { ws.close(); } catch { /* noop */ }
+      result.error = 'timeout waiting for setupComplete + model audio';
+      try {
+        ws.close();
+      } catch {
+        // noop
+      }
       resolve(result);
     }, 15_000);
 
     ws.onopen = () => {
-      // The session config was baked into the ephemeral token's
-      // bidi_generate_content_setup, so iOS does NOT need to send a
-      // SETUP frame. Send a realtimeInput.text to elicit a response.
-      // (clientContent is history-only on 3.1 Flash Live per CLAUDE.md #11.)
-      const turn = {
-        realtimeInput: {
-          text: 'Say hello in five words.',
-        },
-      };
-      ws.send(JSON.stringify(turn));
+      ws.send(setupFrameJSON);
+      setTimeout(() => {
+        try {
+          ws.send(JSON.stringify({
+            realtimeInput: {
+              audio: { data: silencePcm16FrameBase64(), mimeType: 'audio/pcm;rate=16000' },
+            },
+          }));
+          result.audioFrameSent = true;
+        } catch (err) {
+          result.error = err instanceof Error ? err.message : String(err);
+        }
+      }, 500);
+      setTimeout(() => {
+        try {
+          ws.send(JSON.stringify({ realtimeInput: { text: 'Say ok in one short sentence.' } }));
+        } catch (err) {
+          result.error = err instanceof Error ? err.message : String(err);
+        }
+      }, 900);
     };
 
     ws.onmessage = async (evt: MessageEvent) => {
@@ -186,14 +197,31 @@ async function probeWebSocket(token: string): Promise<ProbeResult> {
         text = String(evt.data);
       }
       let parsed: unknown = text;
-      try { parsed = JSON.parse(text); } catch { /* keep raw */ }
-      if (result.sampleFrames.length < 5) result.sampleFrames.push(parsed);
-      const obj = parsed as { setupComplete?: unknown; usageMetadata?: unknown; serverContent?: { turnComplete?: boolean } };
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // keep raw
+      }
+      if (typeof parsed === 'object' && parsed != null && result.sampleFrameKeys.length < 6) {
+        result.sampleFrameKeys.push(Object.keys(parsed as Record<string, unknown>));
+      }
+      const obj = parsed as {
+        setupComplete?: unknown;
+        usageMetadata?: unknown;
+        serverContent?: { turnComplete?: boolean; modelTurn?: { parts?: Array<{ inlineData?: { data?: string } }> } };
+      };
       if (obj.setupComplete !== undefined) result.setupComplete = true;
       if (obj.usageMetadata) result.usageMetadata.push(obj.usageMetadata);
-      if (obj.serverContent?.turnComplete) {
+      const parts = obj.serverContent?.modelTurn?.parts ?? [];
+      if (parts.some((part) => typeof part.inlineData?.data === 'string')) result.receivedModelAudio = true;
+      if (obj.serverContent?.turnComplete) result.turnComplete = true;
+      if (result.setupComplete && result.receivedModelAudio && result.turnComplete) {
         clearTimeout(timeout);
-        try { ws.close(); } catch { /* noop */ }
+        try {
+          ws.close();
+        } catch {
+          // noop
+        }
         resolve(result);
       }
     };
@@ -204,42 +232,45 @@ async function probeWebSocket(token: string): Promise<ProbeResult> {
 
     ws.onclose = (e: CloseEvent) => {
       clearTimeout(timeout);
-      if (!result.setupComplete && !result.error) {
-        result.error = `ws closed without setup-complete (code=${e.code}, reason=${e.reason})`;
+      if (!result.error && !result.setupComplete) {
+        result.error = `ws closed before setupComplete (code=${e.code}, reason=${e.reason})`;
       }
       resolve(result);
     };
   });
 }
 
-const probe = await probeWebSocket(activeToken);
-if (probe.setupComplete) {
-  push({ test: 'WebSocket setupComplete frame', status: 'pass', detail: `turn_coverage=${activeTurnCoverage}` });
-} else {
-  push({ test: 'WebSocket setupComplete frame', status: 'fail', detail: probe.error ?? 'no setup-complete received', raw: probe.sampleFrames });
-}
-if (probe.receivedServerMessage) {
-  push({ test: 'WebSocket any message received', status: 'pass', detail: `sampled ${probe.sampleFrames.length} frames` });
-} else {
-  push({ test: 'WebSocket any message received', status: 'fail', detail: probe.error ?? 'silent' });
-}
-if (probe.usageMetadata.length > 0) {
-  push({ test: 'usageMetadata emission', status: 'pass', detail: `${probe.usageMetadata.length} usage frames`, raw: probe.usageMetadata });
-} else {
-  push({ test: 'usageMetadata emission', status: 'warn', detail: 'no usageMetadata before turn complete — likely text-only turn was too small' });
-}
-
-// ---------------------------------------------------------------------------
-// 3. Summary
-// ---------------------------------------------------------------------------
+const probe = await probeWebSocket(minted.tokenName, minted.setupFrameJSON);
+push({
+  test: 'WebSocket setupComplete frame',
+  status: probe.setupComplete ? 'pass' : 'fail',
+  detail: probe.setupComplete ? 'setupComplete received after explicit setup frame' : probe.error ?? 'missing setupComplete',
+  ...(probe.setupComplete ? {} : { raw: probe.sampleFrameKeys }),
+});
+push({
+  test: 'PCM16 audio frame protocol',
+  status: probe.audioFrameSent && !probe.error ? 'pass' : 'fail',
+  detail: probe.audioFrameSent && !probe.error ? 'audio/pcm;rate=16000 frame accepted without protocol close' : probe.error ?? 'send failed',
+});
+push({
+  test: 'Live model audio response',
+  status: probe.receivedModelAudio && probe.turnComplete ? 'pass' : 'fail',
+  detail: probe.receivedModelAudio && probe.turnComplete ? 'model audio and turnComplete received' : probe.error ?? 'missing audio/turnComplete',
+  ...(probe.receivedModelAudio && probe.turnComplete ? {} : { raw: probe.sampleFrameKeys }),
+});
+push({
+  test: 'usageMetadata emission',
+  status: probe.usageMetadata.length > 0 ? 'pass' : 'warn',
+  detail: `${probe.usageMetadata.length} usage frames`,
+  raw: probe.usageMetadata.map((item) => Object.keys(item as Record<string, unknown>)),
+});
 
 const fails = report.filter((r) => r.status === 'fail');
 console.log('\nDRIFT CHECK SUMMARY:');
-console.log(JSON.stringify({ active_turn_coverage: activeTurnCoverage, report }, null, 2));
+console.log(JSON.stringify({ turn_coverage: TURN_COVERAGE, report }, null, 2));
 if (fails.length === 0) {
   console.log('\nAll checks passed. Safe to proceed with step-6 production code.');
   Deno.exit(0);
-} else {
-  console.log(`\n${fails.length} drift finding(s). Update CLAUDE.md + Cook Mode Architecture doc before production code.`);
-  Deno.exit(1);
 }
+console.log(`\n${fails.length} drift finding(s). Update specs before production code.`);
+Deno.exit(1);

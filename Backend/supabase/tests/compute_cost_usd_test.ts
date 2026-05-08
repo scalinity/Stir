@@ -165,6 +165,16 @@ Deno.test('computeCostUSD coerces NaN/Infinity inputs to 0 (defense in depth)', 
   assertEquals(infinity, 0.0015);
 });
 
+Deno.test('computeCostUSD FlashLivePreview uses current image input pricing', () => {
+  const cost = computeCostUSD(GeminiModel.FlashLivePreview, {
+    textInputTokens: 0,
+    imageInputTokens: 1000,
+    textOutputTokens: 0,
+  });
+  // Live image/video input: 1000 * $1.00 / 1e6 = $0.001000.
+  assertEquals(cost, 0.001);
+});
+
 Deno.test('computeCostUSD handles zero textInputTokens gracefully', () => {
   // Degenerate input: zero text input with a non-zero cached count
   // shouldn't produce phantom cost. The double-clamp ensures cached
