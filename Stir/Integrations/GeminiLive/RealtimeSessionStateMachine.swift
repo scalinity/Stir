@@ -383,7 +383,6 @@ extension RealtimeSession {
     /// speak again. Re-checks state under MainActor because a real
     /// `turnComplete` could have arrived between the Task.sleep wake
     /// and the fire handler (rare but possible).
-    @MainActor
     func turnStuckWatchdogFired() {
         guard stateMachine.state == .modelSpeaking else { return }
         let now = Date()
