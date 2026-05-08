@@ -74,15 +74,25 @@ struct CookModeRoot: View {
     /// still stale). Cleared on consume, the safety timeout, or dismiss
     /// without purchase.
     @State private var pendingLeftoversIntent: Bool = false
-    /// SCA-56: Cancellable handles for the two ad-hoc Tasks the leftovers
-    /// handoff used to fire-and-forget. Storing them lets the success path
-    /// (`.onChange` observer consuming `pendingLeftoversIntent`) cancel
-    /// the safety timeout, prevents re-entrancy when a user starts a
-    /// second cook within the 5s window, and stops orphan Tasks from
-    /// surviving CookModeRoot teardown. Both are `MainActor` Tasks so
-    /// cancellation is synchronous from the actor.
+    /// SCA-56: Cancellable handles for the ad-hoc Tasks the post-submit
+    /// handoffs used to fire-and-forget. Storing them lets the success
+    /// path (`.onChange` observer consuming `pendingLeftoversIntent`)
+    /// cancel the safety timeout, prevents re-entrancy when a user
+    /// starts a second cook within the timeout window, and stops orphan
+    /// Tasks from surviving CookModeRoot teardown. Both are `MainActor`
+    /// Tasks so cancellation is synchronous from the actor.
+    ///
+    /// SCA-122 rename: `postSubmitPresentationTask` (previously
+    /// `leftoversPresentationTask`) is shared across BOTH the SCA-55
+    /// leftovers cover-handoff AND the SCA-66 repeat-candidate sheet
+    /// paywall handoff (added in SCA-114). The two intents are mutually
+    /// exclusive at decision time (postSubmitIntent short-circuits on
+    /// leftoverCount>0 before the rating check), so cancellation on
+    /// re-arm is benign today. If a future intent overlaps with either
+    /// path, give it its own slot — don't add a third caller to this
+    /// one.
     @State private var leftoversTimeoutTask: Task<Void, Never>?
-    @State private var leftoversPresentationTask: Task<Void, Never>?
+    @State private var postSubmitPresentationTask: Task<Void, Never>?
 
     init(
         recipePlan: RecipePlan,
@@ -182,8 +192,8 @@ struct CookModeRoot: View {
                             // standard from SCA-56 documented at
                             // `Self.coverHandoffGap`.
                             presentPaywall: { trigger in
-                                cancelLeftoversPresentationTask()
-                                leftoversPresentationTask = Task { @MainActor in
+                                cancelPostSubmitPresentationTask()
+                                postSubmitPresentationTask = Task { @MainActor in
                                     try? await Task.sleep(for: Self.coverHandoffGap)
                                     guard !Task.isCancelled else { return }
                                     coordinator.presentPaywall(trigger)
@@ -227,16 +237,18 @@ struct CookModeRoot: View {
                     .onChange(of: entitlements.billingState) { _, _ in
                         consumePendingLeftoversIntentIfReady()
                     }
-                    // SCA-56: cancel any in-flight leftovers Tasks if
+                    // SCA-56: cancel any in-flight post-submit Tasks if
                     // CookModeRoot leaves the tree (parent rebuild, app
                     // background-kill recovery). Without this, the
                     // fire-and-forget timeout/presentation Tasks survive
                     // the View teardown and write to a detached @State.
+                    // Covers both the SCA-55 leftovers handoff and the
+                    // SCA-66 / SCA-114 repeat-candidate paywall handoff.
                     .onDisappear {
                         leftoversTimeoutTask?.cancel()
                         leftoversTimeoutTask = nil
-                        leftoversPresentationTask?.cancel()
-                        leftoversPresentationTask = nil
+                        postSubmitPresentationTask?.cancel()
+                        postSubmitPresentationTask = nil
                     }
                     // Transient voice-error toast (empty transcript,
                     // mic denied, backend error). Auto-clears on tap.
@@ -470,15 +482,19 @@ struct CookModeRoot: View {
 
     // MARK: - SCA-55 Leftovers handoff
 
-    /// 50ms cover-handoff gap. SwiftUI's `.fullScreenCover` dismiss
-    /// animation runs ~0.35s; the `isPresented` flip is synchronous but
-    /// queueing a second cover bind in the same tick can swallow the
-    /// presentation on iOS 17/18. 50ms is empirically large enough to
-    /// let the dismiss animation start while staying well under the
-    /// user-perceptible window. Used by both the leftovers branch
-    /// (OutcomeFeedback → LeftoversRoot, both covers on CookModeRoot)
-    /// and the paywall branch (OutcomeFeedback on CookModeRoot →
-    /// PaywallView at RootView). Both branches need the gap because
+    /// 50ms post-submit handoff gap. SwiftUI's `.fullScreenCover` AND
+    /// `.sheet` dismiss animations run ~0.35s; the `isPresented` flip
+    /// is synchronous but queueing a second presentation bind in the
+    /// same tick can swallow it on iOS 17/18. 50ms is empirically
+    /// large enough to let the dismiss animation start while staying
+    /// well under the user-perceptible window. Used by:
+    ///   - SCA-55 leftovers branch (OutcomeFeedback → LeftoversRoot,
+    ///     both fullScreenCovers on CookModeRoot)
+    ///   - SCA-55 paywall branch (OutcomeFeedback on CookModeRoot →
+    ///     PaywallView at RootView)
+    ///   - SCA-66/SCA-114 repeat-candidate paywall handoff (sheet on
+    ///     CookModeRoot → PaywallView at RootView, sheet-after-sheet)
+    /// All three need the gap because
     /// the OutcomeFeedback dismiss runs the same animation regardless
     /// of where the next cover is bound.
     private static let coverHandoffGap: Duration = .milliseconds(50)
@@ -520,8 +536,8 @@ struct CookModeRoot: View {
             Task { @MainActor in
                 await viewModel.closeVoiceSessionFromHost()
             }
-            cancelLeftoversPresentationTask()
-            leftoversPresentationTask = Task { @MainActor in
+            cancelPostSubmitPresentationTask()
+            postSubmitPresentationTask = Task { @MainActor in
                 try? await Task.sleep(for: Self.coverHandoffGap)
                 guard !Task.isCancelled else { return }
                 presentLeftovers()
@@ -531,8 +547,8 @@ struct CookModeRoot: View {
             // SCA-66: rating ≥ 4 on un-saved recipe — surface the save
             // prompt as a sheet. 50ms gap mirrors the leftovers handoff
             // pattern so iOS doesn't try to stack two presentations.
-            cancelLeftoversPresentationTask()
-            leftoversPresentationTask = Task { @MainActor in
+            cancelPostSubmitPresentationTask()
+            postSubmitPresentationTask = Task { @MainActor in
                 try? await Task.sleep(for: Self.coverHandoffGap)
                 guard !Task.isCancelled else { return }
                 repeatCandidateContext = RepeatCandidateContext(id: recipePlanId)
@@ -550,14 +566,14 @@ struct CookModeRoot: View {
             // and the older one can race in and clear the newer
             // sticky intent (DB1 #3 / DB2 #1 / CA1 #1).
             cancelLeftoversTimeoutTask()
-            cancelLeftoversPresentationTask()
+            cancelPostSubmitPresentationTask()
             pendingLeftoversIntent = true
             leftoversTimeoutTask = Task { @MainActor in
                 try? await Task.sleep(for: Self.stickyIntentTimeout)
                 guard !Task.isCancelled, pendingLeftoversIntent else { return }
                 pendingLeftoversIntent = false
             }
-            leftoversPresentationTask = Task { @MainActor in
+            postSubmitPresentationTask = Task { @MainActor in
                 try? await Task.sleep(for: Self.coverHandoffGap)
                 guard !Task.isCancelled else { return }
                 coordinator.presentPaywall(trigger)
@@ -589,9 +605,9 @@ struct CookModeRoot: View {
     }
 
     @MainActor
-    private func cancelLeftoversPresentationTask() {
-        leftoversPresentationTask?.cancel()
-        leftoversPresentationTask = nil
+    private func cancelPostSubmitPresentationTask() {
+        postSubmitPresentationTask?.cancel()
+        postSubmitPresentationTask = nil
     }
 
     /// Build a fresh `LeftoversSessionViewModel` and bind it to
