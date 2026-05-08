@@ -433,15 +433,16 @@ async function fulfillSweep(
     partial: 0,
   };
 
-  // Claim up to CLAIM_LIMIT rows in 'approved' state. Atomic transition
-  // via UPDATE ... RETURNING; rows in 'processing' are left alone (ops
-  // intervention path).
-  const { data: claimed, error: claimErr } = await client
-    .from('deletion_requests')
-    .update({ state: 'processing', started_at: new Date().toISOString() })
-    .eq('state', 'approved')
-    .select('id, canonical_user_key, canonical_user_key_hash, external_refs_json')
-    .limit(CLAIM_LIMIT);
+  // Claim up to CLAIM_LIMIT rows in 'approved' state via the
+  // stir_claim_deletion_requests RPC (SCA-223). PostgREST's .update().limit()
+  // is unbounded without an explicit .order(), and even with one doesn't
+  // carry FOR UPDATE SKIP LOCKED — two parallel ticks could double-claim
+  // or strand rows in 'processing' with no reclaim sweep to recover them.
+  // The RPC mirrors the sibling stir_claim_pending_jobs pattern.
+  const { data: claimed, error: claimErr } = await client.rpc(
+    'stir_claim_deletion_requests',
+    { p_limit: CLAIM_LIMIT },
+  );
 
   if (claimErr) {
     log.error('deletion_fulfill_claim_failed', { err: claimErr.message });
