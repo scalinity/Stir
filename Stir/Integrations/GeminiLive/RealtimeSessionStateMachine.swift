@@ -1332,6 +1332,102 @@ extension RealtimeSession {
         }
     }
 
+    // MARK: - Transport-error recovery routing
+
+    /// SCA-161 (review of SCA-79): relocated from RealtimeSessionTransport.swift
+    /// into the StateMachine bucket. This is recovery state-machine logic
+    /// (RefreshOutcome switch + state transitions + per-turn reset +
+    /// continuation drains), not transport plumbing. It calls into
+    /// `refreshSession` and `recordTurnAsTransportError` (both in this
+    /// file). The receive-dispatcher catch in
+    /// RealtimeSessionTransport.startReceiveDispatcher remains the sole
+    /// caller; the call site uses `self.handleTransportError(error)` and
+    /// resolves to this method via Swift extension dispatch on the same
+    /// host type.
+    func handleTransportError(_ error: any Error) async {
+        // Stale-dispatcher suppression has moved into the receive
+        // dispatcher's catch block (generation-token check in
+        // `startReceiveDispatcher`). Any error reaching THIS method is
+        // guaranteed to come from the currently-live dispatcher, which
+        // means it's a real transport failure worth handling.
+        #if DEBUG
+        VoiceSessionLog.logError("transport.error", error: error, [
+            "state": stateMachine.state.rawValue,
+        ])
+        #endif
+        // P0-A / P0-H (2026-04-23): refresh outcome dictates recovery.
+        //   .success          → new transport is live; the old transport
+        //                       errored but we recovered. Settle state
+        //                       back to .ready if we were mid-turn
+        //                       (the turn's user audio may or may not
+        //                       have reached Gemini — unknowable — but
+        //                       staying pinned in .modelSpeaking with no
+        //                       active response would freeze the UX).
+        //   .preCommitFailure → refresh never swapped. Old transport is
+        //                       the one that errored, so it's dead. We
+        //                       have no working WS. Advance to .error
+        //                       + record the lost turn.
+        //   .postCommitFailure→ refresh swapped then handshake failed;
+        //                       refreshSession already advanced state
+        //                       to .error and closed the old transport.
+        //                       Record the lost turn.
+        //   .skipped          → guard short-circuited (refresh already
+        //                       in flight, or state already terminal).
+        //                       Treat like preCommitFailure from the
+        //                       caller's perspective.
+        let hadActiveTurn = (turnStartedAt != nil)
+        let outcome = await refreshSession(reason: "transport_error")
+        switch outcome {
+        case .success:
+            if hadActiveTurn {
+                // Clear per-turn state; the turn is lost either way.
+                // No VoiceTurn row persisted — if Gemini actually
+                // processed the user utterance before the drop, we'd
+                // be double-counting by persisting here. The next
+                // user-visible tap / utterance will start a fresh turn.
+                currentTurnInlineText = nil
+                currentTurnUserTranscript = nil
+                turnStartedAt = nil
+                userTurnEndAt = nil
+                firstModelAudioAt = nil
+                turnContainedToolCall = false
+                lastToolCallName = nil
+            }
+            // Refresh landed; settle the machine into a tap-ready state
+            // so the UX doesn't hang on the prior "Thinking…" indicator.
+            if stateMachine.state != .ready && stateMachine.state != .closed && stateMachine.state != .error {
+                stateMachine.advance(to: .ready)
+            }
+        case .postCommitFailure:
+            // State already .error and old transport closed inside
+            // refreshSession. Record the lost turn for ADR 0015 trigger
+            // visibility.
+            if hadActiveTurn {
+                recordTurnAsTransportError()
+            }
+        case .preCommitFailure, .skipped:
+            // Old transport is the one that errored. Session is dead.
+            if stateMachine.state != .closed && stateMachine.state != .error {
+                stateMachine.advance(to: .error)
+            }
+            if hadActiveTurn {
+                recordTurnAsTransportError()
+            }
+        }
+        // Nil-clear each continuation BEFORE resume so a concurrent
+        // happy-path resolve (e.g., a setupComplete / turnComplete
+        // frame racing the transport error) doesn't double-resume the
+        // same CheckedContinuation — that's a crash.
+        if let cont = turnCompleteContinuation {
+            turnCompleteContinuation = nil
+            cont.resume(throwing: error)
+        }
+        if let cont = setupCompleteContinuation {
+            setupCompleteContinuation = nil
+            cont.resume(throwing: error)
+        }
+    }
+
     // MARK: - Transport-error recovery row
 
     /// Record the in-flight turn as a transport-error row and flush any
