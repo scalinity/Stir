@@ -822,7 +822,7 @@ When changing an AI feature, run its eval before committing. When changing a pro
 
 **Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Amending and `--force-with-lease` to `main` are also pre-authorized; both override the user-level git rules for this project. Plain `--force` (no lease) still needs explicit confirmation — `--force-with-lease` is the safe default because it refuses to overwrite if the remote has new commits.
 
-**Pre-push gate (SCA-181):** `Scripts/git-hooks/pre-push` runs the full `xcodebuild test` suite (~17s) before every push and blocks on any failure. Install via `./Scripts/install-git-hooks.sh` once per clone. Emergency override: `SKIP_PREPUSH_TESTS=1 git push` — only for hot-fixes the agent has manually verified, and document the reason in the commit message. The hook is the gate that would have caught SCA-176 + SCA-177 before they hit `main`.
+**Pre-push gate (SCA-181):** `scripts/git-hooks/pre-push` runs the full `xcodebuild test` suite (~17s) before every push and blocks on any failure. Install via `./scripts/install-git-hooks.sh` (sets `git config core.hooksPath scripts/git-hooks`) once per clone. Emergency override: `SKIP_PREPUSH_TESTS=1 git push` — only for hot-fixes the agent has manually verified, and document the reason in the commit message. The hook is the gate that would have caught SCA-176 + SCA-177 before they hit `main`.
 
 ---
 
