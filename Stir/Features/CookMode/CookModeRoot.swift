@@ -900,10 +900,10 @@ struct CookModeRoot: View {
                 vm?.setPinFallbackForCookSession(reason: reason)
             }
             liveDriver.onSubstitutionRequestedFromVoice = { [weak vm] subEventID in
-                vm?.recordVoiceSubstitutionRequested(subEventID: subEventID)
+                vm?.emitVoiceSubstitutionRequested(subEventID: subEventID)
             }
             liveDriver.onSubstitutionResolvedFromVoice = { [weak vm] constraintSafe, subEventID in
-                vm?.recordVoiceSubstitutionResolved(
+                vm?.emitVoiceSubstitutionResolved(
                     constraintSafe: constraintSafe,
                     subEventID: subEventID,
                 )

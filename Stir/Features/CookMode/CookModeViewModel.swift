@@ -1200,13 +1200,13 @@ final class CookModeViewModel {
         case .allowed:
             break
         case .blockedByTier, .blockedByBilling:
-            emitVoiceAffordance(tier: tier, result: "paywall_shown")
+            emitVoiceAffordance(tier: tier, result: .paywallShown)
             presentPaywall?(.voiceAffordanceTapped)
             return
         case .blockedByQuota:
             // Premium+ who's hit the monthly voice cap — Pro-upsell
             // paywall, not the generic trial one.
-            emitVoiceAffordance(tier: tier, result: "paywall_shown")
+            emitVoiceAffordance(tier: tier, result: .paywallShown)
             presentPaywall?(.voiceCookQuotaExhausted)
             return
         }
@@ -1253,7 +1253,7 @@ final class CookModeViewModel {
                 // session and return to tap-only Cook Mode.
                 isVoiceUIRequested = false
                 await closeVoiceSession()
-                emitVoiceAffordance(tier: tier, result: "voice_stopped")
+                emitVoiceAffordance(tier: tier, result: .voiceStopped)
                 return
             case .submit:
                 // User is mid-utterance → submit the turn early.
@@ -1275,7 +1275,7 @@ final class CookModeViewModel {
                 }
                 isVoiceUIRequested = false
                 await closeVoiceSession()
-                emitVoiceAffordance(tier: tier, result: "voice_stopped")
+                emitVoiceAffordance(tier: tier, result: .voiceStopped)
                 return
             }
         }
@@ -1369,16 +1369,16 @@ final class CookModeViewModel {
             try await beginVoiceTurnInner()
             hasBegunFirstTurn = true
             voiceBeginSucceeded = true
-            emitVoiceAffordance(tier: tier, result: "voice_started")
+            emitVoiceAffordance(tier: tier, result: .voiceStarted)
         } catch SpeechFallbackError.permissionDenied {
-            emitVoiceAffordance(tier: tier, result: "permission_denied")
+            emitVoiceAffordance(tier: tier, result: .permissionDenied)
             showVoiceError(
                 message: "Microphone access is off. You can keep cooking with taps, or turn on the mic in Settings.",
                 errorCode: "PERM-MIC-01",
                 screen: "cook_mode_voice_begin",
             )
         } catch SpeechFallbackError.recognizerUnavailable {
-            emitVoiceAffordance(tier: tier, result: "permission_denied")
+            emitVoiceAffordance(tier: tier, result: .permissionDenied)
             showVoiceError(
                 message: "Voice isn't available on this device.",
                 errorCode: "PERM-MIC-01",
@@ -1499,16 +1499,14 @@ final class CookModeViewModel {
     /// over-live-trace error log; the VM owns the data shape.
     private func seedVoiceSessionTrace(from driver: any VoiceSessionDriver) {
         guard let sid = driver.voiceSessionID else { return }
-        var inputState: [String: Any] = [
-            "cooking_session_id": session.id?.uuidString ?? "",
-            "recipe_plan_id": recipePlan.id?.uuidString ?? "",
-            "current_step_number": currentStepIndex + 1,
-            "path": driver.pathLabel.rawValue,
-        ]
-        if let promptVersion = driver.voiceSessionPromptVersion {
-            inputState["prompt_version"] = promptVersion
-        }
-        voiceTelemetry.seedTrace(sessionID: sid, inputState: inputState)
+        voiceTelemetry.seedTrace(
+            sessionID: sid,
+            cookingSessionID: session.id,
+            recipePlanID: recipePlan.id,
+            currentStepNumber: currentStepIndex + 1,
+            pathLabel: driver.pathLabel.rawValue,
+            promptVersion: driver.voiceSessionPromptVersion,
+        )
     }
 
     /// Called by CookModeRoot's `onTurnTranscriptFinalized` wiring on
@@ -1555,12 +1553,10 @@ final class CookModeViewModel {
     /// is owned by the VM; canonical accumulator + emit logic lives on
     /// `VoiceSessionTelemetry.recordLiveTurnSummary`.
     func recordLiveTurnSummary(_ summary: LiveTurnSummary) {
-        let pathLabel = voiceDriver?.pathLabel.rawValue ?? "live_api"
         voiceTelemetry.recordLiveTurnSummary(
             summary,
             currentStepIndex: currentStepIndex,
-            pathLabel: pathLabel,
-            bargedIn: consumeBargeInFlag(),
+            consumeBargeInFlag: { [self] in consumeBargeInFlag() },
         )
     }
 
@@ -1597,13 +1593,13 @@ final class CookModeViewModel {
     }
 
     /// SCA-80 forwarder for the voice-path `substitution_requested`.
-    func recordVoiceSubstitutionRequested(subEventID: String) {
-        voiceTelemetry.recordVoiceSubstitutionRequested(subEventID: subEventID)
+    func emitVoiceSubstitutionRequested(subEventID: String) {
+        voiceTelemetry.emitVoiceSubstitutionRequested(subEventID: subEventID)
     }
 
     /// SCA-80 forwarder for the voice-path `substitution_accepted`.
-    func recordVoiceSubstitutionResolved(constraintSafe: Bool, subEventID: String) {
-        voiceTelemetry.recordVoiceSubstitutionResolved(
+    func emitVoiceSubstitutionResolved(constraintSafe: Bool, subEventID: String) {
+        voiceTelemetry.emitVoiceSubstitutionResolved(
             constraintSafe: constraintSafe,
             subEventID: subEventID,
         )
@@ -1817,7 +1813,7 @@ final class CookModeViewModel {
         rebuildDriverTask?.cancel()
         await closeVoiceSession()
         if hadActiveSession {
-            emitVoiceAffordance(tier: tier, result: "voice_stopped")
+            emitVoiceAffordance(tier: tier, result: .voiceStopped)
         }
     }
 
@@ -2087,7 +2083,7 @@ final class CookModeViewModel {
         switch stirError {
         case .rateLimited:
             // User hit voice_cook_session monthly cap — Pro-upsell path.
-            emitVoiceAffordance(tier: entitlements?.tier ?? .free, result: "paywall_shown")
+            emitVoiceAffordance(tier: entitlements?.tier ?? .free, result: .paywallShown)
             // P0-J (2026-04-23): close the live voice session BEFORE
             // presenting the paywall. Mid-cook paywall triggers land
             // while the WebSocket + mic + audio engine are live; if we
@@ -2206,7 +2202,7 @@ final class CookModeViewModel {
     }
 
     /// SCA-80 forwarder for spec §15 `voice_affordance_tapped`.
-    private func emitVoiceAffordance(tier: Tier, result: String) {
+    private func emitVoiceAffordance(tier: Tier, result: VoiceAffordanceResult) {
         voiceTelemetry.emitVoiceAffordance(tier: tier, result: result)
     }
 
@@ -2284,6 +2280,17 @@ final class CookModeViewModel {
     /// `handleMicTap`'s success path / reset sites only.
     func _testForceHasBegunFirstTurn(_ value: Bool) {
         hasBegunFirstTurn = value
+    }
+
+    /// Test-only hooks for the SCA-80 barge-in flag lifecycle. Pin the
+    /// invariant that `currentTurnBargedIn` is only consumed when an
+    /// emission actually fires — a late `turnComplete` frame arriving
+    /// after `fireCloseTrace` ran must NOT clear the flag.
+    func _testSetCurrentTurnBargedIn(_ value: Bool) {
+        currentTurnBargedIn = value
+    }
+    func _testGetCurrentTurnBargedIn() -> Bool {
+        currentTurnBargedIn
     }
     #endif
 }

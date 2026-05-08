@@ -145,6 +145,70 @@ final class CookModeVoiceTraceAggregationTests: XCTestCase {
         XCTAssertEqual(traceSpy.captures.count, 1, "Second exit must not emit another $ai_trace")
     }
 
+    /// SCA-80 W1 — pins the barge-in flag lifecycle invariant:
+    /// `currentTurnBargedIn` is consumed only when an emission actually
+    /// fires. A late `turnComplete` arriving after `fireCloseTrace` ran
+    /// (e.g. an in-flight WebSocket frame after Exit) lands in
+    /// `recordLiveTurnSummary`'s no-trace early-return path and MUST
+    /// NOT clear the flag — otherwise the `barge_in: true` signal that
+    /// belongs to the next session's first cook_turn_resolved is silently
+    /// lost. The fix passes `consumeBargeInFlag` as a closure to the
+    /// helper so the read+reset only happens past the trace-id guard.
+    func test_lateFrameAfterCloseTrace_preservesBargeInFlagForNextSession() async throws {
+        let session = try freshSession()
+        let driver = LiveMockDriver(
+            sessionID: "33333333-3333-4333-8333-333333333333",
+            promptVersion: "1.0.0",
+        )
+        let vm = makeVM(session: session, voiceDriver: nil)
+        vm.attachVoiceDriver(driver)
+        vm.recordLiveTurnSummary(.init(
+            turnIndex: 1,
+            promptTokensText: 100, promptTokensAudio: 100, promptTokensTotal: 200,
+            responseTokensText: 0, responseTokensAudio: 50, responseTokensTotal: 50,
+            submittedAt: Date(),
+            latencyMs: 1000, latencyTtfaMs: 0,
+            containedToolCall: false,
+            endedReason: .turnComplete,
+            endedAt: Date(),
+        ))
+
+        await vm.exit(markAbandoned: true)
+        XCTAssertEqual(traceSpy.captures.count, 1, "first session emits one $ai_trace")
+
+        // Simulate the user tapping mic during model-speaking on the
+        // next attach (sets `currentTurnBargedIn = true`). In the bug
+        // shape, the test hook isn't strictly needed — `handleMicTap`'s
+        // .modelSpeaking branch flips the flag — but the hook keeps the
+        // assertion narrow so a regression in handleMicTap can't make
+        // this test pass for the wrong reason.
+        vm._testSetCurrentTurnBargedIn(true)
+
+        // Late-frame: a stale WebSocket callback fires `recordLiveTurnSummary`
+        // after the trace was already closed. Helper's trace-id guard
+        // returns early; the closure-based bargeIn consumption must
+        // never run — preserving the flag for the next session.
+        vm.recordLiveTurnSummary(.init(
+            turnIndex: 99,
+            promptTokensText: 50, promptTokensAudio: 50, promptTokensTotal: 100,
+            responseTokensText: 0, responseTokensAudio: 25, responseTokensTotal: 25,
+            submittedAt: Date(),
+            latencyMs: 500, latencyTtfaMs: 0,
+            containedToolCall: false,
+            endedReason: .turnComplete,
+            endedAt: Date(),
+        ))
+
+        XCTAssertEqual(
+            traceSpy.captures.count, 1,
+            "late frame after fireCloseTrace must not produce a second $ai_trace",
+        )
+        XCTAssertTrue(
+            vm._testGetCurrentTurnBargedIn(),
+            "bargeIn flag must survive a no-trace recordLiveTurnSummary so the next session's first cook_turn_resolved still carries barge_in=true",
+        )
+    }
+
     func test_closeTrace_skipped_whenNoLiveSessionIDOnDriver() async throws {
         let session = try freshSession()
         // Fallback driver: voiceSessionID returns nil via protocol default.
