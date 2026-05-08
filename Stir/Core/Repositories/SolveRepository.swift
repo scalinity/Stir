@@ -175,7 +175,9 @@ final class SolveRepository {
 
     /// Persist a leftovers-mode solve outcome: ONE picked dish, no pantry
     /// snapshot, no constraints, linked back to the meal that produced the
-    /// leftovers via `MealSolveRequest.sourceRecipePlanId`. Returns the
+    /// leftovers via `MealSolveRequest.sourceRecipePlan` (Core Data
+    /// relationship — SCA-110 promoted this from a bare-UUID
+    /// `sourceRecipePlanId` attribute; lightweight migration). Returns the
     /// persisted `RecipePlan` so the caller can route it (typically letting
     /// `latestTonightPick` surface it as the next Tonight hero card per the
     /// LeftoversSolveView helper text "adds it to tomorrow's Tonight").
@@ -243,21 +245,27 @@ final class SolveRepository {
             solve.completedAt = now
             solve.typedStatus = .completed
             solve.aiRequestId = aiRequestId
-            solve.sourceRecipePlanId = bgSourcePlan.id
+            // SCA-110: write the relationship (replacing the legacy bare-UUID
+            // sourceRecipePlanId attribute). Nullify deletionRule on both sides
+            // means a future RecipePlan delete leaves the leftovers solve row
+            // intact with sourceRecipePlan == nil, instead of carrying a
+            // dangling UUID pointer with no FK enforcement.
+            solve.sourceRecipePlan = bgSourcePlan
             // Intentionally NOT set: typedConstraints, typedPantrySnapshot —
             // leftovers solves skip both per LeftoversSessionViewModel:
             // pantry-skip is line 187 (`ingredients: []`); constraints aren't
             // collected on the leftovers prompt.
             //
-            // SCA-56 S4 — `sourceRecipePlanId` is intentionally a bare UUID,
-            // NOT a Core Data relationship. Orphan acceptance: if the source
-            // RecipePlan is later soft- or hard-deleted, the leftovers solve
-            // carries a dangling pointer with no cascade. This is acceptable
-            // because (1) no UI consumes the field today; it's analytics-only,
-            // (2) joining via UUID at query time tolerates absent rows, and
-            // (3) flipping to a relationship later requires an inverse on
-            // RecipePlan and a lightweight migration. Revisit if a UI surface
-            // ever depends on the link being live.
+            // SCA-110: `sourceRecipePlan` was promoted from a bare-UUID
+            // `sourceRecipePlanId` attribute to a proper Core Data
+            // relationship via lightweight migration of the Stir model.
+            // Nullify deletionRule on both sides means a future RecipePlan
+            // soft- or hard-delete leaves the leftovers solve row intact
+            // with `sourceRecipePlan == nil` — no dangling pointer. The
+            // SCA-56-era "analytics-only, joins tolerate absent rows"
+            // rationale no longer applies; UI / analytics consumers read
+            // the relationship's `.id` directly via
+            // `solve.sourceRecipePlan?.id`.
 
             let recipe = RecipePlan(context: bg)
             recipe.id = UUID()
@@ -420,13 +428,19 @@ final class SolveRepository {
         /// ≤30 min. Capped at 3 entries — mockup 03 shows three chips.
         let chips: [String]
         /// SCA-70 visibility fix: true when the underlying
-        /// `MealSolveRequest.sourceRecipePlanId != nil` — i.e., this
+        /// `MealSolveRequest.sourceRecipePlan != nil` — i.e., this
         /// pick was promoted from a Leftovers handoff rather than a
         /// regular dinner-solve. TonightHomeView surfaces a "From your
         /// leftovers" eyebrow on the hero card so the user understands
         /// what they're looking at; the "Solve again" affordance below
         /// the hero is the documented escape hatch (LeftoversSolveView
         /// helper text "Solve again to re-roll").
+        ///
+        /// SCA-110 swapped the underlying field from a bare-UUID
+        /// `sourceRecipePlanId` to the new `sourceRecipePlan`
+        /// relationship (lightweight migration of the Stir model).
+        /// Semantics unchanged — both expressions evaluate to the same
+        /// boolean post-migration.
         let isFromLeftovers: Bool
     }
 
@@ -498,7 +512,7 @@ final class SolveRepository {
             estimatedMinutes: Int(dish.estimatedMinutes),
             servings: Int(plan.servings),
             chips: chips,
-            isFromLeftovers: solve.sourceRecipePlanId != nil,
+            isFromLeftovers: solve.sourceRecipePlan != nil,
         )
     }
 

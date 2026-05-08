@@ -2,7 +2,10 @@
 //
 // SCA-55 — pin SolveRepository.createLeftoversSolveWithDish behavior:
 //   - persists ONE dish, not three
-//   - sets sourceRecipePlanId to link back to the source recipe
+//   - sets sourceRecipePlan (relationship, SCA-110) to link back to the
+//     source recipe — was a bare UUID `sourceRecipePlanId` attribute
+//     pre-SCA-110 (lightweight migration). Tests assert via the new
+//     relationship's `.id`.
 //   - skips constraints + pantrySnapshot (leftovers solves carry neither)
 //   - marks the suggested dish selected immediately (no separate
 //     selection step downstream — picking the leftovers card IS the
@@ -70,7 +73,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         XCTAssertEqual(dishes.count, 1, "leftovers solve persists ONE dish, not three")
     }
 
-    func test_createLeftoversSolveWithDish_setsSourceRecipePlanId() async throws {
+    func test_createLeftoversSolveWithDish_setsSourceRecipePlanRelationship() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
@@ -83,11 +86,56 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         )
 
         let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
+        // SCA-110: relationship-based link. The leftovers solve must
+        // point to the SAME RecipePlan instance that produced the
+        // leftovers — analytics queries read `.id` off the relationship.
         XCTAssertEqual(
-            solve.sourceRecipePlanId,
+            solve.sourceRecipePlan?.id,
             source.id,
-            "leftovers solve must link back to the meal that produced the leftovers",
+            "leftovers solve relationship must resolve to the source RecipePlan",
         )
+        XCTAssertTrue(
+            solve.sourceRecipePlan === source,
+            "relationship resolves to the same managed object passed in (no proxy/copy)",
+        )
+    }
+
+    // SCA-110: orphan-detection — Nullify deletionRule on both sides
+    // means deleting the source RecipePlan should leave the leftovers
+    // solve row intact with sourceRecipePlan == nil, NOT crash and NOT
+    // cascade-delete the solve. Pinned here because the SCA-56-era
+    // bare-UUID design tolerated dangling pointers; the Stir-2 model's
+    // FK-style relationship has stricter semantics that need a test to
+    // ensure we didn't accidentally pick deletionRule=Cascade.
+    func test_createLeftoversSolveWithDish_sourceRecipePlanDeleteNullsRelationship() async throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
+
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
+        )
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
+        XCTAssertNotNil(solve.sourceRecipePlan, "precondition: relationship is wired")
+
+        // Hard-delete the source plan and save.
+        controller.viewContext.delete(source)
+        try controller.viewContext.save()
+
+        // Re-fetch the solve to bust any in-memory cache and verify the
+        // relationship is now nil (not a dangling reference, not a
+        // cascade-deleted solve row).
+        controller.viewContext.refresh(solve, mergeChanges: true)
+        XCTAssertNil(solve.sourceRecipePlan, "Nullify deletionRule clears the relationship")
+        XCTAssertNil(solve.deletedAt, "leftovers solve row is NOT cascade-deleted with the source plan")
+        // Round-trip via fetch to confirm persistence layer agrees.
+        let request = NSFetchRequest<MealSolveRequest>(entityName: "MealSolveRequest")
+        request.predicate = NSPredicate(format: "id == %@", solve.id! as CVarArg)
+        let refreshed = try XCTUnwrap(controller.viewContext.fetch(request).first)
+        XCTAssertNil(refreshed.sourceRecipePlan)
     }
 
     func test_createLeftoversSolveWithDish_skipsConstraintsAndPantrySnapshot() async throws {
