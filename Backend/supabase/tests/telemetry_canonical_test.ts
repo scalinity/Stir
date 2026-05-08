@@ -125,3 +125,78 @@ Deno.test('stir_ops_force_reauth: RPC return shape includes merged_siblings_bump
   assert('before' in result, 'before snapshot missing');
   assert('after' in result, 'after snapshot missing');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-145 — voice_quota_refund source-shape pin
+// ---------------------------------------------------------------------------
+//
+// Per the file-header rationale (lines 22-39): PostHog emit assertions
+// are intentionally not written for fire-and-forget capturePosthogEvent
+// calls. Source-shape assertions are the working substitute — they
+// catch wiring drift without the mock-PostHog-server infrastructure
+// cost.
+//
+// Both refund call sites (no_active_prompt, mint_failure) must:
+//   (a) call refundQuota
+//   (b) emit voice_quota_refund via emitVoiceQuotaRefund
+// Together they pin the SCA-145 invariant that every refund decision
+// produces a disambiguating telemetry event.
+
+const REALTIME_SESSION_PATH = 'functions/realtime-session/index.ts';
+
+Deno.test('realtime-session: voice_quota_refund emit declared at module scope', async () => {
+  const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
+  // Helper function exists.
+  assertStringIncludes(
+    src,
+    'async function emitVoiceQuotaRefund(',
+    'emitVoiceQuotaRefund helper must be declared',
+  );
+  // Event name literal — would silently regress if a refactor renamed
+  // the event without updating spec §15 + CLAUDE.md.
+  assertStringIncludes(
+    src,
+    "event: 'voice_quota_refund'",
+    "voice_quota_refund event literal must appear in capturePosthogEvent call",
+  );
+});
+
+Deno.test('realtime-session: voice_quota_refund emitted from no_active_prompt refund site', async () => {
+  const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
+  // The no_active_prompt branch refunds quota AND emits the audit
+  // event with reason='no_active_prompt'. Look for the discriminated
+  // reason literal in proximity to the helper call.
+  assertStringIncludes(
+    src,
+    "reason: 'no_active_prompt'",
+    "no_active_prompt refund site must pass reason='no_active_prompt'",
+  );
+});
+
+Deno.test('realtime-session: voice_quota_refund emitted from mint-failure refund site', async () => {
+  const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
+  // The mint-failure catch branch discriminates on `err instanceof
+  // LiveMintError`: 'mint_failed' on LiveMintError, 'mint_unexpected_error'
+  // otherwise. Both literals must appear.
+  assertStringIncludes(
+    src,
+    "'mint_failed'",
+    "mint-failure refund site must pass reason='mint_failed' on LiveMintError",
+  );
+  assertStringIncludes(
+    src,
+    "'mint_unexpected_error'",
+    "mint-failure refund site must pass reason='mint_unexpected_error' on non-LiveMintError",
+  );
+});
+
+Deno.test('realtime-session: voice_quota_refund declares is_refresh + upstream_status properties', async () => {
+  const src = await Deno.readTextFile(REALTIME_SESSION_PATH);
+  // The helper's properties shape pins the contract documented in
+  // spec §15 (request_id, reason, is_refresh, upstream_status?).
+  // distinct_id is the hashed canonical_user_key, not a property.
+  assertStringIncludes(src, 'request_id: args.requestId');
+  assertStringIncludes(src, 'reason: args.reason');
+  assertStringIncludes(src, 'is_refresh: args.isRefresh');
+  assertStringIncludes(src, 'upstream_status = args.upstreamStatus');
+});

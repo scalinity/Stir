@@ -36,6 +36,8 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
+import { hashCanonicalKey } from '../_shared/hashing.ts';
+import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
@@ -50,6 +52,68 @@ const MODEL = GeminiModel.FlashLivePreview;
 
 /** PostgREST error.code for SQLSTATE 23505 (unique_violation). */
 const UNIQUE_VIOLATION_CODE = '23505';
+
+/**
+ * SCA-145 — refund-audit observability. Emit `voice_quota_refund` to
+ * PostHog from the two refund call sites in the request handler. The
+ * is_refresh=false increment-then-refund path on the placeholder-key
+ * CI path is observationally identical to never-incremented at the
+ * `usage_counters` layer; this event disambiguates by stamping every
+ * refund decision so dashboards/tests can pin the correct branch.
+ *
+ * Spec §15 + CLAUDE.md telemetry list register this event.
+ *
+ * Properties:
+ * - `request_id` — correlator with the originating /v1/ai/realtime-session
+ *   request (and with `ai_request_log` rows on the same request).
+ * - `reason` — what tripped the refund. Discriminated:
+ *     `no_active_prompt` — prompt-version table empty for FEATURE_KEY
+ *     `mint_failed` — Gemini /v1alpha/auth_tokens returned 4xx/5xx
+ *     `mint_unexpected_error` — non-LiveMintError thrown during mint
+ * - `is_refresh` — bool. False = first-mint path (real refund).
+ *   True is unreachable here (the `didConsumeQuota` guard short-circuits
+ *   refresh mints), but emitted for invariant verification.
+ * - `upstream_status` — number, present iff `reason='mint_failed'` and
+ *   the LiveMintError carried a status code. Lets ops correlate
+ *   refund storms with Gemini outage windows.
+ *
+ * Privacy: distinct_id is `hashCanonicalKey(canonical_user_key)` —
+ * 16-char SHA-256 prefix, same as every other server emit. No user
+ * content. Hash failure is swallowed via try/catch; the user's HTTP
+ * response isn't gated on PostHog ingest.
+ */
+async function emitVoiceQuotaRefund(
+  log: { warn: (msg: string, fields?: Record<string, unknown>) => void },
+  args: {
+    canonicalUserKey: string;
+    requestId: string;
+    reason: 'no_active_prompt' | 'mint_failed' | 'mint_unexpected_error';
+    isRefresh: boolean;
+    upstreamStatus?: number;
+  },
+): Promise<void> {
+  try {
+    const distinctId = await hashCanonicalKey(args.canonicalUserKey);
+    const properties: Record<string, unknown> = {
+      request_id: args.requestId,
+      reason: args.reason,
+      is_refresh: args.isRefresh,
+    };
+    if (args.upstreamStatus !== undefined) {
+      properties.upstream_status = args.upstreamStatus;
+    }
+    capturePosthogEvent(log as unknown as Parameters<typeof capturePosthogEvent>[0], {
+      event: 'voice_quota_refund',
+      distinctId,
+      properties,
+    });
+  } catch (err) {
+    log.warn('voice_quota_refund_emit_failed', {
+      reason: args.reason,
+      err: err instanceof Error ? err.message.slice(0, 200) : 'non_error_thrown',
+    });
+  }
+}
 
 /**
  * Supersede any prior open `voice_session_owners` row for this user,
@@ -446,6 +510,16 @@ Deno.serve(async (req) => {
         'voice_cook_session',
         consumedPeriodStart,
       );
+      // SCA-145: refund-audit observability. The is_refresh=false
+      // increment-then-refund path on the placeholder-key CI path is
+      // observationally identical to never-incremented at the
+      // usage_counters layer. PostHog emit disambiguates.
+      await emitVoiceQuotaRefund(userLog, {
+        canonicalUserKey: claims.canonical_user_key,
+        requestId,
+        reason: 'no_active_prompt',
+        isRefresh: body.is_refresh,
+      });
     }
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
     return jsonError(ErrorCode.AI_01, 500, undefined, requestId);
@@ -541,6 +615,17 @@ Deno.serve(async (req) => {
         'voice_cook_session',
         consumedPeriodStart,
       );
+      // SCA-145: refund-audit observability. See no_active_prompt
+      // refund site for rationale. `upstream_status` is included on
+      // the LiveMintError branch so ops can correlate refunds with
+      // Gemini outage windows.
+      await emitVoiceQuotaRefund(userLog, {
+        canonicalUserKey: claims.canonical_user_key,
+        requestId,
+        reason: err instanceof LiveMintError ? 'mint_failed' : 'mint_unexpected_error',
+        isRefresh: body.is_refresh,
+        upstreamStatus: err instanceof LiveMintError ? err.statusCode : undefined,
+      });
     }
     // `refund_applied` metadata mirrors the actual refund decision so
     // ops triage isn't misled on refresh-mint failures.
