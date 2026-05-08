@@ -628,6 +628,16 @@ struct CookModeRoot: View {
             aiDispatch: aiDispatch,
             entitlements: entitlements,
             presentPaywall: { trigger in
+                // SCA-105: belt-and-suspenders presenting-context check.
+                // findFollowUpIdea's gate runs sync at the top of an async
+                // function, but the call site (LeftoversSolveView's
+                // "Find idea" CTA) is reachable only while Cook Mode's
+                // cover sequence is alive. If the cover is already
+                // unwinding (user backgrounds, slow-device race), gating
+                // on activeCookLaunch ensures the paywall doesn't fire
+                // onto TonightHome with no Cook Mode context. No-op in
+                // the happy path.
+                guard coordinator.activeCookLaunch != nil else { return }
                 coordinator.presentPaywall(trigger)
             },
         )
