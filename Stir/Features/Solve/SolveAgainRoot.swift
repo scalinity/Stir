@@ -44,6 +44,7 @@ struct SolveAgainRoot: View {
 
     init(
         ingredients: [DinnerSolveRequest.IngredientLite],
+        useFirstPrefill: [String] = [],
         aiDispatch: AIDispatch,
         solveRepo: SolveRepository,
         householdStore: CurrentHouseholdStore,
@@ -63,6 +64,7 @@ struct SolveAgainRoot: View {
         // funnel link. Backend handles a nil parseID as "solve from
         // user-supplied pantry" without complaint.
         vm.prepare(with: ingredients, parseID: nil)
+        vm.constraints.useFirst = useFirstPrefill
         self._solveViewModel = State(wrappedValue: vm)
         self.onDismiss = onDismiss
     }

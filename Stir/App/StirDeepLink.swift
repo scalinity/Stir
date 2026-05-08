@@ -173,13 +173,16 @@ enum StirDeepLinkHandler {
             // recent leftover-eligible cook and routes straight to
             // LeftoversRoot — see follow-up filed at SCA-65 close-out.
             LeftoversFollowupScheduler.shared.recordAction()
-        case .useSoon:
-            // SCA-64 v1: record the action and land on Tonight. The
-            // ConstraintsSheet prefill from `useFirstPantryItemId` is
-            // out of scope for SCA-64 — it ships alongside the Tonight
-            // Home use-soon card surface (see SCA-86). Until then the
-            // user sees a familiar Tonight + can manually solve.
+        case .useSoon(let useFirstPantryItemId):
+            // SCA-86: record the action and ask Tonight Home to open
+            // Solve again with constraints.use_first prefilled from the
+            // pantry row if it is still present. The selected-tab write
+            // lives in the coordinator hook so notification taps work
+            // from any current tab.
             UseSoonScheduler.shared.recordAction()
+            Task { @MainActor in
+                coordinator.requestUseSoonPrefill(pantryItemID: useFirstPantryItemId)
+            }
         case .manageSubscription:
             // SCA-77 — billing_grace push tap. Open Apple's Manage
             // Subscriptions URL directly. iOS handles the rest (StoreKit

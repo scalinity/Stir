@@ -121,6 +121,15 @@ final class SolveViewModelPaywallTests: XCTestCase {
         }
     }
 
+    // MARK: - Constraints use-first parsing
+
+    func test_constraintsSheet_parseUseFirstDraft_trimsCommaAndLineSeparatedValues() {
+        XCTAssertEqual(
+            ConstraintsSheet.parseUseFirstDraft(" spinach, salmon\n basil ,, "),
+            ["spinach", "salmon", "basil"],
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(

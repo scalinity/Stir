@@ -67,6 +67,10 @@ final class RootCoordinator {
     let cookTimerRepository: CookTimerRepository
     let substitutionRepository: SubstitutionRepository
     let voiceTurnRepository: VoiceTurnRepository
+    /// SCA-87: Tonight Home reads widget nudge eligibility through the
+    /// coordinator so tests can inject an isolated defaults-backed
+    /// service and production avoids `.shared` drift.
+    let widgetNudgeService: WidgetNudgeService
     /// HouseholdProfile accessor — owns existence checks at fast-path init
     /// and creation in the full-bootstrap path. Injected so tests can stub
     /// the on-disk profile state without touching Core Data directly.
@@ -201,6 +205,7 @@ final class RootCoordinator {
     struct SolveAgainEntry: Identifiable, Equatable {
         let id: UUID
         let ingredients: [DinnerSolveRequest.IngredientLite]
+        let useFirstPrefill: [String]
     }
 
     /// Called from Tonight's "Solve again" tile. Consumers pass the
@@ -208,14 +213,40 @@ final class RootCoordinator {
     /// `SolveRepository.latestPantryIngredients(for:)`; the cover
     /// presents and SolveViewModel is primed via `prepare(with:)`
     /// inside `SolveAgainRoot`'s init.
-    func requestSolveAgain(ingredients: [DinnerSolveRequest.IngredientLite]) {
-        activeSolveAgain = SolveAgainEntry(id: UUID(), ingredients: ingredients)
+    func requestSolveAgain(
+        ingredients: [DinnerSolveRequest.IngredientLite],
+        useFirstPrefill: [String] = [],
+    ) {
+        activeSolveAgain = SolveAgainEntry(
+            id: UUID(),
+            ingredients: ingredients,
+            useFirstPrefill: useFirstPrefill,
+        )
     }
 
     /// Dismissal hook from `SolveAgainRoot`. Clears the active entry
     /// so the cover drops.
     func dismissSolveAgain() {
         activeSolveAgain = nil
+    }
+
+    /// SCA-86: use-soon notification taps land on Tonight, then ask
+    /// the screen to open Solve again with a `constraints.use_first`
+    /// prefill for the tapped pantry item if it still exists.
+    var pendingUseSoonPrefill: UseSoonPrefillEntry?
+
+    struct UseSoonPrefillEntry: Identifiable, Equatable {
+        let id: UUID
+        let pantryItemID: UUID?
+    }
+
+    func requestUseSoonPrefill(pantryItemID: UUID?) {
+        selectedTab = .tonight
+        pendingUseSoonPrefill = UseSoonPrefillEntry(id: UUID(), pantryItemID: pantryItemID)
+    }
+
+    func clearUseSoonPrefill() {
+        pendingUseSoonPrefill = nil
     }
 
     /// "Other options" launch signal. Drives a `.fullScreenCover(item:)`
@@ -313,6 +344,7 @@ final class RootCoordinator {
         substitutionRepository: SubstitutionRepository? = nil,
         voiceTurnRepository: VoiceTurnRepository? = nil,
         householdRepo: HouseholdProfileRepository? = nil,
+        widgetNudgeService: WidgetNudgeService? = nil,
         sharedStorage: SharedStorage = SharedStorage(),
         revenueCat: (any RevenueCatPurchasing)? = nil,
         fastPathMinLoadingDuration: Duration = .milliseconds(500),
@@ -332,6 +364,7 @@ final class RootCoordinator {
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository(controller: persistenceController)
         self.substitutionRepository = substitutionRepository ?? SubstitutionRepository(controller: persistenceController)
         self.voiceTurnRepository = voiceTurnRepository ?? VoiceTurnRepository(controller: persistenceController)
+        self.widgetNudgeService = widgetNudgeService ?? WidgetNudgeService()
         self.householdRepo = householdRepo ?? HouseholdProfileRepository(controller: persistenceController)
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared

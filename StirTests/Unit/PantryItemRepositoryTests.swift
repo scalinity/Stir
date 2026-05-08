@@ -95,6 +95,31 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(Set(withDeleted.map(\.displayName)), ["live", "tombstone"])
     }
 
+    func test_fetchByID_scopesToHouseholdAndExcludesDeletedRows() throws {
+        let row = try seedItem(name: "spinach")
+        let deleted = try seedItem(name: "old dill", deleted: true)
+
+        let other = HouseholdProfile(context: pc.viewContext)
+        other.id = UUID()
+        other.createdAt = Date()
+        let theirRow = PantryItem(context: pc.viewContext)
+        theirRow.id = row.id
+        theirRow.household = other
+        theirRow.displayName = "not ours"
+        theirRow.canonicalIngredientSlug = ""
+        theirRow.typedSource = .manual
+        theirRow.typedMemoryState = .remembered
+        theirRow.userConfirmed = true
+        theirRow.createdAt = Date()
+        theirRow.updatedAt = Date()
+        theirRow.lastSeenAt = Date()
+        try pc.viewContext.save()
+
+        XCTAssertEqual(try repo.fetch(id: row.id!, for: household)?.displayName, "spinach")
+        XCTAssertNil(try repo.fetch(id: deleted.id!, for: household), "soft-deleted rows must not prefill use-first")
+        XCTAssertEqual(try repo.fetch(id: row.id!, for: other)?.displayName, "not ours")
+    }
+
     // MARK: - insertManual
 
     func test_insertManual_persistsRowAndDedupesAgainstExisting() throws {

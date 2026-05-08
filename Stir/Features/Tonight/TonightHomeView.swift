@@ -48,11 +48,35 @@ struct TonightHomeView: View {
     @State private var toastMessage: String?
     @State private var resumableSession: CookingSession?
     @State private var tonightPick: SolveRepository.TonightPick?
+    @State private var useSoonCandidate: UseSoonCandidate?
+    @State private var widgetNudgeVisible = false
     @State private var activeModal: ActiveModal?
 
     enum ActiveModal: String, Identifiable {
         case scan
+        case widgetGuide
         var id: String { rawValue }
+    }
+
+    struct UseSoonCandidate: Equatable {
+        let id: UUID
+        let displayName: String
+        let expiresAt: Date
+
+        func subtitle(now: Date = Date()) -> String {
+            Self.subtitle(expiresAt: expiresAt, now: now)
+        }
+
+        static func subtitle(expiresAt: Date, now: Date = Date()) -> String {
+            let remaining = expiresAt.timeIntervalSince(now)
+            guard remaining > 0 else { return "Expires soon" }
+            if remaining < 86_400 {
+                let hours = max(1, Int(ceil(remaining / 3600)))
+                return "Expires in \(hours)h"
+            }
+            let days = max(1, Int(ceil(remaining / 86_400)))
+            return "Expires in \(days)d"
+        }
     }
 
     var body: some View {
@@ -81,6 +105,11 @@ struct TonightHomeView: View {
             guard new != nil, activeModal == nil else { return }
             activeModal = .scan
             coordinator.clearDeepLinkScan()
+        }
+        .onChange(of: coordinator.pendingUseSoonPrefill) { _, entry in
+            guard let entry else { return }
+            handleUseSoonPrefill(entry)
+            coordinator.clearUseSoonPrefill()
         }
         // When the scan cover dismisses (activeModal flips back to nil
         // after being .scan), refresh state so a new completed solve
@@ -175,6 +204,10 @@ struct TonightHomeView: View {
                     capturedCoordinator.presentPaywall(trigger)
                 },
             )
+        case .widgetGuide:
+            WidgetSetupGuideView(onDone: {
+                activeModal = nil
+            })
         }
     }
 
@@ -185,6 +218,7 @@ struct TonightHomeView: View {
         let capturedCoordinator = coordinator
         SolveAgainRoot(
             ingredients: entry.ingredients,
+            useFirstPrefill: entry.useFirstPrefill,
             aiDispatch: coordinator.aiDispatch,
             solveRepo: coordinator.solveRepository,
             householdStore: coordinator.household,
@@ -386,6 +420,14 @@ struct TonightHomeView: View {
 
     @ViewBuilder
     private var mainContent: some View {
+        VStack(spacing: CGFloat.Stir.space4) {
+            primaryTonightContent
+            supportingCards
+        }
+    }
+
+    @ViewBuilder
+    private var primaryTonightContent: some View {
         if let pick = tonightPick {
             VStack(spacing: CGFloat.Stir.space4) {           // 16pt — gap between hero and secondary tiles per mockup-03
                 TonightPickHeroCard(
@@ -404,6 +446,22 @@ struct TonightHomeView: View {
             }
         } else {
             firstUseEmpty
+        }
+    }
+
+    @ViewBuilder
+    private var supportingCards: some View {
+        if let useSoonCandidate {
+            UseSoonCard(
+                candidate: useSoonCandidate,
+                onSolve: { handleUseSoonTap(useSoonCandidate) },
+            )
+        }
+        if widgetNudgeVisible {
+            WidgetNudgeCard(
+                onGuide: showWidgetGuide,
+                onDismiss: dismissWidgetNudge,
+            )
         }
     }
 
@@ -437,32 +495,6 @@ struct TonightHomeView: View {
         }
     }
 
-    /// Re-solve from the latest pantry snapshot, no camera. Reads the
-    /// snapshot off the most-recent completed `MealSolveRequest` (the
-    /// same row that fed `tonightPick`), converts to the
-    /// `IngredientLite` shape the dinner-solve endpoint wants, and
-    /// hands off to `coordinator.requestSolveAgain(...)` which drives
-    /// the `SolveAgainRoot` cover. If the snapshot is missing or empty
-    /// (shouldn't happen when the hero card is visible — both depend
-    /// on a completed solve), bail with a toast and refresh state so
-    /// the stale Solve again button doesn't keep failing.
-    private func handleSolveAgainTap() {
-        guard let household = coordinator.household.profile else {
-            toastMessage = "Couldn't open Solve again. Try again."
-            return
-        }
-        guard
-            let ingredients = coordinator.solveRepository.latestPantryIngredients(
-                for: household,
-            )
-        else {
-            toastMessage = "No pantry to solve from. Try a fresh scan."
-            Task { await refreshState() }
-            return
-        }
-        coordinator.requestSolveAgain(ingredients: ingredients)
-    }
-
     private func secondaryTile(
         icon: Image,
         title: String,
@@ -470,10 +502,6 @@ struct TonightHomeView: View {
         isEnabled: Bool,
         action: @escaping () -> Void,
     ) -> some View {
-        // Color choices express the disabled state without a separate
-        // greyscale palette — icon falls to ink.300 (matches the
-        // `Image.Stir.disclosure` arrow's resting color), title falls
-        // to ink.500, subtitle stays ink.500.
         let iconTint = isEnabled ? Color.Stir.ember600 : Color.Stir.ink300
         let titleColor = isEnabled ? Color.Stir.ink900 : Color.Stir.ink500
         return Button(action: action) {
@@ -501,6 +529,108 @@ struct TonightHomeView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityHint(subtitle)
+    }
+
+    /// Re-solve from the latest pantry snapshot, no camera. Reads the
+    /// snapshot off the most-recent completed `MealSolveRequest` (the
+    /// same row that fed `tonightPick`), converts to the
+    /// `IngredientLite` shape the dinner-solve endpoint wants, and
+    /// hands off to `coordinator.requestSolveAgain(...)` which drives
+    /// the `SolveAgainRoot` cover. If the snapshot is missing or empty
+    /// (shouldn't happen when the hero card is visible — both depend
+    /// on a completed solve), bail with a toast and refresh state so
+    /// the stale Solve again button doesn't keep failing.
+    private func handleSolveAgainTap() {
+        guard let household = coordinator.household.profile else {
+            toastMessage = "Couldn't open Solve again. Try again."
+            return
+        }
+        guard
+            let ingredients = coordinator.solveRepository.latestPantryIngredients(
+                for: household,
+            )
+        else {
+            toastMessage = "No pantry to solve from. Try a fresh scan."
+            Task { await refreshState() }
+            return
+        }
+        coordinator.requestSolveAgain(ingredients: ingredients)
+    }
+
+    private func handleUseSoonTap(_ candidate: UseSoonCandidate) {
+        openSolveAgain(useFirstDisplayName: candidate.displayName)
+        PostHogClient.shared.capture(.useSoonTapped, properties: [:])
+    }
+
+    private func handleUseSoonPrefill(_ entry: RootCoordinator.UseSoonPrefillEntry) {
+        guard let household = coordinator.household.profile else { return }
+        let displayName: String?
+        if let pantryItemID = entry.pantryItemID,
+           let item = try? coordinator.pantryItemRepository.fetch(id: pantryItemID, for: household),
+           let name = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            displayName = name
+        } else {
+            displayName = useSoonCandidate?.displayName
+        }
+        guard let displayName else {
+            toastMessage = "That ingredient is no longer in your pantry."
+            return
+        }
+        openSolveAgain(useFirstDisplayName: displayName)
+    }
+
+    private func openSolveAgain(useFirstDisplayName: String) {
+        guard let household = coordinator.household.profile else {
+            toastMessage = "Couldn't open dinner ideas. Try again."
+            return
+        }
+        let ingredients: [DinnerSolveRequest.IngredientLite]
+        do {
+            ingredients = try coordinator.pantryItemRepository.fetchAll(for: household)
+                .compactMap(Self.ingredientLite)
+        } catch {
+            Logger.ui.error("TonightHome use-soon pantry refresh failed: \(error.localizedDescription, privacy: .public)")
+            toastMessage = "Couldn't read your pantry. Try a fresh scan."
+            return
+        }
+        guard !ingredients.isEmpty else {
+            toastMessage = "No pantry to solve from. Try a fresh scan."
+            return
+        }
+        coordinator.requestSolveAgain(
+            ingredients: ingredients,
+            useFirstPrefill: [useFirstDisplayName],
+        )
+    }
+
+    private func showWidgetGuide() {
+        coordinator.widgetNudgeService.recordActed()
+        widgetNudgeVisible = false
+        activeModal = .widgetGuide
+    }
+
+    private func dismissWidgetNudge() {
+        coordinator.widgetNudgeService.recordDeferred()
+        widgetNudgeVisible = false
+    }
+
+    private static func ingredientLite(_ item: PantryItem) -> DinnerSolveRequest.IngredientLite? {
+        guard let displayName = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !displayName.isEmpty else { return nil }
+        return DinnerSolveRequest.IngredientLite(
+            displayName: displayName,
+            canonicalSlug: item.canonicalIngredientSlug?.isEmpty == true ? nil : item.canonicalIngredientSlug,
+            amountText: item.amountText,
+        )
+    }
+
+    private static func useSoonCandidate(_ item: PantryItem) -> UseSoonCandidate? {
+        guard let id = item.id,
+              let expiresAt = item.expiresAt,
+              let displayName = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !displayName.isEmpty else { return nil }
+        return UseSoonCandidate(id: id, displayName: displayName, expiresAt: expiresAt)
     }
 
     /// "Last: 2 days ago" / "Last: today" — bucket time since the
@@ -691,6 +821,62 @@ struct TonightHomeView: View {
         // both Repository and view are @MainActor and Core Data
         // lives in viewContext.
         self.tonightPick = solveRepo.latestTonightPick(for: household)
+        refreshUseSoonCandidate(household: household, cookingRepo: cookingRepo)
+        refreshWidgetNudge(household: household, cookingRepo: cookingRepo)
+    }
+
+    private func refreshUseSoonCandidate(
+        household: HouseholdProfile,
+        cookingRepo: CookingSessionRepository,
+    ) {
+        let now = Date()
+        if let completedAt = try? cookingRepo.mostRecentCompletedAt(for: household),
+           now.timeIntervalSince(completedAt) < 24 * 3600 {
+            useSoonCandidate = nil
+            return
+        }
+        do {
+            useSoonCandidate = try coordinator.pantryItemRepository
+                .fetchExpiringSoon(now: now, for: household)
+                .compactMap(Self.useSoonCandidate)
+                .first
+        } catch {
+            Logger.ui.error("TonightHome use-soon refresh failed: \(error.localizedDescription, privacy: .public)")
+            useSoonCandidate = nil
+        }
+    }
+
+    private func refreshWidgetNudge(
+        household: HouseholdProfile,
+        cookingRepo: CookingSessionRepository,
+    ) {
+        let flagEnabled = entitlements.flagBool(forKey: "widget_nudge_enabled") ?? false
+        guard flagEnabled else {
+            widgetNudgeVisible = false
+            return
+        }
+        let now = Date()
+        let recentCount = ((try? cookingRepo.recentCompletedSessions(for: household, limit: 50)) ?? [])
+            .filter { session in
+                guard let endedAt = session.endedAt else { return false }
+                return now.timeIntervalSince(endedAt) <= 14 * 86_400
+            }
+            .count
+        if widgetNudgeVisible,
+           !coordinator.widgetNudgeService.isPermanentlyDismissed,
+           coordinator.widgetNudgeService.lastWidgetTap == nil {
+            return
+        }
+        guard coordinator.widgetNudgeService.shouldShowNudge(
+            now: now,
+            sessionsInLast14Days: recentCount,
+            flagEnabled: flagEnabled,
+        ) else {
+            widgetNudgeVisible = false
+            return
+        }
+        widgetNudgeVisible = true
+        coordinator.widgetNudgeService.markShown(at: now)
     }
 
     // MARK: - Kill switch
@@ -730,6 +916,175 @@ struct TonightHomeView: View {
                     }
                 }
         }
+    }
+}
+
+// MARK: - UseSoonCard
+
+private struct UseSoonCard: View {
+    let candidate: TonightHomeView.UseSoonCandidate
+    let onSolve: () -> Void
+
+    var body: some View {
+        Button(action: onSolve) {
+            HStack(alignment: .center, spacing: CGFloat.Stir.space3) {
+                Image.Stir.pantry
+                    .font(.system(size: CGFloat.Stir.iconLg, weight: .semibold))
+                    .foregroundStyle(Color.Stir.sage600)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                            .fill(Color.Stir.sage100),
+                    )
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                    Text("Use \(candidate.displayName) soon")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ink900)
+                        .lineLimit(2)
+                    Text(candidate.subtitle())
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ink500)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image.Stir.disclosure
+                    .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ink300)
+            }
+            .padding(CGFloat.Stir.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .stirCard(
+                fill: Color.Stir.sage100.opacity(0.45),
+                borderColor: Color.Stir.sage600.opacity(0.25),
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Use \(candidate.displayName) soon")
+        .accessibilityHint("Find dinner ideas that prioritize this ingredient")
+    }
+}
+
+// MARK: - WidgetNudgeCard
+
+private struct WidgetNudgeCard: View {
+    let onGuide: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+                Image.Stir.widget
+                    .font(.system(size: CGFloat.Stir.iconLg, weight: .semibold))
+                    .foregroundStyle(Color.Stir.ember600)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                            .fill(Color.Stir.ember100),
+                    )
+
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                    Text("Put Stir on your Home Screen")
+                        .stirFont(.labelLg)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ink900)
+                    Text("Jump back to tonight's dinner ideas from a widget.")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: CGFloat.Stir.space2) {
+                Button(action: onGuide) {
+                    Label("Show me how", systemImage: "square.grid.2x2")
+                        .stirFont(.labelMd)
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.Stir.ember600)
+
+                Button("Not now", action: onDismiss)
+                    .stirFont(.labelMd)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink700)
+                    .frame(minWidth: 86)
+                    .buttonStyle(.plain)
+                    .padding(.vertical, CGFloat.Stir.space2)
+            }
+        }
+        .padding(CGFloat.Stir.space4)
+        .stirCard(
+            fill: Color.Stir.paper100,
+            borderColor: Color.Stir.ember600.opacity(0.25),
+        )
+    }
+}
+
+// MARK: - WidgetSetupGuideView
+
+private struct WidgetSetupGuideView: View {
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                    Image.Stir.widgetFill
+                        .font(.system(size: CGFloat.Stir.iconHero, weight: .regular))
+                        .foregroundStyle(Color.Stir.ember600)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, CGFloat.Stir.space5)
+
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                        Text("Add Stir as a widget")
+                            .stirFont(.displayMd)
+                            .foregroundStyle(Color.Stir.ink900)
+                        Text("Keep tonight's ideas one tap away from your Home Screen.")
+                            .stirFont(.bodyMd)
+                            .foregroundStyle(Color.Stir.ink500)
+                    }
+
+                    guideStep("1", "Touch and hold your Home Screen until the apps jiggle.")
+                    guideStep("2", "Tap the plus button and search for Stir.")
+                    guideStep("3", "Choose a widget size, then tap Add Widget.")
+
+                    PrimaryButton(title: "Done", action: onDone)
+                        .padding(.top, CGFloat.Stir.space2)
+                }
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.bottom, CGFloat.Stir.space7)
+            }
+            .background(Color.Stir.paper50)
+            .navigationTitle("Widget setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: onDone)
+                }
+            }
+        }
+    }
+
+    private func guideStep(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+            Text(number)
+                .stirFont(.labelMd)
+                .fontWeight(.bold)
+                .foregroundStyle(Color.Stir.paper50)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.Stir.ember600))
+            Text(text)
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.ink900)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(CGFloat.Stir.space4)
+        .stirCard()
     }
 }
 

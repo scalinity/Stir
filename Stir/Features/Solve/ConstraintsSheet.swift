@@ -20,6 +20,7 @@ struct ConstraintsSheet: View {
 
     @State private var maxTimeIndex: Int = 2 // 30 min default
     @State private var cuisine: String = ""
+    @State private var useFirstDraft: String = ""
     @State private var goalDraft: String = ""
 
     /// 5 time-budget preset pills. The first preset is "Any" (nil
@@ -28,12 +29,27 @@ struct ConstraintsSheet: View {
     /// the ForEach iterate indices without a separate preset struct.
     private let maxTimeOptions: [Int?] = [nil, 15, 30, 45, 60]
 
+    init(
+        viewModel: SolveViewModel,
+        onSolve: @escaping () -> Void,
+    ) {
+        self.viewModel = viewModel
+        self.onSolve = onSolve
+        let selectedMaxTime = viewModel.constraints.maxTimeMinutes
+        let selectedIndex = maxTimeOptions.firstIndex { $0 == selectedMaxTime } ?? 2
+        self._maxTimeIndex = State(initialValue: selectedIndex)
+        self._cuisine = State(initialValue: viewModel.constraints.cuisineLeaning ?? "")
+        self._useFirstDraft = State(initialValue: viewModel.constraints.useFirst.joined(separator: ", "))
+        self._goalDraft = State(initialValue: viewModel.constraints.goal ?? "")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     timeBudgetSection
                     cuisineSection
+                    useFirstSection
                     goalSection
                     Spacer(minLength: CGFloat.Stir.space3)
                     solveButton
@@ -116,6 +132,22 @@ struct ConstraintsSheet: View {
         }
     }
 
+    private var useFirstSection: some View {
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            Text("Use first")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+            InputField(
+                placeholder: "optional — e.g. spinach, salmon",
+                text: $useFirstDraft,
+                autocapitalization: .sentences,
+            )
+            Text("Separate ingredients with commas.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
+        }
+    }
+
     private var solveButton: some View {
         PrimaryButton(
             title: "Find me dinner",
@@ -138,6 +170,7 @@ struct ConstraintsSheet: View {
     private func commit() {
         viewModel.constraints.maxTimeMinutes = maxTimeOptions[maxTimeIndex]
         viewModel.constraints.cuisineLeaning = cuisine.isEmpty ? nil : cuisine
+        viewModel.constraints.useFirst = Self.parseUseFirstDraft(useFirstDraft)
         viewModel.constraints.goal = goalDraft.isEmpty ? nil : goalDraft
         PostHogClient.shared.capture(.constraintsSet, properties: [
             "has_max_time": viewModel.constraints.maxTimeMinutes != nil,
@@ -146,5 +179,12 @@ struct ConstraintsSheet: View {
             "use_first_count": viewModel.constraints.useFirst.count,
             "avoid_equipment_count": viewModel.constraints.avoidEquipment.count,
         ])
+    }
+
+    static func parseUseFirstDraft(_ draft: String) -> [String] {
+        draft
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 }
