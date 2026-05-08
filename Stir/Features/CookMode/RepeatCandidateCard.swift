@@ -19,6 +19,7 @@
 // "Don't ask again" suppresses the prompt for this recipe lifetime
 // via RepeatCandidateSuppressionStore.
 
+import OSLog
 import SwiftUI
 
 /// Identifiable wrapper around a recipePlanId so CookModeRoot can use
@@ -40,6 +41,15 @@ struct RepeatCandidateCard: View {
     let suppressionStore: RepeatCandidateSuppressionStore
     let presentPaywall: (PaywallTrigger) -> Void
     let onDismiss: () -> Void
+
+    /// SCA-111 fix: surfaces persistence-failure on the Premium "Save
+    /// as a favorite" path. `SolveRepository.setFavorite` returns a
+    /// Bool; on Core Data save failure the sheet stayed up as if
+    /// successful AND `favorite_saved` was emitted regardless,
+    /// corrupting the conversion-funnel anchor. Now: on `false`, set
+    /// this banner, do NOT emit telemetry, do NOT dismiss the sheet
+    /// so the user can retry or cancel deliberately.
+    @State private var saveError: String?
 
     init(
         recipePlan: RecipePlan,
@@ -68,6 +78,9 @@ struct RepeatCandidateCard: View {
                 Text(promptBody)
                     .stirFont(.bodyMd)
                     .foregroundStyle(Color.Stir.ink700)
+            }
+            if let saveError {
+                errorBanner(saveError)
             }
             VStack(spacing: CGFloat.Stir.space2) {
                 PrimaryButton(title: yesButtonTitle, action: handleYes)
@@ -108,16 +121,39 @@ struct RepeatCandidateCard: View {
         let tier = entitlements.effectiveTier
         switch tier {
         case .premium, .pro:
-            _ = solveRepository.setFavorite(true, on: recipePlan)
-            // SCA-66: extend favorite_saved with `source` for funnel
-            // analysis. Spec §15 favorite_saved property table now
-            // includes `source ∈ {tonight, post_meal_feedback,
-            // saved_replay}` per audit ticket A3.
-            analytics.capture(.favoriteSaved, properties: [
-                "recipe_origin": recipePlan.origin ?? "ai",
-                "source": "post_meal_feedback",
-            ])
-            onDismiss()
+            // SCA-111 fix: setFavorite returns Bool indicating
+            // persistence success/failure (rolls back the context on
+            // Core Data save error per its doc). Pre-fix dropped the
+            // return on the floor: on disk-full / corruption / validation
+            // failures, the sheet dismissed as if successful AND
+            // favorite_saved fired anyway, corrupting the
+            // conversion-funnel anchor. Now: branch on the return —
+            // only emit telemetry + dismiss on true. On false, surface
+            // the error in-card and keep the sheet up so the user can
+            // retry or cancel.
+            let saved = solveRepository.setFavorite(true, on: recipePlan)
+            if saved {
+                // SCA-66: extend favorite_saved with `source` for funnel
+                // analysis. Spec §15 favorite_saved property table
+                // includes `source ∈ {tonight, post_meal_feedback,
+                // saved_replay}` per audit ticket A3.
+                analytics.capture(.favoriteSaved, properties: [
+                    "recipe_origin": recipePlan.origin ?? "ai",
+                    "source": "post_meal_feedback",
+                ])
+                onDismiss()
+            } else {
+                // SolveRepository.setFavorite already logged the
+                // underlying NSError + rolled back the context (per its
+                // doc-comment); Logger.coreData routes through Sentry's
+                // breadcrumb integration. Surface the banner so the
+                // user sees the failure instead of getting silently
+                // dismissed.
+                Logger.coreData.warning(
+                    "RepeatCandidateCard setFavorite returned false — keeping sheet up",
+                )
+                saveError = "We couldn't save that. Try again, or pick another option."
+            }
         case .free:
             analytics.capture(.repeatCandidateCardDismissed, properties: [
                 "recipe_plan_id": recipePlan.id?.uuidString ?? "",
@@ -130,6 +166,24 @@ struct RepeatCandidateCard: View {
                 presentPaywall(.savedFavoritesGate)
             }
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: CGFloat.Stir.space2) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.Stir.crimson600)
+                .accessibilityHidden(true)
+            Text(message)
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.crimson600)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, CGFloat.Stir.space3Half)
+        .padding(.vertical, CGFloat.Stir.space3)
+        .stirCard(
+            fill: Color.Stir.crimson100,
+            borderColor: Color.Stir.crimson600.opacity(0.3),
+        )
     }
 
     private func handleNotForThisOne() {
