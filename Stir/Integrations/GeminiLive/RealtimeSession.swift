@@ -277,6 +277,16 @@ struct LiveTurnTranscript: Sendable, Equatable {
 }
 
 @MainActor
+// SCA-159 (review of SCA-79 split): stored properties on this class
+// declaration are intentionally non-private to permit cross-file
+// extension access from RealtimeSessionAudioIO/Transport/StateMachine.swift
+// (Swift extensions in separate files cannot reach `private`/`fileprivate`
+// declarations on the host type). They are NOT a broadened API surface —
+// treat them as `private` to non-extension callers in the Stir module.
+// Mutation discipline: every property is mutated only by methods on
+// this class or its dedicated extension files. New cross-bucket
+// callers should add a `// SCA-159 non-private` marker if they widen
+// access further.
 final class RealtimeSession: VoiceSessionDriver {
 
     // MARK: - VoiceSessionDriver conformance
@@ -314,8 +324,8 @@ final class RealtimeSession: VoiceSessionDriver {
     let stateMachine = VoiceSessionStateMachine()
 
     // Transport + audio
-    var transport: LiveWebSocketTransport?
-    var audioPipeline: LiveAudioPipeline?
+    var transport: LiveWebSocketTransport?  // SCA-159 non-private: refresh swap in StateMachine, open in main file
+    var audioPipeline: LiveAudioPipeline?  // SCA-159 non-private: read by AudioIO mic forwarder
     /// P0-D (2026-04-23): observes AVAudioSession interruption /
     /// route-change / media-services-reset events and forwards them to
     /// `handleAudioInterruption(_:)` so we can tear down cleanly on
@@ -340,7 +350,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// race window where the flag could be cleared before the stale
     /// dispatcher's error handler ran (review 2026-04-22 Critical #2).
     /// Generation-based suppression is flag-state-independent. ADR 0014.
-    var dispatcherGeneration: Int = 0
+    var dispatcherGeneration: Int = 0  // SCA-159 non-private: bumped by Transport.startReceiveDispatcher
 
     /// Wall-clock timestamp of the most recent inbound server audio
     /// chunk. Used by `startMicForwarding` to extend the post-speech playback tail + room-reverb
@@ -367,7 +377,7 @@ final class RealtimeSession: VoiceSessionDriver {
     // echoCooldownSec moved to LiveSessionBudget.echoCooldownSec (P2-F).
 
     // Session state
-    var mintResponse: RealtimeSessionResponse?
+    var mintResponse: RealtimeSessionResponse?  // SCA-159 non-private: carries setupFrameJSON; never log raw frame
     var turnCount: Int = 0
 
     // Mic forwarding task — reads mic frames from pipeline and sends
@@ -389,7 +399,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// finalizes; UI uses it to render the YOU SAID side of the
     /// voice-active transcript card.
     var currentTurnUserTranscript: String?
-    var turnCompleteContinuation: CheckedContinuation<Void, Error>?
+    var turnCompleteContinuation: CheckedContinuation<Void, Error>?  // SCA-159 non-private: nil-clear BEFORE resume — double-resume of CheckedContinuation crashes
     /// Accumulates per-chunk `usageMetadata` deltas across the current
     /// turn. Reset at `flushPendingReport()`. See `TurnUsageAccumulator`
     /// docstring for the Gemini Live streaming-delta shape.
@@ -523,7 +533,7 @@ final class RealtimeSession: VoiceSessionDriver {
     /// → swap → old close). Guards re-entry — mid-refresh turn boundaries
     /// shouldn't trigger a second refresh. Cleared in the refresh path's
     /// defer block so a failed refresh doesn't wedge the session.
-    var isRefreshing: Bool = false
+    var isRefreshing: Bool = false  // SCA-159 non-private: read by AudioIO mic-mute gate, StateMachine refresh trigger, finalizeTurn
 
     /// Pre-minted refresh token, kicked off one turn before the refresh
     /// cadence fires (at `turnsSinceRefresh == refreshAtTurnCount - 1`).
@@ -1404,10 +1414,10 @@ final class RealtimeSession: VoiceSessionDriver {
     /// P3-H (2026-04-23): TTL-cached household snapshot. Invalidated
     /// naturally after 60 s; preWarm + close both clear it via
     /// `clearHouseholdContextCache()` as a belt-and-suspenders reset.
-    var cachedHouseholdContext: RealtimeHouseholdContext?
-    var cachedHouseholdContextAt: Date?
+    var cachedHouseholdContext: RealtimeHouseholdContext?  // SCA-159 non-private: written by Transport.buildHouseholdContext, cleared from main close()
+    var cachedHouseholdContextAt: Date?  // SCA-159 non-private: paired with cachedHouseholdContext
 
-    var setupCompleteContinuation: CheckedContinuation<Void, Error>?
+    var setupCompleteContinuation: CheckedContinuation<Void, Error>?  // SCA-159 non-private: nil-clear BEFORE resume — double-resume of CheckedContinuation crashes
 
     /// Monotonic counter bumped every time a new `turnComplete` /
     /// `setupComplete` await begins. Each timeout task captures the
@@ -1422,6 +1432,6 @@ final class RealtimeSession: VoiceSessionDriver {
     /// and resume-throw `.turnDrained` on it — surfacing as a spurious
     /// "voice turn failed" in the middle of an otherwise-working
     /// session (review 2026-04-22 §Critical #3).
-    var turnCompleteGeneration: Int = 0
-    var setupCompleteGeneration: Int = 0
+    var turnCompleteGeneration: Int = 0  // SCA-159 non-private: bumped by StateMachine.awaitTurnComplete
+    var setupCompleteGeneration: Int = 0  // SCA-159 non-private: bumped by Transport.awaitSetupComplete
 }
