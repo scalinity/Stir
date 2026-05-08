@@ -109,18 +109,34 @@ struct RepeatCandidateCard: View {
     }
 
     private var yesButtonTitle: String {
-        switch entitlements.effectiveTier {
-        case .premium, .pro: return "Save as a favorite"
-        case .free:          return "See plans to save favorites"
+        // SCA-112: read through canAccess(.savedFavorites) per CLAUDE.md
+        // "Don't hardcode entitlement checks against tier strings in
+        // views. Always go through EntitlementService." canAccess
+        // already routes through effectiveTier (which demotes
+        // expired/none → free) AND adds the billingState dimension
+        // — same gate the saveFavorite-write path uses.
+        switch entitlements.canAccess(.savedFavorites) {
+        case .allowed:
+            return "Save as a favorite"
+        case .blockedByTier, .blockedByBilling, .blockedByQuota:
+            return "See plans to save favorites"
         }
     }
 
     // MARK: - Actions
 
     private func handleYes() {
-        let tier = entitlements.effectiveTier
-        switch tier {
-        case .premium, .pro:
+        // SCA-112: gate on `canAccess(.savedFavorites)` rather than
+        // raw `effectiveTier` switching. Closes the TOCTOU window
+        // where the title rendered "Save as a favorite" (Premium) but
+        // a tap landed after the tier flipped to expired/none — pre-fix
+        // the switch would've still routed through the .premium arm,
+        // letting setFavorite run on what's now effectively a Free user.
+        // canAccess re-derives from both `tier` AND `billingState` and
+        // matches the gate the rest of the codebase uses.
+        let access = entitlements.canAccess(.savedFavorites)
+        switch access {
+        case .allowed:
             // SCA-111 fix: setFavorite returns Bool indicating
             // persistence success/failure (rolls back the context on
             // Core Data save error per its doc). Pre-fix dropped the
@@ -154,7 +170,7 @@ struct RepeatCandidateCard: View {
                 )
                 saveError = "We couldn't save that. Try again, or pick another option."
             }
-        case .free:
+        case .blockedByTier, .blockedByBilling, .blockedByQuota:
             analytics.capture(.repeatCandidateCardDismissed, properties: [
                 "recipe_plan_id": recipePlan.id?.uuidString ?? "",
                 "outcome": "paywall_routed",
