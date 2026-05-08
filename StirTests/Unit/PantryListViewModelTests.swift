@@ -56,9 +56,14 @@ final class PantryListViewModelTests: XCTestCase {
         try seedManual("flour")
         let vm = makeVM()
         vm.load()
-        vm.searchText = "OLIVE"
+        // SCA-177: filter reads `effectiveSearchText` (post-debounce),
+        // not the raw `searchText` typing buffer. The view layer
+        // pulses effectiveSearchText via .onChange(of: searchText)
+        // wrapped in a 150ms debounce (SCA-101 c). Tests bypass the
+        // debounce by writing the post-debounce value directly.
+        vm.effectiveSearchText = "OLIVE"
         XCTAssertEqual(vm.filteredItems.map(\.displayName), ["Olive Oil"])
-        vm.searchText = ""
+        vm.effectiveSearchText = ""
         XCTAssertEqual(vm.filteredItems.count, 2)
     }
 
