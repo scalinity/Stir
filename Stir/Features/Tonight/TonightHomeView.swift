@@ -94,19 +94,22 @@ struct TonightHomeView: View {
                 Task { await refreshState() }
             }
         }
-        .fullScreenCover(item: $activeModal, content: scanCoverContent)
-        .fullScreenCover(item: Binding(
-            get: { coordinator.activeCookLaunch },
-            set: { coordinator.activeCookLaunch = $0 },
-        ), content: cookLaunchCoverContent)
-        .fullScreenCover(item: Binding(
-            get: { coordinator.activeSolveAgain },
-            set: { coordinator.activeSolveAgain = $0 },
-        ), content: solveAgainCoverContent)
-        .fullScreenCover(item: Binding(
-            get: { coordinator.activeOtherOptions },
-            set: { coordinator.activeOtherOptions = $0 },
-        ), content: otherOptionsCoverContent)
+        // SCA-94: the four .fullScreenCover modifiers are applied via
+        // `tonightCoverHost(...)` (TonightCoverHost.swift) rather than
+        // chained directly on body. Inline 4-deep `.fullScreenCover` +
+        // `Binding(get:set:)` ladders pushed body past SwiftUI's
+        // typechecker reasonable-time threshold; the extension hides
+        // the chain behind a single opaque `some View` so adding new
+        // body modifiers (use-soon card SCA-86, widget-nudge SCA-87)
+        // has clear headroom again.
+        .tonightCoverHost(
+            activeModal: $activeModal,
+            coordinator: coordinator,
+            scanCover: scanCoverContent,
+            cookLaunchCover: cookLaunchCoverContent,
+            solveAgainCover: solveAgainCoverContent,
+            otherOptionsCover: otherOptionsCoverContent,
+        )
         // SCA-5 / SCA-19 — first-run feature tour. See
         // `tonightTourShouldPresent` for the gating contract.
         .tutorial(
