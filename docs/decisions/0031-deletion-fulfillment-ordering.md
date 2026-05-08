@@ -35,15 +35,34 @@ The order is load-bearing. Two options were live during design:
 
 ## Decision
 
-**Postgres sweep runs LAST.** Plus a key constraint: the worker
-inserts a durable `audit_log` row BEFORE the Postgres sweep, since
-the sweep CASCADE-deletes `deletion_requests` itself.
+**Postgres sweep runs LAST.** Plus a key sub-decision (revised 2026-05-08
+under SCA-222): the worker inserts the durable `audit_log` row AFTER
+the `DELETE FROM app_users` succeeds, not before. Originally we
+inserted the audit row first because the cascade was about to delete
+`deletion_requests` and we wanted a surviving anchor — but that
+ordering had two reachable bugs (the audit row outliving a failed
+DELETE; duplicate audit rows on retry). Inserting after success means:
+- Failed deletions leave NO audit row (the `deletion_requests.failed`
+  row is the only record).
+- Retries can't produce duplicates.
+- `audit_log.actor_id ON DELETE SET NULL` already keeps the audit row
+  alive across the cascade — there's no "anchor must exist before
+  cascade" constraint that justified the earlier ordering.
 
 The trade-off is intentional: Option A's "external services run with
 no canonical key" is a worse failure mode than Option B's "operational
 data persists for one retry tick." If RevenueCat is unreachable,
 Option B preserves the canonical key for the next sweep; Option A
 loses the only retry handle.
+
+**Pre-step on app_users.merged_into RESTRICT (SCA-222):**
+`app_users.merged_into REFERENCES app_users(canonical_user_key) ON
+DELETE RESTRICT`. Any user who absorbed a CloudKit alias-merge has
+inbound `merged_into` rows pointing at their canonical_user_key.
+Without intervention the DELETE raises 23503. Worker pre-NULLs those
+inbound refs in the same step before issuing DELETE — the merged_into
+chain is a forward alias and the dangling alias rows have nothing
+useful to point to once the canonical row is gone.
 
 ## Why CloudKit can't be server-side
 
@@ -67,10 +86,11 @@ When the Postgres sweep runs `DELETE FROM app_users`, the cascade
 deletes the deletion_requests row too. The "completed" state never
 lands on the row — it's wiped a millisecond later.
 
-Resolved by inserting an `audit_log` row before the cascade. The
-audit_log table has `actor_id REFERENCES auth.users(id) ON DELETE SET
-NULL` (not CASCADE) — it survives the user's deletion as a durable
-record:
+The audit_log table has `actor_id REFERENCES auth.users(id) ON DELETE
+SET NULL` (not CASCADE) — it survives the user's deletion as a
+durable record. We insert the audit row **after** the DELETE succeeds
+(SCA-222 — see Decision section above for why), keyed on the
+canonical_user_key_hash anchor:
 
 ```
 audit_log row:
@@ -86,8 +106,11 @@ This means a completed deletion has TWO records:
 - `deletion_requests` row — gone (cascade).
 
 Failed deletions have ONLY the `deletion_requests` row, in the
-`failed` state. The audit_log row is only written on the path to
-success.
+`failed` state. The audit_log row is only written on the success
+path. (Earlier draft had the audit insert BEFORE the DELETE; that
+introduced two reachable bugs — audit row outliving a failed
+DELETE, plus duplicate audit rows on the documented ops replay
+path. Revised under SCA-222.)
 
 ## Resume semantics
 
@@ -104,6 +127,30 @@ The persisted `external_refs_json` update happens BEFORE the Postgres
 sweep. If the sweep itself fails, the row flips back to `failed` with
 the full subsystem state preserved — next sweep tick resumes only the
 failed step.
+
+## Sentry erasure scope limitation (SCA-225)
+
+`stepSentry` calls Sentry's bulk-issue-delete endpoint:
+`DELETE /api/0/projects/{org}/{project}/issues/?query=user.id:{hash}`.
+That deletes Issue rows attributed to the user-hash query but does
+NOT expunge user PII from event metadata in older issues stored
+before the user-hash tag was attached. Full GDPR/CCPA "forget me"
+requires Sentry's `POST /api/0/organizations/{org}/data-privacy-requests/`
+flow (async, polling).
+
+For v1 we accept best-effort posture:
+- The bulk-issue-delete call covers the recent attribution window.
+- Workspace-level data-scrubbing handles existing PII in retained
+  event metadata.
+- The runbook documents a manual Data Privacy UI follow-up step
+  the operator runs alongside the automated call.
+
+Tracked as v1.1 follow-up in SCA-238: switch to the data-privacy-
+requests API (async-polling shape, request_id stored in
+`external_refs.sentry.privacy_request_id`).
+
+Reviewed and accepted under SCA-225 (corroborated W1 finding from the
+post-launch /review-2 pass).
 
 ## Alternatives considered
 

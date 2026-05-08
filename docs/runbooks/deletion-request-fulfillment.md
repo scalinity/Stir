@@ -45,19 +45,37 @@ identifying properties from event blobs.
   If a PostHog outage during fulfillment matters for compliance,
   manually re-emit via the PostHog dashboard's user-deletion control.
 
-### 2. Sentry user erase
+### 2. Sentry — bulk issue deletion (NOT full PII erasure — see scope note)
+
+**Scope note (SCA-225):** this step deletes Sentry *issues* matching
+the user-hash query. It does NOT expunge user PII from event metadata
+in older issues stored before the user-hash tag was attached. Full
+GDPR/CCPA "forget me" requires Sentry's Data Privacy Requests flow
+(SCA-238 v1.1). For v1 we accept best-effort posture: this call covers
+recent issues attributed to the user_hash; remaining PII is workspace-
+level data-scrubbing's job, plus the manual UI step below.
 
 Best-effort `DELETE` against
 `sentry.io/api/0/projects/{org}/{project}/issues/?query=user.id:{hash}`.
 Requires `SENTRY_AUTH_TOKEN` + `SENTRY_ORG_SLUG` + `SENTRY_PROJECT_SLUG`
 in the function env.
 
-- **Verify:** Sentry → Issues → search `user.id:<hash>`; should return
-  zero matches after fulfillment.
+- **Verify (issue deletion):** Sentry → Issues → search `user.id:<hash>`;
+  should return zero matches after fulfillment.
+- **Required manual follow-up for full PII erasure:** Sentry → Settings
+  → Security & Privacy → "Data Privacy" → submit a "Forget User"
+  request for the user_hash. This is the auditor-grade erasure step
+  the API call above doesn't perform. Track the manual completion in
+  the deletion-request ops log alongside the automated `external_refs`
+  state.
 - **Without secrets:** worker marks
   `external_refs.sentry.requires_manual_action = true`. Manual fix:
   Sentry workspace owner runs the data-scrubbing UI for that user_id
-  hash.
+  hash AND submits the Data Privacy "Forget User" request.
+- **Timeout (SCA-224):** AbortError after 8s yields
+  `requires_manual_action: true` with `error: 'sentry_timeout_8s'`.
+  The postgres sweep still runs; ops can replay later via the
+  documented `state='approved'` path.
 
 ### 3. RevenueCat alias cleanup
 

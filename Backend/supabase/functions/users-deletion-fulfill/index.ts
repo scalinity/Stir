@@ -128,9 +128,20 @@ async function stepPostHog(ctx: FulfillContext): Promise<SubsystemRecord> {
 async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
   if (ctx.refs.sentry?.completed_at) return ctx.refs.sentry;
 
-  // Sentry's user-erase API requires SENTRY_AUTH_TOKEN with project:write
-  // scope. If not configured, mark for manual action and continue —
-  // privacy promise is best-effort for analytics platforms.
+  // SCA-225 scope note: this step uses Sentry's BULK ISSUE-DELETE
+  // endpoint, NOT a full GDPR user-erase API. It deletes Issue rows
+  // matching `user.id:<hash>` but does NOT expunge PII from event
+  // metadata in older issues that were stored before the user-hash
+  // tag was attached. Proper GDPR-grade erasure requires Sentry's
+  // /api/0/organizations/{org}/data-privacy-requests/ flow (async,
+  // polling) — tracked as a v1.1 follow-up. For v1 we accept the
+  // best-effort posture: any retained PII is workspace-level
+  // data-scrubbing's job, plus the runbook documents a manual
+  // Data Privacy UI step the operator runs alongside this call.
+  //
+  // Requires SENTRY_AUTH_TOKEN with project:write scope plus the
+  // org + project slugs. If any are unset, mark for manual action
+  // and continue — privacy-promise minimum is the postgres sweep.
   const token = Deno.env.get('SENTRY_AUTH_TOKEN');
   const orgSlug = Deno.env.get('SENTRY_ORG_SLUG');
   const projectSlug = Deno.env.get('SENTRY_PROJECT_SLUG');
@@ -142,11 +153,8 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
   }
 
   try {
-    // Sentry's "delete user feedback" by hash:
-    //   POST /api/0/projects/{org}/{project}/user-feedback/?user.id={hash}
-    // Erase event metadata containing the user hash via the data-scrubbing
-    // settings already in place (this is workspace-level config). Here we
-    // submit a one-off issue-deletion request scoped to user_hash.
+    // Bulk-issue-delete by user.id query. NOTE: the docstring above
+    // explains why this is event-deletion only, not full user-erase.
     const url = `https://sentry.io/api/0/projects/${orgSlug}/${projectSlug}/issues/?query=user.id:${ctx.canonicalUserKeyHash}`;
     const resp = await fetch(url, {
       method: 'DELETE',
