@@ -628,18 +628,39 @@ struct SettingsRootView: View {
                 // mandates this surface as the primary path; the email
                 // fallback at privacy@getstir.app is preserved on the
                 // destination view for users who can't authenticate.
+                //
+                // FD1-17 (WCAG 1.4.1 color-only-signaling): destructive
+                // semantic carried by ember-vs-crimson on adjacent rows
+                // is a weak signal for low-vision / color-blind users.
+                // Lead with a trash icon-tile + trailing chevron so the
+                // hierarchy reads as "this is a NavigationLink to a
+                // destructive flow", not "another About link in red."
                 NavigationLink {
                     DeleteMyDataView()
                 } label: {
-                    Text("Delete my data")
-                        .stirFont(.labelLg)
-                        .foregroundStyle(Color.Stir.danger)
-                        .padding(.horizontal, CGFloat.Stir.space3Half)
-                        .padding(.vertical, CGFloat.Stir.space3Half)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    HStack(spacing: CGFloat.Stir.space3) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.Stir.danger)
+                            .frame(width: 32, height: 32)
+                            .background(Color.Stir.danger.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .accessibilityHidden(true)
+                        Text("Delete my data")
+                            .stirFont(.labelLg)
+                            .foregroundStyle(Color.Stir.danger)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.Stir.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, CGFloat.Stir.space3Half)
+                    .padding(.vertical, CGFloat.Stir.space3Half)
+                    .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Delete my data")
+                .accessibilityHint("Opens the delete-my-data confirmation flow.")
             }
             .stirCard()
         }

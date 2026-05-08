@@ -116,6 +116,19 @@ export const RevenueCatWebhookEnvelope = z.object({
   event: RevenueCatEvent,
 }).passthrough();
 
+// SA1-M1 (CWE-915 mass-assignment-adjacent): both schemas above are
+// intentionally `.passthrough()` so RevenueCat schema additions don't
+// break webhook deploys. The signature gate (`verifyAuthHeader`) means
+// only RC can supply a payload, so unknown-key passthrough is bounded
+// by RC's own contract surface.
+//
+// HOWEVER: any future consumer that persists the parsed event (e.g.,
+// JSON.stringify into a JSONB audit-log column) MUST explicitly project
+// the fields it cares about — never persist the full parsed payload.
+// Persisting passthrough'd unknown fields would let a future RC schema
+// addition silently land in our DB without review, and re-introduce
+// the mass-assignment risk this comment is here to head off.
+
 export type RevenueCatWebhookEnvelope = z.infer<typeof RevenueCatWebhookEnvelope>;
 export type RevenueCatEvent = z.infer<typeof RevenueCatEvent>;
 
