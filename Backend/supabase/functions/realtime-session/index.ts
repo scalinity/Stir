@@ -37,13 +37,18 @@ import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
-import { capturePosthogEvent } from '../_shared/posthog.ts';
+import { captureSafe } from '../_shared/posthog.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { GeminiModel } from '../_shared/gemini.ts';
 import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
-import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
+import {
+  createLogger,
+  type Logger,
+  requestIdFrom,
+  sanitizeErrorForLog,
+} from '../_shared/logger.ts';
 import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
@@ -61,58 +66,58 @@ const UNIQUE_VIOLATION_CODE = '23505';
  * `usage_counters` layer; this event disambiguates by stamping every
  * refund decision so dashboards/tests can pin the correct branch.
  *
- * Spec §15 + CLAUDE.md telemetry list register this event.
+ * Spec §15 + CLAUDE.md telemetry list + canonical-properties.md §8
+ * register this event.
  *
  * Properties:
- * - `request_id` — correlator with the originating /v1/ai/realtime-session
- *   request (and with `ai_request_log` rows on the same request).
+ * - `request_id` — request-scoped correlator. NOTE: both refund call
+ *   sites return BEFORE `logAIRequest()`, so the matching
+ *   `ai_request_log` row does NOT exist. `request_id` correlates
+ *   only with the function logger's structured-output lines (which
+ *   expire) — not with a Supabase row. Ops triage finds the
+ *   refunded request via PostHog Insight on this event, NOT via a
+ *   join against `ai_request_log`.
  * - `reason` — what tripped the refund. Discriminated:
  *     `no_active_prompt` — prompt-version table empty for FEATURE_KEY
  *     `mint_failed` — Gemini /v1alpha/auth_tokens returned 4xx/5xx
  *     `mint_unexpected_error` — non-LiveMintError thrown during mint
- * - `is_refresh` — bool. False = first-mint path (real refund).
- *   True is unreachable here (the `didConsumeQuota` guard short-circuits
- *   refresh mints), but emitted for invariant verification.
  * - `upstream_status` — number, present iff `reason='mint_failed'` and
  *   the LiveMintError carried a status code. Lets ops correlate
  *   refund storms with Gemini outage windows.
  *
+ * `is_refresh` is intentionally NOT a property: the `didConsumeQuota`
+ * guard short-circuits refresh mints before the refund branch fires,
+ * making `is_refresh=true` structurally unreachable here. Emitting a
+ * dead property without an alarm to detect inversion is decorative;
+ * Sprint-B-review W6 dropped it.
+ *
  * Privacy: distinct_id is `hashCanonicalKey(canonical_user_key)` —
  * 16-char SHA-256 prefix, same as every other server emit. No user
- * content. Hash failure is swallowed via try/catch; the user's HTTP
- * response isn't gated on PostHog ingest.
+ * content (ADR 0009). Failure is swallowed via `captureSafe`'s
+ * internal try/catch; the user's HTTP response isn't gated on
+ * PostHog ingest.
  */
 async function emitVoiceQuotaRefund(
-  log: { warn: (msg: string, fields?: Record<string, unknown>) => void },
+  log: Logger,
   args: {
     canonicalUserKey: string;
     requestId: string;
     reason: 'no_active_prompt' | 'mint_failed' | 'mint_unexpected_error';
-    isRefresh: boolean;
     upstreamStatus?: number;
   },
 ): Promise<void> {
-  try {
-    const distinctId = await hashCanonicalKey(args.canonicalUserKey);
-    const properties: Record<string, unknown> = {
-      request_id: args.requestId,
-      reason: args.reason,
-      is_refresh: args.isRefresh,
-    };
-    if (args.upstreamStatus !== undefined) {
-      properties.upstream_status = args.upstreamStatus;
-    }
-    capturePosthogEvent(log as unknown as Parameters<typeof capturePosthogEvent>[0], {
-      event: 'voice_quota_refund',
-      distinctId,
-      properties,
-    });
-  } catch (err) {
-    log.warn('voice_quota_refund_emit_failed', {
-      reason: args.reason,
-      err: err instanceof Error ? err.message.slice(0, 200) : 'non_error_thrown',
-    });
+  const properties: Record<string, unknown> = {
+    request_id: args.requestId,
+    reason: args.reason,
+  };
+  if (args.upstreamStatus !== undefined) {
+    properties.upstream_status = args.upstreamStatus;
   }
+  await captureSafe(log, {
+    event: 'voice_quota_refund',
+    distinctIdSource: () => hashCanonicalKey(args.canonicalUserKey),
+    properties,
+  });
 }
 
 /**
@@ -518,7 +523,6 @@ Deno.serve(async (req) => {
         canonicalUserKey: claims.canonical_user_key,
         requestId,
         reason: 'no_active_prompt',
-        isRefresh: body.is_refresh,
       });
     }
     userLog.error('no_active_prompt', new Error(`no active ${FEATURE_KEY} prompt`));
@@ -623,8 +627,9 @@ Deno.serve(async (req) => {
         canonicalUserKey: claims.canonical_user_key,
         requestId,
         reason: err instanceof LiveMintError ? 'mint_failed' : 'mint_unexpected_error',
-        isRefresh: body.is_refresh,
-        upstreamStatus: err instanceof LiveMintError ? err.statusCode : undefined,
+        // exactOptionalPropertyTypes rejects `upstreamStatus: undefined`
+        // — only set the key when there's a real value.
+        ...(err instanceof LiveMintError ? { upstreamStatus: err.statusCode } : {}),
       });
     }
     // `refund_applied` metadata mirrors the actual refund decision so
