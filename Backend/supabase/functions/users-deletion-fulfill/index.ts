@@ -47,6 +47,10 @@ import type { Logger } from '../_shared/logger.ts';
 
 const CLAIM_LIMIT = 5; // one tick handles at most 5 deletions
 const FAILURE_REASON_MAX = 1024;
+// Per-step error message cap. Sentry/RC error bodies and exception
+// stringifications can run long; truncate before persisting to keep
+// external_refs_json reasonable. Tunable; SCA-236.
+const STEP_ERROR_MAX = 200;
 
 // ---- Auth ----
 
@@ -126,7 +130,7 @@ async function stepPostHog(ctx: FulfillContext): Promise<SubsystemRecord> {
       distinct_id_hash: ctx.canonicalUserKeyHash,
     };
   } catch (err) {
-    return { error: truncate(String(err), 200) };
+    return { error: truncate(String(err), STEP_ERROR_MAX) };
   }
 }
 
@@ -179,7 +183,7 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
       signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok && resp.status !== 404) {
-      return { error: truncate(`sentry_http_${resp.status}`, 200) };
+      return { error: truncate(`sentry_http_${resp.status}`, STEP_ERROR_MAX) };
     }
     return {
       completed_at: new Date().toISOString(),
@@ -197,7 +201,7 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
         triggered_at: new Date().toISOString(),
       };
     }
-    return { error: truncate(String(err), 200) };
+    return { error: truncate(String(err), STEP_ERROR_MAX) };
   }
 }
 
@@ -233,7 +237,7 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
       signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok && resp.status !== 404) {
-      return { error: truncate(`revenuecat_http_${resp.status}`, 200) };
+      return { error: truncate(`revenuecat_http_${resp.status}`, STEP_ERROR_MAX) };
     }
     return {
       completed_at: new Date().toISOString(),
@@ -247,7 +251,7 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
         triggered_at: new Date().toISOString(),
       };
     }
-    return { error: truncate(String(err), 200) };
+    return { error: truncate(String(err), STEP_ERROR_MAX) };
   }
 }
 
@@ -287,7 +291,7 @@ async function stepPostgres(
     .update({ merged_into: null })
     .eq('merged_into', ctx.canonicalUserKey);
   if (mergedErr) {
-    return { error: truncate(`merged_into_clear_failed: ${mergedErr.message}`, 200) };
+    return { error: truncate(`merged_into_clear_failed: ${mergedErr.message}`, STEP_ERROR_MAX) };
   }
 
   // 2. The irreversible step. ON DELETE CASCADE fans out across:
@@ -298,7 +302,7 @@ async function stepPostgres(
     .delete()
     .eq('canonical_user_key', ctx.canonicalUserKey);
   if (delErr) {
-    return { error: truncate(`app_users_delete_failed: ${delErr.message}`, 200) };
+    return { error: truncate(`app_users_delete_failed: ${delErr.message}`, STEP_ERROR_MAX) };
   }
 
   // 3. Insert the durable audit_log row AFTER the delete succeeds (SCA-222).
