@@ -279,7 +279,7 @@ struct DeleteMyDataView: View {
         do {
             let response = try await coordinator.submitDeletionRequest()
             Logger.settings.info(
-                "deletion request accepted; id=\(response.deletionRequestID, privacy: .public) state=\(response.state, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
+                "deletion request accepted; id=\(response.deletionRequestID.uuidString, privacy: .public) state=\(response.state.rawValue, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
             )
             submissionState = .submitted
         } catch {

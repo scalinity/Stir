@@ -371,7 +371,7 @@ actor AIDispatch {
         Logger.aiDispatch.info("users_delete_request_dispatch")
         let response: UsersDeleteRequestResponse = try await session.performAuthenticated(request)
         Logger.aiDispatch.info(
-            "users_delete_request_complete state=\(response.state, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
+            "users_delete_request_complete state=\(response.state.rawValue, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
         )
         return response
     }

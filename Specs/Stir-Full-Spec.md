@@ -1723,6 +1723,7 @@ See §12.3. In addition:
 | `widget_nudge_dismissed`           | outcome ∈ {acted, deferred, suppressed}                                                        | widget adoption funnel     | Engagement              |
 | `app_users_bootstrapped`           | has_cloudkit_record, tier                                                                      | identity funnel            | Identity                |
 | `app_users_merged`                 | tier                                                                                           | identity funnel            | Identity                |
+| `deletion_request_submitted`       | request_id, actor_id ∈ {user, admin}, deletion_request_id                                      | privacy / CCPA SLA funnel  | Privacy / Compliance    |
 | `entitlement_state_changed`        | from_state, to_state, billing_state, source ∈ {ios_foreground, server_webhook}, [event_type, tier, is_trial] | churn / recovery           | Billing                 |
 | `ops_admin.flagged_outputs.created` | feature_key, flagged_output_id, had_cached_output                                             | ops flag-rate              | Ops                     |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
