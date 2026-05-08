@@ -40,7 +40,7 @@
 
 import { z } from 'zod';
 import { createServiceClient } from '../_shared/db.ts';
-import { createLogger, requestIdFrom } from '../_shared/logger.ts';
+import { createLogger } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import type { Logger } from '../_shared/logger.ts';
@@ -99,6 +99,11 @@ interface FulfillContext {
   canonicalUserKeyHash: string;
   refs: ExternalRefs;
   log: Logger;
+  // SCA-235: UUID minted per worker invocation. Threaded through
+  // processOne → stepPostgres so the audit_log.request_id column
+  // (UUID-typed) carries the same ID as the createLogger() output,
+  // letting ops correlate the audit row with the function's log lines.
+  requestId: string;
 }
 
 async function stepPostHog(ctx: FulfillContext): Promise<SubsystemRecord> {
@@ -323,6 +328,8 @@ async function stepPostgres(
       deletion_request_id: ctx.rowId,
       external_refs: ctx.refs,
     },
+    // SCA-235: tie the audit row to this worker invocation's logs.
+    request_id: ctx.requestId,
   });
   if (auditErr) {
     ctx.log.warn('audit_log_insert_after_delete_failed', {
@@ -355,6 +362,7 @@ async function processOne(
     external_refs_json: ExternalRefs;
   },
   log: Logger,
+  requestId: string = crypto.randomUUID(),
 ): Promise<'completed' | 'partial' | 'failed'> {
   const ctx: FulfillContext = {
     rowId: row.id,
@@ -362,6 +370,7 @@ async function processOne(
     canonicalUserKeyHash: row.canonical_user_key_hash,
     refs: row.external_refs_json ?? {},
     log,
+    requestId,
   };
 
   // Run subsystems in order. Each writes its result into ctx.refs.
@@ -486,6 +495,7 @@ async function processOne(
 async function fulfillSweep(
   client: ReturnType<typeof createServiceClient>,
   log: Logger,
+  requestId: string = crypto.randomUUID(),
 ): Promise<WorkerSummary> {
   const summary: WorkerSummary = {
     claimed: 0,
@@ -516,7 +526,7 @@ async function fulfillSweep(
 
   for (const row of claimed) {
     try {
-      const outcome = await processOne(client, row, log);
+      const outcome = await processOne(client, row, log, requestId);
       if (outcome === 'completed') summary.completed += 1;
       else if (outcome === 'partial') summary.partial += 1;
       else summary.failed += 1;
@@ -569,11 +579,17 @@ Deno.serve(async (req: Request) => {
   const raw = await req.json().catch(() => ({}));
   RequestSchema.parse(raw);
 
-  const requestId = requestIdFrom(req);
+  // SCA-235: mint a fresh UUID per invocation. `audit_log.request_id`
+  // is UUID-typed; `requestIdFrom(req)` accepts a broader [A-Za-z0-9_\-:.]
+  // shape that wouldn't cast cleanly. Cron + manual trigger are the only
+  // callers and neither sends x-request-id, so dropping the incoming-
+  // correlation path is a no-op for production. The fresh UUID flows
+  // through createLogger() AND audit_log.request_id so ops can correlate.
+  const requestId = crypto.randomUUID();
   const log = await createLogger(requestId, 'users-deletion-fulfill');
 
   const client = createServiceClient();
-  const summary = await fulfillSweep(client, log);
+  const summary = await fulfillSweep(client, log, requestId);
 
   log.info('deletion_fulfill_tick', {
     claimed: summary.claimed,
