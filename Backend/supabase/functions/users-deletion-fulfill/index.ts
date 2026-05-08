@@ -365,10 +365,20 @@ async function processOne(
   // Persist external_refs_json BEFORE running the postgres sweep — the
   // sweep cascade-deletes deletion_requests itself, so this is the last
   // chance to record the upstream subsystem state on the row.
-  await client
+  // SCA-229: capture the error and warn-log on failure. Persist failure
+  // is silent to ops without this — the next paragraph's sweep still
+  // runs and CASCADE-deletes the row, so a transient DB error here
+  // would lose the subsystem state without a trace.
+  const { error: persistErr } = await client
     .from('deletion_requests')
     .update({ external_refs_json: ctx.refs as Record<string, unknown> })
     .eq('id', row.id);
+  if (persistErr) {
+    log.warn('external_refs_persist_failed', {
+      deletion_request_id: row.id,
+      err: persistErr.message,
+    });
+  }
 
   // Postgres sweep runs ONLY if subsystems either completed or are
   // explicitly marked manual/client-action (best-effort acceptable).
