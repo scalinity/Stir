@@ -1,0 +1,21 @@
+-- SCA-230 — drop unused deletion_requests.completed_at column.
+--
+-- Pre-flight (2026-05-08): grep across Backend/supabase/ confirmed
+-- the only references to `completed_at` within deletion_requests
+-- context are the column declaration itself (migration
+-- 20260508000002 line 42) plus in-memory references inside
+-- external_refs_json SubsystemRecord shapes — those are JSONB
+-- payload fields, NOT the column.
+--
+-- ADR 0031 explicitly states that successful deletions persist as
+-- audit_log rows, not deletion_requests rows (the cascade wipes
+-- deletion_requests when app_users is deleted). The `completed_at`
+-- column was a vestige of an earlier design where success state was
+-- supposed to land on the deletion_requests row itself; that design
+-- was superseded by the audit_log anchor pattern. The column is
+-- dead in the current code.
+--
+-- Forward migration (immutable-migration policy: never edit the
+-- original).
+
+ALTER TABLE deletion_requests DROP COLUMN IF EXISTS completed_at;
