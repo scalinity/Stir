@@ -251,6 +251,11 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // {outcome ∈ {continued_to_onboarding, back_to_welcome}}.
     case sampleShowcaseViewed = "sample_showcase_viewed"
     case sampleShowcaseExited = "sample_showcase_exited"
+    // SCA-72 — widget nudge in-app card lifecycle. Spec §15 + CLAUDE.md
+    // canonical. _shown emits when the nudge is composed onto Tonight
+    // Home. _dismissed carries `outcome ∈ {acted, deferred, suppressed}`.
+    case widgetNudgeShown     = "widget_nudge_shown"
+    case widgetNudgeDismissed = "widget_nudge_dismissed"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
     // are spec §15 canonical (destination NOT export_target; parse_quality
     // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`

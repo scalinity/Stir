@@ -1716,6 +1716,8 @@ See §12.3. In addition:
 | `repeat_candidate_card_dismissed`  | recipe_plan_id, outcome ∈ {paywall_routed, deferred, suppressed}                               | save-prompt funnel         | Engagement              |
 | `sample_showcase_viewed`           | dish_count                                                                                     | onboarding sample funnel   | Onboarding              |
 | `sample_showcase_exited`           | outcome ∈ {continued_to_onboarding, back_to_welcome}                                           | onboarding sample funnel   | Onboarding              |
+| `widget_nudge_shown`               | (none)                                                                                         | widget adoption funnel     | Engagement              |
+| `widget_nudge_dismissed`           | outcome ∈ {acted, deferred, suppressed}                                                        | widget adoption funnel     | Engagement              |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
 | `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |

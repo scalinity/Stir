@@ -131,6 +131,14 @@ enum StirDeepLinkHandler {
         Logger.app.info(
             "stir deep link \(destination.breadcrumbCategory, privacy: .public) url=\(url.absoluteString, privacy: .private(mask: .hash))",
         )
+        // SCA-72: any widget-origin tap satisfies the "user has
+        // engaged with the widget" gate. Records the timestamp; the
+        // WidgetNudgeService disqualifies the user from the nudge
+        // once this is non-nil. Excludes liveactivity.* (timer
+        // taps from cooking aren't widget engagement).
+        if destination.breadcrumbCategory.hasPrefix("widget.") {
+            WidgetNudgeService.shared.recordWidgetTap()
+        }
         switch destination {
         case .paywallWidget:
             // Highest-intent conversion tap per spec §9 — widget shows

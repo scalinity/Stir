@@ -177,6 +177,8 @@
 		DBB8E50B8D1175D25F3648D8 /* PantryMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D207AEF72AEECA87C465A19B /* PantryMatchingTests.swift */; };
 		8E6A25495C2D327AD46792D8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */; };
 		A65A00100000000F /* sample_solve.json in Resources */ = {isa = PBXBuildFile; fileRef = A65A001000000010 /* sample_solve.json */; };
+		A65A001000000011 /* WidgetNudgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000012 /* WidgetNudgeService.swift */; };
+		A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000014 /* WidgetNudgeServiceTests.swift */; };
 		8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */; };
 		8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */; };
 		90FAD8F8685ACB0239361814 /* PrimaryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */; };
@@ -462,6 +464,8 @@
 		54D85C83C67E1CA51774FE07 /* TonightSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightSnapshot.swift; sourceTree = "<group>"; };
 		55250D5B2C87B1ADE12BB0CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A65A001000000010 /* sample_solve.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = sample_solve.json; sourceTree = "<group>"; };
+		A65A001000000012 /* WidgetNudgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeService.swift; sourceTree = "<group>"; };
+		A65A001000000014 /* WidgetNudgeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeServiceTests.swift; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
 		5760939C8F0B686F7EFE90EE /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
 		579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
@@ -723,6 +727,7 @@
 				64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */,
 				07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */,
 				ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */,
+				A65A001000000012 /* WidgetNudgeService.swift */,
 				6DE4A6746B60DA63C17DB13D /* WidgetReloadCoordinator.swift */,
 			);
 			path = Services;
@@ -766,6 +771,7 @@
 				579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */,
 				8B826DCA6393D026CC51F15B /* NotificationPreferencesStoreTests.swift */,
 				A65A001000000004 /* LeftoversFollowupSchedulerTests.swift */,
+				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
 				F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */,
@@ -1626,6 +1632,7 @@
 				6ED22C864D819ECE7BD8690F /* Motion.swift in Sources */,
 				C99910CC8EC77949382366AE /* NotificationPreferencesStoreTests.swift in Sources */,
 				A65A001000000003 /* LeftoversFollowupSchedulerTests.swift in Sources */,
+				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
 				F1158A993CE98C45F369F12C /* PreferenceMemoryServiceTests.swift in Sources */,
@@ -1860,6 +1867,7 @@
 				DE76C4B2F34B0ACF847D5161 /* VoiceTurnRepository.swift in Sources */,
 				F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */,
 				5E8F656515AC048F68C62633 /* WidgetReloadCoordinator.swift in Sources */,
+				A65A001000000011 /* WidgetNudgeService.swift in Sources */,
 							245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */,
 				A34FCF1DDFCF240B1B2357A3 /* TutorialStepView.swift in Sources */,
 				679EF3AA3AEA60324302724C /* TutorialKey.swift in Sources */,
