@@ -16,6 +16,7 @@
 // bucket.
 
 import Foundation
+import OSLog
 
 @MainActor
 final class NotificationHistoryStore {
@@ -23,6 +24,16 @@ final class NotificationHistoryStore {
     private let stateKey: String
     private let suppressionKey: String
     private static let maxEntries = 5
+    /// CR2-W2 / CA1-02: surface the 2-per-7d cap as a named constant so the
+    /// schedulers can read it instead of duplicating `>= 2` literals at
+    /// each callsite. Keeps the policy invariant in one place.
+    static let weeklyCap = 2
+    /// CA1-02: when checking for an unactioned streak, only count fires
+    /// from this trailing window. Without this, FIFO-bound `entries`
+    /// can carry old (unactioned, multi-week-stale) fires that wrongly
+    /// arm the 14-day suppression on a fresh schedule. 30 days is the
+    /// "if you went on vacation, we don't punish you" window.
+    static let unactionedStreakWindowSec: TimeInterval = 30 * 86_400
 
     struct Entry: Codable, Equatable {
         let fireAt: Date
@@ -49,15 +60,23 @@ final class NotificationHistoryStore {
     }
 
     /// Append a scheduled-fire entry. Also evaluates the unactioned
-    /// streak — if the prior 2 entries were both unactioned, set the
-    /// 14-day suppression starting now. Bounded at maxEntries entries
-    /// so storage stays trivially small.
+    /// streak — if the prior 2 RECENT entries were both unactioned, set
+    /// the 14-day suppression starting now. The recency filter (CA1-02)
+    /// stops stale entries (e.g., 6-week-old fires retained by the
+    /// FIFO bound) from arming suppression on a fresh fire. Bounded at
+    /// maxEntries entries so storage stays trivially small.
     func recordScheduled(fireAt: Date) {
         var entries = load()
-        let prior = entries.suffix(2)
-        if prior.count == 2, prior.allSatisfy({ !$0.actioned }) {
+        let now = Date()
+        let recencyCutoff = now.addingTimeInterval(-Self.unactionedStreakWindowSec)
+        let recentPrior = entries
+            .suffix(Self.weeklyCap)
+            .filter { $0.fireAt >= recencyCutoff }
+        if recentPrior.count == Self.weeklyCap,
+           recentPrior.allSatisfy({ !$0.actioned })
+        {
             defaults.set(
-                Date().addingTimeInterval(14 * 86_400),
+                now.addingTimeInterval(14 * 86_400),
                 forKey: suppressionKey,
             )
         }
@@ -86,7 +105,18 @@ final class NotificationHistoryStore {
 
     private func load() -> [Entry] {
         guard let data = defaults.data(forKey: stateKey) else { return [] }
-        return (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
+        do {
+            return try JSONDecoder().decode([Entry].self, from: data)
+        } catch {
+            // CR1-S5: a decode failure means the user's history just got
+            // reset (which reopens the door to spam). Surface to OSLog
+            // so a future incompatible Entry shape change is observable
+            // rather than silently wiping the rolling-cap state.
+            Logger.notifications.warning(
+                "NotificationHistoryStore decode failed for key=\(self.stateKey, privacy: .public): \(error.localizedDescription, privacy: .private)",
+            )
+            return []
+        }
     }
 
     private func save(_ entries: [Entry]) {

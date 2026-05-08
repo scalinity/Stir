@@ -32,7 +32,7 @@ import {
 } from '../_shared/rate_limiter.ts';
 
 // Empty body — auth gates the request.
-const RequestSchema = z.object({}).strict().optional();
+const RequestSchema = z.object({}).strict();
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
       }, requestId);
     }
     log.error('auth_unexpected', err);
-    return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+    return jsonError(ErrorCode.INTERNAL_01, 500, undefined, requestId);
   }
   const userLog = await createLogger(requestId, endpoint, claims.canonical_user_key);
 
@@ -91,7 +91,16 @@ Deno.serve(async (req) => {
 
   const client = createServiceClient();
 
-  // ---- Rate limit (per IP — defense against a runaway client)
+  // ---- Rate limit (per IP — defense against a runaway client).
+  //
+  // Fail-open is intentional: if the rate-limiter RPC errors (Postgres
+  // sick, rate_limit_buckets table glitch), we proceed into the deletion
+  // path rather than blocking a privacy-rights submission. The downstream
+  // unique partial index `uq_deletion_requests_in_flight` serializes
+  // concurrent submits at the DB layer, and the JWT auth gate above
+  // bounds the attack surface to authenticated users — so the worst
+  // case from fail-open is one extra row written, not unbounded flood.
+  // CR3-02 / CA1-W4 from the multi-agent code review.
   const sourceIP = extractSourceIP(req);
   try {
     const ipRl = await checkAndIncrement(client, 'ip:users_delete_request_hourly', sourceIP);
@@ -105,6 +114,8 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
+    // Fail-open per the comment block above. Log at error so the
+    // dashboard surfaces RPC-level rate-limiter failures.
     userLog.error('rate_limiter_failed', err);
   }
 
@@ -118,18 +129,29 @@ Deno.serve(async (req) => {
     }, requestId);
   }
 
-  // ---- Idempotent insert: return existing pending/approved/processing row
+  // ---- Idempotent insert: return existing pending/approved/processing row.
+  //
+  // CA1-01: include `failed` in the existing-row probe so a user who
+  // re-submits after a fulfillment-worker failure gets back the prior
+  // failure_reason + preserves the original SLA clock (requested_at)
+  // instead of accumulating a duplicate audit row. Admins still see the
+  // failed history in `deletion_requests.list` ordered by requested_at
+  // DESC.
   const userHash = await hashCanonicalKey(claims.canonical_user_key);
   const { data: existing, error: existingErr } = await client
     .from('deletion_requests')
-    .select('id, state, requested_at')
+    .select('id, state, requested_at, failure_reason')
     .eq('canonical_user_key', claims.canonical_user_key)
-    .in('state', ['pending', 'approved', 'processing'])
-    .maybeSingle<{ id: string; state: string; requested_at: string }>();
+    .in('state', ['pending', 'approved', 'processing', 'failed'])
+    .order('requested_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<
+      { id: string; state: string; requested_at: string; failure_reason: string | null }
+    >();
 
   if (existingErr) {
     userLog.error('existing_lookup_failed', existingErr);
-    return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+    return jsonError(ErrorCode.INTERNAL_01, 500, undefined, requestId);
   }
 
   if (existing) {
@@ -142,6 +164,7 @@ Deno.serve(async (req) => {
         deletion_request_id: existing.id,
         state: existing.state,
         requested_at: existing.requested_at,
+        failure_reason: existing.failure_reason,
         idempotent: true,
       },
       requestId,
@@ -160,8 +183,41 @@ Deno.serve(async (req) => {
     .single<{ id: string; state: string; requested_at: string }>();
 
   if (insertErr || !inserted) {
+    // CA2-02: detect the unique-partial-index race. Two concurrent POSTs
+    // from the same user can both miss the SELECT-existing probe above
+    // (TOCTOU window) and race the INSERT. Postgres returns 23505 →
+    // PostgREST surfaces code "23505". Re-fetch the winning row instead
+    // of returning 500, which would otherwise trigger iOS retry-up-to-3
+    // and burn Sentry noise on a self-healing path.
+    if (insertErr && (insertErr as { code?: string }).code === '23505') {
+      userLog.info('deletion_request_insert_race_resolved');
+      const { data: winning, error: winningErr } = await client
+        .from('deletion_requests')
+        .select('id, state, requested_at, failure_reason')
+        .eq('canonical_user_key', claims.canonical_user_key)
+        .in('state', ['pending', 'approved', 'processing'])
+        .maybeSingle<
+          { id: string; state: string; requested_at: string; failure_reason: string | null }
+        >();
+
+      if (winning && !winningErr) {
+        return jsonOk(
+          {
+            deletion_request_id: winning.id,
+            state: winning.state,
+            requested_at: winning.requested_at,
+            failure_reason: winning.failure_reason,
+            idempotent: true,
+          },
+          requestId,
+          200,
+        );
+      }
+      // Race-recovery lookup itself failed — fall through to 500.
+      userLog.error('deletion_request_race_recovery_failed', winningErr);
+    }
     userLog.error('deletion_request_insert_failed', insertErr);
-    return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+    return jsonError(ErrorCode.INTERNAL_01, 500, undefined, requestId);
   }
 
   userLog.info('deletion_request_created', {

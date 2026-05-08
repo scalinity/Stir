@@ -53,4 +53,8 @@ extension Logger {
     /// service-side state machine) and `coordinator` (which logs
     /// presentation routing).
     static let settings = Logger(subsystem: subsystem, category: "settings")
+
+    /// Notification scheduling + delegate (LeftoversFollowupScheduler,
+    /// UseSoonScheduler, NotificationHistoryStore, StirNotificationDelegate).
+    static let notifications = Logger(subsystem: subsystem, category: "notifications")
 }
