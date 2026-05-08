@@ -1285,6 +1285,27 @@ struct PushRegisterResponse: Decodable, Sendable {
     }
 }
 
+// MARK: - Users Delete Request (SCA-61)
+//
+// Wire shape for POST /v1/users/delete-request. Empty request body —
+// server pulls canonical_user_key from the authenticated session JWT.
+// Response carries the row id + state so the iOS surface can reflect
+// "submitted" vs "already pending" without a separate GET.
+
+struct UsersDeleteRequestResponse: Decodable, Sendable {
+    let deletionRequestID: String
+    let state: String
+    let requestedAt: String
+    let idempotent: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case deletionRequestID = "deletion_request_id"
+        case state
+        case requestedAt = "requested_at"
+        case idempotent
+    }
+}
+
 // MARK: - Voice Turn Usage (PostHog LLM Observability)
 //
 // Wire shape for POST /v1/ai/voice-turn-usage. Backend computes cost from

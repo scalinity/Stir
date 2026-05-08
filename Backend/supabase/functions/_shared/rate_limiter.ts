@@ -32,6 +32,7 @@ export type RateLimitPolicyKey =
   | 'ip:voice_turn_usage_daily'
   | 'ip:realtime_session_daily'
   | 'ip:ops_admin_hourly'
+  | 'ip:users_delete_request_hourly'
   | 'user:dinner_solve_hourly'
   | 'user:voice_turn_usage_hourly'
   | 'user:cook_turn_hourly'
@@ -107,6 +108,14 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   // exceeds 5-10 rpm) while cutting enumeration from thousands/sec to
   // 30/min. Per-admin bucket is a step-9 follow-up per CLAUDE.md §Deferred.
   'ip:ops_admin_hourly': { windowSeconds: 3600, maxCount: 1800 },
+  // users_delete_request (SCA-61): legitimate caller submits exactly 1
+  // deletion request per session, and the endpoint is idempotent on
+  // (canonical_user_key, in-flight state) so repeat POSTs return the
+  // existing pending row rather than creating a new one. 5/hour/IP is
+  // burst protection against a buggy client; the actual abuse vector
+  // (admin-DDoS via repeated requests) is constrained by the JWT auth
+  // gate and the unique partial index on deletion_requests.
+  'ip:users_delete_request_hourly': { windowSeconds: 3600, maxCount: 5 },
 };
 
 export interface RateLimitResult {

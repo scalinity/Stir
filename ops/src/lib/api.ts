@@ -17,7 +17,9 @@ export type AdminActionName =
   | 'cost_anomalies.list'
   | 'voice_sessions.list'
   | 'prompt_versions.rollout'
-  | 'feature_flags.update';
+  | 'feature_flags.update'
+  | 'deletion_requests.list'
+  | 'deletion_requests.approve';
 
 export class AdminApiError extends Error {
   constructor(

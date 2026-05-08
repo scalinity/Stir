@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import UsersPage from './pages/UsersPage';
 import FlaggedOutputsPage from './pages/FlaggedOutputsPage';
 import CostAnomaliesPage from './pages/CostAnomaliesPage';
+import DeletionRequestsPage from './pages/DeletionRequestsPage';
 
 export default function App() {
   const { session, loading } = useAdminSession();
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="flagged" element={<FlaggedOutputsPage />} />
         <Route path="anomalies" element={<CostAnomaliesPage />} />
+        <Route path="deletions" element={<DeletionRequestsPage />} />
         <Route path="voice" element={<DeferredPage page="Voice Sessions" />} />
         <Route path="flags" element={<DeferredPage page="Feature Flags" />} />
         <Route path="prompts" element={<DeferredPage page="Prompt Versions" />} />

@@ -172,18 +172,18 @@ We do not discriminate against users who exercise their CCPA rights.
 
 ### 7.7 How to exercise these rights
 
-Email **privacy@getstir.app** with the subject line "Privacy request: \<know | delete | correct\>". Include the canonical user identifier shown in **Stir > Settings > About** so we can locate your data, or include the Apple ID email associated with your subscription.
+**In-app (primary):** open **Stir > Settings > Delete my data**. The screen explains what will be deleted, asks you to type a confirmation phrase, and submits a deletion request to our backend. Subscription auto-renew is canceled automatically; refunds are managed via the App Store.
 
-We respond within 30 days. We may need to verify your identity before fulfilling certain requests.
+**Email (fallback):** if you can't access the app — for example, you've been locked out, or you're submitting a request on behalf of a deceased user — email **privacy@getstir.app** with the subject line "Privacy request: \<know | delete | correct\>". Include the Apple ID email associated with your subscription so we can verify your identity. We may need to verify your identity before fulfilling certain requests.
+
+We respond within 30 days for any path.
 
 For deletion requests:
 - Operational data (Stir backend): purged within 30 days of request
-- User content (CloudKit): you delete this directly via Stir > Settings > Delete Local Data, or by signing out of iCloud / removing Stir from iCloud
+- User content (CloudKit): you delete this directly via Stir > Settings > Delete Local Data, or by signing out of iCloud / removing Stir from iCloud. The in-app **Delete my data** flow also triggers a CloudKit erase across your devices on next launch.
 - Third-party processors (PostHog, Sentry, RevenueCat): we forward deletion requests to each subprocessor and they process per their own SLA
 
 You will receive an email confirmation when each step completes.
-
-We are working on a single-tap in-app deletion flow that consolidates these steps for v1.1; until then, the email path is the primary mechanism.
 
 ## 8. Children
 

@@ -623,6 +623,23 @@ struct SettingsRootView: View {
                 )
                 rowDivider
                 aboutLink("Support", url: "mailto:support@getstir.app")
+                rowDivider
+                // SCA-61 — in-app CCPA deletion. Privacy Policy §7.7
+                // mandates this surface as the primary path; the email
+                // fallback at privacy@getstir.app is preserved on the
+                // destination view for users who can't authenticate.
+                NavigationLink {
+                    DeleteMyDataView()
+                } label: {
+                    Text("Delete my data")
+                        .stirFont(.labelLg)
+                        .foregroundStyle(Color.Stir.danger)
+                        .padding(.horizontal, CGFloat.Stir.space3Half)
+                        .padding(.vertical, CGFloat.Stir.space3Half)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Delete my data")
             }
             .stirCard()
         }

@@ -1022,6 +1022,18 @@ final class RootCoordinator {
         Task { await bootstrap() }
     }
 
+    // MARK: - CCPA / privacy-rights deletion (SCA-61)
+
+    /// Submit an in-app deletion request for the current authenticated
+    /// user. Idempotent on the server: a duplicate POST while a pending
+    /// request exists returns the existing row, so it's safe to call
+    /// from a retry handler.
+    ///
+    /// Surfaced from `DeleteMyDataView`.
+    func submitDeletionRequest() async throws -> UsersDeleteRequestResponse {
+        try await aiDispatch.usersDeleteRequest()
+    }
+
     // MARK: - Tutorial replay (SCA-5)
 
     /// Reset every in-app tutorial (full-screen + coach-mark) and

@@ -747,8 +747,12 @@ ops_admin.users.quota_reset, ops_admin.users.status_changed,
 ops_admin.users.force_reauth,
 ops_admin.flagged_outputs.resolved,
 ops_admin.prompt_versions.rollout,
-ops_admin.feature_flags.updated
+ops_admin.feature_flags.updated,
+ops_admin.deletion_requests.list_queried,
+ops_admin.deletion_requests.approved
 ```
+
+**iOS-side privacy events** (SCA-61): `deletion_request_submitted` is emitted server-side from `users-delete-request` (distinct_id = canonical_user_key_hash), not from iOS. iOS surfaces success state without a separate emit — funnel is request → server-emit → ops_admin.deletion_requests.approved → fulfillment-worker emits.
 
 Wired in `Backend/supabase/functions/ops-admin/index.ts`. Property contract via `emitOpsEvent` helper. Schema: `docs/telemetry/canonical-properties.md` + ADR 0027.
 

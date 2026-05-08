@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/users', label: 'Users' },
   { to: '/flagged', label: 'Flagged Outputs' },
   { to: '/anomalies', label: 'Cost Anomalies' },
+  { to: '/deletions', label: 'Deletion Requests' },
   { to: '/voice', label: 'Voice Sessions' },
   { to: '/flags', label: 'Feature Flags' },
   { to: '/prompts', label: 'Prompt Versions' },

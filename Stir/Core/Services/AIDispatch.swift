@@ -347,6 +347,35 @@ actor AIDispatch {
         return response
     }
 
+    // MARK: - CCPA / privacy-rights deletion (SCA-61)
+
+    /// POST /v1/users/delete-request. Submits an in-app deletion request
+    /// for the current authenticated user. Idempotent on the server: a
+    /// duplicate POST returns the existing pending row.
+    ///
+    /// Server enqueues; deletion fulfillment is a downstream pgmq-dispatch
+    /// consumer (CloudKit zone delete, Postgres row sweep, RC alias
+    /// cleanup, PostHog identify-merge, Sentry erase). 30-day SLA per
+    /// Privacy Policy §7.2.
+    func usersDeleteRequest() async throws -> UsersDeleteRequestResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/users-delete-request")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 15
+        // Empty JSON body — auth gates the request, server pulls
+        // canonical_user_key from the JWT.
+        request.httpBody = "{}".data(using: .utf8)
+
+        Logger.aiDispatch.info("users_delete_request_dispatch")
+        let response: UsersDeleteRequestResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "users_delete_request_complete state=\(response.state, privacy: .public) idempotent=\(response.idempotent ? "1" : "0", privacy: .public)",
+        )
+        return response
+    }
+
     // MARK: - Voice Turn Usage (PostHog LLM Observability)
 
     /// POST /v1/ai/voice-turn-usage. Fire-and-forget per-turn usage report

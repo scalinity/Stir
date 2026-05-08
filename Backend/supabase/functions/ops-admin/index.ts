@@ -142,6 +142,21 @@ const PromptVersionsRolloutParams = z.object({
   is_default: z.boolean().optional(),
 }).strict();
 
+// SCA-61. Deletion-request triage. Listing supports the standard
+// state filter; approval flips state from pending → approved and
+// stamps approved_by_admin_id + approved_at. Actual fulfillment
+// (CloudKit zone delete + cross-system erase) is handled by the
+// pgmq-dispatch worker downstream — see SCA-88 follow-up.
+const DeletionRequestsListParams = z.object({
+  state: z.enum(['pending', 'approved', 'processing', 'completed', 'failed']).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+  offset: z.number().int().min(0).optional(),
+}).strict();
+
+const DeletionRequestsApproveParams = z.object({
+  id: z.string().uuid(),
+}).strict();
+
 const FeatureFlagsUpdateParams = z.object({
   key: z.string().min(1).max(128),
   value: z.unknown().optional(),
@@ -172,6 +187,12 @@ const AdminActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('prompt_versions.rollout'), params: PromptVersionsRolloutParams })
     .strict(),
   z.object({ action: z.literal('feature_flags.update'), params: FeatureFlagsUpdateParams })
+    .strict(),
+  z.object({
+    action: z.literal('deletion_requests.list'),
+    params: DeletionRequestsListParams.default({}),
+  }).strict(),
+  z.object({ action: z.literal('deletion_requests.approve'), params: DeletionRequestsApproveParams })
     .strict(),
 ]);
 
@@ -338,6 +359,10 @@ async function dispatch(parsed: AdminAction, ctx: HandlerCtx): Promise<Record<st
       return await handlePromptVersionsRollout(parsed.params, ctx);
     case 'feature_flags.update':
       return await handleFeatureFlagsUpdate(parsed.params, ctx);
+    case 'deletion_requests.list':
+      return await handleDeletionRequestsList(parsed.params, ctx);
+    case 'deletion_requests.approve':
+      return await handleDeletionRequestsApprove(parsed.params, ctx);
     default: {
       // Exhaustiveness guard (review W45). TS can't narrow z.infer<any>
       // through discriminated-switch at the Zod seam, so we fall through
@@ -897,6 +922,115 @@ async function handleFeatureFlagsUpdate(
     is_enabled: params.is_enabled ?? null,
     rollout_pct: params.rollout_pct ?? null,
     noop: false,
+    audit_id: auditId,
+  });
+
+  return { ok: true, before, after, audit_id: auditId };
+}
+
+// ---------------------------------------------------------------------------
+// Action: deletion_requests.list / deletion_requests.approve (SCA-61)
+// ---------------------------------------------------------------------------
+
+async function handleDeletionRequestsList(
+  params: z.infer<typeof DeletionRequestsListParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  let query = ctx.client
+    .from('deletion_requests')
+    .select(
+      'id, canonical_user_key_hash, state, requested_at, approved_at, started_at, completed_at, failure_reason',
+      { count: 'exact' },
+    )
+    .order('requested_at', { ascending: false });
+
+  if (params.state) {
+    query = query.eq('state', params.state);
+  } else {
+    // Default view: in-flight + recent terminal entries. The pending
+    // index lives on (state, requested_at DESC), so this default is
+    // also the index hot-path.
+    query = query.in('state', ['pending', 'approved', 'processing', 'failed']);
+  }
+
+  const limit = params.limit ?? 100;
+  const offset = params.offset ?? 0;
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+  if (error) {
+    throw new Error(`deletion_requests list failed: ${error.message}`);
+  }
+
+  await emitOpsEvent(ctx, 'ops_admin.deletion_requests.list_queried', {
+    state_filter: params.state ?? null,
+    target_id: null,
+    result_count: data?.length ?? 0,
+  });
+
+  return {
+    rows: data ?? [],
+    total_count: count ?? 0,
+    limit,
+    offset,
+  };
+}
+
+async function handleDeletionRequestsApprove(
+  params: z.infer<typeof DeletionRequestsApproveParams>,
+  ctx: HandlerCtx,
+): Promise<Record<string, unknown>> {
+  const { data: before, error: preErr } = await ctx.client
+    .from('deletion_requests')
+    .select('id, state, canonical_user_key_hash, requested_at, approved_at')
+    .eq('id', params.id)
+    .single();
+
+  if (preErr || !before) {
+    throw new DispatchError(ErrorCode.VAL_01, 404, `deletion_request ${params.id} not found`);
+  }
+  if (before.state !== 'pending') {
+    throw new DispatchError(
+      ErrorCode.VAL_01,
+      409,
+      `deletion_request ${params.id} state is ${before.state}; only 'pending' can be approved`,
+    );
+  }
+
+  const { data: after, error: updateErr } = await ctx.client
+    .from('deletion_requests')
+    .update({
+      state: 'approved',
+      approved_at: new Date().toISOString(),
+      approved_by_admin_id: ctx.admin.authUserId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', params.id)
+    .eq('state', 'pending')
+    .select('id, state, approved_at, approved_by_admin_id')
+    .single();
+
+  if (updateErr || !after) {
+    throw new Error(
+      `deletion_requests approve failed: ${updateErr?.message ?? 'race lost on state filter'}`,
+    );
+  }
+
+  const auditId = await writeAudit(ctx.client, ctx.log, {
+    actor_id: ctx.admin.authUserId,
+    actor_email: ctx.admin.email,
+    action: 'deletion_requests.approved',
+    target_table: 'deletion_requests',
+    target_id: params.id,
+    before,
+    after,
+    request_id: ctx.requestId,
+  });
+
+  await emitOpsEvent(ctx, 'ops_admin.deletion_requests.approved', {
+    deletion_request_id: params.id,
+    target_id: params.id,
+    target_user_hash: before.canonical_user_key_hash,
     audit_id: auditId,
   });
 

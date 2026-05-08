@@ -444,6 +444,14 @@ verify_jwt = false
 [functions.ops-flag-output]
 verify_jwt = false
 
+# SCA-61. users-delete-request verifies the iOS session JWT itself so
+# CCPA deletion submissions carry typed AUTH-01 reasons. Kong's default
+# verify_jwt=true would reject the POST at the gateway with an opaque
+# 401 before our handler runs (per CLAUDE.md §Backend contracts: every
+# JWT-verifying function MUST set this).
+[functions.users-delete-request]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
