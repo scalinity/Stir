@@ -24,17 +24,23 @@
 import SwiftUI
 
 struct SampleShowcaseView: View {
-    let onContinueOnboarding: () -> Void
+    /// Title of the primary terminal CTA. Defaults to onboarding-context
+    /// copy; SCA-69 (camera-denied path) overrides with
+    /// "Open Settings to enable camera".
+    let primaryCTATitle: String
+    let onPrimaryAction: () -> Void
     let onBack: () -> Void
 
     private let fixture: SampleSolveFixture
 
     init(
-        onContinueOnboarding: @escaping () -> Void,
+        primaryCTATitle: String = "Try with your real kitchen",
+        onPrimaryAction: @escaping () -> Void,
         onBack: @escaping () -> Void,
         fixture: SampleSolveFixture = .bundled,
     ) {
-        self.onContinueOnboarding = onContinueOnboarding
+        self.primaryCTATitle = primaryCTATitle
+        self.onPrimaryAction = onPrimaryAction
         self.onBack = onBack
         self.fixture = fixture
     }
@@ -75,15 +81,15 @@ struct SampleShowcaseView: View {
 
     private var actionStack: some View {
         VStack(spacing: CGFloat.Stir.space3) {
-            PrimaryButton(title: "Try with your real kitchen") {
+            PrimaryButton(title: primaryCTATitle) {
                 PostHogClient.shared.capture(.sampleShowcaseExited, properties: [
-                    "outcome": "continued_to_onboarding",
+                    "outcome": "primary_action",
                 ])
-                onContinueOnboarding()
+                onPrimaryAction()
             }
             TextButton(title: "Back to start") {
                 PostHogClient.shared.capture(.sampleShowcaseExited, properties: [
-                    "outcome": "back_to_welcome",
+                    "outcome": "back",
                 ])
                 onBack()
             }

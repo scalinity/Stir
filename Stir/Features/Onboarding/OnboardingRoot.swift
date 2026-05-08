@@ -147,7 +147,7 @@ struct OnboardingRoot: View {
                     )
                 case .sampleShowcase:
                     SampleShowcaseView(
-                        onContinueOnboarding: {
+                        onPrimaryAction: {
                             guard !isAdvancing else { return }
                             isAdvancing = true
                             // Reuse the original "See a sample" bypass

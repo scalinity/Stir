@@ -9,6 +9,7 @@
 // so users don't accidentally drop a capture).
 
 import SwiftUI
+import UIKit
 
 struct ScanFlowRoot: View {
     @State private var scanViewModel: ScanViewModel
@@ -152,6 +153,16 @@ private struct ScanPrimerBody: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .largeTitle) private var heroIconSize: CGFloat = 64
+    /// SCA-69 — when the user has been denied camera permission, expose
+    /// a "See sample dinner ideas" affordance that presents the
+    /// SampleShowcaseView (reused from SCA-67) so the user can preview
+    /// the product surface without granting camera access. Spec §7
+    /// trust-earning stub-path "camera denied → bundled sample" is
+    /// honored UX-wise via the showcase rather than a literal sample
+    /// image (the AI parse on a stranger's kitchen wouldn't surface
+    /// recognizable ingredients to the user; the showcase is the more
+    /// effective preview).
+    @State private var showSampleShowcase = false
 
     var body: some View {
         VStack(spacing: CGFloat.Stir.space5) {
@@ -181,12 +192,38 @@ private struct ScanPrimerBody: View {
                         : "Allow camera access",
                     action: { Task { await grantAndContinue() } },
                 )
+                if cameraService.currentPermission == .denied {
+                    // SCA-69: explicit deny-state escape hatch. When
+                    // `.notDetermined`, the PrimaryButton above triggers
+                    // the OS prompt and `grantAndContinue` will route
+                    // forward on .authorized; only show the showcase
+                    // CTA when iOS will no longer re-prompt.
+                    TextButton(title: "See sample dinner ideas") {
+                        showSampleShowcase = true
+                    }
+                }
                 TextButton(title: "Not now", action: onCancel)
             }
             .padding(.horizontal, CGFloat.Stir.screenMarginHero)
             .padding(.bottom, CGFloat.Stir.space5)
         }
         .background(Color.Stir.paper50)
+        .sheet(isPresented: $showSampleShowcase) {
+            NavigationStack {
+                SampleShowcaseView(
+                    primaryCTATitle: "Open Settings to enable camera",
+                    onPrimaryAction: {
+                        showSampleShowcase = false
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    },
+                    onBack: {
+                        showSampleShowcase = false
+                    },
+                )
+            }
+        }
         // Keep `navigationTitle` for the back-chevron label +
         // VoiceOver; the visible title comes from the .principal
         // toolbar item below in the Stir display serif. Default

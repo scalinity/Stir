@@ -805,7 +805,7 @@ Use these exact messages everywhere; each screen references applicable codes.
 | `AI-03`         | "This is taking longer than expected."                                                      | Keep Waiting / Retry / Cook Saved  |
 | `AI-VOICE-01`   | "Voice mode running in reduced quality — still here to help."                               | Continue / Use Taps                |
 | `IMPORT-01`     | "I couldn't turn that recipe into clean steps yet."                                         | Edit Manually / Retry / Cancel     |
-| `PERM-CAM-01`   | "Camera access is off. Turn it on to scan your kitchen."                                    | Open Settings / Use Sample Photo   |
+| `PERM-CAM-01`   | "Camera access is off. Turn it on to scan your kitchen."                                    | Open Settings / See sample dinner ideas |
 | `PERM-MIC-01`   | "Microphone access is off. You can keep cooking with taps, or turn on the mic in Settings." | Keep Cooking / Open Settings       |
 | `PERM-PHOTO-01` | "Photos access is off. Enable it to import a screenshot or recipe photo."                   | Open Settings / Paste Link Instead |
 | `PERM-REM-01`   | "Reminders access is off. Your grocery list will stay in Stir until you enable Reminders."  | Keep In App / Open Settings        |
