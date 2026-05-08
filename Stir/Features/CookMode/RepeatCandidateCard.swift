@@ -176,11 +176,12 @@ struct RepeatCandidateCard: View {
                 "outcome": "paywall_routed",
             ])
             onDismiss()
-            // Route to paywall AFTER dismiss so iOS doesn't try to
-            // stack a fullScreenCover behind this sheet.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                presentPaywall(.savedFavoritesGate)
-            }
+            // SCA-114: paywall handoff is now host-owned. Fire the
+            // closure synchronously; CookModeRoot wraps the
+            // presentation in a cancellable Task with the same 50ms
+            // cover-handoff gap (Self.coverHandoffGap) so view
+            // teardown / double-tap can short-circuit cleanly.
+            presentPaywall(.savedFavoritesGate)
         }
     }
 

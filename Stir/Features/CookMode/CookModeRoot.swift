@@ -155,8 +155,23 @@ struct CookModeRoot: View {
                         RepeatCandidateCard(
                             recipePlan: recipePlan,
                             entitlements: entitlements,
+                            // SCA-114: wrap the paywall handoff in a
+                            // cancellable Task using the existing
+                            // presentation-task slot (mirrors the
+                            // SCA-56 leftovers pattern). Pre-fix the
+                            // card itself used DispatchQueue.main.
+                            // asyncAfter — uncancellable, magic 0.05,
+                            // and racy on view teardown / double-tap.
+                            // The 50ms gap is the cover-handoff
+                            // standard from SCA-56 documented at
+                            // `Self.coverHandoffGap`.
                             presentPaywall: { trigger in
-                                coordinator.presentPaywall(trigger)
+                                cancelLeftoversPresentationTask()
+                                leftoversPresentationTask = Task { @MainActor in
+                                    try? await Task.sleep(for: Self.coverHandoffGap)
+                                    guard !Task.isCancelled else { return }
+                                    coordinator.presentPaywall(trigger)
+                                }
                             },
                             onDismiss: {
                                 repeatCandidateContext = nil
