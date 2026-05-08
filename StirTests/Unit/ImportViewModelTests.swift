@@ -74,9 +74,16 @@ final class ImportViewModelTests: XCTestCase {
         household.createdAt = Date()
         household.servingsDefault = 2
         try ctx.save()
+        // SCA-179: pass `importRepo` constructed against the test's
+        // in-memory controller. The default `RecipeImportRepository()`
+        // would fall through to `PersistenceController.shared` and the
+        // rejection-path persist (`recordClientReject`) would crash
+        // because the entity-to-class mapping isn't fully wired in the
+        // shared container at unit-test load time.
         return ImportViewModel(
             household: household,
             aiDispatch: AIDispatch.stub,
+            importRepo: RecipeImportRepository(controller: controller),
             controller: controller,
         )
     }
