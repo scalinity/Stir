@@ -55,6 +55,24 @@ export default function DeletionRequestsPage() {
   const err = error ? String(error) : null;
 
   const onApprove = async (row: DeletionRow) => {
+    // SCA-174: friction-shaped gate matching the iOS user-side path
+    // (which requires typing "DELETE MY DATA" verbatim before submit).
+    // Asymmetric protection was the gap — the user requesting their
+    // own deletion had a typed gate; the admin starting the irreversible
+    // erasure pipeline had a single-click `plain destructive` confirm.
+    // Now both sides require a typed match. The expected string is the
+    // first 8 chars of the row's `canonical_user_key_hash` — short enough
+    // to type quickly, long enough that an admin who clicked the wrong
+    // row will visibly fail to match (different hash prefix in the
+    // dialog vs. the one they meant to approve).
+    //
+    // No wire-shape change to `deletion_requests.approve`: the typed
+    // string is verified client-side as a confirmation gate; the
+    // server-side audit_log already records target_id (= the same
+    // canonical_user_key_hash the admin just typed) + approver_id +
+    // approved_at, so the typed value is implicitly captured by virtue
+    // of the row identity already being audited.
+    const expected = row.canonical_user_key_hash.slice(0, 8);
     const confirmed = await ask({
       title: 'Approve deletion request?',
       description: (
@@ -64,10 +82,13 @@ export default function DeletionRequestsPage() {
           <br />
           Approval marks the row for fulfillment by the downstream pgmq worker. The user's data will
           be erased across all subsystems within 30 days. This action is logged in audit_log.
+          <br />
+          <br />
+          Type the first 8 chars of the user hash to confirm you have the right row.
         </>
       ),
       confirmLabel: 'Approve',
-      mode: { kind: 'plain', destructive: true },
+      mode: { kind: 'typed', expected, placeholder: expected.slice(0, 2) + '…' },
     });
     if (!confirmed.confirmed) return;
     approveMutation.mutate(row.id);
