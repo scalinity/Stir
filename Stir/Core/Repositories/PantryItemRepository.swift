@@ -643,7 +643,20 @@ final class PantryItemRepository {
         let calendar = Calendar.current
         let plus30h = now.addingTimeInterval(30 * 3600)
         let nextMorningStart = calendar.startOfDay(for: plus30h)
-        return nextMorningStart.addingTimeInterval(6 * 3600)
+        let candidate = nextMorningStart.addingTimeInterval(6 * 3600)
+        // SCA-178 (test_upsertFromScan_ephemeralRow_setsExpiresAt
+        // floor invariant): `Calendar.startOfDay(for:)` snaps BACKWARD to
+        // the same calendar day's midnight, so for `now` between roughly
+        // 6am and 6pm the candidate can land 12-18h in the future —
+        // shorter than the "survive a typical cook session" floor the
+        // ephemeral-state contract promises (and shorter than the
+        // foreground sweep's 24h cadence assumes). Bump one day forward
+        // whenever the candidate falls inside the 18h floor.
+        let minimum = now.addingTimeInterval(18 * 3600)
+        if candidate < minimum {
+            return candidate.addingTimeInterval(24 * 3600)
+        }
+        return candidate
     }
 
     /// Fetch ephemeral rows whose `expiresAt` is in the trailing 48-hour

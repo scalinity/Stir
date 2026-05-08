@@ -530,11 +530,17 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(row.typedMemoryState, .ephemeral)
         XCTAssertNotNil(row.expiresAt)
         XCTAssertGreaterThan(row.expiresAt!, now, "expiresAt must be in the future on insert")
-        // Window: at least 18h, at most 36h (the formula's bounds —
-        // startOfDay(now+30h)+6h falls between [now+22h, now+36h]).
+        // Window: SCA-178 — formula is `startOfDay(now+30h)+6h` with an
+        // 18h-floor guard that bumps the result one day when the
+        // candidate falls inside the floor (Calendar.startOfDay snaps
+        // backward to the same calendar day's midnight, so for `now`
+        // between 6am and 6pm the unguarded candidate lands as short
+        // as 12-18h ahead). Guarded range is [18h, 42h):
+        //   - Lower: now=12pm noon → exactly 18h.
+        //   - Upper: now=12:00:01pm → ~41h59m (one bump from 18h floor).
         let hoursUntilExpiry = row.expiresAt!.timeIntervalSince(now) / 3600
-        XCTAssertGreaterThan(hoursUntilExpiry, 18, "expire window must be at least 18h to survive a typical cook session")
-        XCTAssertLessThan(hoursUntilExpiry, 38, "expire window must not exceed 38h — anything longer breaks 'today' semantics")
+        XCTAssertGreaterThanOrEqual(hoursUntilExpiry, 18, "expire window must be at least 18h to survive a typical cook session")
+        XCTAssertLessThan(hoursUntilExpiry, 42, "expire window must not exceed 42h — anything longer breaks 'today' semantics")
     }
 
     func test_upsertFromScan_rememberedRow_leavesExpiresAtNil() throws {
