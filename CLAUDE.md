@@ -710,14 +710,16 @@ substitution_requested, substitution_accepted,
 # preference can't disambiguate equal-length winners). Properties:
 # session_id (UUID string, "unknown" placeholder when nil pre-persist),
 # candidate_count (≥2), surface ∈ {voice, tap}, resolved_to ∈
-# {free_text_fallback, user_picked_first, user_picked_second,
-# timed_out}. v1 emits ONLY free_text_fallback — voice routes
-# ambiguous matches to free-text persistence (no recipe row mutation).
-# Other resolution values reserved for the future "ask the user
-# mid-turn" build-out (Owner-step "as triggered" — needs RealtimeSession
-# state-machine work + 5s response window). Adding a new surface or
-# resolved_to value is a wire-contract change — update
-# VoiceSessionTelemetry.swift enum + spec §15 + this list together.
+# {free_text_fallback}. v1 emits ONLY free_text_fallback — voice
+# routes ambiguous matches to free-text persistence (no recipe row
+# mutation). SCA-199 (/review-2 S1) trimmed three speculative
+# resolution cases (user_picked_first / user_picked_second /
+# timed_out) that locked the wire vocab in advance of the Phase 2
+# mid-turn-prompt UX; re-add cases when the prompt-UX commit
+# actually lands rather than locking the closed vocab today.
+# Adding a new surface or resolved_to value is a wire-contract
+# change — update VoiceSessionTelemetry.swift enum + spec §15 +
+# this list together.
 voice_substitution_disambiguated,
 cook_session_completed,
 # SCA-55: meal_rated gains `leftovers_handoff_offered` (bool, true iff

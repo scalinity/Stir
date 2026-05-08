@@ -438,19 +438,21 @@ final class VoiceSessionTelemetry {
     }
 
     /// Closed resolution enum for `voice_substitution_disambiguated.resolved_to`.
-    /// `freeTextFallback` is what we ship in v1: ambiguous voice matches
-    /// route to the free-text persistence path (no recipe mutation);
-    /// the model's narration carries the user-facing swap.
-    /// `userPickedFirst` / `userPickedSecond` / `timedOut` are reserved
-    /// for the future "ask the user mid-turn" build-out (Owner-step:
-    /// "as triggered" — needs RealtimeSession state-machine work).
-    /// Until that lands, emit only `freeTextFallback`. Closed vocab
-    /// keeps the eventual prompt-UX wiring from drift-shipping a typo.
+    /// v1 ships ONLY `freeTextFallback`: ambiguous voice matches route
+    /// to the free-text persistence path (no recipe mutation); the
+    /// model's narration carries the user-facing swap.
+    ///
+    /// SCA-199 (/review-2 S1): the speculative `userPickedFirst` /
+    /// `userPickedSecond` / `timedOut` cases were trimmed. Adding
+    /// closed wire vocab in advance of the data path is a forward-
+    /// design footgun — when Phase 2 (mid-turn-prompt UX, gated on
+    /// the SCA-148 ≥1% telemetry trigger) finally ships, it may
+    /// distinguish more states than three (e.g. "user_picked_third"
+    /// or "user_skipped"). Re-add cases when the prompt-UX commit
+    /// actually lands; spec §15 + CLAUDE.md telemetry list update
+    /// in the same commit per the wire-contract rule.
     enum SubstitutionDisambiguationResolution: String {
         case freeTextFallback = "free_text_fallback"
-        case userPickedFirst = "user_picked_first"
-        case userPickedSecond = "user_picked_second"
-        case timedOut = "timed_out"
     }
 
     /// SCA-148: emit `voice_substitution_disambiguated` when matchIngredient
