@@ -180,10 +180,19 @@ struct RepeatCandidateCard: View {
                 // analysis. Spec §15 favorite_saved property table
                 // includes `source ∈ {tonight, post_meal_feedback,
                 // saved_replay}` per audit ticket A3.
-                analytics.capture(.favoriteSaved, properties: [
-                    "recipe_origin": recipePlan.origin ?? "ai",
-                    "source": "post_meal_feedback",
-                ])
+                //
+                // SCA-120: route through the typed
+                // `BillingTelemetryProperties.favoriteSaved(...:source:)`
+                // helper so this callsite shares the same property
+                // shape as DishPreview / SavedMealsView; SourceKit
+                // catches drift instead of the inline literal dict.
+                analytics.capture(
+                    .favoriteSaved,
+                    properties: BillingTelemetryProperties.favoriteSaved(
+                        recipeOrigin: recipePlan.origin ?? "ai",
+                        source: .postMealFeedback,
+                    ),
+                )
                 onDismiss()
             } else {
                 // SolveRepository.setFavorite already logged the

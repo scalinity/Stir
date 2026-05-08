@@ -102,12 +102,45 @@ enum BillingTelemetryProperties {
 
     // MARK: favorite_saved
 
-    /// Spec §15: `recipe_origin`. From RecipePlan.origin (scan | import | saved).
+    /// Spec §15: `recipe_origin` + `source`. SCA-120 closes the
+    /// drift introduced by SCA-66: every callsite now emits both
+    /// fields via this helper rather than three callsites duplicating
+    /// inline literal dicts (one of which forgot the new `source`
+    /// property entirely). Callers that still pass only
+    /// `recipeOrigin` are routed through the old shape via the
+    /// secondary helper below — but new emitters should use this one.
+    static func favoriteSaved(
+        recipeOrigin: String,
+        source: FavoriteSource,
+    ) -> [String: Any] {
+        [
+            "recipe_origin": recipeOrigin,
+            "source": source.rawValue,
+        ]
+    }
+
+    /// Legacy helper — temporarily kept until every callsite is
+    /// migrated. Prefer the (recipeOrigin:source:) overload above.
+    /// Marked deprecated so SourceKit flags any new callers; the
+    /// existing two callers are migrated in this same commit.
+    @available(*, deprecated, renamed: "favoriteSaved(recipeOrigin:source:)")
     static func favoriteSaved(recipeOrigin: String) -> [String: Any] {
         [
             "recipe_origin": recipeOrigin,
         ]
     }
+}
+
+/// Where the favorite_saved event originated. Pinned by spec §15:1701
+/// (SCA-66 added the property). Wire values must match the spec enum;
+/// SourceKit-checked at every callsite via the typed enum.
+enum FavoriteSource: String, Sendable {
+    /// Star-tap on Tonight tab's hero card or DishPreview.
+    case tonight
+    /// SCA-66: rating ≥ 4 on a not-yet-favorited recipe → suggestSave card.
+    case postMealFeedback = "post_meal_feedback"
+    /// User toggled an unfavorited Saved-tab card back on (re-favorite).
+    case savedReplay = "saved_replay"
 }
 
 /// Where a Restore Purchases tap originated. Captured as the `origin`

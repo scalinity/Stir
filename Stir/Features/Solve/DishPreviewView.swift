@@ -289,8 +289,13 @@ struct DishPreviewView: View {
         if newValue {
             PostHogClient.shared.capture(
                 .favoriteSaved,
+                // SCA-120: emit `source` so the favorites funnel can
+                // separate Tonight/DishPreview saves from Saved-tab
+                // re-favorites (savedReplay) and post-meal-feedback
+                // suggestSave (postMealFeedback per SCA-66).
                 properties: BillingTelemetryProperties.favoriteSaved(
                     recipeOrigin: plan.typedOrigin.rawValue,
+                    source: .tonight,
                 ),
             )
         }

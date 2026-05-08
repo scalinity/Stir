@@ -343,8 +343,14 @@ struct SavedMealsView: View {
                 if newValue {
                     PostHogClient.shared.capture(
                         .favoriteSaved,
+                        // SCA-120: emit `source: .savedReplay` for
+                        // re-favorite taps from the Saved tab so the
+                        // favorites funnel separates these from
+                        // first-time Tonight saves and post-meal
+                        // suggestSave routes.
                         properties: BillingTelemetryProperties.favoriteSaved(
                             recipeOrigin: plan.typedOrigin.rawValue,
+                            source: .savedReplay,
                         ),
                     )
                 }

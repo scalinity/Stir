@@ -21,7 +21,11 @@ final class PaywallTelemetryTests: XCTestCase {
         .purchaseCompleted: ["sku", "price", "trial", "intro_offer"],
         .restorePurchasesTapped: ["origin"],
         .entitlementStateChanged: ["from_state", "to_state", "billing_state"],
-        .favoriteSaved: ["recipe_origin"],
+        // SCA-120: `source` added to the canonical-keys snapshot so
+        // the typed BillingTelemetryProperties.favoriteSaved(...:source:)
+        // overload locks in the spec §15:1701 enum
+        // (tonight | post_meal_feedback | saved_replay).
+        .favoriteSaved: ["recipe_origin", "source"],
     ]
 
     // MARK: paywall_viewed
@@ -126,9 +130,26 @@ final class PaywallTelemetryTests: XCTestCase {
     // MARK: favorite_saved
 
     func test_favoriteSaved_keysMatchSpec() {
-        let props = BillingTelemetryProperties.favoriteSaved(recipeOrigin: "ai")
+        // SCA-120: typed (recipeOrigin:source:) overload — emits both
+        // recipe_origin AND source per spec §15:1701. The legacy
+        // single-arg helper is now @available(*, deprecated) and
+        // exercised by `test_favoriteSaved_legacy_dropsSource` below.
+        let props = BillingTelemetryProperties.favoriteSaved(
+            recipeOrigin: "ai",
+            source: .postMealFeedback,
+        )
         XCTAssertEqual(Set(props.keys), canonicalKeys[.favoriteSaved])
         XCTAssertEqual(props["recipe_origin"] as? String, "ai")
+        XCTAssertEqual(props["source"] as? String, "post_meal_feedback")
+    }
+
+    /// SCA-120 / spec §15:1701 wire-value lock. Renaming any rawValue
+    /// here breaks PostHog dashboards keyed on these strings; coordinate
+    /// with the dashboard team before changing.
+    func test_favoriteSource_telemetryValues_areStable() {
+        XCTAssertEqual(FavoriteSource.tonight.rawValue, "tonight")
+        XCTAssertEqual(FavoriteSource.postMealFeedback.rawValue, "post_meal_feedback")
+        XCTAssertEqual(FavoriteSource.savedReplay.rawValue, "saved_replay")
     }
 
     // MARK: trigger → telemetryValue stability
