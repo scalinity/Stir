@@ -304,6 +304,14 @@ async function stepPostgres(
   //    deletion — the cascade has already committed; log warn and return
   //    success. `audit_log.actor_id ON DELETE SET NULL` keeps the row alive
   //    independent of the now-gone app_users row.
+  //
+  //    NOT using _shared/audit.ts::writeAudit (SCA-234). The shared helper
+  //    intentionally swallows audit-insert failures (best-effort posture
+  //    for routine admin actions). For deletion fulfillment the audit row
+  //    is the surviving compliance anchor — failure must propagate (here:
+  //    as a log.warn, since the delete already committed) rather than be
+  //    silently lost. Keep this insert inline; do NOT reflexively
+  //    "consolidate" to the shared helper.
   const { error: auditErr } = await client.from('audit_log').insert({
     actor_id: null, // system automation
     actor_email: null,
