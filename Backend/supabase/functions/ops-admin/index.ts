@@ -40,6 +40,7 @@ import {
 } from '../_shared/rate_limiter.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
+import { validateCannedFallback } from '../_shared/canned_fallback_schemas.ts';
 
 // Typed, recoverable handler failure. Throw this from a handler when the
 // error class is a user-input problem (not found / already resolved /
@@ -618,6 +619,24 @@ async function handleFlaggedOutputsResolve(
   }
   if (flagged.resolved_at) {
     throw new DispatchError(ErrorCode.VAL_01, 409, `flagged_output ${params.id} already resolved`);
+  }
+
+  // SCA-81: validate canned_fallback_json against the per-feature
+  // top-level-key allowlist. Refuse the resolve if the payload doesn't
+  // structurally match the feature's response shape — a malformed
+  // paste would otherwise land in ai_response_cache and break iOS
+  // decode on the next cache hit.
+  if (params.action === 'canned_fallback_pinned' && params.canned_fallback_json !== undefined) {
+    const errors = validateCannedFallback(flagged.feature_key, params.canned_fallback_json);
+    if (errors.length > 0) {
+      throw new DispatchError(
+        ErrorCode.VAL_01,
+        400,
+        `canned_fallback_json shape invalid for feature_key '${flagged.feature_key}': ${
+          errors.map((e) => `${e.field} → ${e.issue}`).join('; ')
+        }`,
+      );
+    }
   }
 
   // Cache side-effects BEFORE the resolve write so failures surface loudly.
