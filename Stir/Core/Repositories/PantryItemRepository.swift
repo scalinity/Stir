@@ -453,6 +453,13 @@ final class PantryItemRepository {
             NSSortDescriptor(key: "lastSeenAt", ascending: false),
             NSSortDescriptor(key: "displayName", ascending: true),
         ]
+        // SCA-101 (a): fault rows in pages of 50. Pro-tier 1000-row
+        // pantries pay only for what scrolls into view; faulting cost
+        // dominated the warm-cache profile pre-batch. Free / Premium
+        // (≤250 rows) are unaffected — the array still materialises
+        // in one fetch round-trip, the difference is per-row property
+        // realisation.
+        request.fetchBatchSize = 50
         do {
             return try controller.viewContext.fetch(request)
         } catch {

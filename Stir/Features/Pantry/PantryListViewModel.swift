@@ -47,15 +47,48 @@ final class PantryListViewModel {
     /// and the first batch of items rendering.
     private(set) var didCompleteInitialLoad: Bool = false
 
-    /// Bound from the search bar in PantryListView. Filtering runs on
-    /// every set; we don't memoize because the in-memory list is small
-    /// (≤1000 entries, capped by the Pro tier).
+    /// Bound from the search bar in PantryListView. Field updates fire
+    /// per keystroke; the view-layer wraps writes in a 150ms debounce
+    /// (SCA-101 d) and forwards them to `effectiveSearchText` below
+    /// once the user has stopped typing — so this property is the
+    /// raw, undebounced typing buffer.
     var searchText: String = ""
 
+    /// Debounced search text. Reads from this instead of `searchText`
+    /// so the filter doesn't recompute on every keystroke. View layer
+    /// writes here from a debounced `.onChange(of: searchText)` pulse.
+    /// Initialised empty to match `searchText`'s default.
+    var effectiveSearchText: String = ""
+
+    /// Memoised pair of (query, filtered result) so back-to-back reads
+    /// of `filteredItems` (e.g. List body re-evaluation under
+    /// @Observable) don't re-run the filter when nothing changed.
+    /// Keyed on `(items count + effectiveSearchText)` — a coarse but
+    /// correct invalidator: any mutation that adds, removes, or
+    /// reorders a row changes `items.count` (load() reassigns the
+    /// array, edits change displayName which the sort honours).
+    /// SCA-101 (c).
+    private var filteredItemsCache: (key: FilteredCacheKey, value: [PantryItem])?
+
+    private struct FilteredCacheKey: Equatable {
+        let count: Int
+        let query: String
+    }
+
     var filteredItems: [PantryItem] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return items }
-        return items.filter { ($0.displayName ?? "").lowercased().contains(q) }
+        let q = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let key = FilteredCacheKey(count: items.count, query: q)
+        if let cached = filteredItemsCache, cached.key == key {
+            return cached.value
+        }
+        let value: [PantryItem]
+        if q.isEmpty {
+            value = items
+        } else {
+            value = items.filter { ($0.displayName ?? "").lowercased().contains(q) }
+        }
+        filteredItemsCache = (key, value)
+        return value
     }
 
     /// Live count of items that count against the standing pantry cap

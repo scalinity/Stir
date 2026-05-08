@@ -130,6 +130,30 @@ struct PantryListView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search pantry",
         )
+        // SCA-101 (d): debounce filter recompute by 150ms. The text
+        // field stays responsive (binding above writes per keystroke)
+        // but `effectiveSearchText` — which `filteredItems` reads —
+        // only catches up after the user stops typing for 150ms.
+        // Pro-tier 1000-row pantries pay the filter cost once per
+        // pause instead of per keystroke. Cancellation via `.task(id:)`
+        // ensures only the latest sleep wins.
+        .task(id: viewModel?.searchText) {
+            guard let vm = viewModel else { return }
+            // Capture the current value to compare after the sleep.
+            let pending = vm.searchText
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return // task cancelled by next keystroke
+            }
+            // Only commit if the text hasn't changed during the sleep.
+            // The .task(id:) cancellation makes this redundant in
+            // practice but defends against a stale write should the
+            // task scheduler decide to run two siblings briefly.
+            if vm.searchText == pending {
+                vm.effectiveSearchText = pending
+            }
+        }
         // SCA-19 / SCA-28 — full-screen in-list Pantry walkthrough.
         // SCA-28 C2 collapsed the prior two-`.tutorial(...)` mount
         // into a single modifier keyed off `inListTutorialKey`. Two
