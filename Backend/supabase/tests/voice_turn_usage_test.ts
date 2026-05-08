@@ -383,18 +383,29 @@ Deno.test(
 // P1-B / SA2-W4: session_id ownership binding
 // ---------------------------------------------------------------------------
 
-Deno.test('voice-turn-usage 403 when session_id has no owner row (unbooted session)', async () => {
-  // Valid Premium JWT but a session_id that was never minted. Prior
-  // behavior: would 204 and happily write a turn under someone else's
-  // trace_id. Post-P1-B: hard 403 with ENT-VOICE-01.
+Deno.test('voice-turn-usage 403 VOICE-SESSION-01 session_missing when no owner row exists (unbooted session)', async () => {
+  // SCA-146: migrated from ENT-VOICE-01 to VOICE-SESSION-01 per ADR
+  // 0017. The pre-migration assertion passed via entitlement-gate-
+  // short-circuit (Free user fails ENT-VOICE-01 before reaching the
+  // owner-binding check); the test pinned the wrong reason. Promoting
+  // to Premium routes execution into the owner-binding path, which is
+  // what this test should actually exercise.
+  //
+  // Scenario: valid Premium JWT but a session_id that was never minted.
+  // Prior behavior: would 204 and happily write a turn under someone
+  // else's trace_id. Post-P1-B: hard 403 with VOICE-SESSION-01 +
+  // reason='session_missing'.
   const boot = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(boot.canonical_user_key);
   const sessionId = crypto.randomUUID(); // not seeded
   const result = await callVoiceTurnUsage(
     validBody({ session_id: sessionId }),
     boot.session_jwt,
   );
   assertEquals(result.status, 403);
-  assertEquals((result.body as { error: string }).error, 'ENT-VOICE-01');
+  const body = result.body as { error: string; reason?: string };
+  assertEquals(body.error, 'VOICE-SESSION-01');
+  assertEquals(body.reason, 'session_missing');
 });
 
 Deno.test(
@@ -436,11 +447,19 @@ Deno.test(
   },
 );
 
-Deno.test('voice-turn-usage 403 when session_id was minted by a different user (IDOR)', async () => {
-  // Bootstrap TWO users. User A mints a session. User B tries to post
-  // turns under A's session_id — must be rejected.
+Deno.test('voice-turn-usage 403 VOICE-SESSION-01 owner_mismatch when session_id was minted by a different user (IDOR)', async () => {
+  // SCA-146: migrated from ENT-VOICE-01 to VOICE-SESSION-01 per ADR
+  // 0017. Pre-migration the assertion fired on userB's entitlement
+  // gate (Free) instead of the owner-mismatch check; pinned the wrong
+  // reason. Promoting userB to Premium routes execution into the
+  // owner-binding path where the IDOR rejection actually lives.
+  //
+  // Bootstrap TWO users. User A mints a session. User B (Premium)
+  // tries to post turns under A's session_id — must be rejected with
+  // VOICE-SESSION-01 + reason='owner_mismatch'.
   const userA = await quickBootstrap();
   const userB = await quickBootstrap();
+  await promoteToPremiumWithVoiceQuota(userB.canonical_user_key);
   const sessionId = crypto.randomUUID();
   await seedVoiceSessionOwner({ sessionId, canonicalUserKey: userA.canonical_user_key });
 
@@ -449,7 +468,9 @@ Deno.test('voice-turn-usage 403 when session_id was minted by a different user (
     userB.session_jwt, // B's JWT, A's session
   );
   assertEquals(result.status, 403);
-  assertEquals((result.body as { error: string }).error, 'ENT-VOICE-01');
+  const body = result.body as { error: string; reason?: string };
+  assertEquals(body.error, 'VOICE-SESSION-01');
+  assertEquals(body.reason, 'owner_mismatch');
 });
 
 Deno.test(
