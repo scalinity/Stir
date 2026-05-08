@@ -140,9 +140,12 @@ struct RootView: View {
         }
         .fullScreenCover(item: $pendingShareImport) { pending in
             if let household = coordinator.household.profile {
+                let importController = PersistenceController.shared
                 let vm = ImportViewModel(
                     household: household,
                     aiDispatch: coordinator.aiDispatch,
+                    importRepo: RecipeImportRepository(controller: importController),
+                    controller: importController,
                 )
                 ImportRoot(
                     viewModel: vm,

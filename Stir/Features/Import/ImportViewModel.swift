@@ -94,8 +94,8 @@ final class ImportViewModel {
     init(
         household: HouseholdProfile,
         aiDispatch: AIDispatch,
-        importRepo: RecipeImportRepository = RecipeImportRepository(controller: .shared),
-        controller: PersistenceController = .shared,
+        importRepo: RecipeImportRepository,
+        controller: PersistenceController,
         analytics: PostHogClient = .shared,
         ocrService: OCRService = OCRService(),
     ) {
