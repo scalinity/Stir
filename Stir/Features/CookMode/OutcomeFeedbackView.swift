@@ -36,6 +36,11 @@ struct OutcomeFeedbackView: View {
         case dismiss
         case openLeftovers
         case openPaywall(PaywallTrigger)
+        /// SCA-66: rating ≥ 4 on an un-saved recipe → surface the
+        /// "Save as a one-tap weeknight meal?" card. Always tier-
+        /// agnostic; the card itself routes Premium+ to a direct save
+        /// and Free to `PaywallTrigger.savedFavoritesGate`.
+        case suggestSave(recipePlanId: UUID)
     }
 
     let session: CookingSession
@@ -380,6 +385,8 @@ struct OutcomeFeedbackView: View {
             ))
             let intent = Self.postSubmitIntent(
                 leftoverCount: leftoverCount,
+                rating: rating,
+                recipePlan: session.recipePlan,
                 entitlements: entitlements,
             )
             analytics.capture(.mealRated, properties: [
@@ -476,30 +483,43 @@ struct OutcomeFeedbackView: View {
     @MainActor
     static func postSubmitIntent(
         leftoverCount: Int,
+        rating: Int,
+        recipePlan: RecipePlan?,
         entitlements: EntitlementService?,
+        repeatCandidateSuppression: RepeatCandidateSuppressionStore = .shared,
     ) -> PostSubmitIntent {
-        guard leftoverCount > 0 else { return .dismiss }
-        guard let entitlements else {
-            // SCA-56 (CR1 S7): defensive fallback — production always
-            // passes a non-nil EntitlementService via the host's init.
-            // This branch exists for tests that don't care about the
-            // gate; server-side ENT-LEFTOVERS-01 remains authoritative.
-            return .dismiss
+        // 1. Leftovers handoff wins when present — single tap to next
+        //    meal is more actionable than a save prompt.
+        if leftoverCount > 0 {
+            guard let entitlements else {
+                // SCA-56 (CR1 S7): defensive fallback — production always
+                // passes a non-nil EntitlementService via the host's init.
+                // This branch exists for tests that don't care about the
+                // gate; server-side ENT-LEFTOVERS-01 remains authoritative.
+                return .dismiss
+            }
+            switch entitlements.canAccess(.leftoversMode) {
+            case .allowed:
+                return .openLeftovers
+            case .blockedByTier, .blockedByBilling, .blockedByQuota:
+                // SCA-56 (CR1 W1): collapsed the previously-dead
+                // `.blockedByQuota` arm into the paywall path.
+                return .openPaywall(.leftoversGate)
+            }
         }
-        switch entitlements.canAccess(.leftoversMode) {
-        case .allowed:
-            return .openLeftovers
-        case .blockedByTier, .blockedByBilling, .blockedByQuota:
-            // SCA-56 (CR1 W1): collapsed the previously-dead
-            // `.blockedByQuota` arm into the paywall path.
-            // `EntitlementService.canAccess(.leftoversMode)` only ever
-            // returns `.allowed` or `.blockedByTier(.premium)` today
-            // (line 206-208) — the gate is unmetered. Future-proof:
-            // any new state the compiler flags here gets a deliberate
-            // decision rather than the silent `.dismiss` the dead arm
-            // used to give.
-            return .openPaywall(.leftoversGate)
+
+        // 2. SCA-66: rating ≥ 4 on an un-saved recipe → suggest save.
+        //    Per-recipePlanId suppression honored ("never nag again for
+        //    same recipe" per spec §8 row 947 fallback).
+        if rating >= 4,
+           let plan = recipePlan,
+           plan.isSaved == false,
+           let planId = plan.id,
+           !repeatCandidateSuppression.isSuppressed(recipePlanId: planId) {
+            return .suggestSave(recipePlanId: planId)
         }
+
+        return .dismiss
     }
 }
 

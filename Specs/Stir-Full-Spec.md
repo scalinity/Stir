@@ -1698,7 +1698,7 @@ See §12.3. In addition:
 | `meal_rated`                       | rating, workload, taste, would_repeat, leftovers_handoff_offered, leftovers_handoff_taken, leftovers_eligible_free | core success completion    | Core Loop               |
 | `meal_rating_skipped`              | recipe_plan_id                                                                                 | opt-out rate on rating sheet (complement to meal_rated; typically one of the pair follows every cook_session_completed — force-quit / crash / background-kill between sheet open and dismissal yield zero emissions, so dashboards should treat "neither fired" as a valid third state rather than a data bug) | Core Loop               |
 | `grocery_list_exported`            | item_count, destination=reminders/in_app                                                       | write-back success         | Utility                 |
-| `favorite_saved`                   | recipe_origin                                                                                  | retention asset            | Retention               |
+| `favorite_saved`                   | recipe_origin, source ∈ {tonight, post_meal_feedback, saved_replay}                            | retention asset            | Retention               |
 | `recipe_import_started`            | source_type                                                                                    | import funnel              | Import                  |
 | `recipe_import_completed`          | source_type, parse_quality, edit_required                                                      | import quality             | Import                  |
 | `paywall_viewed`                   | trigger, variant, current_tier                                                                 | paywall funnel             | Billing                 |
@@ -1712,6 +1712,8 @@ See §12.3. In addition:
 | `use_soon_fired`                   | (none)                                                                                         | use-soon retention loop    | Engagement              |
 | `use_soon_tapped`                  | (none)                                                                                         | use-soon retention loop    | Engagement              |
 | `use_soon_suppressed`              | reason ∈ {weekly_cap, unactioned_streak, recent_session, no_candidate}                         | use-soon retention loop    | Engagement              |
+| `repeat_candidate_card_shown`      | recipe_plan_id, tier                                                                           | save-prompt funnel         | Engagement              |
+| `repeat_candidate_card_dismissed`  | recipe_plan_id, outcome ∈ {paywall_routed, deferred, suppressed}                               | save-prompt funnel         | Engagement              |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
 | `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |

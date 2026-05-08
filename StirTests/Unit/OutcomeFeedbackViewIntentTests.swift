@@ -49,7 +49,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     func test_leftoverCountZero_returnsDismiss_evenForPremium() {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 0, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 0,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .dismiss,
         )
     }
@@ -57,7 +62,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     func test_leftoverCountZero_returnsDismiss_forFree() {
         let entitlements = makeEntitlements(tier: .free, billingState: .none)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 0, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 0,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .dismiss,
         )
     }
@@ -65,7 +75,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     func test_leftoverCountPositive_freeUser_returnsPaywall() {
         let entitlements = makeEntitlements(tier: .free, billingState: .none)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 2,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .openPaywall(.leftoversGate),
         )
     }
@@ -73,7 +88,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     func test_leftoverCountPositive_premiumActive_returnsOpenLeftovers() {
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 2,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .openLeftovers,
         )
     }
@@ -83,7 +103,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         // recovers payment. Leftovers must continue to work.
         let entitlements = makeEntitlements(tier: .premium, billingState: .grace)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 2,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .openLeftovers,
         )
     }
@@ -93,7 +118,12 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         // free for `expired` AND `none`"). Leftovers must paywall.
         let entitlements = makeEntitlements(tier: .premium, billingState: .expired)
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: entitlements),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 2,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: entitlements,
+            ),
             .openPaywall(.leftoversGate),
         )
     }
@@ -105,9 +135,105 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         // care about the gate can omit it without forcing every test to
         // instantiate a service.
         XCTAssertEqual(
-            OutcomeFeedbackView.postSubmitIntent(leftoverCount: 2, entitlements: nil),
+            OutcomeFeedbackView.postSubmitIntent(
+                leftoverCount: 2,
+                rating: 0,
+                recipePlan: nil,
+                entitlements: nil,
+            ),
             .dismiss,
         )
+    }
+
+    // MARK: - SCA-66: rating ≥ 4 on un-saved recipe → suggestSave
+
+    func test_suggestSave_premium_ratingFourUnsaved_returnsSuggestSave() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isSaved: false)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 4,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+    }
+
+    func test_suggestSave_freeTier_ratingFiveUnsaved_returnsSuggestSave() {
+        // Free still gets the card — the card itself routes "Yes" to
+        // the savedFavoritesGate paywall.
+        let entitlements = makeEntitlements(tier: .free, billingState: .none)
+        let plan = makeRecipePlan(isSaved: false)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 5,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .suggestSave(recipePlanId: plan.id!))
+    }
+
+    func test_suggestSave_ratingThree_returnsDismiss() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isSaved: false)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 3,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .dismiss)
+    }
+
+    func test_suggestSave_alreadySaved_returnsDismiss() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isSaved: true)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 5,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .dismiss)
+    }
+
+    func test_suggestSave_suppressed_returnsDismiss() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isSaved: false)
+        let suppression = makeFreshSuppressionStore()
+        suppression.suppress(recipePlanId: plan.id!)
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 5,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .dismiss)
+    }
+
+    func test_suggestSave_leftoversWins_returnsOpenLeftovers() {
+        // Conflict matrix: when both leftovers AND high-rating fire,
+        // leftovers wins (more actionable; spec implicit).
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isSaved: false)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 2,
+            rating: 5,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .openLeftovers)
     }
 
     // MARK: - SCA-56 critical-3: leftovers_eligible_free uses effectiveTier
@@ -140,6 +266,22 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func makeRecipePlan(isSaved: Bool) -> RecipePlan {
+        let context = controller.viewContext
+        let plan = RecipePlan(context: context)
+        plan.id = UUID()
+        plan.title = "Miso-Glazed Salmon"
+        plan.isSaved = isSaved
+        plan.origin = "ai"
+        return plan
+    }
+
+    private func makeFreshSuppressionStore() -> RepeatCandidateSuppressionStore {
+        let suite = "test.repeat_candidate.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return RepeatCandidateSuppressionStore(defaults: defaults)
+    }
 
     private func makeEntitlements(
         tier: Tier,

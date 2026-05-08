@@ -237,6 +237,15 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case useSoonFired      = "use_soon_fired"
     case useSoonTapped     = "use_soon_tapped"
     case useSoonSuppressed = "use_soon_suppressed"
+    // SCA-66 — high-rated repeat candidate card lifecycle. Spec §15 +
+    // CLAUDE.md canonical. _shown carries {recipe_plan_id, tier};
+    // _dismissed carries {recipe_plan_id, outcome ∈ {paywall_routed,
+    // deferred, suppressed}}. The "saved" outcome reuses the existing
+    // `favorite_saved` event with `source = "post_meal_feedback"`
+    // (no new event for the success path — keeps the favorite funnel
+    // single-event).
+    case repeatCandidateCardShown     = "repeat_candidate_card_shown"
+    case repeatCandidateCardDismissed = "repeat_candidate_card_dismissed"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
     // are spec §15 canonical (destination NOT export_target; parse_quality
     // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`

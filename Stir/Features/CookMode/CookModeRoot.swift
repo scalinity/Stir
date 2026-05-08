@@ -58,6 +58,12 @@ struct CookModeRoot: View {
     /// consecutive cooks in the same Cook Mode session each get their
     /// own cover presentation rather than animating a no-op swap.
     @State private var leftoversSession: LeftoversSessionViewModel?
+    /// SCA-66: identity-wrapping the recipePlan UUID so the sheet
+    /// modifier (`.sheet(item:)`) has an Identifiable handle.
+    /// Premium+ users with rating ≥ 4 on an un-saved recipe receive
+    /// the "Save this as a one-tap weeknight meal?" prompt; Free
+    /// users see the same card with a paywall-routed "Yes" CTA.
+    @State private var repeatCandidateContext: RepeatCandidateContext?
     /// SCA-55 sticky-intent flag for the Free → paywall → Leftovers path.
     /// Set when OutcomeFeedback emits `.openPaywall(.leftoversGate)`;
     /// observed alongside `entitlements.tier` AND `entitlements.billingState`
@@ -140,6 +146,28 @@ struct CookModeRoot: View {
                                 onDismiss()
                             },
                         )
+                    }
+                    // SCA-66 — repeat-candidate save card. Sheet (not
+                    // fullScreenCover) so the user keeps context on the
+                    // underlying surface; medium presentationDetent
+                    // applied inside the card view itself.
+                    .sheet(item: $repeatCandidateContext) { ctx in
+                        RepeatCandidateCard(
+                            recipePlan: recipePlan,
+                            entitlements: entitlements,
+                            presentPaywall: { trigger in
+                                coordinator.presentPaywall(trigger)
+                            },
+                            onDismiss: {
+                                repeatCandidateContext = nil
+                                // Dismiss CookModeRoot itself once the
+                                // user has acted on (or skipped) the
+                                // save prompt — same terminal behavior
+                                // as the .dismiss case in handlePostSubmit.
+                                onDismiss()
+                            },
+                        )
+                        .id(ctx.id)  // force fresh view per recipe
                     }
                     // Sticky-intent observation for the Free→paywall
                     // success path (SCA-55 D5/D6). When the user purchases
@@ -464,6 +492,17 @@ struct CookModeRoot: View {
                 try? await Task.sleep(for: Self.coverHandoffGap)
                 guard !Task.isCancelled else { return }
                 presentLeftovers()
+            }
+
+        case .suggestSave(let recipePlanId):
+            // SCA-66: rating ≥ 4 on un-saved recipe — surface the save
+            // prompt as a sheet. 50ms gap mirrors the leftovers handoff
+            // pattern so iOS doesn't try to stack two presentations.
+            cancelLeftoversPresentationTask()
+            leftoversPresentationTask = Task { @MainActor in
+                try? await Task.sleep(for: Self.coverHandoffGap)
+                guard !Task.isCancelled else { return }
+                repeatCandidateContext = RepeatCandidateContext(id: recipePlanId)
             }
 
         case .openPaywall(let trigger):
