@@ -166,10 +166,23 @@ extension RealtimeSession {
         guard let transport else { return }
         dispatcherGeneration += 1
         let myGen = dispatcherGeneration
-        receiveDispatcherTask = Task { [weak self] in
+        // SCA-170 S14 (CA3): annotate the unstructured Task with `@MainActor`
+        // so the catch-block read of `dispatcherGeneration` (MainActor-isolated)
+        // doesn't require an actor hop. Cold-path only — fires once per
+        // dispatcher tear-down — but the explicit annotation also uniformizes
+        // the threading model with the other awaitX timeout Tasks in this file.
+        receiveDispatcherTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 for try await frame in transport.inbound {
+                    // SCA-170 S11 (CA2): defense-in-depth against
+                    // close-during-frame-delivery races. The state-machine
+                    // `handleInboundFrame.closed` short-circuit at the top of
+                    // that method already covers this for already-delivered
+                    // frames; this guard cuts the loop earlier so any frame
+                    // still queued in `transport.inbound` after a cancel
+                    // doesn't trigger a needless dispatch.
+                    if Task.isCancelled { return }
                     await self.handleInboundFrame(frame)
                 }
             } catch {
@@ -177,8 +190,9 @@ extension RealtimeSession {
                 // started (via refreshSession or close+restart), this
                 // task is stale and its error is noise from an intentional
                 // teardown. Log at info and return. Race-free because both
-                // reads happen on the @MainActor.
-                let current = await self.dispatcherGeneration
+                // reads happen on the @MainActor (SCA-170 S14: now
+                // explicit on the Task closure too).
+                let current = self.dispatcherGeneration
                 if myGen != current {
                     Logger.voice.info(
                         "live_receive_dispatcher_stale_suppressed gen=\(myGen, privacy: .public) current=\(current, privacy: .public)",
