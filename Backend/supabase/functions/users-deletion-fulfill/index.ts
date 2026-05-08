@@ -550,13 +550,16 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Body is optional / empty — cron passes `{}`.
-  try {
-    const raw = await req.json().catch(() => ({}));
-    RequestSchema.parse(raw);
-  } catch (_err) {
-    return jsonError(ErrorCode.VAL_01, 400, { message: 'invalid_body' });
-  }
+  // Body is optional / empty — cron passes `{}`. The only callers are
+  // pg_cron (`{}::jsonb`) and the service-role-gated manual trigger RPC
+  // `stir_deletion_fulfill_trigger_once()` (also `{}::jsonb`). The
+  // `.catch(() => ({}))` handles a non-JSON body without throwing;
+  // `RequestSchema.parse({})` against `z.object({}).strict().optional()`
+  // cannot throw on `{}` or `undefined`, so the previous outer try/catch
+  // was unreachable code (SCA-231). Leaving the parse call as a no-op
+  // schema gate in case a future schema change adds required fields.
+  const raw = await req.json().catch(() => ({}));
+  RequestSchema.parse(raw);
 
   const requestId = requestIdFrom(req);
   const log = await createLogger(requestId, 'users-deletion-fulfill');
