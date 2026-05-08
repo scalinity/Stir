@@ -1714,6 +1714,8 @@ See §12.3. In addition:
 | `use_soon_suppressed`              | reason ∈ {weekly_cap, unactioned_streak, recent_session, no_candidate}                         | use-soon retention loop    | Engagement              |
 | `repeat_candidate_card_shown`      | recipe_plan_id, tier                                                                           | save-prompt funnel         | Engagement              |
 | `repeat_candidate_card_dismissed`  | recipe_plan_id, outcome ∈ {paywall_routed, deferred, suppressed}                               | save-prompt funnel         | Engagement              |
+| `sample_showcase_viewed`           | dish_count                                                                                     | onboarding sample funnel   | Onboarding              |
+| `sample_showcase_exited`           | outcome ∈ {continued_to_onboarding, back_to_welcome}                                           | onboarding sample funnel   | Onboarding              |
 | `purchase_completed`               | sku, price, trial, intro_offer                                                                 | revenue funnel             | Billing                 |
 | `restore_purchases_tapped`         | origin                                                                                         | support funnel             | Billing                 |
 | `entitlement_state_changed`        | from_state, to_state, billing_state                                                            | churn / recovery           | Billing                 |

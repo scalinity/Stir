@@ -43,36 +43,12 @@ struct OnboardingRoot: View {
                 },
                 onSeeSample: {
                     guard !isAdvancing else { return }
-                    isAdvancing = true
-                    // Step-2 stub — sample path bypasses Setup 1/2
-                    // entirely, so it records every subsequent step as
-                    // skipped and fires `onboarding_completed` inline
-                    // (no completion-transition for this path).
-                    Task {
-                        defer { isAdvancing = false }
-                        do {
-                            // Persist whatever state the VM holds
-                            // (zero-selection defaults) BEFORE flipping
-                            // onboardingCompleted=true. Prevents the
-                            // 'onboardingCompleted=true but no dietary
-                            // rules / no kitchen equipment' partial
-                            // state that downstream context-builders
-                            // would interpret as user-confirmed-empty.
-                            // Review finding W-A W4 (SA2).
-                            try viewModel.savePreferences()
-                            try viewModel.saveKitchen()
-                            viewModel.recordSkip(over: "setup_preferences")
-                            viewModel.recordSkip(over: "setup_kitchen")
-                            try viewModel.completeOnboarding()
-                            viewModel.fireOnboardingCompletedEvent()
-                            onFinished()
-                        } catch {
-                            Logger.ui.error(
-                                "onboarding_sample_bypass_failed: \(error.localizedDescription, privacy: .public)",
-                            )
-                            errorMessage = ErrorPresenter.present(.sync01).message
-                        }
-                    }
+                    // SCA-67: route into the showcase, NOT directly
+                    // into the bypass-to-Tonight. The showcase's "Try
+                    // with your real kitchen" CTA reuses the bypass
+                    // logic via OnboardingRoute.sampleShowcase →
+                    // SampleShowcaseView's onContinueOnboarding.
+                    path.append(.sampleShowcase)
                 },
             )
             .navigationDestination(for: OnboardingRoute.self) { route in
@@ -168,6 +144,38 @@ struct OnboardingRoot: View {
                     OnboardingCompletionView(
                         viewModel: viewModel,
                         onFinished: onFinished,
+                    )
+                case .sampleShowcase:
+                    SampleShowcaseView(
+                        onContinueOnboarding: {
+                            guard !isAdvancing else { return }
+                            isAdvancing = true
+                            // Reuse the original "See a sample" bypass
+                            // logic — persist zero-selection defaults,
+                            // record skips, complete onboarding inline
+                            // (no completion-transition for the sample
+                            // path), land on Tonight Home.
+                            Task {
+                                defer { isAdvancing = false }
+                                do {
+                                    try viewModel.savePreferences()
+                                    try viewModel.saveKitchen()
+                                    viewModel.recordSkip(over: "setup_preferences")
+                                    viewModel.recordSkip(over: "setup_kitchen")
+                                    try viewModel.completeOnboarding()
+                                    viewModel.fireOnboardingCompletedEvent()
+                                    onFinished()
+                                } catch {
+                                    Logger.ui.error(
+                                        "onboarding_sample_continue_failed: \(error.localizedDescription, privacy: .public)",
+                                    )
+                                    errorMessage = ErrorPresenter.present(.sync01).message
+                                }
+                            }
+                        },
+                        onBack: {
+                            path.removeLast()
+                        },
                     )
                 }
             }

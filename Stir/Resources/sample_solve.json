@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "_doc": "SCA-67 — sample dinner-options fixture for the Welcome 'See a sample' path. Pre-baked 3-dish solve that lets a new user preview the product surface before committing to onboarding. Deliberately uses pantry-staple ingredients so the dishes look plausible without a real scan.",
+  "dishes": [
+    {
+      "rank": 1,
+      "title": "Pasta with Garlic, Lemon & Parmesan",
+      "label": "fastest",
+      "rationale": "20 min start to finish · uses pantry staples",
+      "estimated_minutes": 20,
+      "missing_ingredients": [],
+      "primary_ingredients": ["pasta", "garlic", "lemon", "parmesan", "olive oil"]
+    },
+    {
+      "rank": 2,
+      "title": "Sheet-Pan Chicken with Roasted Vegetables",
+      "label": "best fit",
+      "rationale": "high protein · matches your cookware",
+      "estimated_minutes": 35,
+      "missing_ingredients": [],
+      "primary_ingredients": ["chicken thighs", "potatoes", "carrots", "rosemary", "olive oil"]
+    },
+    {
+      "rank": 3,
+      "title": "Black Bean & Sweet Potato Tacos",
+      "label": "least waste",
+      "rationale": "uses items aging in your fridge",
+      "estimated_minutes": 25,
+      "missing_ingredients": [],
+      "primary_ingredients": ["black beans", "sweet potato", "tortillas", "lime", "cilantro"]
+    }
+  ]
+}

@@ -246,6 +246,11 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // single-event).
     case repeatCandidateCardShown     = "repeat_candidate_card_shown"
     case repeatCandidateCardDismissed = "repeat_candidate_card_dismissed"
+    // SCA-67 — Welcome "See a sample" showcase. Spec §15 + CLAUDE.md
+    // canonical. _viewed fires on showcase appear; _exited carries
+    // {outcome ∈ {continued_to_onboarding, back_to_welcome}}.
+    case sampleShowcaseViewed = "sample_showcase_viewed"
+    case sampleShowcaseExited = "sample_showcase_exited"
     // Step 7 — import + grocery + widgets/shortcuts. Property names below
     // are spec §15 canonical (destination NOT export_target; parse_quality
     // NOT confidence; edit_required NOT needed_edits). No `widget_tapped`
