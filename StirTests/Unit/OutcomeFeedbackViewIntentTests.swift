@@ -256,7 +256,28 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
         XCTAssertEqual(intent, .dismiss)
     }
 
-    func test_suggestSave_leftoversWins_returnsOpenLeftovers() {
+    /// SCA-124 / DB1 M1: rating=0 (skipped rating) must short-circuit
+    /// to .dismiss BEFORE the suggestSave gate. Currently
+    /// `skipAndDismiss()` bypasses postSubmitIntent, so this is
+    /// theoretically unreachable — but the function is internal and a
+    /// future refactor that wires Skip through the same decision
+    /// function would silently miss the rating-≥4 guard. Pin the
+    /// contract.
+    func test_suggestSave_ratingZero_returnsDismiss() {
+        let entitlements = makeEntitlements(tier: .premium, billingState: .active)
+        let plan = makeRecipePlan(isFavorite: false)
+        let suppression = makeFreshSuppressionStore()
+        let intent = OutcomeFeedbackView.postSubmitIntent(
+            leftoverCount: 0,
+            rating: 0,
+            recipePlan: plan,
+            entitlements: entitlements,
+            repeatCandidateSuppression: suppression,
+        )
+        XCTAssertEqual(intent, .dismiss)
+    }
+
+    func test_suggestSave_leftoversWins_returnsOpenLeftovers() throws {
         // Conflict matrix: when both leftovers AND high-rating fire,
         // leftovers wins (more actionable; spec implicit).
         let entitlements = makeEntitlements(tier: .premium, billingState: .active)

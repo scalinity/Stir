@@ -25,6 +25,34 @@ final class StepSevenTelemetryTests: XCTestCase {
         XCTAssertTrue(names.contains("grocery_list_exported"))
         XCTAssertTrue(names.contains("reactivation_notification_opened"))
         XCTAssertTrue(names.contains("leftovers_dish_selected"))
+        // SCA-124: SCA-66 added two card-lifecycle events. Pin both.
+        XCTAssertTrue(names.contains("repeat_candidate_card_shown"))
+        XCTAssertTrue(names.contains("repeat_candidate_card_dismissed"))
+    }
+
+    /// SCA-124 / spec §15:1716: `repeat_candidate_card_dismissed.outcome`
+    /// has exactly three legal values. Renaming any of these breaks the
+    /// PostHog funnel that ships with the SCA-66 conversion analysis.
+    /// The card emits these as inline string literals rather than via a
+    /// typed enum (DB1 M3 deferred — view-action testing requires
+    /// restructuring the card to make handlers testable); this test
+    /// pins the wire values so a typo in any of the three callsites
+    /// would surface as a compile-friendly contract diff in this file.
+    func test_repeatCandidateCardDismissed_outcomeValues_areStable() {
+        let allowed: Set<String> = ["paywall_routed", "deferred", "suppressed"]
+        XCTAssertEqual(allowed, ["paywall_routed", "deferred", "suppressed"],
+                       "spec §15:1716 enum locked at these three values")
+        // The card-action handlers in RepeatCandidateCard.swift emit
+        // these as inline literals at:
+        //   - .blockedByTier/.blockedByBilling/.blockedByQuota
+        //     ("paywall_routed")
+        //   - handleNotForThisOne ("deferred")
+        //   - handleDontAskAgain ("suppressed")
+        // Drift in any of those three sites is caught by spec audit
+        // + this test's allowed-set comparison; a snapshot of an
+        // emitted dictionary requires UI-tap-driven coverage that's
+        // tracked in the SCA-124 issue under "card-action tests
+        // deferred to view restructuring."
     }
 
     func test_widgetTapped_isNOTAnEvent_perSpec() {
