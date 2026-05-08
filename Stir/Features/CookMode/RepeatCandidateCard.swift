@@ -51,6 +51,19 @@ struct RepeatCandidateCard: View {
     /// so the user can retry or cancel deliberately.
     @State private var saveError: String?
 
+    /// SCA-118: guard against rapid double-taps on any of the three
+    /// action buttons during the dismiss-in-flight window. Pre-fix a
+    /// double-tap fired:
+    ///   - two `setFavorite(true, on:)` calls (idempotent state but
+    ///     two `updatedAt = Date()` writes)
+    ///   - two `analytics.capture(.favoriteSaved, ...)` events,
+    ///     doubling the per-user conversion count
+    ///   - symmetric problem on Don't-ask-again (two
+    ///     `repeatCandidateCardDismissed` with `outcome: suppressed`)
+    /// Set true on the first tap; resets only if the Premium save
+    /// path fails (saveError populated) so the user can retry.
+    @State private var isResolving: Bool = false
+
     init(
         recipePlan: RecipePlan,
         entitlements: EntitlementService,
@@ -83,9 +96,21 @@ struct RepeatCandidateCard: View {
                 errorBanner(saveError)
             }
             VStack(spacing: CGFloat.Stir.space2) {
-                PrimaryButton(title: yesButtonTitle, action: handleYes)
-                SecondaryButton(title: "Not for this one", action: handleNotForThisOne)
-                TextButton(title: "Don't ask again", action: handleDontAskAgain)
+                PrimaryButton(
+                    title: yesButtonTitle,
+                    isDisabled: isResolving,
+                    action: handleYes,
+                )
+                SecondaryButton(
+                    title: "Not for this one",
+                    isDisabled: isResolving,
+                    action: handleNotForThisOne,
+                )
+                TextButton(
+                    title: "Don't ask again",
+                    isDisabled: isResolving,
+                    action: handleDontAskAgain,
+                )
             }
         }
         .padding(CGFloat.Stir.screenMargin)
@@ -126,6 +151,8 @@ struct RepeatCandidateCard: View {
     // MARK: - Actions
 
     private func handleYes() {
+        guard !isResolving else { return }
+        isResolving = true
         // SCA-112: gate on `canAccess(.savedFavorites)` rather than
         // raw `effectiveTier` switching. Closes the TOCTOU window
         // where the title rendered "Save as a favorite" (Premium) but
@@ -169,6 +196,11 @@ struct RepeatCandidateCard: View {
                     "RepeatCandidateCard setFavorite returned false — keeping sheet up",
                 )
                 saveError = "We couldn't save that. Try again, or pick another option."
+                // Re-enable buttons so the user can retry. Only the
+                // failure path resets isResolving — successful paths
+                // dismiss before the user could reach the buttons
+                // again.
+                isResolving = false
             }
         case .blockedByTier, .blockedByBilling, .blockedByQuota:
             analytics.capture(.repeatCandidateCardDismissed, properties: [
@@ -204,6 +236,8 @@ struct RepeatCandidateCard: View {
     }
 
     private func handleNotForThisOne() {
+        guard !isResolving else { return }
+        isResolving = true
         analytics.capture(.repeatCandidateCardDismissed, properties: [
             "recipe_plan_id": recipePlan.id?.uuidString ?? "",
             "outcome": "deferred",
@@ -212,6 +246,8 @@ struct RepeatCandidateCard: View {
     }
 
     private func handleDontAskAgain() {
+        guard !isResolving else { return }
+        isResolving = true
         if let id = recipePlan.id {
             suppressionStore.suppress(recipePlanId: id)
         }
