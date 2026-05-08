@@ -1411,6 +1411,21 @@ final class RealtimeSession: VoiceSessionDriver {
         #endif
     }
 
+    // MARK: - Cross-extension stored state
+    //
+    // SCA-79 / SCA-164: these properties live on the main class declaration
+    // because Swift extensions cannot host stored instance properties. They
+    // are read/written across the four extension files (AudioIO, Transport,
+    // StateMachine, plus this main file). Lifecycle ownership:
+    //
+    //   cachedHouseholdContext / ...At — Transport (buildHouseholdContext
+    //                                    populates; close → clearHouseholdContextCache clears)
+    //   setupCompleteContinuation       — Transport (awaitSetupComplete sets;
+    //                                    StateMachine.handleInboundFrame.setupComplete
+    //                                    + main close drain)
+    //   turnCompleteGeneration          — StateMachine (awaitTurnComplete bumps)
+    //   setupCompleteGeneration         — Transport (awaitSetupComplete bumps)
+
     /// P3-H (2026-04-23): TTL-cached household snapshot. Invalidated
     /// naturally after 60 s; preWarm + close both clear it via
     /// `clearHouseholdContextCache()` as a belt-and-suspenders reset.
