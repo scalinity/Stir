@@ -671,69 +671,79 @@ struct CookModeRoot: View {
         _ dish: DishCard,
         vm: LeftoversSessionViewModel,
     ) {
-        do {
-            let newPlan = try coordinator.solveRepository.createLeftoversSolveWithDish(
-                on: household,
-                from: recipePlan,
-                dish: dish,
-                aiRequestId: nil,
-                promptVersion: vm.lastPromptVersion,
-            )
-            PostHogClient.shared.capture(
-                .leftoversDishSelected,
-                properties: [
-                    "rank": dish.rank,
-                    // Snapshot taken at solve-start in
-                    // LeftoversSessionViewModel — defends against the
-                    // user toggling items off after the dishes render
-                    // but before tapping a card (DB1 #11).
-                    "leftovers_items_count": vm.selectedItemsCountAtSolve,
-                    "prompt_version": vm.lastPromptVersion ?? "unknown",
-                    // "unknown" placeholder beats "" so PostHog
-                    // dashboards that filter by ID don't silently
-                    // drop these events (DB1 #7).
-                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
-                    "new_recipe_plan_id": newPlan.id?.uuidString ?? "unknown",
-                ],
-            )
-            // SCA-75: dismiss the LeftoversRoot cover first, then —
-            // after the cover-handoff gap — dismiss CookModeRoot. Both
-            // covers used to drop in the same synchronous tick; iOS
-            // sometimes swallowed the second dismiss-animation when
-            // they overlapped. Mirrors the present-direction gap.
-            leftoversSession = nil
-            Task { @MainActor in
+        // SCA-106: persistence is now async because the save runs on a
+        // background NSManagedObjectContext. Wrap the whole branch in a
+        // @MainActor Task so failures still route through the existing
+        // VM error surface, and so the cover-handoff dismiss sequence
+        // remains in @MainActor scope.
+        Task { @MainActor in
+            do {
+                let outcome = try await coordinator.solveRepository.createLeftoversSolveWithDish(
+                    on: household,
+                    from: recipePlan,
+                    dish: dish,
+                    aiRequestId: nil,
+                    promptVersion: vm.lastPromptVersion,
+                )
+                PostHogClient.shared.capture(
+                    .leftoversDishSelected,
+                    properties: [
+                        "rank": dish.rank,
+                        // Snapshot taken at solve-start in
+                        // LeftoversSessionViewModel — defends against the
+                        // user toggling items off after the dishes render
+                        // but before tapping a card (DB1 #11).
+                        "leftovers_items_count": vm.selectedItemsCountAtSolve,
+                        "prompt_version": vm.lastPromptVersion ?? "unknown",
+                        // "unknown" placeholder beats "" so PostHog
+                        // dashboards that filter by ID don't silently
+                        // drop these events (DB1 #7).
+                        "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
+                        "new_recipe_plan_id": outcome.recipePlan.id?.uuidString ?? "unknown",
+                        // SCA-106: background-context save latency in ms.
+                        // Dashboard signal: p95(persist_ms) > 50 OR a sudden
+                        // jump in the long tail = revisit the bg-context
+                        // path or split into a coarser batch.
+                        "persist_ms": outcome.persistMs,
+                    ],
+                )
+                // SCA-75: dismiss the LeftoversRoot cover first, then —
+                // after the cover-handoff gap — dismiss CookModeRoot. Both
+                // covers used to drop in the same synchronous tick; iOS
+                // sometimes swallowed the second dismiss-animation when
+                // they overlapped. Mirrors the present-direction gap.
+                leftoversSession = nil
                 try? await Task.sleep(for: Self.coverHandoffGap)
                 onDismiss()
+            } catch {
+                // SCA-56 (W1): persistence failed — DON'T silently dismiss
+                // as if success. Keep the LeftoversRoot cover up and
+                // transition the VM to its `.error` stage so the existing
+                // ErrorView surface (LeftoversSolveView) renders an
+                // actionable message. The `meal_rated` properties emitted
+                // upstream still record the offer; the per-dish
+                // `leftovers_dish_selected` is correctly suppressed because
+                // no plan was created.
+                Logger.coreData.error(
+                    "createLeftoversSolveWithDish failed: \(error.localizedDescription, privacy: .public)",
+                )
+                SentryReporter.shared.captureError(
+                    error,
+                    context: [
+                        "screen": "leftovers_handoff",
+                        "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
+                        "error_type": String(describing: type(of: error)),
+                    ],
+                )
+                vm.markPersistenceFailed(
+                    code: "AI-02",
+                    // SCA-73: copy adjusted now that ErrorView surfaces a
+                    // Retry button — "try a different one" was prescriptive
+                    // and steered users away from the simpler retry path.
+                    message: "Couldn't save that idea. Tap Try again, or pick a different one.",
+                    dish: dish,
+                )
             }
-        } catch {
-            // SCA-56 (W1): persistence failed — DON'T silently dismiss
-            // as if success. Keep the LeftoversRoot cover up and
-            // transition the VM to its `.error` stage so the existing
-            // ErrorView surface (LeftoversSolveView) renders an
-            // actionable message. The `meal_rated` properties emitted
-            // upstream still record the offer; the per-dish
-            // `leftovers_dish_selected` is correctly suppressed because
-            // no plan was created.
-            Logger.coreData.error(
-                "createLeftoversSolveWithDish failed: \(error.localizedDescription, privacy: .public)",
-            )
-            SentryReporter.shared.captureError(
-                error,
-                context: [
-                    "screen": "leftovers_handoff",
-                    "source_recipe_plan_id": recipePlan.id?.uuidString ?? "unknown",
-                    "error_type": String(describing: type(of: error)),
-                ],
-            )
-            vm.markPersistenceFailed(
-                code: "AI-02",
-                // SCA-73: copy adjusted now that ErrorView surfaces a
-                // Retry button — "try a different one" was prescriptive
-                // and steered users away from the simpler retry path.
-                message: "Couldn't save that idea. Tap Try again, or pick a different one.",
-                dish: dish,
-            )
         }
     }
 

@@ -79,6 +79,19 @@ final class PersistenceController {
         container.viewContext.name = "viewContext.main"
     }
 
+    /// Spin up a private-queue context bound to the same persistent store
+    /// coordinator. Use for write-heavy operations that would otherwise
+    /// block the main thread (SCA-106). The returned context's saves
+    /// propagate to `viewContext` via `automaticallyMergesChangesFromParent`
+    /// (already enabled), so callers don't need to merge manually.
+    /// Merge policy mirrors viewContext so conflict semantics match.
+    nonisolated func newBackgroundContext() -> NSManagedObjectContext {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        context.name = "background.\(UUID().uuidString.prefix(8))"
+        return context
+    }
+
     /// Commit the viewContext's pending changes. Throws StirError.coreData on failure.
     ///
     /// On save failure: rollback before rethrowing. Without rollback, the

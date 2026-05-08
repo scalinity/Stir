@@ -2,12 +2,22 @@
 //
 // SCA-55 — pin SolveRepository.createLeftoversSolveWithDish behavior:
 //   - persists ONE dish, not three
-//   - sets sourceRecipePlan to link back to the source recipe
+//   - sets sourceRecipePlan (relationship, SCA-110) to link back to the
+//     source recipe — was a bare UUID `sourceRecipePlanId` attribute
+//     pre-SCA-110 (lightweight migration). Tests assert via the new
+//     relationship's `.id`.
 //   - skips constraints + pantrySnapshot (leftovers solves carry neither)
 //   - marks the suggested dish selected immediately (no separate
 //     selection step downstream — picking the leftovers card IS the
 //     commitment)
 //   - returns a usable RecipePlan whose ingredients/steps round-trip
+//
+// SCA-106 — the function is now async and saves on a background
+// NSManagedObjectContext. Tests await the call and read `.recipePlan`
+// off the returned `LeftoversSolveOutcome`. Adds the
+// `test_createLeftoversSolveWithDish_pathologicalDishPersists` case
+// that exercises a 50-ingredient fixture to ensure the bg-context
+// path is wired.
 //
 // CoreData fixtures use the in-memory PersistenceController so saves
 // round-trip without touching disk; test-scoped install:test:<uuid>
@@ -44,11 +54,11 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
 
     // MARK: - createLeftoversSolveWithDish
 
-    func test_createLeftoversSolveWithDish_persistsExactlyOneDish() throws {
+    func test_createLeftoversSolveWithDish_persistsExactlyOneDish() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -56,18 +66,18 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        XCTAssertEqual(newPlan.title, "Salmon fried rice")
+        XCTAssertEqual(outcome.recipePlan.title, "Salmon fried rice")
         // Walk back from the persisted plan via its SuggestedDish to its
         // MealSolveRequest — exactly one dish should hang off the solve.
-        let dishes = try fetchSuggestedDishes(forRecipePlanId: newPlan.id)
+        let dishes = try fetchSuggestedDishes(forRecipePlanId: outcome.recipePlan.id)
         XCTAssertEqual(dishes.count, 1, "leftovers solve persists ONE dish, not three")
     }
 
-    func test_createLeftoversSolveWithDish_setsSourceRecipePlanRelationship() throws {
+    func test_createLeftoversSolveWithDish_setsSourceRecipePlanRelationship() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -75,42 +85,64 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
+        // SCA-110: relationship-based link. The leftovers solve must
+        // point to the SAME RecipePlan instance that produced the
+        // leftovers — analytics queries read `.id` off the relationship.
         XCTAssertEqual(
             solve.sourceRecipePlan?.id,
             source.id,
-            "leftovers solve must link back to the meal that produced the leftovers",
+            "leftovers solve relationship must resolve to the source RecipePlan",
+        )
+        XCTAssertTrue(
+            solve.sourceRecipePlan === source,
+            "relationship resolves to the same managed object passed in (no proxy/copy)",
         )
     }
 
-    func test_sourceRecipePlanRelationshipNullifiesWhenSourcePlanIsDeleted() throws {
+    // SCA-110: orphan-detection — Nullify deletionRule on both sides
+    // means deleting the source RecipePlan should leave the leftovers
+    // solve row intact with sourceRecipePlan == nil, NOT crash and NOT
+    // cascade-delete the solve. Pinned here because the SCA-56-era
+    // bare-UUID design tolerated dangling pointers; the Stir-2 model's
+    // FK-style relationship has stricter semantics that need a test to
+    // ensure we didn't accidentally pick deletionRule=Cascade.
+    func test_createLeftoversSolveWithDish_sourceRecipePlanDeleteNullsRelationship() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
             aiRequestId: nil,
             promptVersion: "v1.1.0-test",
         )
-        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
-        XCTAssertEqual(solve.sourceRecipePlan?.id, source.id)
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
+        XCTAssertNotNil(solve.sourceRecipePlan, "precondition: relationship is wired")
 
+        // Hard-delete the source plan and save.
         controller.viewContext.delete(source)
-        try controller.save()
+        try controller.viewContext.save()
 
-        XCTAssertNil(
-            solve.sourceRecipePlan,
-            "deleting the source RecipePlan must nullify the leftovers source relationship",
-        )
+        // Re-fetch the solve to bust any in-memory cache and verify the
+        // relationship is now nil (not a dangling reference, not a
+        // cascade-deleted solve row).
+        controller.viewContext.refresh(solve, mergeChanges: true)
+        XCTAssertNil(solve.sourceRecipePlan, "Nullify deletionRule clears the relationship")
+        XCTAssertNil(solve.deletedAt, "leftovers solve row is NOT cascade-deleted with the source plan")
+        // Round-trip via fetch to confirm persistence layer agrees.
+        let request = NSFetchRequest<MealSolveRequest>(entityName: "MealSolveRequest")
+        request.predicate = NSPredicate(format: "id == %@", solve.id! as CVarArg)
+        let refreshed = try XCTUnwrap(controller.viewContext.fetch(request).first)
+        XCTAssertNil(refreshed.sourceRecipePlan)
     }
 
-    func test_createLeftoversSolveWithDish_skipsConstraintsAndPantrySnapshot() throws {
+    func test_createLeftoversSolveWithDish_skipsConstraintsAndPantrySnapshot() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -118,16 +150,16 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
         XCTAssertNil(solve.typedConstraints, "leftovers solves don't carry constraints")
         XCTAssertNil(solve.typedPantrySnapshot, "leftovers solves skip pantry per LeftoversSessionViewModel:187")
     }
 
-    func test_createLeftoversSolveWithDish_marksDishSelected() throws {
+    func test_createLeftoversSolveWithDish_marksDishSelected() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -135,13 +167,13 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
         let suggested = try XCTUnwrap(solve.suggestedDishArray.first)
         XCTAssertNotNil(suggested.selectedAt, "leftovers solve marks its dish selected immediately")
         XCTAssertEqual(solve.selectedSuggestedDishId, suggested.id)
     }
 
-    func test_createLeftoversSolveWithDish_roundTripsIngredientsAndSteps() throws {
+    func test_createLeftoversSolveWithDish_roundTripsIngredientsAndSteps() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(
             title: "Salmon fried rice",
@@ -150,7 +182,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             stepCount: 4,
         )
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -158,12 +190,12 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        let ings = (newPlan.ingredients as? Set<RecipeIngredient>)?
+        let ings = (outcome.recipePlan.ingredients as? Set<RecipeIngredient>)?
             .sorted { $0.sortOrder < $1.sortOrder }
             .compactMap(\.displayName) ?? []
         XCTAssertEqual(ings, ["Cooked rice", "Leftover salmon", "Soy sauce"])
 
-        let steps = (newPlan.steps as? Set<RecipeStep>)?
+        let steps = (outcome.recipePlan.steps as? Set<RecipeStep>)?
             .sorted { $0.sortOrder < $1.sortOrder } ?? []
         XCTAssertEqual(steps.count, 4)
         XCTAssertEqual(steps.map { Int($0.stepNumber) }, [1, 2, 3, 4])
@@ -173,11 +205,11 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
     // and magic-confidence 0.9/0.5 from the original implementation are
     // gone; instead, persistence threads the actual prompt version and
     // sets confidence to 0 (no model confidence on leftovers DishCards).
-    func test_createLeftoversSolveWithDish_threadsPromptVersionAndZerosConfidence() throws {
+    func test_createLeftoversSolveWithDish_threadsPromptVersionAndZerosConfidence() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -185,20 +217,20 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-canary",
         )
 
-        XCTAssertEqual(newPlan.aiVersion, "v1.1.0-canary",
+        XCTAssertEqual(outcome.recipePlan.aiVersion, "v1.1.0-canary",
                        "leftovers persistence MUST thread the backend prompt version, not a magic 'leftovers' tag")
 
-        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: newPlan.id))
+        let solve = try XCTUnwrap(fetchSolveRequest(forNewRecipePlanId: outcome.recipePlan.id))
         let suggested = try XCTUnwrap(solve.suggestedDishArray.first)
         XCTAssertEqual(suggested.confidence, 0,
                        "leftovers DishCards don't carry a model confidence; persisted value must be 0 (sentinel), not a synthesized 0.9/0.5")
     }
 
-    func test_createLeftoversSolveWithDish_unknownPromptVersionWhenNil() throws {
+    func test_createLeftoversSolveWithDish_unknownPromptVersionWhenNil() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -206,13 +238,13 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: nil,
         )
 
-        XCTAssertEqual(newPlan.aiVersion, "unknown",
+        XCTAssertEqual(outcome.recipePlan.aiVersion, "unknown",
                        "nil promptVersion (stream errored before done event) falls back to 'unknown' sentinel")
     }
 
     // SCA-56 (DB1 #8) — verify steps are pre-sorted by stepNumber so
     // wire-order quirks can't desync sortOrder from semantic order.
-    func test_createLeftoversSolveWithDish_sortsStepsByStepNumberRegardlessOfWireOrder() throws {
+    func test_createLeftoversSolveWithDish_sortsStepsByStepNumberRegardlessOfWireOrder() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let outOfOrderSteps = [
             DishCard.RecipePlanWire.StepWire(stepNumber: 3, instructionText: "third", timerSeconds: nil, cautionTags: nil),
@@ -235,11 +267,11 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             reasoningSummary: "test",
         )
 
-        let newPlan = try solveRepo.createLeftoversSolveWithDish(
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
             on: household, from: source, dish: dish,
             aiRequestId: nil, promptVersion: nil,
         )
-        let steps = (newPlan.steps as? Set<RecipeStep>)?
+        let steps = (outcome.recipePlan.steps as? Set<RecipeStep>)?
             .sorted { $0.sortOrder < $1.sortOrder } ?? []
         XCTAssertEqual(steps.map(\.instructionText), ["first", "second", "third"])
     }
@@ -249,11 +281,11 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
     // for a "FROM YOUR LEFTOVERS" eyebrow on the hero card. Pairs
     // with `test_latestTonightPick_dinnerSolveReportsNotFromLeftovers`
     // in SolveRepositoryTonightPickTests for the negative case.
-    func test_createLeftoversSolveWithDish_picksUpAsFromLeftoversTrue() throws {
+    func test_createLeftoversSolveWithDish_picksUpAsFromLeftoversTrue() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
-        _ = try solveRepo.createLeftoversSolveWithDish(
+        _ = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -266,7 +298,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
                       "leftovers solve must surface on Tonight with isFromLeftovers=true")
     }
 
-    func test_createLeftoversSolveWithDish_promotesNewPlanToLatestTonightPick() throws {
+    func test_createLeftoversSolveWithDish_promotesNewPlanToLatestTonightPick() async throws {
         // The contract LeftoversSolveView's helper text promises:
         // "Saving one of these adds it to tomorrow's Tonight." Verify
         // the new leftovers plan IS the latestTonightPick after the call.
@@ -274,7 +306,7 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Tomorrow's leftover plan", rank: 1)
 
-        _ = try solveRepo.createLeftoversSolveWithDish(
+        _ = try await solveRepo.createLeftoversSolveWithDish(
             on: household,
             from: source,
             dish: dish,
@@ -284,6 +316,48 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
 
         let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))
         XCTAssertEqual(pick.title, "Tomorrow's leftover plan")
+    }
+
+    // SCA-106: pathological 50-ingredient + 25-step dish persists via
+    // the bg-context path. Verifies (a) the round-trip writes all rows,
+    // (b) `persistMs` is reported (>= 0; happy-path inMemory writes
+    // are typically < 30 ms, so we assert a generous 5000 ms ceiling
+    // to catch a regression where the bg context is mis-wired and
+    // synchronously blocks the test main actor for many seconds), and
+    // (c) the returned RecipePlan resolves on viewContext (proves the
+    // objectID handoff works after a sibling-context save).
+    func test_createLeftoversSolveWithDish_pathologicalDishPersistsViaBackgroundContext() async throws {
+        let source = try seedSourceRecipePlan(title: "Salmon dinner")
+        let ingredientNames = (1 ... 50).map { "Ingredient \($0)" }
+        let dish = makeDishCard(
+            title: "Pathological leftover plan",
+            rank: 1,
+            ingredientNames: ingredientNames,
+            stepCount: 25,
+        )
+
+        let outcome = try await solveRepo.createLeftoversSolveWithDish(
+            on: household,
+            from: source,
+            dish: dish,
+            aiRequestId: nil,
+            promptVersion: "v1.1.0-test",
+        )
+
+        // (a) round-trip writes
+        let ings = (outcome.recipePlan.ingredients as? Set<RecipeIngredient>) ?? []
+        XCTAssertEqual(ings.count, 50, "all 50 ingredients persisted on bg-context save")
+        let steps = (outcome.recipePlan.steps as? Set<RecipeStep>) ?? []
+        XCTAssertEqual(steps.count, 25, "all 25 steps persisted on bg-context save")
+
+        // (b) persist_ms reported
+        XCTAssertGreaterThanOrEqual(outcome.persistMs, 0, "persist_ms is non-negative")
+        XCTAssertLessThan(outcome.persistMs, 5000,
+                          "in-memory bg-context save shouldn't take > 5s; if it does, the bg context is mis-wired")
+
+        // (c) view-context resolution after sibling save
+        let viewObject = try controller.viewContext.existingObject(with: outcome.recipePlan.objectID)
+        XCTAssertTrue(viewObject is RecipePlan, "returned RecipePlan resolves on viewContext")
     }
 
     // MARK: - Helpers

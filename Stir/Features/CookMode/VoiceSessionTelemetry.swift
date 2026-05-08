@@ -425,6 +425,66 @@ final class VoiceSessionTelemetry {
         ])
     }
 
+    // MARK: - SCA-148 — substitution disambiguation
+
+    /// Closed surface enum for `voice_substitution_disambiguated.surface`.
+    /// Voice path is the only emit site today; tap path is reserved for
+    /// the SubstitutionSheet's auto-apply branch if it ever picks up
+    /// matchIngredient logic. Adding a new case requires updating spec
+    /// §15 + CLAUDE.md telemetry list in the same commit.
+    enum SubstitutionDisambiguationSurface: String {
+        case voice
+        case tap
+    }
+
+    /// Closed resolution enum for `voice_substitution_disambiguated.resolved_to`.
+    /// v1 ships ONLY `freeTextFallback`: ambiguous voice matches route
+    /// to the free-text persistence path (no recipe mutation); the
+    /// model's narration carries the user-facing swap.
+    ///
+    /// SCA-199 (/review-2 S1): the speculative `userPickedFirst` /
+    /// `userPickedSecond` / `timedOut` cases were trimmed. Adding
+    /// closed wire vocab in advance of the data path is a forward-
+    /// design footgun — when Phase 2 (mid-turn-prompt UX, gated on
+    /// the SCA-148 ≥1% telemetry trigger) finally ships, it may
+    /// distinguish more states than three (e.g. "user_picked_third"
+    /// or "user_skipped"). Re-add cases when the prompt-UX commit
+    /// actually lands; spec §15 + CLAUDE.md telemetry list update
+    /// in the same commit per the wire-contract rule.
+    enum SubstitutionDisambiguationResolution: String {
+        case freeTextFallback = "free_text_fallback"
+    }
+
+    /// SCA-148: emit `voice_substitution_disambiguated` when matchIngredient
+    /// detects a same-length tie among substring candidates. Properties:
+    ///   - `session_id` (string) — joins to the voice session trace
+    ///   - `candidate_count` (int) — number of equally-long winners
+    ///   - `surface` (string ∈ {voice, tap})
+    ///   - `resolved_to` (string ∈ closed enum above)
+    /// PostHog dashboards: split by surface; if 7-day rolling
+    /// `voice_substitution_disambiguated / substitution_requested(invocation=realtime_function_call) ≥ 1%`
+    /// the prompt-UX work is justified per the SCA-148 ticket trigger.
+    func recordSubstitutionDisambiguated(
+        sessionID: UUID?,
+        candidateCount: Int,
+        surface: SubstitutionDisambiguationSurface,
+        resolvedTo: SubstitutionDisambiguationResolution,
+    ) {
+        // "unknown" placeholder beats "" so PostHog dashboards filtering
+        // by session_id don't silently drop these events. Matches the
+        // pattern used by `leftovers_dish_selected.source_recipe_plan_id`.
+        let sessionIDString = sessionID?.uuidString ?? "unknown"
+        Logger.telemetry.info(
+            "voice_substitution_disambiguated session_id=\(sessionIDString, privacy: .public) candidate_count=\(candidateCount, privacy: .public) surface=\(surface.rawValue, privacy: .public) resolved_to=\(resolvedTo.rawValue, privacy: .public)",
+        )
+        analytics.capture(.voiceSubstitutionDisambiguated, properties: [
+            "session_id": sessionIDString,
+            "candidate_count": candidateCount,
+            "surface": surface.rawValue,
+            "resolved_to": resolvedTo.rawValue,
+        ])
+    }
+
     // MARK: - Generic UX-error emitters
 
     /// Single spec §15 `screen_error_shown` emission point (properties:

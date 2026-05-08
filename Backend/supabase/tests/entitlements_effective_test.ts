@@ -12,6 +12,8 @@ import { assertEquals } from '@std/assert';
 import {
   effectiveTier,
   effectiveVoiceEnabled,
+  STANDING_PANTRY_CAPS,
+  standingPantryCap,
   type BillingState,
 } from '../functions/_shared/entitlements.ts';
 import type { UserTier } from '../functions/_shared/auth.ts';
@@ -81,4 +83,53 @@ Deno.test('effectiveVoiceEnabled: pro paid states → true', () => {
   for (const bs of ['active', 'trial', 'grace', 'cancelled_active'] as const) {
     assertEquals(effectiveVoiceEnabled(row('pro', bs)), true, `pro + ${bs}`);
   }
+});
+
+// SCA-100 — standing-pantry-cap value table + effective-tier resolution.
+
+Deno.test('STANDING_PANTRY_CAPS: matches CLAUDE.md tier-entitlements table', () => {
+  // Lock the cap-per-tier table at the constant so the values can't
+  // drift between Backend and iOS (which carries the same numbers in
+  // Tier.rememberedPantryCap as a fallback). CLAUDE.md §"Tier
+  // entitlements (authoritative)" is the source of truth.
+  assertEquals(STANDING_PANTRY_CAPS.free, 25);
+  assertEquals(STANDING_PANTRY_CAPS.premium, 250);
+  assertEquals(STANDING_PANTRY_CAPS.pro, 1000);
+});
+
+Deno.test('standingPantryCap: paid premium → 250', () => {
+  for (const bs of ['active', 'trial', 'grace', 'cancelled_active'] as const) {
+    assertEquals(standingPantryCap(row('premium', bs)), 250, `premium + ${bs}`);
+  }
+});
+
+Deno.test('standingPantryCap: paid pro → 1000', () => {
+  for (const bs of ['active', 'trial', 'grace', 'cancelled_active'] as const) {
+    assertEquals(standingPantryCap(row('pro', bs)), 1000, `pro + ${bs}`);
+  }
+});
+
+Deno.test('standingPantryCap: free always → 25', () => {
+  for (const bs of ['none', 'active', 'trial', 'grace', 'cancelled_active', 'expired'] as const) {
+    assertEquals(standingPantryCap(row('free', bs)), 25, `free + ${bs}`);
+  }
+});
+
+Deno.test('standingPantryCap: expired premium → 25 (effective-tier demotion)', () => {
+  // Critical: a lapsed Premium user with `tier='premium', billing_state='expired'`
+  // must demote to the Free cap. Without this routing through effectiveTier(),
+  // a stale RevenueCat row would keep their 250-item cap even after Apple
+  // expired the subscription.
+  assertEquals(standingPantryCap(row('premium', 'expired')), 25);
+});
+
+Deno.test('standingPantryCap: expired pro → 25 (effective-tier demotion)', () => {
+  assertEquals(standingPantryCap(row('pro', 'expired')), 25);
+});
+
+Deno.test('standingPantryCap: premium + none → 25 (defensive demotion)', () => {
+  // `none` on a premium row shouldn't happen in practice, but the
+  // resolver must demote rather than trust the stale tier column —
+  // mirrors the same defense effectiveTier applies for canAccess.
+  assertEquals(standingPantryCap(row('premium', 'none')), 25);
 });

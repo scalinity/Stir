@@ -249,6 +249,41 @@ function allergyKeywordsFor(allergenValue: string): string[] {
   return ALLERGEN_KEYWORD_EXPANSION[allergenValue] ?? [allergenValue];
 }
 
+// SCA-150 — botanical-safe allowlist for the regenerator's allergen
+// retry path. The validator is intentionally aggressive (false-positive-
+// favored, per CA2-1's "favor extra retries over a missed allergen"
+// stance), which means a regenerator slot can fire on a dish that
+// cooked-down to a single legitimate-but-coconut-coded ingredient. On
+// the regenerator pass the model gets this clause appended to the
+// replacement userText so it doesn't blanket-reject all "*nut*" foods
+// when the allergen is `nut` / `tree_nut` / `peanut`.
+//
+// Wording targets the model's reasoning, not user-facing copy. Coconut,
+// butternut squash, and nutmeg are botanically NOT tree nuts and are
+// recognized as safe for nut-allergy users by AAAAI / ACAAI guidance.
+// Pine nut is a seed but cross-reactive in many tree-nut allergic users
+// (Roux 2003, Cabanillas 2015); the clause explicitly tells the model
+// to keep avoiding it. We do NOT loosen the validator — the regenerator
+// keyword-match still covers coconut etc. on the FIRST pass; this clause
+// only nudges the model's REPLACEMENT proposal.
+//
+// Exported for unit testing of the userText builder
+// (`buildReplacementUserText`) in dinner-solve/index.ts.
+const NUT_BOTANICAL_NOTE = [
+  'Botanical safety note for tree-nut / peanut allergens: "coconut" (a drupe),',
+  '"butternut squash" (a gourd), and "nutmeg" (the seed of Myristica fragrans) are',
+  'NOT tree nuts and are SAFE for tree-nut and peanut allergies — do not avoid them',
+  'on those grounds when proposing a replacement. "Pine nut" is botanically a seed',
+  'but cross-reactive enough in tree-nut-allergic users that you must treat pine nut',
+  'AS a tree nut and avoid it for any nut-allergy user.',
+].join(' ');
+
+export const ALLERGEN_BOTANICAL_SAFE_NOTES: Record<string, string> = {
+  nut: NUT_BOTANICAL_NOTE,
+  tree_nut: NUT_BOTANICAL_NOTE,
+  peanut: NUT_BOTANICAL_NOTE,
+};
+
 // Equipment keyword map: equipment name → substrings that imply needing it
 // in a recipe step. Step-3 is conservative — we only flag the obvious.
 const EQUIPMENT_IMPLICATION: Record<string, string[]> = {

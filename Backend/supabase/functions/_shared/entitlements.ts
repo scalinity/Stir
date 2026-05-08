@@ -25,6 +25,45 @@ export type BillingState =
   | 'cancelled_active'
   | 'expired';
 
+// ---------------------------------------------------------------------------
+// SCA-100 — standing-pantry-item caps (per-tier, non-metered)
+// ---------------------------------------------------------------------------
+//
+// Standing cap on `PantryItem.memoryState = .remembered` rows the user can
+// keep across cook sessions. Distinct from `TIER_CAPS` below (those are
+// monthly metered usage_counters); this one is a steady-state ceiling
+// enforced client-side against CloudKit (no server-side row count, since
+// user content lives in CloudKit per north-star #3).
+//
+// Pre-SCA-100 the value table lived only on iOS (`Tier.rememberedPantryCap`).
+// Centralizing it here lets `/v1/session/bootstrap` and
+// `/v1/config/bootstrap` ship the value as
+// `entitlements.standing_pantry_cap`, so a future marketing A/B or cap
+// change is server-resolvable without an iOS release. iOS keeps the
+// constant table as a fallback for offline / cached / pre-SCA-100 server
+// response paths — see `EntitlementService.standingPantryCap`.
+//
+// CLAUDE.md §"Tier entitlements (authoritative)" remains the source of
+// truth for the values: free 25 / premium 250 / pro 1000.
+export const STANDING_PANTRY_CAPS: Record<UserTier, number> = {
+  free: 25,
+  premium: 250,
+  pro: 1000,
+};
+
+/**
+ * Resolve the standing-pantry-cap value to ship on the wire for a given
+ * entitlement row. Goes through `effectiveTier` so a stale RevenueCat
+ * column with `billing_state = expired` correctly demotes to the Free
+ * cap — same defense the rest of this module relies on for every other
+ * entitlement decision.
+ */
+export function standingPantryCap(
+  row: Pick<EntitlementRow, 'tier' | 'billing_state'>,
+): number {
+  return STANDING_PANTRY_CAPS[effectiveTier(row)];
+}
+
 /** Per-tier monthly caps. Mirrors CLAUDE.md "Tier entitlements (authoritative)". */
 export const TIER_CAPS: Record<UserTier, Record<UsageFeatureKey, number>> = {
   // ADR 0015 caps (post-step-6 device test, 2026-04-23):

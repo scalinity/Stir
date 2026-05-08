@@ -43,6 +43,7 @@ import {
   ensureCurrentPeriodRows,
   ensureEntitlementRow,
   readQuotasForWire,
+  standingPantryCap,
 } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
 import {
@@ -321,6 +322,10 @@ Deno.serve(async (req) => {
         expires_at: entitlement.expires_at,
         voice_enabled: voiceEnabled,
         billing_retry_banner: billingRetryBanner,
+        // SCA-100: see config-bootstrap for the rationale. Both
+        // bootstrap endpoints carry this field so a fresh JWT mint
+        // (24h cache miss) gets the same shape as a foreground refresh.
+        standing_pantry_cap: standingPantryCap(entitlement),
         quotas,
       },
       feature_flags: flags,

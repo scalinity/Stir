@@ -65,9 +65,20 @@ struct SavedMealsView: View {
     /// CloudKit pushes can fire several `NSPersistentStoreRemoteChange`
     /// notifications in quick succession when a multi-row CloudKit
     /// transaction lands; debouncing collapses them into a single
-    /// `load()` call after a quiet 300ms window. The window is short
-    /// enough that the AC's "row disappears within 5s of CloudKit push"
-    /// holds easily — push latency dominates anyway.
+    /// `load()` call after a quiet 300ms window.
+    ///
+    /// SCA-197: 300ms specifically because (a) it matches the existing
+    /// keystroke-search debounce (`searchQuery → debouncedSearchQuery`,
+    /// 150ms × 2 ≈ 300ms perceived budget — keeps the two reactive
+    /// pipelines on the same cadence), (b) CloudKit pushes typically
+    /// arrive in <100ms bursts, so 300ms collapses the burst to one
+    /// fetch without dragging visible UX, and (c) the SCA-152 AC's
+    /// "row disappears within 5s of CloudKit push" budget is dominated
+    /// by network + iCloud propagation, leaving the 300ms in the noise.
+    /// SCA-197 also files a triggered-by-next-touch entry in
+    /// `docs/deferred-work.md` to extract this publisher wiring out of
+    /// the view layer when a second consumer (or a widget-process
+    /// save) appears.
     @State private var reloadDebounceTask: Task<Void, Never>?
 
     /// Filter + sort pipeline. Consults pre-computed searchBlobs so each
@@ -201,7 +212,19 @@ struct SavedMealsView: View {
         // existing repository fetch is cheap enough (~5-10 ms in-memory
         // cache hits) that filtering by entity type isn't worth the
         // complexity. The 300ms debounce is the real noise-suppressor.
-        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
+        //
+        // SCA-193: `.receive(on: DispatchQueue.main)` is load-bearing.
+        // `NSManagedObjectContextDidSave` posts on whichever queue the
+        // saving context is bound to — SCA-106's leftovers persist runs
+        // on a private-queue background context, so this notification
+        // arrives off-main. Without the explicit hop, `scheduleReload`
+        // (which mutates `@State var reloadDebounceTask`) would be
+        // racing the SwiftUI runtime; under Swift 6 strict concurrency
+        // that's undefined behavior.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)
+                .receive(on: DispatchQueue.main),
+        ) { _ in
             scheduleReload()
         }
         // SCA-152: re-load when CloudKit pushes a remote change to the
@@ -214,7 +237,16 @@ struct SavedMealsView: View {
         // SCA-152 ticket: device A flips a favorite, device B has the
         // Saved tab foregrounded, B's row updates within the debounce
         // window of the CloudKit push.
-        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+        //
+        // SCA-193: same `.receive(on: DispatchQueue.main)` rationale as
+        // the didSave observer above — Apple's docs note that
+        // `NSPersistentStoreRemoteChange` is delivered on a private
+        // queue chosen by the coordinator, so the publisher's receive
+        // handler ends up off-main without the explicit hop.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+                .receive(on: DispatchQueue.main),
+        ) { _ in
             scheduleReload()
         }
         .fullScreenCover(item: $cookAgainPlan) { plan in
@@ -233,6 +265,17 @@ struct SavedMealsView: View {
         // visit explaining how meals end up saved, the search/sort/
         // favorites filter, and the Cook Again CTA.
         .tutorial(key: .savedMeals) { SavedMealsTutorial() }
+        // SCA-195: cancel any pending reload Task when the view leaves
+        // the tree (tab switch, nav push, app background-kill). The
+        // Task survives @State teardown otherwise and would fire a
+        // load() against a no-longer-rendered view — wasted work, and
+        // during the SCA-106 bg-save burst it could land after the
+        // user has navigated away. Mirrors the leftoversTimeoutTask /
+        // postSubmitPresentationTask cleanup in CookModeRoot.
+        .onDisappear {
+            reloadDebounceTask?.cancel()
+            reloadDebounceTask = nil
+        }
     }
 
     // MARK: - Filter bar

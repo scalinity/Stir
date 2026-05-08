@@ -228,9 +228,39 @@ async function stepPostgres(
 ): Promise<SubsystemRecord> {
   if (ctx.refs.postgres?.completed_at) return ctx.refs.postgres;
 
-  // Insert durable audit_log row BEFORE deleting app_users. The deletion
-  // CASCADEs to deletion_requests itself (FK reference), so the audit
-  // anchor needs to live on a different table.
+  // 1. Pre-resolve inbound merged_into references (SCA-222).
+  //    `app_users.merged_into` is `REFERENCES app_users(canonical_user_key)
+  //    ON DELETE RESTRICT`, so any row whose merged_into points at this
+  //    canonical_user_key blocks the DELETE with a 23503. The merged_into
+  //    chain is a forward alias; once the canonical row is gone, the alias
+  //    has nothing to point to. NULL the inbound refs first.
+  const { error: mergedErr } = await client
+    .from('app_users')
+    .update({ merged_into: null })
+    .eq('merged_into', ctx.canonicalUserKey);
+  if (mergedErr) {
+    return { error: truncate(`merged_into_clear_failed: ${mergedErr.message}`, 200) };
+  }
+
+  // 2. The irreversible step. ON DELETE CASCADE fans out across:
+  //    device_installations, entitlement_snapshots, usage_counters,
+  //    ai_request_log, notification_jobs, deletion_requests.
+  const { error: delErr } = await client
+    .from('app_users')
+    .delete()
+    .eq('canonical_user_key', ctx.canonicalUserKey);
+  if (delErr) {
+    return { error: truncate(`app_users_delete_failed: ${delErr.message}`, 200) };
+  }
+
+  // 3. Insert the durable audit_log row AFTER the delete succeeds (SCA-222).
+  //    Inserting before would leave a row claiming "fulfilled" if the delete
+  //    failed (audit lies), and the documented ops replay path would insert
+  //    a SECOND audit row on retry (audit_log has no uniqueness constraint
+  //    on (action, target_id)). Audit-insert failure here doesn't fail the
+  //    deletion — the cascade has already committed; log warn and return
+  //    success. `audit_log.actor_id ON DELETE SET NULL` keeps the row alive
+  //    independent of the now-gone app_users row.
   const { error: auditErr } = await client.from('audit_log').insert({
     actor_id: null, // system automation
     actor_email: null,
@@ -244,19 +274,12 @@ async function stepPostgres(
     },
   });
   if (auditErr) {
-    return { error: truncate(`audit_log_insert_failed: ${auditErr.message}`, 200) };
+    ctx.log.warn('audit_log_insert_after_delete_failed', {
+      deletion_request_id: ctx.rowId,
+      err: auditErr.message,
+    });
   }
 
-  // Now the irreversible step. ON DELETE CASCADE fans out across:
-  //   device_installations, entitlement_snapshots, usage_counters,
-  //   ai_request_log, notification_jobs, deletion_requests.
-  const { error: delErr } = await client
-    .from('app_users')
-    .delete()
-    .eq('canonical_user_key', ctx.canonicalUserKey);
-  if (delErr) {
-    return { error: truncate(`app_users_delete_failed: ${delErr.message}`, 200) };
-  }
   return {
     completed_at: new Date().toISOString(),
     canonical_user_key_hash: ctx.canonicalUserKeyHash,

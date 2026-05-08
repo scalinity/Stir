@@ -377,6 +377,7 @@ final class PreferenceMemoryServiceTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: tier != .free,
             billingRetryBanner: false,
+            standingPantryCap: nil,
             quotas: [
                 BootstrapResponse.Quota(featureKey: .dinnerSolve, used: 0, cap: 6, periodEnd: "2026-12-31"),
                 BootstrapResponse.Quota(featureKey: .voiceCookSession, used: 0, cap: 0, periodEnd: "2026-12-31"),

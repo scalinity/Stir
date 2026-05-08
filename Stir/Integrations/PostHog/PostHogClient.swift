@@ -270,11 +270,25 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// via `SolveRepository.createLeftoversSolveWithDish`. Properties:
     /// `rank` (1..3), `leftovers_items_count`, `prompt_version`,
     /// `source_recipe_plan_id` (the meal that produced the leftovers),
-    /// `new_recipe_plan_id` (the persisted leftover plan). Pairs with
-    /// the `meal_rated.leftovers_handoff_*` properties for the full
+    /// `new_recipe_plan_id` (the persisted leftover plan), `persist_ms`
+    /// (SCA-106 — background-context save latency for the leftovers
+    /// solve persist; powers the long-tail dashboard signal that
+    /// motivated the bg-context migration). Pairs with the
+    /// `meal_rated.leftovers_handoff_*` properties for the full
     /// Premium-side conversion funnel; Free-side conversion lives on
     /// `paywall_viewed.trigger=leftovers_gate` → `purchase_completed`.
     case leftoversDishSelected = "leftovers_dish_selected"
+    /// SCA-148 — fires when CookModeViewModel.matchIngredient detects a
+    /// same-length tie among substring candidates for a voice
+    /// substitution. Properties: `session_id`, `candidate_count`
+    /// (≥2), `surface` ∈ {voice, tap}, `resolved_to` ∈ closed enum
+    /// in `VoiceSessionTelemetry.SubstitutionDisambiguationResolution`.
+    /// Today's only emit path is the voice surface routing ambiguous
+    /// matches to free-text persistence (`resolved_to=free_text_fallback`);
+    /// other resolution values are reserved for the future
+    /// mid-turn-prompt UX. Dashboard: rate of fire vs total voice subs
+    /// — ≥1% justifies the prompt-UX build-out per SCA-148 ticket.
+    case voiceSubstitutionDisambiguated = "voice_substitution_disambiguated"
     // SCA-5 — in-app feature tutorials. Fired once per tutorial-key
     // lifecycle: started on first appear, then exactly one of
     // {completed, skipped} on resolution. `tutorial_step_advanced`
