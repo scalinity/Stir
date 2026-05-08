@@ -268,6 +268,31 @@ Deno.serve(async (req) => {
     log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
   }
 
+  // 1c. Per-admin rate limit (SCA-117): 60/min keyed on admin.authUserId.
+  // Layered defense above the IP cap — catches a compromised single
+  // admin token that rotates source IPs to bypass the IP-scoped check.
+  // First-to-trip wins; RATE-01 `scope` distinguishes which gate fired
+  // so the SPA can show "your account is rate-limited" vs "your IP is."
+  // Same fail-open posture as 1b — bucket glitches must not lock out
+  // legit ops triage.
+  try {
+    const rl = await checkAndIncrement(client, 'user:ops_admin_minutely', admin.authUserId);
+    if (!rl.allowed) {
+      log.warn('rate_limited', {
+        scope: 'user:ops_admin_minutely',
+        actor_id: admin.authUserId,
+      });
+      return buildRate01Response(
+        'user:ops_admin_minutely',
+        rl.retry_after_seconds,
+        rl.reset_at,
+        requestId,
+      );
+    }
+  } catch (err) {
+    log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
+  }
+
   // 2. Body validation.
   let body: unknown;
   try {

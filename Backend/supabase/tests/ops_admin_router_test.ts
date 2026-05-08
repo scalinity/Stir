@@ -185,3 +185,83 @@ Deno.test('ops-admin: users.force_reauth on non-existent user → VAL-01 404 (re
   assertEquals(body.error, 'VAL-01');
   assertEquals(String(body.message).includes('user not found'), true);
 });
+
+// ---------------------------------------------------------------------------
+// SCA-117: per-admin rate limit (user:ops_admin_minutely, 60/min/admin)
+// ---------------------------------------------------------------------------
+//
+// Layered above the ip:ops_admin_hourly cap. The IP cap defends single-IP
+// enumeration; this defends a single-admin-token compromise that rotates
+// IPs. We pre-fill the bucket via the SQL RPC at the per-admin policy's
+// (window=60s, max=60) so the next HTTP call trips the gate without
+// having to make 60 real HTTP calls.
+
+Deno.test(
+  'ops-admin: SCA-117 per-admin rate limit — pre-filled bucket → 429 RATE-01 scope=user:ops_admin_minutely',
+  async () => {
+    await clearRateLimitBuckets();
+    const admin = await seedAdmin();
+    const svc = serviceClient();
+
+    // Pre-fill the per-admin bucket to its cap (60 increments at the
+    // policy's window/max). Each call advances current_count by 1; the
+    // 60th leaves current_count == max == 60 (still allowed). The next
+    // call (over HTTP) is the 61st → blocked.
+    for (let i = 0; i < 60; i++) {
+      const { error } = await svc.rpc('stir_rate_limit_check', {
+        p_scope_key: 'user:ops_admin_minutely',
+        p_bucket_key: admin.authUserId,
+        p_window_seconds: 60,
+        p_max_count: 60,
+      });
+      if (error) throw error;
+    }
+
+    const { status, body } = await callOpsAdmin(
+      { action: 'users.list', params: { limit: 100 } },
+      `Bearer ${admin.jwt}`,
+    );
+
+    assertEquals(status, 429);
+    assertEquals(body.error, 'RATE-01');
+    assertEquals(body.scope, 'user:ops_admin_minutely');
+    assertNotEquals(body.retry_after_seconds, undefined);
+  },
+);
+
+Deno.test(
+  'ops-admin: SCA-117 per-admin buckets are per-admin — admin A capped does not block admin B',
+  async () => {
+    await clearRateLimitBuckets();
+    const adminA = await seedAdmin();
+    const adminB = await seedAdmin();
+    const svc = serviceClient();
+
+    // Cap admin A only.
+    for (let i = 0; i < 60; i++) {
+      const { error } = await svc.rpc('stir_rate_limit_check', {
+        p_scope_key: 'user:ops_admin_minutely',
+        p_bucket_key: adminA.authUserId,
+        p_window_seconds: 60,
+        p_max_count: 60,
+      });
+      if (error) throw error;
+    }
+
+    // Admin A: blocked.
+    const a = await callOpsAdmin(
+      { action: 'users.list', params: { limit: 10 } },
+      `Bearer ${adminA.jwt}`,
+    );
+    assertEquals(a.status, 429);
+    assertEquals(a.body.scope, 'user:ops_admin_minutely');
+
+    // Admin B: still allowed (independent bucket).
+    const b = await callOpsAdmin(
+      { action: 'users.list', params: { limit: 10 } },
+      `Bearer ${adminB.jwt}`,
+    );
+    assertEquals(b.status, 200);
+    assertEquals(b.body.ok, true);
+  },
+);
