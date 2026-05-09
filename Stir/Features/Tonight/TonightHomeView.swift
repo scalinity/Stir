@@ -564,13 +564,36 @@ struct TonightHomeView: View {
 
     private func handleUseSoonPrefill(_ entry: RootCoordinator.UseSoonPrefillEntry) {
         guard let household = coordinator.household.profile else { return }
+        // SCA-259 (W11 from /review-5): the displayed-card fallback is
+        // ONLY valid when the deep-link entry has no pantryItemID
+        // (notification-without-id branch — older notifications, or
+        // a use-soon card tap that bypassed the pantryItemID path).
+        // When pantryItemID IS provided and the lookup misses, the
+        // user tapped a notification for a SPECIFIC ingredient that
+        // no longer exists in their pantry. Substituting whichever
+        // ingredient happens to be on the displayed card means the
+        // user opens Solve again prefilled with a different
+        // ingredient than the one they tapped — and use_soon
+        // conversion telemetry attributes the conversion to the
+        // wrong source. Surface "no longer in your pantry" toast
+        // and abort instead.
         let displayName: String?
-        if let pantryItemID = entry.pantryItemID,
-           let item = try? coordinator.pantryItemRepository.fetch(id: pantryItemID, for: household),
-           let name = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !name.isEmpty {
-            displayName = name
+        if let pantryItemID = entry.pantryItemID {
+            if let item = try? coordinator.pantryItemRepository.fetch(id: pantryItemID, for: household),
+               let name = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
+                displayName = name
+            } else {
+                // Specific-ID miss: the user tapped a notification
+                // for an ingredient that's been deleted/expired.
+                // Surface and stop — no fallback substitution.
+                toastMessage = "That ingredient is no longer in your pantry."
+                return
+            }
         } else {
+            // No-ID branch: fall back to whatever the displayed
+            // use-soon card surfaces (a still-eligible expiring
+            // ingredient at the time of tap), if any.
             displayName = useSoonCandidate?.displayName
         }
         guard let displayName else {
