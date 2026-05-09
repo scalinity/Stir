@@ -228,6 +228,20 @@ final class MockLiveTransport: LiveTransporting {
         continuation = pair.continuation
     }
 
+    /// SCA-256 (W8 from /review-5): defensive `deinit` finishes the
+    /// continuation if a test forgot to call `close()` / `finish()`.
+    /// `AsyncThrowingStream.Continuation.finish()` is a no-op when
+    /// invoked after the stream has already terminated, so the
+    /// guarded path is safe even when callers explicitly closed.
+    /// This keeps a stray test from leaking the producer-side
+    /// continuation past the mock's lifetime — important if a future
+    /// refactor moves the continuation off `self` to a long-lived
+    /// owner where deallocation no longer naturally terminates the
+    /// stream.
+    deinit {
+        continuation?.finish()
+    }
+
     func open(url: URL) throws {
         if let openError { throw openError }
         openedURLs.append(url)

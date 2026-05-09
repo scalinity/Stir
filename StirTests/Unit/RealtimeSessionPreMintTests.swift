@@ -505,6 +505,57 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         XCTAssertTrue(transport.isClosed, "mock transport must record close state")
     }
 
+    // MARK: - SCA-256 (W8 from /review-5) — MockLiveTransport error paths
+
+    /// Pre-fix the mock harness only had a happy-path test; the seam's
+    /// value (catching error-path regressions) wasn't exercised. These
+    /// three tests pin the contract for `openError`, `sendError`, and
+    /// `finish(throwing:)` so a future refactor that swallowed any of
+    /// the three propagation paths fails the suite.
+
+    func test_mockLiveTransport_openErrorPropagates() {
+        struct OpenStubError: Error, Equatable {}
+        let transport = MockLiveTransport()
+        transport.openError = OpenStubError()
+        XCTAssertThrowsError(
+            try transport.open(url: URL(string: "wss://test.invalid")!),
+        ) { error in
+            XCTAssertTrue(error is OpenStubError, "openError must propagate verbatim")
+        }
+        XCTAssertTrue(transport.openedURLs.isEmpty, "open(url:) must NOT record on the throw path")
+    }
+
+    func test_mockLiveTransport_sendErrorPropagates() async {
+        struct SendStubError: Error, Equatable {}
+        let transport = MockLiveTransport()
+        transport.sendError = SendStubError()
+        do {
+            try await transport.send(.setupRawJSON("{\"setup\":{}}"))
+            XCTFail("send(_:) must throw when sendError is set")
+        } catch is SendStubError {
+            // expected
+        } catch {
+            XCTFail("send(_:) must throw the configured sendError, not \(error)")
+        }
+        XCTAssertTrue(transport.sentFrames.isEmpty, "send(_:) must NOT record on the throw path")
+    }
+
+    func test_mockLiveTransport_finishThrowingTerminatesInboundWithError() async {
+        struct FinishStubError: Error, Equatable {}
+        let transport = MockLiveTransport()
+        transport.finish(throwing: FinishStubError())
+
+        var iterator = transport.inbound.makeAsyncIterator()
+        do {
+            _ = try await iterator.next()
+            XCTFail("inbound iterator must surface the finish-thrown error")
+        } catch is FinishStubError {
+            // expected — the stream terminated with the configured error.
+        } catch {
+            XCTFail("expected FinishStubError, got \(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     /// Builds a `RealtimeSession` routed through a `FailFastURLProtocol`-
