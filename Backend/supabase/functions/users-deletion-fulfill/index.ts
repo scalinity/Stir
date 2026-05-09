@@ -513,7 +513,19 @@ async function fulfillSweep(
   // is unbounded without an explicit .order(), and even with one doesn't
   // carry FOR UPDATE SKIP LOCKED — two parallel ticks could double-claim
   // or strand rows in 'processing' with no reclaim sweep to recover them.
-  // The RPC mirrors the sibling stir_claim_pending_jobs pattern.
+  // The RPC mirrors the sibling stir_claim_pending_jobs pattern with two
+  // intentional divergences:
+  //   1. NO `attempt_count < N` retry-cap predicate. The deletion state
+  //      machine is the retry gate — failed rows stay 'failed' until ops
+  //      manually replays via the documented runbook procedure
+  //      (`UPDATE deletion_requests SET state='approved' WHERE id=...`).
+  //      Adding an auto-retry counter would change ops semantics in a
+  //      load-bearing way; future maintainers should NOT reflexively port
+  //      the sibling's `attempt_count` predicate.
+  //   2. Returns the post-flip row shape (state already 'processing')
+  //      instead of the pre-flip snapshot. We use canonical_user_key_hash
+  //      as the durable audit anchor, not the row state, so pre-flip
+  //      data isn't needed downstream.
   const { data: claimed, error: claimErr } = await client.rpc(
     'stir_claim_deletion_requests',
     { p_limit: CLAIM_LIMIT },
