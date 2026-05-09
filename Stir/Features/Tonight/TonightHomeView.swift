@@ -25,7 +25,7 @@
 //     if a second screen wants the same value.)
 //   - paper.200 plate pedestal up top with `HIGH MATCH` badge (sage)
 //     top-left and `SOLVED N MIN AGO` eyebrow top-right
-//   - SwiftUI-rendered `PlateIllustration` — illustrated, not a photo
+//   - SwiftUI-rendered `StirPlate(.hero())` — illustrated, not a photo
 //     (per Spec §13: "photos of yet-to-be-cooked meals are always a
 //     lie")
 //   - paper.100 body with TONIGHT'S PICK (ember eyebrow), serif title,
@@ -1098,7 +1098,7 @@ private struct TonightPickHeroCard: View {
 
             VStack {
                 Spacer().frame(height: CGFloat.Stir.space4) // 16pt
-                PlateIllustration(size: 180)
+                StirPlate(.hero(), size: 180)
                 Spacer().frame(height: CGFloat.Stir.space1Half) // 6pt
             }
             .frame(maxWidth: .infinity)
@@ -1351,128 +1351,10 @@ private struct TonightPickHeroCard: View {
 
 }
 
-// MARK: - PlateIllustration
-
-/// Mockup 03's <Plate /> reproduced in SwiftUI. Concentric paper-200 →
-/// paper-100 disc with a stylised salmon fillet, three sage greens,
-/// a lemon wedge, scattered rice grains, and a few sesame seeds.
-/// Pure decorative SwiftUI shapes — no asset catalog dependency.
-private struct PlateIllustration: View {
-    let size: CGFloat
-
-    var body: some View {
-        ZStack {
-            // Outer disc
-            Circle()
-                .fill(Color.Stir.paper200)
-                .overlay(Circle().strokeBorder(Color.Stir.divider, lineWidth: 1))
-                .frame(width: size, height: size)
-
-            // Inner disc — slightly smaller for the rim effect
-            Circle()
-                .fill(Color.Stir.paper100)
-                .overlay(Circle().strokeBorder(Color.Stir.divider, lineWidth: 1))
-                .frame(width: size * 0.86, height: size * 0.86)
-
-            // Salmon fillet — rounded ovoid in ember at 88% opacity
-            Capsule(style: .continuous)
-                .fill(Color.Stir.ember600.opacity(0.88))
-                .frame(width: size * 0.40, height: size * 0.26)
-                .rotationEffect(.degrees(-8))
-                .offset(x: -size * 0.07, y: size * 0.02)
-                .overlay(
-                    // Three pale lines suggest fillet grain
-                    GeometryReader { _ in
-                        Path { p in
-                            let w = size * 0.30
-                            let h = size * 0.18
-                            let originX = (size * 0.40 - w) / 2
-                            let originY = (size * 0.26 - h) / 2 + size * 0.02
-                            for i in 0..<3 {
-                                let yOffset = originY + CGFloat(i) * (h / 3)
-                                p.move(to: CGPoint(x: originX, y: yOffset))
-                                p.addQuadCurve(
-                                    to: CGPoint(x: originX + w, y: yOffset),
-                                    control: CGPoint(x: originX + w / 2, y: yOffset - 2),
-                                )
-                            }
-                        }
-                        .stroke(Color.Stir.ember100, lineWidth: 1.2)
-                    }
-                    .frame(width: size * 0.40, height: size * 0.26)
-                    .rotationEffect(.degrees(-8))
-                    .offset(x: -size * 0.07, y: size * 0.02),
-                )
-
-            // Sage greens — three soft circles stacked top-right
-            Circle()
-                .fill(Color.Stir.sage600.opacity(0.80))
-                .frame(width: size * 0.10, height: size * 0.10)
-                .offset(x: size * 0.21, y: -size * 0.08)
-            Circle()
-                .fill(Color.Stir.sage600.opacity(0.90))
-                .frame(width: size * 0.07, height: size * 0.07)
-                .offset(x: size * 0.27, y: -size * 0.02)
-            Circle()
-                .fill(Color.Stir.sage600.opacity(0.75))
-                .frame(width: size * 0.08, height: size * 0.08)
-                .offset(x: size * 0.22, y: size * 0.05)
-
-            // Lemon wedge — amber circle with dashed rim (pith hint)
-            Circle()
-                .fill(Color.Stir.amber600.opacity(0.85))
-                .overlay(
-                    Circle().strokeBorder(
-                        Color.Stir.paper50.opacity(0.5),
-                        style: StrokeStyle(lineWidth: 1, dash: [2, 2]),
-                    ),
-                )
-                .frame(width: size * 0.09, height: size * 0.09)
-                .offset(x: size * 0.16, y: size * 0.15)
-
-            // Rice grains — 14 small ellipses below the fillet
-            riceGrains
-
-            // Sesame seeds — 3 dark dots on the salmon
-            sesameSeeds
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-
-    private var riceGrains: some View {
-        ZStack {
-            ForEach(0..<14, id: \.self) { i in
-                let col = i % 5
-                let row = i / 5
-                let x = -size * 0.11 + CGFloat(col) * (size * 0.03) + CGFloat(row % 2) * (size * 0.015)
-                let y = size * 0.20 + CGFloat(row) * (size * 0.025)
-                Ellipse()
-                    .fill(Color.Stir.divider)
-                    .opacity(0.7)
-                    .frame(width: size * 0.025, height: size * 0.015)
-                    .offset(x: x, y: y)
-            }
-        }
-    }
-
-    private var sesameSeeds: some View {
-        ZStack {
-            Circle()
-                .fill(Color.Stir.ink700)
-                .frame(width: size * 0.012, height: size * 0.012)
-                .offset(x: -size * 0.06, y: -size * 0.02)
-            Circle()
-                .fill(Color.Stir.ink700)
-                .frame(width: size * 0.012, height: size * 0.012)
-                .offset(x: size * 0.02, y: 0)
-            Circle()
-                .fill(Color.Stir.ink700)
-                .frame(width: size * 0.012, height: size * 0.012)
-                .offset(x: size * 0.07, y: -size * 0.03)
-        }
-    }
-}
+// PlateIllustration moved to Stir/DesignSystem/Components/StirPlate.swift
+// as `StirPlate(.hero(), size:)` (SCA-96). The salmon-fillet GeometryReader
+// (FD1-11) was retired during the move — the path is fully size-derived
+// and never needed parent-frame measurement.
 
 // SolveAgainRoot moved to Stir/Features/Solve/SolveAgainRoot.swift (CR1-W2 fix).
 

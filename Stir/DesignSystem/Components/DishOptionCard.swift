@@ -124,7 +124,7 @@ struct DishOptionCard: View {
         // same reason).
         ZStack {
             Color.Stir.paper200
-            PlateView(tint: plateTint, size: 88)
+            StirPlate(.option(tint: plateTint), size: 88)
         }
         .frame(width: 104)
         .frame(maxHeight: .infinity)
@@ -179,7 +179,7 @@ struct DishOptionCard: View {
     /// Plate tint cycles by rank — salmon (1) → sage (2) → amber (3).
     /// No backend signal drives the choice; the visual variety is
     /// purely ordinal so users distinguish cards at a glance.
-    private var plateTint: PlateTint {
+    private var plateTint: StirPlate.OptionTint {
         switch rank {
         case 1: return .salmon
         case 2: return .sage
@@ -203,87 +203,6 @@ struct DishOptionCard: View {
                      : "\(safeCount) ingredients to grab")
         parts.append("why it fits: \(whyItFits)")
         return parts.joined(separator: ", ")
-    }
-}
-
-// MARK: - Plate illustration
-
-/// Three plate tints, cycled by rank. Kept file-private — the plate
-/// is a DishOptionCard implementation detail, not a reusable DS atom.
-///
-/// Each tint exposes a main + two accent colors. The mockup hardcoded
-/// `sage + amber` accents on every tint, which on the sage and amber
-/// main plates collapsed one accent into the main color and rendered
-/// it invisible. The per-tint palette here keeps both accent dots
-/// visible against every main color.
-private enum PlateTint {
-    case salmon, sage, amber
-
-    var mainColor: Color {
-        switch self {
-        case .salmon: return Color.Stir.ember600
-        case .sage:   return Color.Stir.sage600
-        case .amber:  return Color.Stir.amber600
-        }
-    }
-
-    /// Upper-left, larger accent (mockup's "sage spot" position).
-    var accent1Color: Color {
-        switch self {
-        case .salmon: return Color.Stir.sage600  // mockup default
-        case .sage:   return Color.Stir.amber600 // swap: avoid sage-on-sage
-        case .amber:  return Color.Stir.sage600
-        }
-    }
-
-    /// Upper-right, smaller accent (mockup's "amber spot" position).
-    var accent2Color: Color {
-        switch self {
-        case .salmon: return Color.Stir.amber600 // mockup default
-        case .sage:   return Color.Stir.amber600 // both yellows on sage main
-        case .amber:  return Color.Stir.ember600 // swap: avoid amber-on-amber
-        }
-    }
-}
-
-/// SwiftUI port of the mockup 05 plate illustration
-/// (`stir-app-design/project/DesignMockups/05_solve_flow.html`,
-/// `Plate` component). All circle positions/radii are scaled from
-/// the source's 200×200 viewBox so the proportions stay identical
-/// at any caller-supplied `size`. The size is a constructor parameter
-/// — a previous draft used `GeometryReader` to derive it from the
-/// parent frame, which was unnecessary indirection given every caller
-/// already knows the dimension it wants.
-private struct PlateView: View {
-    let tint: PlateTint
-    let size: CGFloat
-
-    var body: some View {
-        let s = size / 200.0
-        ZStack {
-            Circle()
-                .fill(Color.Stir.paper200)
-                .frame(width: 176 * s, height: 176 * s)
-            Circle()
-                .fill(Color.Stir.paper100)
-                .frame(width: 152 * s, height: 152 * s)
-            Circle()
-                .fill(tint.mainColor.opacity(0.85))
-                .frame(width: 88 * s, height: 88 * s)
-            Circle()
-                .fill(tint.accent1Color.opacity(0.75))
-                .frame(width: 24 * s, height: 24 * s)
-                .offset(x: -28 * s, y: -6 * s)
-            Circle()
-                .fill(tint.accent2Color.opacity(0.85))
-                .frame(width: 20 * s, height: 20 * s)
-                .offset(x: 32 * s, y: -4 * s)
-            Circle()
-                .fill(Color.Stir.ink700.opacity(0.35))
-                .frame(width: 18 * s, height: 18 * s)
-                .offset(x: 20 * s, y: 28 * s)
-        }
-        .frame(width: size, height: size)
     }
 }
 

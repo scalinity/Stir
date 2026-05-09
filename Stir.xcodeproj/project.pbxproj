@@ -356,6 +356,7 @@
 		60AD30993B1BAC692CEB33EE /* SectionEyebrow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */; };
 		85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */; };
 		3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */; };
+		8B3E60A3B36F85AE3C73D5BC /* StirPlate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D230E72CEDAF340F4A81112 /* StirPlate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -709,6 +710,7 @@
 		095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEyebrow.swift; sourceTree = "<group>"; };
 		9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirRowDivider.swift; sourceTree = "<group>"; };
 		9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNavigationTitle.swift; sourceTree = "<group>"; };
+		4D230E72CEDAF340F4A81112 /* StirPlate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirPlate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1392,6 +1394,7 @@
 				01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */,
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */,
+				4D230E72CEDAF340F4A81112 /* StirPlate.swift */,
 				9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
 							3F920935AC9534472392B226 /* TutorialFlowContainer.swift */,
@@ -1917,6 +1920,7 @@
 				63CAE82D1AC92EC0A569CE12 /* StirGlyph.swift in Sources */,
 				3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */,
 				C200803A785580A86DBEE427 /* StirNotificationDelegate.swift in Sources */,
+				8B3E60A3B36F85AE3C73D5BC /* StirPlate.swift in Sources */,
 				85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */,
 				A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */,
 				D075C96D81CFEBE670FDFA19 /* SubstitutionEvent+Extensions.swift in Sources */,
