@@ -401,6 +401,7 @@ Tracked tech debt + triggered refactors live in `docs/deferred-work.md`. Read be
 - **Audit prior artifacts with the same rigor as new work.** If past-Claude got something wrong in spec or code, say so directly. Prior outputs aren't ground truth.
 - **Challenge bad calls.** One direct sentence beats three diplomatic paragraphs.
 - **Don't silently drop features.** If a planned feature turns out infeasible mid-build, stop and tell Daniel. Never make compilation pass by dropping scope.
+- **Run the existing tests in a test file before adding a new one.** Pre-existing red surfaces only after the new test compounds the diagnostic load — twice now: P1-N session had 4 red `realtime_session_test.ts` tests masked by `all_steps` schema drift; P1-O session had 7 red `voice_turn_usage_test.ts` tests masked by missing Premium-promote + `session_closed` assertion drift. Smoke the file first, fix the red, then add. Hook enforcement deferred to SCA-156 follow-up if the rule fails to stick.
 - Tables for comparisons, diagrams for systems, prose only when it earns its place.
 
 ---
