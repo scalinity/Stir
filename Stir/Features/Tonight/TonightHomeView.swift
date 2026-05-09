@@ -826,7 +826,14 @@ struct TonightHomeView: View {
 
     // MARK: - State helpers
 
-    @MainActor
+    // SCA-279 (S13 from /review-5): no `@MainActor` annotation needed.
+    // `TonightHomeView` is a SwiftUI `View` struct, which is implicitly
+    // main-actor-isolated for body evaluation. The two callers are
+    // `.task { await refreshState() }` (inherits the host's main-actor
+    // isolation) and `.onChange { Task { await refreshState() } }`
+    // (same — `Task {}` inherits the enclosing context's actor). The
+    // explicit annotation was redundant and read like the function
+    // might be reachable off-main, which it isn't.
     private func refreshState() async {
         guard let household = coordinator.household.profile else { return }
         // CR1-W4 fix: route through coordinator.cookingSessionRepository
