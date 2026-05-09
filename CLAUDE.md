@@ -323,6 +323,8 @@ When changing a prompt, bump `prompt_versions.version` semver and start `rollout
 
 **Rule:** every work item Daniel raises — bug, issue, feature request, even conversational — gets a Linear issue under the **Stir** project (Scalinity team, key `SCA`) **before** writing code. Pre-authorized; do not ask.
 
+**Beta-tester feature asks DO NOT get Linear issues.** During the beta window the no-new-features invariant holds: log the ask to `docs/roadmap/v2.md` §1 (one line: date + anon tester ID + literal ask) and move on. Asks that recur across 3+ distinct testers are the signal to surface to Daniel — not the first ask, not the second.
+
 Flow: (1) `mcp__linear-server__save_issue` with `team:"Scalinity"`, `project:"Stir"`, `assignee:"@scalinity"`, `state:"In Progress"`, populated repro/root cause/fix plan/files — before any edits. (2) Implement; run test/eval; verify repro gone. (3) `save_issue` `id:"SCA-N"`, `state:"Done"` the instant fix lands locally and tests pass. (4) Stage, commit (`fix(scope): subject (SCA-N)`), push.
 
 **States**: `Backlog | Todo | In Progress | In Review | Done | Canceled | Duplicate`. Never leave `In Progress` across sessions. **Work item** = UI bug, crash, regression, copy/UX nit, design fidelity gap, perf complaint, missing feature, follow-up from review. Idea-stage brainstorming explicitly flagged "thinking out loud" / "don't act yet" is the only opt-out — confirm before skipping.
