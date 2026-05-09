@@ -276,12 +276,17 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         XCTAssertEqual(steps.map(\.instructionText), ["first", "second", "third"])
     }
 
-    // SCA-70: leftovers solves must report isFromLeftovers=true on
-    // TonightPick so TonightHomeView can swap the high-match badge
-    // for a "FROM YOUR LEFTOVERS" eyebrow on the hero card. Pairs
-    // with `test_latestTonightPick_dinnerSolveReportsNotFromLeftovers`
-    // in SolveRepositoryTonightPickTests for the negative case.
-    func test_createLeftoversSolveWithDish_picksUpAsFromLeftoversTrue() async throws {
+    // SCA-108: leftovers solves no longer auto-promote to Tonight. The
+    // SCA-70 negative pairing in SolveRepositoryTonightPickTests
+    // (`test_latestTonightPick_dinnerSolveReportsNotFromLeftovers`)
+    // remains the positive contract for non-leftovers solves; this
+    // test now asserts the inverse — when only a leftovers solve
+    // exists, `latestTonightPick` returns nil because the leftovers
+    // solve is filtered out at the predicate. The prior assertion
+    // (`pick.isFromLeftovers == true`) was the SCA-70 wire contract
+    // that became unreachable once SCA-108 made leftovers a side
+    // trip rather than a hero replacement.
+    func test_createLeftoversSolveWithDish_doesNotPromoteToTonightPick_whenOnlyLeftoversExist() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
 
@@ -293,15 +298,22 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             promptVersion: "v1.1.0-test",
         )
 
-        let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))
-        XCTAssertTrue(pick.isFromLeftovers,
-                      "leftovers solve must surface on Tonight with isFromLeftovers=true")
+        XCTAssertNil(
+            solveRepo.latestTonightPick(for: household),
+            "SCA-108: leftovers solve must NOT auto-promote to Tonight; only the prior dinner solve (or nil if none) is the hero card",
+        )
     }
 
-    func test_createLeftoversSolveWithDish_promotesNewPlanToLatestTonightPick() async throws {
-        // The contract LeftoversSolveView's helper text promises:
-        // "Saving one of these adds it to tomorrow's Tonight." Verify
-        // the new leftovers plan IS the latestTonightPick after the call.
+    func test_createLeftoversSolveWithDish_keepsPriorDinnerSolveAsTonightPick() async throws {
+        // SCA-108 inverse contract: a leftovers solve completing AFTER
+        // a regular dinner solve must NOT overtake the dinner. The
+        // prior dinner remains the Tonight hero card; the leftovers
+        // plan still persists (Saved tab, Tomorrow's plan, analytics
+        // wire), but it doesn't replace what the user just rated.
+        // Earlier behavior (pre-SCA-108) was the inverse: leftovers
+        // overtook because `completedAt` ordering had no source-plan
+        // filter — see deferred-work.md line 42 + ADR ratification of
+        // option B in the SCA-108 ticket body.
         _ = try seedSolveCompletedNow(title: "Earlier dinner")
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Tomorrow's leftover plan", rank: 1)
@@ -315,7 +327,15 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
         )
 
         let pick = try XCTUnwrap(solveRepo.latestTonightPick(for: household))
-        XCTAssertEqual(pick.title, "Tomorrow's leftover plan")
+        XCTAssertEqual(
+            pick.title,
+            "Earlier dinner",
+            "SCA-108: prior dinner solve must remain the Tonight pick after a leftovers solve",
+        )
+        XCTAssertFalse(
+            pick.isFromLeftovers,
+            "SCA-108: latestTonightPick filters leftovers out; pick.isFromLeftovers is unreachable in practice",
+        )
     }
 
     // SCA-106: pathological 50-ingredient + 25-step dish persists via

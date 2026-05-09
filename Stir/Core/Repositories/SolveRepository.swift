@@ -468,10 +468,22 @@ final class SolveRepository {
     /// `latestPantryIngredients` so a Tonight render + a Solve-again tap
     /// don't issue two identical queries; `household.dietaryRules` is now
     /// in the prefetch list so `derivedChips` doesn't lazy-fault per chip.
+    ///
+    /// SCA-108: leftovers solves (those with a non-nil `sourceRecipePlan`
+    /// relationship) are explicitly excluded — a "Salmon → Salmon fried
+    /// rice" leftovers solve no longer auto-promotes to Tonight as the
+    /// hero card. Spec D4/D5 had ratified the auto-promote as the "user
+    /// lands somewhere logical" mechanism, but landed on the inverse
+    /// after user-side feedback: leftovers should be a side trip, not a
+    /// replacement of the dinner the user just rated. The `TonightPick`
+    /// model still carries `isFromLeftovers` for any future explicit-
+    /// promote path; with this filter the value is always `false` in
+    /// practice, but the wire field stays so the renderer code path
+    /// doesn't need to be deleted alongside.
     private func latestCompletedSolve(for household: HouseholdProfile) -> MealSolveRequest? {
         let request = NSFetchRequest<MealSolveRequest>(entityName: "MealSolveRequest")
         request.predicate = NSPredicate(
-            format: "household == %@ AND status == %@ AND deletedAt == nil",
+            format: "household == %@ AND status == %@ AND deletedAt == nil AND sourceRecipePlan == nil",
             household,
             MealSolveRequest.Status.completed.rawValue,
         )
