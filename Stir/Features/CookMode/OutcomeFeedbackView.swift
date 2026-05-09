@@ -114,15 +114,7 @@ struct OutcomeFeedbackView: View {
                 actionBar
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Rate this meal")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .stirNavigationTitle("Rate this meal")
         }
     }
 
@@ -153,7 +145,7 @@ struct OutcomeFeedbackView: View {
 
     private var ratingSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Your rating")
+            SectionEyebrow("Your rating", tone: .compact)
             HStack(spacing: CGFloat.Stir.space3) {
                 ForEach(1...5, id: \.self) { index in
                     Button {
@@ -211,7 +203,7 @@ struct OutcomeFeedbackView: View {
 
     private var repeatSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Cook this again")
+            SectionEyebrow("Cook this again", tone: .compact)
             HStack(spacing: CGFloat.Stir.space3) {
                 Text(wouldRepeat ? "Yes — I'd cook this again" : "Maybe next time")
                     .stirFont(.labelLg)
@@ -230,7 +222,7 @@ struct OutcomeFeedbackView: View {
 
     private var leftoversSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Leftover servings")
+            SectionEyebrow("Leftover servings", tone: .compact)
             HStack(spacing: CGFloat.Stir.space3) {
                 Text("\(leftoverCount) serving\(leftoverCount == 1 ? "" : "s")")
                     .stirFont(.labelLg)
@@ -249,7 +241,7 @@ struct OutcomeFeedbackView: View {
 
     private var notesSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Anything else?")
+            SectionEyebrow("Anything else?", tone: .compact)
             TextField(
                 "e.g. needed more salt, would halve the pepper",
                 text: $notes,
@@ -308,12 +300,6 @@ struct OutcomeFeedbackView: View {
 
     // MARK: - Helpers
 
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.ink500)
-    }
-
     /// Horizontal chip row replacing the iOS segmented `Picker` — same
     /// grammar as `SetupPreferencesView` / `ConstraintsSheet` so the
     /// Cook-Mode-trailing surface reads continuously with the rest of
@@ -327,7 +313,7 @@ struct OutcomeFeedbackView: View {
         onSelect: @escaping (Option) -> Void,
     ) -> some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow(label)
+            SectionEyebrow(label, tone: .compact)
             HStack(spacing: CGFloat.Stir.space2) {
                 ForEach(options, id: \.self) { option in
                     SelectableChip(

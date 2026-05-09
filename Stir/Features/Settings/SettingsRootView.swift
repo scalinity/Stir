@@ -91,19 +91,11 @@ struct SettingsRootView: View {
         .background(Color.Stir.paper50)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // Principal item renders the screen title in the Stir
-            // display serif, matching Saved (`SavedMealsView`). The
-            // default `navigationTitle` chrome would fall back to SF
-            // Pro and break the cross-tab visual rhythm.
-            ToolbarItem(placement: .principal) {
-                Text("Settings")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        // Principal-item title in the Stir display serif via the lifted
+        // `.stirNavigationTitle` modifier (SCA-95). Pairs with `.inline`
+        // above. The system `navigationTitle` chrome would fall back to
+        // SF Pro and break the cross-tab visual rhythm with Saved.
+        .stirNavigationTitle("Settings")
         .stirToast($restoreToast)
         // SCA-19 — full-screen Pantry Management tutorial. Mounts on
         // the Settings root so the cover slides up the first time the
@@ -137,12 +129,12 @@ struct SettingsRootView: View {
 
     private var planBillingSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Plan & Billing")
+            SectionEyebrow("Plan & Billing")
             VStack(spacing: 0) {
                 planHeader
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 planStateRows
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 restoreRow
             }
             .stirCard()
@@ -216,11 +208,11 @@ struct SettingsRootView: View {
         )
         if placement == .above {
             proRow(placement: .above)
-            rowDivider
+            StirRowDivider(insetMatchingTile: true)
         }
         primaryPlanStateRow
         if placement == .below {
-            rowDivider
+            StirRowDivider(insetMatchingTile: true)
             proRow(placement: .below)
         }
     }
@@ -475,7 +467,7 @@ struct SettingsRootView: View {
     /// inside the sub-screen for the new-user-experience case.
     private var helpSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Help")
+            SectionEyebrow("Help")
             NavigationLink {
                 TutorialReplayView()
             } label: {
@@ -501,7 +493,7 @@ struct SettingsRootView: View {
             // titled "Notifications") is acceptable: the eyebrow is
             // 11pt UPPERCASE tracked tertiary text, the row title is
             // 15pt ink900 — they read as group + member, not echo.
-            sectionEyebrow("Notifications")
+            SectionEyebrow("Notifications")
             NavigationLink {
                 NotificationPrefsView()
             } label: {
@@ -520,7 +512,7 @@ struct SettingsRootView: View {
 
     private var householdSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Household")
+            SectionEyebrow("Household")
             NavigationLink {
                 HouseholdPreferencesView()
             } label: {
@@ -545,7 +537,7 @@ struct SettingsRootView: View {
     /// it lives under Settings rather than as a top-level tab.
     private var pantrySection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Pantry")
+            SectionEyebrow("Pantry")
             NavigationLink {
                 PantryListView(coordinator: coordinator)
             } label: {
@@ -565,7 +557,7 @@ struct SettingsRootView: View {
 
     private var syncSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Sync")
+            SectionEyebrow("Sync")
             HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
                 // Status dot in lieu of an icon tile — sage when syncing,
                 // amber when iCloud unavailable. Both pair with the
@@ -607,12 +599,12 @@ struct SettingsRootView: View {
 
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("About")
+            SectionEyebrow("About")
             VStack(spacing: 0) {
                 aboutLink("Privacy Policy", url: "https://getstir.app/privacy")
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 aboutLink("Terms of Service", url: "https://getstir.app/terms")
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 // EULA points at Apple's standard licensed-application
                 // terms (no custom Stir EULA; ToS covers Stir-specific
                 // usage). Symmetric with the paywall's three-link
@@ -621,9 +613,9 @@ struct SettingsRootView: View {
                     "End User License Agreement",
                     url: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
                 )
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 aboutLink("Support", url: "mailto:support@getstir.app")
-                rowDivider
+                StirRowDivider(insetMatchingTile: true)
                 // SCA-61 — in-app CCPA deletion. Privacy Policy §7.7
                 // mandates this surface as the primary path; the email
                 // fallback at privacy@getstir.app is preserved on the
@@ -717,28 +709,14 @@ struct SettingsRootView: View {
 
     // MARK: - DS primitives
 
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.textTertiary)
-            .padding(.horizontal, CGFloat.Stir.space1)
-    }
-
     /// Width + height of the row's leading icon tile (and the sync-row's
     /// status-dot column, which aligns to the same gutter). Hoisted to a
-    /// single constant so divider insets, tile frames, and the sync-dot
-    /// column never drift apart on a future tile-size adjustment.
+    /// single constant so tile frames + the sync-dot column never drift
+    /// apart on a future tile-size adjustment. Mirrors
+    /// `StirRowDivider.iconTileSize` (SCA-95) — kept private here because
+    /// only this file's tile + sync-dot framing consumes it; the divider
+    /// inset is now expressed via `StirRowDivider(insetMatchingTile: true)`.
     private static let iconTileSize: CGFloat = 32
-
-    private var rowDivider: some View {
-        // Internal hairline for multi-row cards. Inset by the icon-tile
-        // column so the divider visually starts at the title baseline,
-        // matching mockup 14 grouped-list rows.
-        Rectangle()
-            .fill(Color.Stir.divider)
-            .frame(height: 1)
-            .padding(.leading, CGFloat.Stir.space3Half + Self.iconTileSize + CGFloat.Stir.space3)
-    }
 
     /// 32×32 tile with an ember600 glyph on an ember100 fill — the
     /// dominant settings-row glyph treatment from mockup 14. Optional

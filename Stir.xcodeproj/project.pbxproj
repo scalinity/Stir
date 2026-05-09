@@ -353,6 +353,9 @@
 		0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */; };
 		ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */; };
 		9432C4F5502844E82680B82D /* SavedMealsTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */; };
+		60AD30993B1BAC692CEB33EE /* SectionEyebrow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */; };
+		85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */; };
+		3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -703,6 +706,9 @@
 		A18CBAA87448B1906C1957FD /* PantryInListPopulatedTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListPopulatedTutorial.swift; sourceTree = "<group>"; };
 		56E929288CDDF57CA12A68ED /* PantryInListEmptyTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryInListEmptyTutorial.swift; sourceTree = "<group>"; };
 		022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsTutorial.swift; sourceTree = "<group>"; };
+		095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEyebrow.swift; sourceTree = "<group>"; };
+		9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirRowDivider.swift; sourceTree = "<group>"; };
+		9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNavigationTitle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -952,6 +958,7 @@
 			isa = PBXGroup;
 			children = (
 				FC78F4C13D0ACA458C7B83DB /* Components */,
+				F728C4D477118D00D7897E93 /* Modifiers */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -1380,10 +1387,12 @@
 				E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */,
 				B05B575B500921F4E51EFB78 /* SavedMealCard.swift */,
 				B15773184EB5F4E8BF129A85 /* SecondaryButton.swift */,
+				095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */,
 				F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */,
 				01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */,
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */,
+				9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
 							3F920935AC9534472392B226 /* TutorialFlowContainer.swift */,
 				5E7F777CF42A785B340434EF /* TutorialStepView.swift */,
@@ -1393,6 +1402,14 @@
 				3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */,
 );
 			path = Components;
+			sourceTree = "<group>";
+		};
+		F728C4D477118D00D7897E93 /* Modifiers */ = {
+			isa = PBXGroup;
+			children = (
+				9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */,
+			);
+			path = Modifiers;
 			sourceTree = "<group>";
 		};
 		FD8B4EC3DEAADA847949BC07 /* Solve */ = {
@@ -1870,6 +1887,7 @@
 				8723DCD40511DF27EDA72454 /* ScanViewModel.swift in Sources */,
 				B03D29307152421E95449EDA /* ScanFlashMode.swift in Sources */,
 				0CC6EF781F17377F12FFF940 /* SecondaryButton.swift in Sources */,
+				60AD30993B1BAC692CEB33EE /* SectionEyebrow.swift in Sources */,
 				7A18D861DEE852A9E77CC785 /* SelectableChip.swift in Sources */,
 				0AC95E13A96F02D33AF25D8C /* SentryReporter.swift in Sources */,
 				B92301183E9FC07571959AE1 /* SentryReporting.swift in Sources */,
@@ -1897,7 +1915,9 @@
 				95A7A5D7A7CB21BF9B90C5AF /* StirDeepLink.swift in Sources */,
 				5E6AC0A940D710330894EB3C /* StirError.swift in Sources */,
 				63CAE82D1AC92EC0A569CE12 /* StirGlyph.swift in Sources */,
+				3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */,
 				C200803A785580A86DBEE427 /* StirNotificationDelegate.swift in Sources */,
+				85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */,
 				A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */,
 				D075C96D81CFEBE670FDFA19 /* SubstitutionEvent+Extensions.swift in Sources */,
 				513376393799D95B45714910 /* SubstitutionRepository.swift in Sources */,

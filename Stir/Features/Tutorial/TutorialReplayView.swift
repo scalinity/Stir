@@ -58,10 +58,10 @@ struct TutorialReplayView: View {
 
     private var tutorialList: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Tutorials")
+            SectionEyebrow("Tutorials")
             VStack(spacing: 0) {
                 ForEach(Array(TutorialKey.allCases.enumerated()), id: \.element) { idx, key in
-                    if idx > 0 { rowDivider }
+                    if idx > 0 { StirRowDivider() }
                     replayRow(for: key)
                 }
             }
@@ -71,7 +71,7 @@ struct TutorialReplayView: View {
 
     private var replayAllButton: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Or all of them")
+            SectionEyebrow("Or all of them")
             SecondaryButton(title: "Replay every tutorial") {
                 coordinator.replayAllTutorials()
                 lastResetKey = nil
@@ -116,17 +116,4 @@ struct TutorialReplayView: View {
         .accessibilityHint(key.replaySubtitle)
     }
 
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.textTertiary)
-            .padding(.horizontal, CGFloat.Stir.space1)
-    }
-
-    private var rowDivider: some View {
-        Rectangle()
-            .fill(Color.Stir.divider)
-            .frame(height: 1)
-            .padding(.leading, CGFloat.Stir.space3Half)
-    }
 }

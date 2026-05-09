@@ -58,15 +58,7 @@ struct NotificationPrefsView: View {
         .background(Color.Stir.paper50)
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Notifications")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .stirNavigationTitle("Notifications")
         // Persistence wiring — `.onChange` fires when @State `prefs`
         // mutates from the toggle's two-way binding. Doesn't fire on
         // initial mount, so the store-seeded values in `.task` don't
@@ -210,14 +202,14 @@ struct NotificationPrefsView: View {
 
     private var typesSection: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Types")
+            SectionEyebrow("Types")
             VStack(spacing: 0) {
                 toggleRow(
                     title: "Cook reminder",
                     subtitle: "If you haven't cooked in a week, a friendly nudge.",
                     isOn: $prefs.reactivation,
                 )
-                rowDivider
+                StirRowDivider()
                 toggleRow(
                     title: "Import completion",
                     subtitle: "Pings you when a long recipe import finishes.",
@@ -269,22 +261,6 @@ struct NotificationPrefsView: View {
         }
         .padding(.horizontal, CGFloat.Stir.space3Half)
         .padding(.vertical, CGFloat.Stir.space3Half)
-    }
-
-    // MARK: - DS primitives
-
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.textTertiary)
-            .padding(.horizontal, CGFloat.Stir.space1)
-    }
-
-    private var rowDivider: some View {
-        Rectangle()
-            .fill(Color.Stir.divider)
-            .frame(height: 1)
-            .padding(.leading, CGFloat.Stir.space3Half)
     }
 
     // MARK: - Permission status

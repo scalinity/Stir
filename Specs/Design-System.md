@@ -439,6 +439,18 @@ The core UI surface. Full-screen, ember-tinted edge glow when voice is active.
 
 Tier comparison uses two stacked cards (Premium / Pro). Current tier (if any) shows a checkmark badge. Selected tier gets an ember border ring. Price shown in display.md, features listed as checklist with sage checkmarks.
 
+### 8.11 Settings primitives (SCA-95)
+
+Three small primitives that compose the grouped-list / form surfaces (Settings, Notifications, Household preferences, OutcomeFeedback, Tutorial replay). Lifted from five feature-local copies into `Stir/DesignSystem/` so future tweaks hit one site instead of drifting forks.
+
+- **`SectionEyebrow(_ text: String, tone: Tone = .standard)`** — `Stir/DesignSystem/Components/SectionEyebrow.swift`. Small uppercase eyebrow above a section. Two tones:
+  - `.standard` — `textTertiary` ink + `space1` horizontal pad. Default. Used by Settings root, Household preferences, Notifications, Tutorial replay. Horizontal pad nudges the eyebrow inboard so it visually aligns with body text inside the adjacent `.stirCard()`, not the card edge.
+  - `.compact` — `ink500` ink, no horizontal pad. Used by `OutcomeFeedbackView` chip sections (full-bleed rows, no card inset).
+- **`StirRowDivider(insetMatchingTile: Bool = false)`** — `Stir/DesignSystem/Components/StirRowDivider.swift`. 1pt hairline (`Color.Stir.divider`) between rows inside a `.stirCard()` group.
+  - `false` (default) — `space3Half` leading inset. Detail-page rows without a leading icon tile (Household, Notifications, Tutorial replay).
+  - `true` — `space3Half + 32 + space3` leading inset. Settings tile-fronted rows where the divider must start at the title baseline so the hairline doesn't underrun the 32×32 ember tile (mockup 14). Exposes `StirRowDivider.iconTileSize = 32` so the consumer's tile + sync-dot framing can stay aligned.
+- **`.stirNavigationTitle(_ title: String)`** — `Stir/DesignSystem/Modifiers/StirNavigationTitle.swift`. View modifier that renders `title` in the Stir display serif via a `.principal` `ToolbarItem`, plus the matching paper50 toolbar background. Pairs with `.navigationBarTitleDisplayMode(.inline)` at the call site (Saved bypasses the bar entirely with `.safeAreaInset(.top)` so it doesn't use this modifier — that's intentional and matches the cross-tab catalog).
+
 ---
 
 ## 9. Screens catalog (v1 inventory)

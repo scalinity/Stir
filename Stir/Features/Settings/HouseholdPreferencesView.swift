@@ -64,21 +64,15 @@ struct HouseholdPreferencesView: View {
         }
         .navigationTitle("Household preferences")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // Principal item renders the screen title in the Stir
-            // display serif, matching `SettingsRootView` and Saved.
-            // The default `navigationTitle` chrome would fall back to
-            // SF Pro and break cross-tab visual rhythm. Removing the
-            // trailing `Done` button (auto-save replaces it) frees
-            // the bar's full width so this title no longer truncates.
-            ToolbarItem(placement: .principal) {
-                Text("Household preferences")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        // Principal-item title in the Stir display serif via the lifted
+        // `.stirNavigationTitle` modifier (SCA-95). Pairs with the
+        // `.inline` display mode above; both are required because the
+        // system bar renders the navigationTitle text and we then layer
+        // a serif-styled principal item on top to match `SettingsRootView`
+        // and Saved. Removing the trailing `Done` button (auto-save
+        // replaces it) frees the bar's full width so this title no
+        // longer truncates.
+        .stirNavigationTitle("Household preferences")
         .task {
             guard viewModel == nil else { return }
             if let profile = householdStore.profile {
@@ -162,7 +156,7 @@ struct HouseholdPreferencesView: View {
         // projection is scope-local).
         @Bindable var bindable = viewModel
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Dietary")
+            SectionEyebrow("Dietary")
             VStack(spacing: 0) {
                 navigationValueRow(
                     title: "Allergies",
@@ -176,7 +170,7 @@ struct HouseholdPreferencesView: View {
                         )
                     },
                 )
-                rowDivider
+                StirRowDivider()
                 navigationValueRow(
                     title: "Diet",
                     value: countLabel(bindable.selectedDiets.count),
@@ -189,7 +183,7 @@ struct HouseholdPreferencesView: View {
                         )
                     },
                 )
-                rowDivider
+                StirRowDivider()
                 navigationValueRow(
                     title: "Goals",
                     value: countLabel(bindable.selectedGoals.count),
@@ -211,7 +205,7 @@ struct HouseholdPreferencesView: View {
     private func equipmentSection(viewModel: OnboardingViewModel) -> some View {
         @Bindable var bindable = viewModel
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Equipment")
+            SectionEyebrow("Equipment")
             navigationValueRow(
                 title: "Equipment",
                 value: countLabel(bindable.selectedEquipment.count),
@@ -231,10 +225,10 @@ struct HouseholdPreferencesView: View {
     @ViewBuilder
     private func servingsSection(viewModel: OnboardingViewModel) -> some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-            sectionEyebrow("Serving")
+            SectionEyebrow("Serving")
             VStack(spacing: 0) {
                 servingsStepperRow(viewModel: viewModel)
-                rowDivider
+                StirRowDivider()
                 unitsPickerRow(viewModel: viewModel)
             }
             .stirCard()
@@ -291,7 +285,7 @@ struct HouseholdPreferencesView: View {
             VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                 VStack(spacing: 0) {
                     ForEach(options.indices, id: \.self) { i in
-                        if i > 0 { rowDivider }
+                        if i > 0 { StirRowDivider() }
                         let option = options[i]
                         pickerRow(
                             label: label(option),
@@ -315,15 +309,7 @@ struct HouseholdPreferencesView: View {
         .background(Color.Stir.paper50)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(title)
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .stirNavigationTitle(title)
     }
 
     private func pickerRow(
@@ -354,25 +340,7 @@ struct HouseholdPreferencesView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - DS primitives
-
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .stirFont(.labelEyebrow)
-            .foregroundStyle(Color.Stir.textTertiary)
-            .padding(.horizontal, CGFloat.Stir.space1)
-    }
-
-    private var rowDivider: some View {
-        // Detail-page rows in this view don't carry a leading icon
-        // tile (matches mockup 14's Allergens / Voice detail screens),
-        // so the divider is inset only by the row's horizontal
-        // padding instead of the tile-column inset Settings uses.
-        Rectangle()
-            .fill(Color.Stir.divider)
-            .frame(height: 1)
-            .padding(.leading, CGFloat.Stir.space3Half)
-    }
+    // MARK: - Drill-in row primitives
 
     /// Static value-row content for navigation-link drill-ins:
     /// title (leading) + value preview + chevron (trailing). No
