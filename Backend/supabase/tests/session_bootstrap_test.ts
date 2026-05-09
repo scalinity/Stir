@@ -3,6 +3,29 @@
 // Requires: `supabase start` + `supabase functions serve --env-file .env`
 // running locally. Tests hit real HTTP and a real Postgres through the
 // service-role client for verification. `supabase db reset` fresh-starts.
+//
+// CloudKit identity testing strategy (SCA-260 / W12 from /review-5):
+// - The `verifyCloudKitIdentity` function supports `fetchImpl` injection
+//   (see `cloudkit_identity_test.ts` for verified, missing-token, timeout,
+//   401, 5xx, malformed-JSON, record-mismatch, verifier-unconfigured, and
+//   strip-shape contract tests covering every CloudKitVerificationReason
+//   variant).
+// - This integration suite drives the verifier through real HTTP
+//   (no DI seam in `session-bootstrap/index.ts` for the verifier path)
+//   so its CK assertions stay narrow:
+//   * "happy path install-only" — no CK claim, exercises install:<uuid>
+//     resolution.
+//   * "unverified CloudKit claim falls back to install identity" — sends
+//     `cloudkit_user_record_name` WITHOUT `cloudkit_web_auth_token`, so
+//     the verifier returns `missing_web_auth_token` and strips the
+//     claim. Trust-mode (SCA-245) does NOT preserve on this reason —
+//     it only carve-outs `verifier_unconfigured`. Test stays valid.
+// - The `alias forward install → ck` test is `ignore: true` because it
+//   needs a verified-CK path end-to-end through HTTP, which requires
+//   either (a) live CLOUDKIT_API_TOKEN + a known-valid ckWebAuthToken
+//   (flaky), or (b) bootstrap-level DI for the verifier (refactor
+//   not yet shipped). Re-enable when (b) lands or when a stable test
+//   fixture for (a) materializes.
 
 import { assertEquals, assertExists } from '@std/assert';
 import { callBootstrap, quickBootstrap, testCkRecord, testInstallId } from './_helpers/factory.ts';
@@ -37,7 +60,15 @@ Deno.test('session-bootstrap: happy path install-only', async () => {
   assertExists(res.session_jwt);
 });
 
-Deno.test('session-bootstrap: unverified CloudKit claim falls back to install identity', async () => {
+Deno.test('session-bootstrap: unverified CloudKit claim (missing web_auth_token) falls back to install identity', async () => {
+  // SCA-260 (W12 from /review-5) — clarified test name. The body
+  // sends `cloudkit_user_record_name` WITHOUT `cloudkit_web_auth_token`;
+  // verifier returns `missing_web_auth_token`; bodyWithVerifiedCloudKitOnly
+  // strips both fields → canonical key resolves to install:<uuid>.
+  // SCA-245 trust-mode does NOT engage here (it only carve-outs
+  // `verifier_unconfigured`, not `missing_web_auth_token`); the
+  // test remains a true regression guard for the strip-on-failure
+  // path even with the C2 trust-mode shipped.
   const installId = testInstallId();
   const ck = testCkRecord();
   const res = await quickBootstrap({
@@ -49,6 +80,17 @@ Deno.test('session-bootstrap: unverified CloudKit claim falls back to install id
   assertEquals(res.is_new_user, true);
 });
 
+// SCA-260 (W12 from /review-5): re-enable trigger documented at
+// the top of this file. Until session-bootstrap accepts a fetchImpl
+// override for the verifier path (or until a stable live-CK test
+// fixture exists), the verified-CK alias-forward path is exercised
+// in `cloudkit_identity_test.ts` at the unit level — both the
+// `matching users/caller record verifies` test (proves the verified
+// shape) and the `record_mismatch still strips BOTH` test (proves
+// the rejected shape). The full alias-forward DB pipeline downstream
+// of resolution is exercised by other tests in this file (the merge
+// path under `install→ck banned`, the BILL-01 path, etc.) using
+// out-of-band DB seed inserts that bypass the verifier entirely.
 Deno.test({
   name: 'session-bootstrap: alias forward install → ck (requires live CloudKit verifier)',
   ignore: true,

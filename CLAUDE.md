@@ -309,6 +309,8 @@ When changing a prompt, bump `prompt_versions.version` semver and start `rollout
 
 **Multi-commit verifies in a worktree** must reckon with `supabase start`'s edge-runtime mount being bound to the directory the stack was started in — tests POSTing to edge functions hit the main-checkout's handler code, not the worktree's. Decision tree + Path A skip-list workflow + Path B full-restart workflow + ideal-fix triggers in `docs/runbooks/isolated-worktree-verification.md`.
 
+**Backend/supabase ergonomics** — `cd Backend/supabase` before any `supabase` CLI command (or pass `--workdir Backend/supabase`); running from repo root auto-generates a stray `supabase/` shadowing the real config. First-of-day step: `cp .env functions/.env` so the edge-runtime container can read secrets. Full reference + gotchas + local-vs-prod project ref discipline in `Backend/supabase/README.md`.
+
 ---
 
 ## Git workflow
