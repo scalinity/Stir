@@ -116,6 +116,32 @@ struct TonightHomeView: View {
             activeModal = .scan
             coordinator.clearDeepLinkScan()
         }
+        // S18 from /review-5 (parent SCA-243): pendingUseSoonPrefill
+        // onChange has a narrow race with `.task { await refreshState() }`
+        // on cold-launch deep-links. If a use-soon notification tap
+        // wakes the app and onChange fires before `refreshState()` has
+        // populated `useSoonCandidate`, `handleUseSoonPrefill`'s no-ID
+        // branch reads a nil fallback and toasts "no longer in your
+        // pantry" even when an eligible ingredient exists. Bounded
+        // failure mode:
+        //   - Pantry-ID branch (notification with use_first=<uuid>):
+        //     unaffected — fetches household-scoped via
+        //     pantryItemRepository.fetch(id:for:); independent of
+        //     useSoonCandidate. SCA-259 (W11) tightened that path so
+        //     a stale ID also produces the toast rather than a
+        //     wrong-row substitution.
+        //   - No-ID branch (older notifications, future generic
+        //     "open with displayed candidate"): reads
+        //     useSoonCandidate?.displayName, may be nil during the
+        //     pre-refreshState window. Toast on miss is the right
+        //     UX — the user retries by foreground-relaunching.
+        // The race is non-deterministic but always fail-soft (toast,
+        // never wrong-row). Documenting here rather than `await`-ing
+        // refreshState synchronously because (a) the toast is the
+        // correct failure mode and (b) blocking the onChange handler
+        // on a Core Data refresh would stall the SwiftUI render
+        // pass for measurably longer than the cold-launch is willing
+        // to wait.
         .onChange(of: coordinator.pendingUseSoonPrefill) { _, entry in
             guard let entry else { return }
             handleUseSoonPrefill(entry)
