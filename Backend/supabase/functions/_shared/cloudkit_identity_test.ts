@@ -212,3 +212,54 @@ Deno.test('bodyWithVerifiedCloudKitOnly: verified=true returns body verbatim', (
   assertEquals(passed.cloudkit_user_record_name, CK_RECORD);
   assertEquals(passed.cloudkit_web_auth_token, 'web-auth-token');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-245 (C2 from /review-5): rollout-trust mode for verifier_unconfigured
+// ---------------------------------------------------------------------------
+
+Deno.test('bodyWithVerifiedCloudKitOnly: verifier_unconfigured PRESERVES record_name (rollout-trust mode)', () => {
+  // Pre-C2: this case stripped both fields, silently shifting every
+  // pre-SCA-136 ck:<record> user to install:<uuid> if the token
+  // wasn't pre-set on prod. Post-C2: record_name preserved so
+  // canonical-key resolution still produces ck:<record>; token
+  // stripped because it's unverifiable.
+  const original = body({
+    cloudkit_user_record_name: CK_RECORD,
+    cloudkit_web_auth_token: 'web-auth-token',
+  });
+  const trusted = bodyWithVerifiedCloudKitOnly(original, {
+    verified: false,
+    reason: 'verifier_unconfigured',
+    claimedRecordName: CK_RECORD,
+  });
+  assertEquals(trusted.cloudkit_user_record_name, CK_RECORD);
+  assertEquals(trusted.cloudkit_web_auth_token, undefined);
+});
+
+Deno.test('bodyWithVerifiedCloudKitOnly: record_mismatch still strips BOTH (active failure ≠ rollout-trust)', () => {
+  const original = body({
+    cloudkit_user_record_name: CK_RECORD,
+    cloudkit_web_auth_token: 'web-auth-token',
+  });
+  const stripped = bodyWithVerifiedCloudKitOnly(original, {
+    verified: false,
+    reason: 'record_mismatch',
+    claimedRecordName: CK_RECORD,
+  });
+  assertEquals(stripped.cloudkit_user_record_name, undefined);
+  assertEquals(stripped.cloudkit_web_auth_token, undefined);
+});
+
+Deno.test('bodyWithVerifiedCloudKitOnly: cloudkit_rejected still strips BOTH (active failure ≠ rollout-trust)', () => {
+  const original = body({
+    cloudkit_user_record_name: CK_RECORD,
+    cloudkit_web_auth_token: 'web-auth-token',
+  });
+  const stripped = bodyWithVerifiedCloudKitOnly(original, {
+    verified: false,
+    reason: 'cloudkit_rejected',
+    claimedRecordName: CK_RECORD,
+  });
+  assertEquals(stripped.cloudkit_user_record_name, undefined);
+  assertEquals(stripped.cloudkit_web_auth_token, undefined);
+});

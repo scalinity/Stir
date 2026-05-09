@@ -59,6 +59,11 @@ export async function verifyCloudKitIdentity(
 
   const apiToken = deps.apiToken ?? Deno.env.get('CLOUDKIT_API_TOKEN');
   if (apiToken == null || apiToken.trim() === '') {
+    // SCA-245 (C2 from /review-5) + SCA-271 (S5): once-per-isolate
+    // stderr warn so a misconfigured prod is noisy in function logs
+    // even before any caller surfaces the reason. Mirrors the
+    // LOG_IP_SALT warn-once pattern in rate_limiter.ts.
+    warnOnceCloudKitApiTokenMissing();
     return { verified: false, reason: 'verifier_unconfigured', claimedRecordName };
   }
 
@@ -147,14 +152,45 @@ export function bodyWithVerifiedCloudKitOnly(
   // Latent today (no downstream consumer reads the token past the
   // verifier) but breaks the helper's contract: "return a body with no
   // unverified CloudKit fields." Now: only the verified-CK happy path
-  // returns body verbatim; every other path strips both fields.
+  // returns body verbatim; every other path strips at least the token.
   if (verification.verified) return body;
+  // SCA-245 (C2 from /review-5): rollout-window trust mode. When the
+  // verifier is unconfigured (CLOUDKIT_API_TOKEN unset on prod), the
+  // server is no better positioned to validate a CK claim than any
+  // pre-SCA-136 build was — i.e. we're equivalent to "trust the
+  // claim", which is backward-compat with every iOS install that
+  // shipped before the verifier landed. Stripping `record_name`
+  // unconditionally here is what made SCA-136's deploy a one-way
+  // identity-shift for the entire CK user base if Daniel forgot to
+  // pre-set the token. Carve-out: on `verifier_unconfigured` we
+  // PRESERVE `cloudkit_user_record_name` (so the canonical key
+  // resolves to `ck:<record>` like it always did) but STRIP
+  // `cloudkit_web_auth_token` (it was unverifiable anyway, and any
+  // future consumer must not see an unvalidated token). All other
+  // unverified reasons (record_mismatch, cloudkit_rejected,
+  // cloudkit_timeout, missing_web_auth_token, not_requested) still
+  // strip both fields — those are active-verifier failures that
+  // mean Apple either disagreed with the claim or we couldn't
+  // confirm it, which is fail-closed territory.
+  if (verification.reason === 'verifier_unconfigured') {
+    const { cloudkit_web_auth_token: _token, ...recordOnly } = body;
+    return recordOnly;
+  }
   const {
     cloudkit_user_record_name: _recordName,
     cloudkit_web_auth_token: _token,
     ...installOnly
   } = body;
   return installOnly;
+}
+
+let _cloudkitApiTokenWarned = false;
+function warnOnceCloudKitApiTokenMissing(): void {
+  if (_cloudkitApiTokenWarned) return;
+  _cloudkitApiTokenWarned = true;
+  console.warn(
+    '[cloudkit_identity] CLOUDKIT_API_TOKEN not set; CloudKit identity verification is in rollout-trust mode (claims preserved, tokens stripped). Set CLOUDKIT_API_TOKEN via `supabase secrets set CLOUDKIT_API_TOKEN=<value>` and deploy session-bootstrap to activate fail-closed verification (SCA-245).',
+  );
 }
 
 function cloudKitEnvironmentFromEnv(): 'development' | 'production' {

@@ -160,6 +160,16 @@ Deno.serve(async (req) => {
     cloudkit_verification: cloudKitVerification.reason,
     cloudkit_upstream_status: cloudKitVerification.upstreamStatus,
   });
+  // SCA-245 (C2 from /review-5): elevate `verifier_unconfigured` to
+  // warn so a misconfigured prod is loud in dashboards. Until the
+  // CLOUDKIT_API_TOKEN secret is set + session-bootstrap is
+  // redeployed, every CK-claiming bootstrap silently runs in
+  // rollout-trust mode (claim preserved, token stripped).
+  if (cloudKitVerification.reason === 'verifier_unconfigured') {
+    userLog.warn('cloudkit_verifier_unconfigured', {
+      source_type: resolution.source_type,
+    });
+  }
 
   try {
     let isNewUser = false;
