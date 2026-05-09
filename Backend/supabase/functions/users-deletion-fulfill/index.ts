@@ -406,11 +406,27 @@ async function processOne(
   requestId: string = crypto.randomUUID(),
   stepOverrides: Partial<StepFunctions> = {},
 ): Promise<'completed' | 'partial' | 'failed'> {
+  // S15 from /review-5 (parent SCA-243): defensive object-shape
+  // guard on `external_refs_json`. The column is JSONB and the
+  // schema's CHECK does not constrain it to an object — a manual
+  // SQL UPDATE could write a string, number, or array. Today the
+  // worker is the only writer and the migration declares default
+  // `'{}'::jsonb`, so the realistic risk is zero. But subsequent
+  // assignments like `ctx.refs.posthog = …` would throw a
+  // `TypeError: Cannot create property on string` if the JSONB
+  // ever held a non-object. Cheap belt: confirm typeof object,
+  // not null, and not an array before using; otherwise treat as
+  // missing and start fresh.
+  const rawRefs: unknown = row.external_refs_json;
+  const refs: ExternalRefs =
+    typeof rawRefs === 'object' && rawRefs !== null && !Array.isArray(rawRefs)
+      ? (rawRefs as ExternalRefs)
+      : {};
   const ctx: FulfillContext = {
     rowId: row.id,
     canonicalUserKey: row.canonical_user_key,
     canonicalUserKeyHash: row.canonical_user_key_hash,
-    refs: row.external_refs_json ?? {},
+    refs,
     log,
     requestId,
   };
