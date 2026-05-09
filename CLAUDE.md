@@ -268,7 +268,7 @@ Property notes (full contracts in spec §15):
 
 ```
 ops_admin.users.{list_queried, detail_viewed, quota_reset, status_changed, force_reauth}
-ops_admin.flagged_outputs.resolved
+ops_admin.flagged_outputs.{created, resolved}
 ops_admin.prompt_versions.rollout
 ops_admin.feature_flags.updated
 ops_admin.deletion_requests.{list_queried, approved}
