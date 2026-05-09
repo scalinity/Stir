@@ -90,6 +90,9 @@
 		4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CC0200F54DD79B24299BCF /* TonightHomeView.swift */; };
 		B5F4E3C2A1908A7B6C5D4E3F /* OtherOptionsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */; };
 		3E42716F0CD185D6212FBE1F /* TonightCoverHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3904AD5DD3CC80C08574BC /* TonightCoverHost.swift */; };
+		D068B150DF3247BE85B3AC6B /* UseSoonCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CCC15CCFD7BEBC52F682C2E /* UseSoonCard.swift */; };
+		22935AA86A5FFC54AF93C629 /* WidgetNudgeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AD282914E74B7BCA9A3E2B /* WidgetNudgeCard.swift */; };
+		03565515378FA829E9EB6D48 /* WidgetSetupGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC12CFB7C4F0E69CA53BF1D /* WidgetSetupGuideView.swift */; };
 		482A2F31B55D16103EC1FA87 /* CloudKitAccountMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81FCD69FD54A65576C313EE2 /* CloudKitAccountMonitor.swift */; };
 		49C51EEBB4AA6C51B4E4CB34 /* LiveAudioPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151133441B87DA5FA6CC975E /* LiveAudioPipeline.swift */; };
 		4A1FAB853D85EE8116CAB750 /* OutcomeFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */; };
@@ -439,6 +442,9 @@
 		34CC0200F54DD79B24299BCF /* TonightHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightHomeView.swift; sourceTree = "<group>"; };
 		C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtherOptionsRoot.swift; sourceTree = "<group>"; };
 		BE3904AD5DD3CC80C08574BC /* TonightCoverHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TonightCoverHost.swift; sourceTree = "<group>"; };
+		5CCC15CCFD7BEBC52F682C2E /* UseSoonCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseSoonCard.swift; sourceTree = "<group>"; };
+		11AD282914E74B7BCA9A3E2B /* WidgetNudgeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeCard.swift; sourceTree = "<group>"; };
+		6DC12CFB7C4F0E69CA53BF1D /* WidgetSetupGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSetupGuideView.swift; sourceTree = "<group>"; };
 		37216544E460CDD56A4AFF6D /* RealtimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSession.swift; sourceTree = "<group>"; };
 		2A75F5CB3183A15F69F8EFC6 /* RealtimeSessionAudioIO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionAudioIO.swift; sourceTree = "<group>"; };
 		20D0F788F5EA77E4C4147F4E /* RealtimeSessionTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionTransport.swift; sourceTree = "<group>"; };
@@ -957,6 +963,9 @@
 				34CC0200F54DD79B24299BCF /* TonightHomeView.swift */,
 				C6E5F4D3B2A1907A8B7C6D5E /* OtherOptionsRoot.swift */,
 				BE3904AD5DD3CC80C08574BC /* TonightCoverHost.swift */,
+				5CCC15CCFD7BEBC52F682C2E /* UseSoonCard.swift */,
+				11AD282914E74B7BCA9A3E2B /* WidgetNudgeCard.swift */,
+				6DC12CFB7C4F0E69CA53BF1D /* WidgetSetupGuideView.swift */,
 			);
 			path = Tonight;
 			sourceTree = "<group>";
@@ -1889,6 +1898,9 @@
 				4746D7D70EC3F009CA0C1DB0 /* TonightHomeView.swift in Sources */,
 				B5F4E3C2A1908A7B6C5D4E3F /* OtherOptionsRoot.swift in Sources */,
 				3E42716F0CD185D6212FBE1F /* TonightCoverHost.swift in Sources */,
+				D068B150DF3247BE85B3AC6B /* UseSoonCard.swift in Sources */,
+				22935AA86A5FFC54AF93C629 /* WidgetNudgeCard.swift in Sources */,
+				03565515378FA829E9EB6D48 /* WidgetSetupGuideView.swift in Sources */,
 				BAE68A81DE3914972A55E2C5 /* TonightSnapshot.swift in Sources */,
 				BDB6D6710EDF448E5C2E154A /* TonightSnapshotService.swift in Sources */,
 				A3F7C6232C29044444C18041 /* Typography.swift in Sources */,
