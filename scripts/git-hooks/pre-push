@@ -1,8 +1,9 @@
 #!/bin/bash
 #
-# Pre-push hook — runs the full xcodebuild test suite before allowing
-# a push. Wired in via `git config core.hooksPath scripts/git-hooks/`
-# (see scripts/install-git-hooks.sh).
+# Pre-push hook — runs the full xcodebuild test suite + the Deno
+# backend test suite before allowing a push. Wired in via
+# `git config core.hooksPath scripts/git-hooks/` (see
+# scripts/install-git-hooks.sh).
 #
 # Rationale (SCA-181): SCA-176 (PaywallTelemetry source key) and
 # SCA-177 (PantryListVM searchText vs effectiveSearchText) both shipped
@@ -11,15 +12,27 @@
 # The full StirTests suite takes ~17s — small enough for a pre-push
 # gate.
 #
+# SCA-220: extended with the deno-test side. Without it, a backend-
+# only commit that breaks Backend/supabase/tests/ can land on main
+# without the iOS hook noticing — the same red-main hazard SCA-181
+# fixed for iOS.
+#
 # Behavior:
-#   - Runs xcodebuild test -scheme Stir on iPhone 17 Pro simulator.
+#   - Stage 1: xcodebuild test -scheme Stir on iPhone 17 Pro simulator.
+#   - Stage 2: deno test --config Backend/supabase/functions/deno.json
+#             --allow-all Backend/supabase/tests/ — IF the local
+#             Supabase stack (localhost:54321) is reachable. Otherwise
+#             warn loudly and skip; the hook can't run tests against
+#             a stack that isn't running, and forcing `supabase start`
+#             before every push would be untenable friction.
 #   - Skipped on tag-only pushes and on delete-only pushes.
-#   - Aborts the push if any test fails OR if zero tests executed
-#     (a passing build with zero tests means the gate is broken;
+#   - Aborts the push if any test fails OR if iOS reports zero tests
+#     (a passing iOS build with zero tests means the gate is broken;
 #     SCA-185 review-CR-C2).
-#   - SKIP_PREPUSH_TESTS=1 + SKIP_PREPUSH_REASON='…' bypasses; both
-#     are required (SCA-188 review-CR-W4 makes the audit trail loud
-#     so override fatigue can't drift unnoticed).
+#   - Override pattern (matches SCA-188 require-both-vars discipline):
+#       SKIP_PREPUSH_TESTS=1 + SKIP_PREPUSH_REASON='…'  → skip BOTH
+#       SKIP_PREPUSH_DENO_TESTS=1                       → skip deno only
+#                                                          (iOS still runs)
 
 set -euo pipefail
 
@@ -92,9 +105,95 @@ COUNT="$(echo "$COUNT_LINE" | sed -E 's/.*Executed ([0-9]+) tests.*/\1/' 2>/dev/
 
 if [ "$EXIT" = "0" ] && [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]; then
     SUMMARY="$(echo "$COUNT_LINE" | sed -E 's/.*(Executed [0-9]+ tests, with [0-9]+ failures).*/\1/' || true)"
-    echo "[pre-push] ✅ ${SUMMARY:-tests passed}"
+    echo "[pre-push] ✅ iOS: ${SUMMARY:-tests passed}"
+    # iOS green — fall through to the deno test stage (SCA-220).
+    IOS_PASSED=1
+fi
+
+# Only continue past here on iOS-pass. iOS-fail flows to the failure
+# branch below and exits 1 before reaching the deno stage.
+if [ "${IOS_PASSED:-0}" = "1" ]; then
+
+# === Stage 2: deno test (SCA-220) =====================================
+#
+# Run the full Backend/supabase/tests/ suite against the local Supabase
+# stack. Skips with a loud warn when the stack isn't reachable — Daniel
+# doesn't always have `supabase start` running; forcing it before every
+# push would be friction the hook can't justify. SCA-128's edge-runtime
+# Path A caveat applies (the running supabase container's mount may not
+# be the verify SHA's tree) but for git-hook purposes that's fine —
+# we're catching "did backend tests pass at commit author time", not
+# "do they pass against this exact tree in CI".
+
+if [ "${SKIP_PREPUSH_DENO_TESTS:-0}" = "1" ]; then
+    echo "[pre-push] ⚠️  deno test skipped via SKIP_PREPUSH_DENO_TESTS=1"
     exit 0
 fi
+
+# Probe the local supabase stack. Default supabase-cli port is 54321.
+# `--max-time 2` keeps the probe under 2s on cold-DNS.
+if ! curl -s -o /dev/null --max-time 2 "http://127.0.0.1:54321/rest/v1/"; then
+    echo "[pre-push] ⚠️  local Supabase stack not reachable on http://127.0.0.1:54321"
+    echo "  skipping deno tests (the hook can't run them against a stopped stack)"
+    echo "  start the stack with:    supabase start"
+    echo "  or push with explicit:   SKIP_PREPUSH_DENO_TESTS=1 git push"
+    exit 0
+fi
+
+echo "[pre-push] running deno test against Backend/supabase/tests/ (~30s)…"
+
+DENOLOG="$(mktemp -t stir-prepush-deno-XXXXXX)"
+# Append the deno log to the existing iOS log cleanup trap.
+trap 'rm -f "$TMPLOG" "$DENOLOG"' EXIT
+
+set +e
+deno test \
+    --config Backend/supabase/functions/deno.json \
+    --allow-all \
+    Backend/supabase/tests/ \
+    > "$DENOLOG" 2>&1
+DENO_EXIT="$?"
+set -e
+
+# `deno test` summary line shape:
+#   "ok | 124 passed | 0 failed (12s)"
+#   "FAILED | 122 passed | 2 failed (12s)"
+# Parse the count for the gate-broken-on-zero check (SCA-185 parity).
+DENO_SUMMARY="$(grep -E '^(ok|FAILED) \| [0-9]+ passed \| [0-9]+ failed' "$DENOLOG" | tail -1 || true)"
+DENO_PASSED="$(echo "$DENO_SUMMARY" | sed -E 's/.*\| ([0-9]+) passed \|.*/\1/' 2>/dev/null || echo "")"
+DENO_FAILED="$(echo "$DENO_SUMMARY" | sed -E 's/.*\| ([0-9]+) failed.*/\1/' 2>/dev/null || echo "")"
+
+if [ "$DENO_EXIT" = "0" ] && [ -n "$DENO_PASSED" ] && [ "$DENO_PASSED" -gt 0 ] && [ "${DENO_FAILED:-0}" = "0" ]; then
+    echo "[pre-push] ✅ deno: $DENO_SUMMARY"
+    exit 0
+fi
+
+# Failure path for deno stage.
+echo "[pre-push] ❌ push blocked — deno tests failed"
+echo
+if [ "$DENO_EXIT" = "0" ] && [ "${DENO_PASSED:-0}" = "0" ]; then
+    echo "  reason: deno test exited 0 but ran 0 tests — gate broken."
+elif [ -n "$DENO_SUMMARY" ]; then
+    echo "  reason: $DENO_SUMMARY"
+else
+    echo "  reason: deno test exited $DENO_EXIT with no parseable summary line"
+fi
+echo
+echo "--- last 80 lines of deno test log ---"
+tail -n 80 "$DENOLOG"
+echo
+echo "Re-run locally with:"
+echo "  cd Backend/supabase && deno test --config functions/deno.json --allow-all tests/"
+echo
+echo "Emergency override (requires reason; documented in commit):"
+echo "  SKIP_PREPUSH_TESTS=1 SKIP_PREPUSH_REASON='…' git push"
+echo "  (or skip ONLY deno: SKIP_PREPUSH_DENO_TESTS=1 git push)"
+exit 1
+
+fi # end IOS_PASSED guard
+
+# Below here only reachable on iOS failure — falls into the existing
+# iOS-failure reporting block.
 
 # Failure path. Reason out which kind and what failed.
 echo "[pre-push] ❌ push blocked"
