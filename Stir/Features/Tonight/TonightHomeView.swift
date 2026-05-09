@@ -862,11 +862,18 @@ struct TonightHomeView: View {
                 return now.timeIntervalSince(endedAt) <= 14 * 86_400
             }
             .count
-        if widgetNudgeVisible,
-           !coordinator.widgetNudgeService.isPermanentlyDismissed,
-           coordinator.widgetNudgeService.lastWidgetTap == nil {
-            return
-        }
+        // SCA-254 (W6 from /review-5): always re-evaluate shouldShowNudge.
+        // Pre-fix, an early-return when widgetNudgeVisible was already
+        // true skipped the eligibility re-check on every refresh, so a
+        // server-side `widget_nudge_enabled` flip-to-false (kill switch)
+        // OR `sessionsInLast14Days` aging out below the threshold left
+        // the card visible until the user dismissed or tab-switched.
+        // Now: shouldShowNudge is the single source of truth on every
+        // refresh. The wasShown guard below keeps `markShown` (which
+        // emits widget_nudge_shown telemetry) firing only on the
+        // false→true transition, not on every refresh while the card
+        // is already up.
+        let wasShown = widgetNudgeVisible
         guard coordinator.widgetNudgeService.shouldShowNudge(
             now: now,
             sessionsInLast14Days: recentCount,
@@ -876,7 +883,9 @@ struct TonightHomeView: View {
             return
         }
         widgetNudgeVisible = true
-        coordinator.widgetNudgeService.markShown(at: now)
+        if !wasShown {
+            coordinator.widgetNudgeService.markShown(at: now)
+        }
     }
 
     // MARK: - Kill switch
