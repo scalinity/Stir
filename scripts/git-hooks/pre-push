@@ -243,11 +243,15 @@ DENOLOG="$(mktemp -t stir-prepush-deno-XXXXXX)"
 trap 'rm -f "$TMPLOG" "$DENOLOG"' EXIT
 
 set +e
-deno test \
-    --config Backend/supabase/functions/deno.json \
+# SCA-284: cwd must be Backend/supabase — telemetry_canonical_test.ts +
+# realtime_session_test.ts use relative paths like
+# `functions/realtime-session/index.ts` that resolve only from there.
+# Running with absolute-path test args from the repo root drops 11 tests
+# in the path-relative tier even though the rest of the suite is green.
+(cd Backend/supabase && deno test \
+    --config functions/deno.json \
     --allow-all \
-    Backend/supabase/tests/ \
-    > "$DENOLOG" 2>&1
+    tests/) > "$DENOLOG" 2>&1
 DENO_EXIT="$?"
 set -e
 
