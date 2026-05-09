@@ -66,6 +66,18 @@ extension KeychainKey {
     /// bumping the account name instead gives us an explicit cutover and a
     /// one-time delete of the legacy slot on service init (see
     /// `EntitlementService.restoreFromCachedSnapshotIfFresh`).
+    ///
+    /// v3 — SCA-207 sunset. `BootstrapResponse.Entitlements.standingPantryCap`
+    /// flipped from `Int?` to `Int`, so `PersistedSnapshot.serverStandingPantryCap`
+    /// must too. A v2 snapshot decoded against the v3 struct would carry
+    /// nil through `optional → required` and crash; bump the slot and
+    /// delete v2 on init.
+    static var entitlementSnapshotV3: KeychainKey {
+        KeychainKey(service: defaultService, account: "entitlement_snapshot_v3")
+    }
+
+    /// Legacy v2 slot. Deleted on EntitlementService init; never written
+    /// post-SCA-207.
     static var entitlementSnapshotV2: KeychainKey {
         KeychainKey(service: defaultService, account: "entitlement_snapshot_v2")
     }

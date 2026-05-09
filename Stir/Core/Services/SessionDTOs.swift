@@ -53,16 +53,15 @@ struct BootstrapResponse: Decodable, Sendable, Equatable {
         let expiresAt: Date?
         let voiceEnabled: Bool
         let billingRetryBanner: Bool
-        /// SCA-100: standing pantry-item cap shipped from the server
-        /// (was iOS-side `Tier.rememberedPantryCap`). Optional on the
-        /// wire so a pre-SCA-100 server response (legacy bootstrap
-        /// pinned in cached integration tests, in-flight rolling
-        /// deploy) decodes cleanly — `EntitlementService` falls back
-        /// to `Tier.rememberedPantryCap` when nil. Once the SCA-100
-        /// server change is live for a release cycle, this can flip
-        /// to non-optional and the iOS fallback table can shrink to
-        /// "panic value 25" or be deleted.
-        let standingPantryCap: Int?
+        /// Server-shipped standing-pantry-item cap (SCA-100). Resolved
+        /// against `effectiveTier(entitlement)` in
+        /// `Backend/supabase/functions/_shared/entitlements.ts` so a
+        /// stale RevenueCat row with `billing_state='expired'` correctly
+        /// demotes before the wire. SCA-207 sunset: this used to be
+        /// `Int?` with an iOS-side `Tier.rememberedPantryCap` fallback
+        /// for in-flight rolling-deploy / pre-SCA-100 server responses;
+        /// post-rollout the field is required.
+        let standingPantryCap: Int
         let quotas: [Quota]
 
         enum CodingKeys: String, CodingKey {

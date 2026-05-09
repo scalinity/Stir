@@ -616,7 +616,13 @@ final class CookModeVoiceIntegrationTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: billingState == .active && tier != .free,
             billingRetryBanner: false,
-            standingPantryCap: nil,
+            standingPantryCap: {
+                switch tier {
+                case .free: return 25
+                case .premium: return 250
+                case .pro: return 1_000
+                }
+            }(),
             quotas: [
                 BootstrapResponse.Quota(featureKey: .voiceCookSession, used: 0, cap: 20, periodEnd: "2027-01-01"),
             ],

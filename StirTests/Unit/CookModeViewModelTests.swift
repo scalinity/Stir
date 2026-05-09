@@ -1036,7 +1036,7 @@ final class CookModeViewModelTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: true,
             billingRetryBanner: false,
-            standingPantryCap: nil,
+            standingPantryCap: 250,
             quotas: [
                 BootstrapResponse.Quota(
                     featureKey: .voiceCookSession,

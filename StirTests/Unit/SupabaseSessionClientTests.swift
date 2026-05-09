@@ -259,6 +259,7 @@ final class SupabaseSessionClientTests: XCTestCase {
             "expires_at": null,
             "voice_enabled": false,
             "billing_retry_banner": false,
+            "standing_pantry_cap": 25,
             "quotas": [
               { "feature_key": "dinner_solve", "used": 0, "cap": 6, "period_end": "2026-05-18" },
               { "feature_key": "voice_cook_session", "used": 0, "cap": 0, "period_end": "2026-05-18" },
@@ -280,6 +281,7 @@ final class SupabaseSessionClientTests: XCTestCase {
             "expires_at": null,
             "voice_enabled": false,
             "billing_retry_banner": false,
+            "standing_pantry_cap": 25,
             "quotas": []
           },
           "feature_flags": [],

@@ -340,7 +340,7 @@ final class PaywallViewModelTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: false,
             billingRetryBanner: false,
-            standingPantryCap: nil,
+            standingPantryCap: 25,
             quotas: [],
         ))
         return PaywallViewModel(

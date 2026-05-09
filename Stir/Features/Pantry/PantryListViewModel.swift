@@ -4,9 +4,10 @@
 // household, exposes a filtered view over a typeahead `searchText`,
 // and brokers manual-add / edit / delete through PantryItemRepository.
 //
-// Quota enforcement: cap source-of-truth lives on `Tier` (see
-// `Tier.rememberedPantryCap`); `EntitlementService.rememberedPantryCap`
-// routes through `effectiveTier`. The actual at-cap rejection happens
+// Quota enforcement: cap source-of-truth is the server-shipped
+// `entitlements.standing_pantry_cap` (SCA-100), exposed via
+// `EntitlementService.rememberedPantryCap` (SCA-207 dropped the
+// iOS-side Tier-table fallback). The actual at-cap rejection happens
 // inside `PantryItemRepository.insertManual` so a re-typed existing
 // remembered name at cap upserts (no row added) instead of being
 // wrongly routed to the paywall (review C4).

@@ -86,13 +86,12 @@ final class EntitlementService {
     /// shape). iOS surfaces this when Apple is retrying a failed renewal and
     /// the user still has paid access in the grace window.
     private(set) var billingRetryBanner: Bool = false
-    /// SCA-100: server-shipped standing-pantry-cap. Nil only between
-    /// init and the first hydrate (or when the server omitted the field
-    /// in a pre-SCA-100 response — see `standingPantryCap` getter for
-    /// the fallback). Stored separately from `Tier.rememberedPantryCap`
-    /// so a future server-side override (marketing A/B, per-user
-    /// experiment) doesn't need an iOS release.
-    private(set) var serverStandingPantryCap: Int?
+    /// SCA-100: server-shipped standing-pantry-cap. Required on the
+    /// wire post-SCA-207 — `BootstrapResponse.Entitlements.standingPantryCap`
+    /// is now non-optional. Default `25` (Free panic value) covers the
+    /// pre-first-hydrate window only; a real bootstrap response always
+    /// overwrites this.
+    private(set) var serverStandingPantryCap: Int = 25
     private(set) var quotas: [FeatureKey: QuotaSnapshot] = [:]
     private(set) var featureFlags: [String: BootstrapResponse.FeatureFlag] = [:]
     private(set) var hydrationState: HydrationState = .loading
@@ -248,10 +247,10 @@ final class EntitlementService {
     // MARK: - Cached snapshot (24h grace)
 
     /// JSON-encodable snapshot kept in Keychain for the 24h offline fallback.
-    /// v2 shape — renamed `showBillingGraceBanner` → `billingRetryBanner` in
-    /// step 5 to match the backend field. Keychain account name was bumped in
-    /// lockstep (see `.entitlementSnapshot` → `.entitlementSnapshotV2` in
-    /// `KeychainStorage`) so stale v1 snapshots are ignored rather than
+    /// v3 shape — flipped `serverStandingPantryCap: Int? → Int` in step
+    /// SCA-207 to match the server-required wire field. Keychain account
+    /// name was bumped in lockstep (see `.entitlementSnapshotV3` in
+    /// `KeychainStorage`) so stale v2 snapshots are ignored rather than
     /// decode-failing and corrupting the 24h grace window.
     private struct PersistedSnapshot: Codable, Sendable {
         let tier: Tier
@@ -261,13 +260,10 @@ final class EntitlementService {
         let voiceEnabled: Bool
         let billingRetryBanner: Bool
         /// SCA-100: cached so a Keychain-restore path (24h offline
-        /// fallback) carries the server-resolved cap instead of falling
-        /// back to the static `Tier.rememberedPantryCap` table. Optional
-        /// to tolerate v2 snapshots written before this field landed —
-        /// the SCA-100 deploy slot is short enough (one release cycle)
-        /// that bumping the snapshot key to V3 just to add an optional
-        /// field would burn the cache for every existing user.
-        let serverStandingPantryCap: Int?
+        /// fallback) carries the server-resolved cap. Non-optional
+        /// post-SCA-207 — the wire field is required, so a snapshot
+        /// without it is malformed by definition.
+        let serverStandingPantryCap: Int
         let quotas: [FeatureKey: QuotaSnapshot]
         let cachedAt: Date
     }
@@ -289,7 +285,7 @@ final class EntitlementService {
         do {
             let data = try JSONEncoder.stir.encode(snapshot)
             guard let string = String(data: data, encoding: .utf8) else { return }
-            try keychain.write(string, key: .entitlementSnapshotV2)
+            try keychain.write(string, key: .entitlementSnapshotV3)
         } catch {
             Logger.entitlement.warning(
                 "failed to persist entitlement snapshot: \(error.localizedDescription, privacy: .public)",
@@ -298,15 +294,16 @@ final class EntitlementService {
     }
 
     private func restoreFromCachedSnapshotIfFresh() {
-        // Best-effort cleanup of the v1 snapshot key. Pre-launch, nothing
-        // depends on v1 data surviving — but leaving stale bytes around is
+        // Best-effort cleanup of the v1/v2 snapshot keys. Pre-launch, nothing
+        // depends on legacy data surviving — but leaving stale bytes around is
         // sloppy and makes future key audits harder. Delete-on-startup is
         // idempotent (errSecItemNotFound is treated as success in
         // `KeychainStorage.delete`).
         try? keychain.delete(key: .entitlementSnapshotLegacyV1)
+        try? keychain.delete(key: .entitlementSnapshotV2)
 
         do {
-            guard let raw = try keychain.read(key: .entitlementSnapshotV2),
+            guard let raw = try keychain.read(key: .entitlementSnapshotV3),
                   let data = raw.data(using: .utf8) else {
                 return
             }
@@ -314,7 +311,7 @@ final class EntitlementService {
             let age = Date().timeIntervalSince(snapshot.cachedAt)
             guard age < Self.cacheValidity else {
                 Logger.entitlement.info("cached snapshot stale (\(Int(age), privacy: .public)s) — discarding")
-                try? keychain.delete(key: .entitlementSnapshotV2)
+                try? keychain.delete(key: .entitlementSnapshotV3)
                 return
             }
             self.tier = snapshot.tier
@@ -376,37 +373,33 @@ final class EntitlementService {
 }
 
 extension EntitlementService {
-    /// Standing-pantry-item cap per tier. SCA-100: prefers the server-
-    /// shipped value from the bootstrap response so a future cap
-    /// override (marketing A/B, per-user experiment) ships without an
-    /// iOS release. Falls back to `Tier.rememberedPantryCap` (the
-    /// constant table) when the server omitted the field — covers the
-    /// pre-SCA-100 server response case (in-flight rolling deploy) and
-    /// the cold-launch-before-bootstrap window.
+    /// Standing-pantry-item cap. Server-shipped via the bootstrap
+    /// response's `entitlements.standing_pantry_cap` (SCA-100), so a
+    /// future cap override (marketing A/B, per-user experiment) ships
+    /// without an iOS release. The Edge Function resolves the cap
+    /// against `effectiveTier(entitlement)` before shipping the number,
+    /// so a stale RevenueCat row `(tier=.premium, billing_state=.expired)`
+    /// already arrives demoted to the Free cap — iOS does NOT
+    /// re-resolve.
     ///
-    /// Effective-tier routing applies to BOTH the server value AND the
-    /// fallback: a stale Keychain snapshot
-    /// `(tier=.premium, billingState=.none)` correctly demotes to the
-    /// Free cap on the fallback path. The server value is already
-    /// effective-tier-resolved by `standingPantryCap()` in the Edge
-    /// Function — no double-resolution risk.
+    /// SCA-207 sunset: prior to this change, the iOS side carried a
+    /// `Tier.rememberedPantryCap` constant table as a fallback for
+    /// in-flight rolling deploy + pre-SCA-100 server responses. Both
+    /// risks are gone post-rollout, so the fallback is dropped — the
+    /// wire field is now required.
+    ///
+    /// SCA-265 floor (preserved): a server-side bug or A/B that ships
+    /// `0` (or negative) would lock every pantry add out with no UI
+    /// signal, since the cap-enforcement path treats `count >= cap` as
+    /// the lockout gate. Treat any non-positive value as a bug and
+    /// floor at the Free panic value 25 — the minimum cap under the
+    /// SCA-100 contract.
     ///
     /// Used by `PantryListViewModel` and `ScanViewModel` for client-
     /// side quota gating on manual adds and scan upserts (the cap is
     /// not enforced server-side because user content lives in
     /// CloudKit per north-star #3).
     var rememberedPantryCap: Int {
-        if let serverValue = serverStandingPantryCap, serverValue > 0 {
-            return serverValue
-        }
-        // SCA-265 (W17 from /review-5): defensive floor against a future
-        // server-side bug or A/B that ships `0` (or negative). Returning
-        // 0 here would lock every pantry add out with no UI signal —
-        // the cap-enforcement path treats `count >= cap` as the lockout
-        // gate, so cap=0 means "every add fails." The Tier table
-        // guarantees Free=25 minimum, so any non-positive server value
-        // is a bug; treat it as missing and fall through to the on-
-        // device tier table rather than honoring it.
-        return effectiveTier.rememberedPantryCap
+        max(serverStandingPantryCap, 25)
     }
 }

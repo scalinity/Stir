@@ -362,7 +362,13 @@ final class OutcomeFeedbackViewIntentTests: XCTestCase {
             expiresAt: nil,
             voiceEnabled: tier != .free,
             billingRetryBanner: false,
-            standingPantryCap: nil,
+            standingPantryCap: {
+                switch tier {
+                case .free: return 25
+                case .premium: return 250
+                case .pro: return 1_000
+                }
+            }(),
             quotas: [],
         ))
         return service

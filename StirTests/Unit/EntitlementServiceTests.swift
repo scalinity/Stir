@@ -325,121 +325,73 @@ final class EntitlementServiceTests: XCTestCase {
 
     func test_rememberedPantryCap_freeTierReturns25() {
         let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(tier: .free, billingState: .none))
+        service.hydrate(from: Self.entitlements(tier: .free, billingState: .none, standingPantryCap: 25))
         XCTAssertEqual(service.rememberedPantryCap, 25)
     }
 
     func test_rememberedPantryCap_premiumActiveReturns250() {
         let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(tier: .premium, billingState: .active))
+        service.hydrate(from: Self.entitlements(tier: .premium, billingState: .active, standingPantryCap: 250))
         XCTAssertEqual(service.rememberedPantryCap, 250)
     }
 
     func test_rememberedPantryCap_proActiveReturns1000() {
         let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(tier: .pro, billingState: .active))
+        service.hydrate(from: Self.entitlements(tier: .pro, billingState: .active, standingPantryCap: 1_000))
         XCTAssertEqual(service.rememberedPantryCap, 1_000)
     }
 
-    /// Stale-snapshot defense: a Keychain snapshot with
-    /// `tier=.premium, billingState=.expired` (or `.none`) must demote
-    /// to the Free cap, mirroring `canAccess`'s effectiveTier logic.
-    /// Without this, a lapsed Premium would keep their 250-item cap
-    /// indefinitely (review W1).
-    func test_rememberedPantryCap_premiumExpiredDemotesToFreeCap() {
+    /// Server-side `effectiveTier()` resolution: a stale RevenueCat row
+    /// `(tier=.premium, billing_state=.expired)` arrives demoted to the
+    /// Free cap (25) on the wire. iOS takes that at face value — no
+    /// double-resolution.
+    func test_rememberedPantryCap_serverDeliversDemotedCapForExpiredPremium() {
         let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(tier: .premium, billingState: .expired))
-        XCTAssertEqual(service.rememberedPantryCap, 25, "expired billingState demotes to .free cap")
-    }
-
-    func test_rememberedPantryCap_proExpiredDemotesToFreeCap() {
-        let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(tier: .pro, billingState: .expired))
-        XCTAssertEqual(service.rememberedPantryCap, 25)
-    }
-
-    func test_tier_rememberedPantryCap_centralizedValueTable() {
-        // Lock the cap-per-tier table at the Tier enum so the values
-        // can't drift between EntitlementService, PantryListViewModel
-        // doc-comments, and CLAUDE.md (review W11).
-        XCTAssertEqual(Tier.free.rememberedPantryCap, 25)
-        XCTAssertEqual(Tier.premium.rememberedPantryCap, 250)
-        XCTAssertEqual(Tier.pro.rememberedPantryCap, 1_000)
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .expired, standingPantryCap: 25,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 25,
+                       "server resolves to Free cap before the wire — iOS takes it as-is")
     }
 
     // MARK: - SCA-100 — server-shipped standing_pantry_cap
 
-    /// Server value wins over the Tier-table fallback. Sanity-check the
-    /// migration's primary contract: `entitlements.standing_pantry_cap`
-    /// from the wire is what `rememberedPantryCap` returns when present.
-    func test_rememberedPantryCap_prefersServerValueWhenPresent() {
+    /// Sanity-check the migration's primary contract:
+    /// `entitlements.standing_pantry_cap` from the wire is what
+    /// `rememberedPantryCap` returns when present.
+    func test_rememberedPantryCap_returnsServerValue() {
         let service = EntitlementService(keychain: MockKeychain())
-        // Tier=.free would normally cap at 25; server says 75 (a future
-        // marketing A/B). The service must return the server value.
+        // Tier=.free; server says 75 (a future marketing A/B). The
+        // service must return the server value as-is.
         service.hydrate(from: Self.entitlements(
             tier: .free, billingState: .none, standingPantryCap: 75,
         ))
         XCTAssertEqual(service.rememberedPantryCap, 75,
-                       "server-shipped cap MUST override the Tier constant table")
-    }
-
-    /// Pre-SCA-100 server response (or in-flight rolling deploy) omits
-    /// the field. The fallback path uses `Tier.rememberedPantryCap`
-    /// keyed on the EFFECTIVE tier so a stale RevenueCat row still
-    /// demotes correctly.
-    func test_rememberedPantryCap_fallsBackToTierTableWhenServerOmits() {
-        let service = EntitlementService(keychain: MockKeychain())
-        service.hydrate(from: Self.entitlements(
-            tier: .premium, billingState: .active, standingPantryCap: nil,
-        ))
-        XCTAssertEqual(service.rememberedPantryCap, 250,
-                       "missing server field falls back to Tier.rememberedPantryCap")
-
-        let staleService = EntitlementService(keychain: MockKeychain())
-        staleService.hydrate(from: Self.entitlements(
-            tier: .premium, billingState: .expired, standingPantryCap: nil,
-        ))
-        XCTAssertEqual(staleService.rememberedPantryCap, 25,
-                       "fallback path STILL routes through effectiveTier — expired premium → free cap")
-    }
-
-    /// The server value is taken at face value — including for
-    /// effective-tier-demoted users — because the Edge Function already
-    /// resolves via `effectiveTier(entitlement)` before shipping the
-    /// number. Double-resolution would risk drift if the two
-    /// implementations diverge.
-    func test_rememberedPantryCap_serverValueTakenAtFaceValueForExpiredPremium() {
-        let service = EntitlementService(keychain: MockKeychain())
-        // Hypothetical: server demoted to free's 25 because billingState=expired.
-        // iOS does NOT re-resolve to a different value — it trusts the wire.
-        service.hydrate(from: Self.entitlements(
-            tier: .premium, billingState: .expired, standingPantryCap: 25,
-        ))
-        XCTAssertEqual(service.rememberedPantryCap, 25)
+                       "server-shipped cap is the source of truth post-SCA-207")
     }
 
     /// SCA-265 (W17 from /review-5): defensive floor against a future
     /// server-side bug shipping `0` (or negative). Returning 0 here
     /// would lock every pantry add out with no UI signal, since the
     /// cap-enforcement path treats `count >= cap` as the lockout gate.
-    /// A non-positive value is treated as "missing" and falls through
-    /// to the on-device Tier table.
-    func test_rememberedPantryCap_serverZeroFallsBackToTierTable() {
+    /// SCA-207 reframes the floor: with the Tier-table fallback gone,
+    /// the floor is the Free panic value 25 inline.
+    func test_rememberedPantryCap_serverZeroFloorsAt25() {
         let service = EntitlementService(keychain: MockKeychain())
         service.hydrate(from: Self.entitlements(
             tier: .premium, billingState: .active, standingPantryCap: 0,
         ))
-        XCTAssertEqual(service.rememberedPantryCap, 250,
-                       "server cap=0 must fall back to Tier.rememberedPantryCap (Premium=250)")
+        XCTAssertEqual(service.rememberedPantryCap, 25,
+                       "server cap=0 must floor at the Free panic value (25)")
     }
 
-    func test_rememberedPantryCap_serverNegativeFallsBackToTierTable() {
+    func test_rememberedPantryCap_serverNegativeFloorsAt25() {
         let service = EntitlementService(keychain: MockKeychain())
         service.hydrate(from: Self.entitlements(
             tier: .free, billingState: .none, standingPantryCap: -1,
         ))
         XCTAssertEqual(service.rememberedPantryCap, 25,
-                       "server cap=-1 must fall back to Tier.rememberedPantryCap (Free=25)")
+                       "server cap=-1 must floor at the Free panic value (25)")
     }
 
     // MARK: - Helpers
@@ -455,7 +407,7 @@ final class EntitlementServiceTests: XCTestCase {
         billingState: BillingState,
         voiceEnabled: Bool = false,
         billingRetryBanner: Bool = false,
-        standingPantryCap: Int? = nil,
+        standingPantryCap: Int = 25,
         quotas: [BootstrapResponse.Quota]? = nil,
     ) -> BootstrapResponse.Entitlements {
         BootstrapResponse.Entitlements(
