@@ -235,4 +235,6 @@ We may update this Privacy Policy from time to time. Material changes will be co
 - Spec §19 — Legal & Regulatory Checklist (parent doc for legal items)
 - `docs/legal/terms-of-service.md` (companion doc)
 - `docs/runbooks/ccpa-deletion-workflow.md` (the operational runbook for §7.7)
+- `docs/runbooks/deletion-request-fulfillment.md` (the fulfillment-worker runbook covering subsystem ordering, partial-failure replay, and cron schedule)
+- `docs/legal/ccpa-deletion-runbook.md` (the legal-compliance companion — 30-day SLA tracking, audit-trail verification, user communication templates)
 - `docs/appstore/app-privacy-details.md` (App Store Connect nutrition label — must align with this PP §2 and §5)

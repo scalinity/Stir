@@ -139,7 +139,7 @@ Per `docs/legal/`:
 - [ ] Terms of Service finalized (lawyer-reviewed, [LEGAL REVIEW REQUIRED] markers resolved)
 - [ ] Privacy Policy finalized (lawyer-reviewed)
 - [ ] Food-safety disclaimer wording finalized (`food-safety-disclaimer.md` — 4 in-app copy sites: Cook Mode footer, Substitution result, Paywall fine-print, Settings > Privacy > AI Disclosure full screen)
-- [ ] CCPA deletion workflow tested end-to-end (`docs/runbooks/ccpa-deletion-workflow.md` pre-beta test section)
+- [ ] CCPA deletion workflow tested end-to-end (`docs/runbooks/ccpa-deletion-workflow.md` pre-beta test section; legal-compliance companion at `docs/legal/ccpa-deletion-runbook.md`)
 - [ ] privacy@getstir.app mailbox provisioned + 48h SLA auto-responder live
 - [ ] support@getstir.app mailbox provisioned + 48h SLA auto-responder live
 - [ ] Trial disclosure on every paywall meets Apple's current subscription requirements (audited in `paywall-disclosure-audit.md`)
