@@ -19,22 +19,6 @@
 -- SKIP LOCKED — so two parallel ticks can lock-wait on each other or
 -- both claim the same row depending on PostgREST version. The stored
 -- proc is the only race-safe shape.
---
--- Differences from sibling stir_claim_pending_jobs:
--- - No `attempt_count < N` retry-cap predicate. notification_jobs
---   uses one because pgmq-dispatch auto-retries failed jobs and
---   needs a runaway safeguard. deletion_requests fulfillment is
---   different by design: a `failed` row stays `failed` until ops
---   manually replays it back to `approved` via the documented
---   runbook procedure (`UPDATE deletion_requests SET state='approved'
---   WHERE id=...`). The state machine itself is the retry gate, so
---   the RPC doesn't need its own counter. Don't add one without
---   updating the runbook (auto-retry would change ops semantics
---   in a load-bearing way).
--- - Returns the post-flip row shape (state already 'processing')
---   instead of the pre-flip snapshot. The deletion worker doesn't
---   need pre-flip state; the audit_log row uses canonical_user_key_hash
---   as the durable anchor, not the row state.
 
 CREATE OR REPLACE FUNCTION stir_claim_deletion_requests(
   p_limit INTEGER
