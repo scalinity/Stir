@@ -10,24 +10,35 @@ YYYYMMDDHHMMSS_kebab-short-description.sql
 
 The leading 14-digit timestamp determines apply order. Supabase CLI sorts lexicographically, so leading-zero-padded timestamps are mandatory.
 
-## SCA-268 — Unique-per-second discipline
+## SCA-268 / SCA-282 — Unique-per-second discipline
 
-Two migrations on `2026-05-08` share the prefix `20260508000008_*`:
+Every new migration MUST land at a timestamp at least one second past the previous migration. Use `date -u +%Y%m%d%H%M%S` immediately before staging the new file. If two ticket trains are landing on the same day, the second one bumps to the next free second — even if the body would have been valid at the same timestamp. This is non-negotiable for fresh-init correctness, not just lexical-order hygiene.
 
-- `20260508000008_deletion_request_sla_alerts.sql`
-- `20260508000008_drop_deletion_requests_completed_at.sql`
+### Why same-second collisions are not commutative-safe
 
-They are **commutative** today (different surfaces — one creates a function, the other drops a column), so application order doesn't matter. But the same-second collision is fragile: if a future maintainer renames either file for cosmetic reasons (typo, kebab-case style), the lexical order between them flips silently and a fresh `supabase db reset` could apply them in a new order.
+`supabase_migrations.schema_migrations` has a primary key on `version` alone. When two migration files share a 14-digit prefix, both bodies execute successfully but the second `INSERT` into `schema_migrations` fails with `23505 duplicate key value` and rolls back the entire `supabase start`. The collision fires regardless of whether the bodies are commutative — the bookkeeping table itself can't tolerate duplicate version rows.
 
-**Going forward** (filed as SCA-268, S2 from /review-5): every new migration MUST land at a timestamp at least one second past the previous migration. Use `date -u +%Y%m%d%H%M%S` immediately before staging the new file. If two ticket trains are landing on the same day, the second one bumps to the next free second — even if the body would have been valid at the same timestamp.
+Prod environments don't see this because rows were inserted one-at-a-time as the migrations landed; the collision only triggers when the CLI applies a same-second pair in a single batch (fresh `supabase start` / `db reset`).
 
-The two existing collision pairs (`20260508000006_*`, `20260508000007_*`, `20260508000008_*`) are NOT being renamed because:
+### History — the three collision pairs that bit us
 
-1. The immutable-migration policy in CLAUDE.md forbids cosmetic edits to applied migrations.
-2. All three pairs are commutative; lexical order between them doesn't affect any existing environment.
-3. A renamed file applied to a fresh dev environment would create a phantom "new migration" record that doesn't match any prod state.
+`2026-05-08` had three same-second pairs land via parallel agents:
 
-If a future need to physically separate one of the pairs arises, the correct path is a security-fix-style supersession (per CLAUDE.md), not an in-place rename.
+- `20260508000006_deletion_fulfill_cron.sql` + `20260508000006_pgmq_dispatch_secret_via_vault.sql`
+- `20260508000007_pgmq_dispatch_5field_schedule.sql` + `20260508000007_stir_claim_deletion_requests.sql`
+- `20260508000008_deletion_request_sla_alerts.sql` + `20260508000008_drop_deletion_requests_completed_at.sql`
+
+SCA-268 originally documented these as "safe to leave because they're commutative." That reading was empirically wrong — see "Why same-second collisions are not commutative-safe" above. Fresh `supabase start` failed at the first pair (`20260508000006`) post-SCA-280's prompt-versions partial-unique-index fix. Filed as SCA-282.
+
+### How SCA-282 resolved them
+
+Per the **correctness-blocks-fresh-init exception** in `CLAUDE.md` §Schema truth, one file in each pair was renamed to a fresh version timestamp:
+
+- `20260508000006_pgmq_dispatch_secret_via_vault.sql` → `20260508000061_pgmq_dispatch_secret_via_vault.sql`
+- `20260508000007_pgmq_dispatch_5field_schedule.sql` → `20260508000071_pgmq_dispatch_5field_schedule.sql`
+- `20260508000008_drop_deletion_requests_completed_at.sql` → `20260508000081_drop_deletion_requests_completed_at.sql`
+
+Each renamed file kept its body byte-identical; only the filename's timestamp changed. The kept-name in each pair is the most-referenced filename across follow-up migrations + runbooks. Each renamed file's header carries an `IN-PLACE EDIT (SCA-282, …)` block documenting the rationale, mirroring the SCA-280 / SCA-139 pattern.
 
 ## See also
 

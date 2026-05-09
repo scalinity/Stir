@@ -1,3 +1,14 @@
+-- IN-PLACE EDIT (SCA-282, correctness-blocks-fresh-init exception per
+-- CLAUDE.md §Schema truth):
+--   This file was originally named `20260508000007_pgmq_dispatch_5field_schedule.sql`
+--   and shared the `20260508000007` version prefix with
+--   `20260508000007_stir_claim_deletion_requests.sql`. Same fresh-init
+--   PK collision as SCA-282's 000006 fix — see that migration's header
+--   for the full rationale. `_stir_claim_deletion_requests` keeps the
+--   canonical timestamp (load-bearing for users-deletion-fulfill RPC
+--   and referenced by 20260508000012's clamp-notice migration);
+--   `_pgmq_dispatch_5field_schedule` rebases to `_000071_...`.
+--
 -- pgmq-dispatch cron schedule: switch to 5-field every-minute.
 --
 -- Discovered post-SCA-157 deploy: managed Supabase has

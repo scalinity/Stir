@@ -1,3 +1,22 @@
+-- IN-PLACE EDIT (SCA-282, correctness-blocks-fresh-init exception per
+-- CLAUDE.md §Schema truth):
+--   This file was originally named `20260508000006_pgmq_dispatch_secret_via_vault.sql`
+--   and shared the `20260508000006` version prefix with
+--   `20260508000006_deletion_fulfill_cron.sql`. `supabase_migrations.schema_migrations`
+--   has a PK on `version` alone — the second INSERT during fresh
+--   `supabase start` / `db reset` violated 23505 even though both
+--   migration bodies execute successfully. Prod was unaffected (rows
+--   were inserted one-at-a-time as files landed); fresh init was
+--   broken.
+--
+--   Rename `..._000006_...` → `..._000061_...` keeps the body byte-
+--   identical and preserves intent (each migration in the pair is
+--   independent of the other; `_deletion_fulfill_cron` is the more-
+--   referenced filename in follow-up migrations + runbooks, so it
+--   keeps the canonical timestamp). Per CLAUDE.md the in-place edit
+--   replaces only the broken mechanism (filename collision) without
+--   changing final-state semantics.
+--
 -- SCA-157: read pgmq-dispatch shared secret from Supabase Vault.
 --
 -- Background: managed Supabase blocks `ALTER DATABASE postgres SET

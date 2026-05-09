@@ -1,3 +1,19 @@
+-- IN-PLACE EDIT (SCA-282, correctness-blocks-fresh-init exception per
+-- CLAUDE.md §Schema truth):
+--   This file was originally named `20260508000008_drop_deletion_requests_completed_at.sql`
+--   and shared the `20260508000008` version prefix with
+--   `20260508000008_deletion_request_sla_alerts.sql`. Same fresh-init
+--   PK collision as SCA-282's 000006/000007 fixes. `_deletion_request_sla_alerts`
+--   keeps the canonical timestamp (it's part of the SCA-88 deletion-
+--   fulfillment lineage referenced by the SCA-268 README discussion);
+--   `_drop_deletion_requests_completed_at` rebases to `_000081_...`.
+--
+--   Note: README.md previously claimed the three collision pairs
+--   (000006/000007/000008) were safe-to-leave because their bodies
+--   were commutative. That reasoning was empirically wrong — the PK
+--   collision fires in `schema_migrations` regardless of body
+--   commutativity. README updated alongside this rename.
+--
 -- SCA-230 — drop unused deletion_requests.completed_at column.
 --
 -- Pre-flight (2026-05-08): grep across Backend/supabase/ confirmed
