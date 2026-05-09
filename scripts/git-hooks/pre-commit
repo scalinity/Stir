@@ -1,9 +1,14 @@
 #!/bin/bash
 #
-# Pre-commit hook — guards against in-place edits to existing
-# Backend/supabase/migrations/*.sql files. Wired in via
+# Pre-commit hook — two staged checks. Wired in via
 # `git config core.hooksPath scripts/git-hooks/` (see
 # scripts/install-git-hooks.sh).
+#
+# Stage 1 (SCA-242): immutable-migration policy guard.
+# Stage 2 (SCA-89):  exhaustive-switch verification on staged Swift
+#                    enum changes. Implemented as a python script;
+#                    invoked from the bottom of this hook only after
+#                    stage 1 passes.
 #
 # Rationale (SCA-242): CLAUDE.md §Schema truth states the
 # immutable-migration policy verbatim:
@@ -87,7 +92,13 @@ while IFS=$'\t' read -r status path1 path2; do
 done < <(git diff --cached --name-status --diff-filter=AMDRCT)
 
 if [ ${#VIOLATIONS[@]} -eq 0 ]; then
-    exit 0
+    # Stage 1 (migration immutability) passed — fall through to Stage 2
+    # (SCA-89 exhaustive-switch verification on staged Swift enum changes).
+    # The python helper handles its own SKIP_PRECOMMIT_EXHAUSTIVE_CHECK
+    # override env var and prints its own diagnostic on violation.
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+    python3 "$REPO_ROOT/scripts/pre-commit-checks/exhaustive-switch.py"
+    exit $?
 fi
 
 echo "[pre-commit] ❌ commit blocked — in-place edit to existing migration(s)"
