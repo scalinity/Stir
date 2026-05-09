@@ -63,11 +63,12 @@ struct TonightHomeView: View {
         let displayName: String
         let expiresAt: Date
 
+        // SCA-267 (S1 from /review-5): collapsed the static + instance
+        // overloads into one instance method. The static form was a
+        // vestige of an earlier draft; only the instance form was
+        // called externally (UseSoonCard.body), and no test referenced
+        // the static directly. Single name, single body, no shadowing.
         func subtitle(now: Date = Date()) -> String {
-            Self.subtitle(expiresAt: expiresAt, now: now)
-        }
-
-        static func subtitle(expiresAt: Date, now: Date = Date()) -> String {
             let remaining = expiresAt.timeIntervalSince(now)
             guard remaining > 0 else { return "Expires soon" }
             if remaining < 86_400 {
