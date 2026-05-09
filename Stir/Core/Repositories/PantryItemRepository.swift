@@ -711,6 +711,17 @@ final class PantryItemRepository {
             ),
         ])
         request.sortDescriptors = [NSSortDescriptor(key: "expiresAt", ascending: true)]
+        // SCA-263 (W15 from /review-5): both callers (TonightHomeView's
+        // `refreshUseSoonCandidate` and UseSoonScheduler's notification
+        // path) consume only `.first` from the result. Without a fetch
+        // cap, a Pro tier (1000-row remembered cap) hot-path refresh
+        // could pull every ephemeral row whose expiresAt is in the 48h
+        // window into the materialization layer just to discard all
+        // but the head. Sort already ascending, so head==.first is
+        // stable. If a future caller needs the full window, lift this
+        // function to take an explicit `limit:` parameter rather than
+        // dropping the cap silently.
+        request.fetchLimit = 1
         do {
             return try controller.viewContext.fetch(request)
         } catch {
