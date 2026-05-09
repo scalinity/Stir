@@ -68,6 +68,14 @@ struct TonightHomeView: View {
         // vestige of an earlier draft; only the instance form was
         // called externally (UseSoonCard.body), and no test referenced
         // the static directly. Single name, single body, no shadowing.
+        //
+        // SCA-269 (S3 from /review-5): day-boundary computation now uses
+        // `Calendar.dateComponents([.day], from: now, to: expiresAt)`
+        // to avoid the DST off-by-one that `Int(remaining / 86_400)`
+        // produces across daylight-savings transitions. Mirrors the
+        // pattern in `lastScanSubtitle` (the only other caller in this
+        // file that bins time into days). Hour-bucket math stays on
+        // raw seconds — sub-day, no DST surface.
         func subtitle(now: Date = Date()) -> String {
             let remaining = expiresAt.timeIntervalSince(now)
             guard remaining > 0 else { return "Expires soon" }
@@ -75,8 +83,9 @@ struct TonightHomeView: View {
                 let hours = max(1, Int(ceil(remaining / 3600)))
                 return "Expires in \(hours)h"
             }
-            let days = max(1, Int(ceil(remaining / 86_400)))
-            return "Expires in \(days)d"
+            let days = Calendar.current
+                .dateComponents([.day], from: now, to: expiresAt).day ?? 1
+            return "Expires in \(max(1, days))d"
         }
     }
 
