@@ -388,6 +388,45 @@ final class RootCoordinator {
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared
         self.fastPathMinLoadingDuration = fastPathMinLoadingDuration
+
+        // SCA-99 / ADR 0035: wire the entitlement service's tier-
+        // downgrade reconciliation hook to the pantry repository.
+        // EntitlementService.hydrate(...) calls this closure on every
+        // detected effective-tier downgrade with the post-downgrade
+        // cap. The closure resolves the active HouseholdProfile from
+        // `self.household.profile` (cleared at logout / un-onboarded);
+        // a nil household yields a zero-archive no-op outcome so the
+        // service can still emit telemetry without blowing up.
+        //
+        // [weak self] to avoid the retain cycle through the closure;
+        // a coordinator deallocation in flight (rare — coordinator
+        // outlives the app session) drops the reconciliation
+        // silently, which is the same outcome as the iOS process
+        // dying mid-reconcile.
+        self.entitlements.tierDowngradeHandler = { [weak self] _, _, newCap in
+            guard let self else {
+                return PantryItemRepository.ReconcileOutcome(
+                    totalRememberedPre: 0,
+                    totalRememberedPost: 0,
+                    archivedCount: 0,
+                )
+            }
+            guard let profile = self.household.profile else {
+                Logger.coordinator.info(
+                    "tierDowngradeHandler invoked but no household profile resolved — skipping pantry reconciliation",
+                )
+                return PantryItemRepository.ReconcileOutcome(
+                    totalRememberedPre: 0,
+                    totalRememberedPost: 0,
+                    archivedCount: 0,
+                )
+            }
+            return try self.pantryItemRepository.reconcileForTierChange(
+                newCap: newCap,
+                on: profile,
+            )
+        }
+
         attemptFastPathLaunch()
     }
 

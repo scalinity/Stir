@@ -237,7 +237,7 @@ voice_session_token_snapshot, voice_session_refreshed,
 voice_quota_refund, voice_turn_stuck_watchdog_fired,
 substitution_requested, substitution_accepted, voice_substitution_disambiguated, cook_session_completed,
 meal_rated, meal_rating_skipped,
-pantry_auto_consume_resolved, pantry_tombstone_reaper_ran, grocery_list_exported, favorite_saved,
+pantry_auto_consume_resolved, pantry_tombstone_reaper_ran, pantry_tier_downgrade_reconciled, grocery_list_exported, favorite_saved,
 leftovers_dish_selected,
 recipe_import_started, recipe_import_completed,
 paywall_viewed, trial_started,
@@ -262,6 +262,7 @@ Property notes (full contracts in spec §15):
 - `voice_quota_refund`: server-emitted from `realtime-session/index.ts` at no_active_prompt + mint_failed/mint_unexpected_error sites. `{request_id, reason, upstream_status?}`. distinct_id = `hashCanonicalKey(canonical_user_key)`. Refund branches return BEFORE `logAIRequest()`, no `ai_request_log` join — find via PostHog Insight.
 - `meal_rated`: `leftovers_handoff_offered`, `leftovers_handoff_taken` (Premium+ only — Free→paywall via `paywall_viewed.trigger=leftovers_gate`), `leftovers_eligible_free`. `meal_rating_skipped` does NOT carry these.
 - `leftovers_dish_selected`: when Premium+ picks a dish from LeftoversRoot. Properties `rank` (1..3), `leftovers_items_count`, `prompt_version`, `source_recipe_plan_id`, `new_recipe_plan_id`.
+- `pantry_tier_downgrade_reconciled` (SCA-99 / ADR 0035): emitted from `EntitlementService.publishReconciliationOutcome` after every detected effective-tier downgrade reconciliation pass — including zero-archive passes. Properties `{previous_tier, new_tier, archived_count, total_remembered_pre, total_remembered_post}`. `archived_count == 0` is valid (user was already below the new cap); banner only surfaces when `archived_count > 0`. Counts only — no item names per ADR 0009.
 - `tutorial_*`: `tutorial_id` is snake_case `TutorialKey.rawValue` (tonight_tour, scan_capture, scan_review, dinner_options, dish_preview, cook_mode_tap, voice_mode, saved_meals, pantry_management, pantry_in_list_tour, pantry_in_list_tour_empty). `step_advanced` adds `from_step`/`to_step`. Lifecycle invariant: exactly one of {completed, skipped} per started. Disappear non-terminal — `suspend()` emits NO telemetry; tour re-arms when host re-appears. Funnel abandonment = `count(started) − count(completed) − count(skipped)`. No `reason` on `tutorial_skipped`.
 
 **Ops surface events** (dotted form per ADR 0027):

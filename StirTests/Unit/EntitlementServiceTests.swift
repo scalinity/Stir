@@ -394,6 +394,249 @@ final class EntitlementServiceTests: XCTestCase {
                        "server cap=-1 must floor at the Free panic value (25)")
     }
 
+    // MARK: - SCA-99 / ADR 0035 — tier-downgrade reconciliation
+
+    func test_isDowngrade_matrix() {
+        XCTAssertTrue(EntitlementService.isDowngrade(from: .pro,     to: .premium))
+        XCTAssertTrue(EntitlementService.isDowngrade(from: .pro,     to: .free))
+        XCTAssertTrue(EntitlementService.isDowngrade(from: .premium, to: .free))
+        XCTAssertFalse(EntitlementService.isDowngrade(from: .free,    to: .free))
+        XCTAssertFalse(EntitlementService.isDowngrade(from: .premium, to: .premium))
+        XCTAssertFalse(EntitlementService.isDowngrade(from: .free,    to: .premium))
+        XCTAssertFalse(EntitlementService.isDowngrade(from: .premium, to: .pro))
+        XCTAssertFalse(EntitlementService.isDowngrade(from: .free,    to: .pro))
+    }
+
+    func test_publishReconciliationOutcome_archivedRows_emitsTelemetryAndBanner() {
+        let service = makeServiceWithIsolatedDefaults()
+        var captured: [[String: Any]] = []
+        service.reconciliationTelemetry = { properties in captured.append(properties) }
+
+        let outcome = PantryItemRepository.ReconcileOutcome(
+            totalRememberedPre: 200,
+            totalRememberedPost: 25,
+            archivedCount: 175,
+        )
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        service.publishReconciliationOutcome(
+            previous: .premium, new: .free, outcome: outcome, now: now,
+        )
+
+        // Telemetry payload
+        XCTAssertEqual(captured.count, 1)
+        let payload = captured[0]
+        XCTAssertEqual(payload["previous_tier"] as? String, "premium")
+        XCTAssertEqual(payload["new_tier"] as? String, "free")
+        XCTAssertEqual(payload["archived_count"] as? Int, 175)
+        XCTAssertEqual(payload["total_remembered_pre"] as? Int, 200)
+        XCTAssertEqual(payload["total_remembered_post"] as? Int, 25)
+
+        // Banner state
+        let banner = service.pantryReconciliationBanner
+        XCTAssertNotNil(banner)
+        XCTAssertEqual(banner?.previousTier, .premium)
+        XCTAssertEqual(banner?.newTier, .free)
+        XCTAssertEqual(banner?.archivedCount, 175)
+        XCTAssertEqual(banner?.shownAt, now)
+    }
+
+    func test_publishReconciliationOutcome_zeroArchive_emitsTelemetryButNoBanner() {
+        let service = makeServiceWithIsolatedDefaults()
+        var captured: [[String: Any]] = []
+        service.reconciliationTelemetry = { properties in captured.append(properties) }
+
+        let outcome = PantryItemRepository.ReconcileOutcome(
+            totalRememberedPre: 10,
+            totalRememberedPost: 10,
+            archivedCount: 0,
+        )
+        service.publishReconciliationOutcome(
+            previous: .premium, new: .free, outcome: outcome,
+        )
+
+        XCTAssertEqual(captured.count, 1, "telemetry fires unconditionally")
+        XCTAssertEqual(captured[0]["archived_count"] as? Int, 0)
+        XCTAssertNil(service.pantryReconciliationBanner,
+                     "banner only surfaces when archivedCount > 0")
+    }
+
+    func test_acknowledgeReconciliationBanner_clearsObservableAndPersistedSlots() {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        let service = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+        service.publishReconciliationOutcome(
+            previous: .premium, new: .free,
+            outcome: PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 200, totalRememberedPost: 25, archivedCount: 175,
+            ),
+        )
+        XCTAssertNotNil(service.pantryReconciliationBanner)
+
+        service.acknowledgeReconciliationBanner()
+
+        XCTAssertNil(service.pantryReconciliationBanner)
+        XCTAssertNil(
+            defaults.data(forKey: "com.scalinity.stir.entitlement.pantryReconciliationBanner"),
+            "persisted UserDefaults backing must clear so the same downgrade event doesn't re-fire on next launch",
+        )
+    }
+
+    func test_dismissExpiredReconciliationBanner_removesBannerAfterTTL() {
+        let service = makeServiceWithIsolatedDefaults()
+        let shownAt = Date(timeIntervalSince1970: 1_700_000_000)
+        service.publishReconciliationOutcome(
+            previous: .premium, new: .free,
+            outcome: PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 200, totalRememberedPost: 25, archivedCount: 175,
+            ),
+            now: shownAt,
+        )
+        XCTAssertNotNil(service.pantryReconciliationBanner)
+
+        // Just under the TTL — banner stays.
+        let nearlyExpired = shownAt.addingTimeInterval(7 * 24 * 3600 - 60)
+        service.dismissExpiredReconciliationBanner(now: nearlyExpired)
+        XCTAssertNotNil(service.pantryReconciliationBanner,
+                        "banner must persist within the 7-day TTL")
+
+        // Past the TTL — banner clears.
+        let expired = shownAt.addingTimeInterval(7 * 24 * 3600 + 1)
+        service.dismissExpiredReconciliationBanner(now: expired)
+        XCTAssertNil(service.pantryReconciliationBanner,
+                     "banner must auto-dismiss past the 7-day TTL")
+    }
+
+    func test_bannerPersistence_restoresOnNewServiceInstance() throws {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let writer = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+        let shownAt = Date()  // banner is fresh — well within TTL
+        writer.publishReconciliationOutcome(
+            previous: .pro, new: .free,
+            outcome: PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 1_000, totalRememberedPost: 25, archivedCount: 975,
+            ),
+            now: shownAt,
+        )
+
+        // Fresh service against the same UserDefaults — banner must restore.
+        let reader = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+        let banner = reader.pantryReconciliationBanner
+        XCTAssertNotNil(banner)
+        XCTAssertEqual(banner?.previousTier, .pro)
+        XCTAssertEqual(banner?.newTier, .free)
+        XCTAssertEqual(banner?.archivedCount, 975)
+    }
+
+    func test_bannerPersistence_dropsStaleBannerOnRestore() {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Hand-write an aged banner directly into UserDefaults.
+        let staleBanner = EntitlementService.ReconciliationBanner(
+            previousTier: .premium, newTier: .free, archivedCount: 50,
+            shownAt: Date().addingTimeInterval(-30 * 24 * 3600),  // 30 days ago
+        )
+        let data = try! JSONEncoder.stir.encode(staleBanner)
+        defaults.set(data, forKey: "com.scalinity.stir.entitlement.pantryReconciliationBanner")
+
+        let reader = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+        XCTAssertNil(reader.pantryReconciliationBanner,
+                     "a banner aged past 7 days must NOT restore on init")
+    }
+
+    func test_hydrate_firstHydrate_doesNotFireReconciliation() async {
+        // First hydrate after launch goes from `.loading` → `.hydrated`.
+        // Even if `effectiveTier` looks like a downgrade against the
+        // (free/none) init defaults, `applyTierChange` must skip — the
+        // service had no prior state to "downgrade from".
+        let service = makeServiceWithIsolatedDefaults()
+        var dispatched = false
+        service.tierDowngradeHandler = { _, _, _ in
+            dispatched = true
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 0, totalRememberedPost: 0, archivedCount: 0,
+            )
+        }
+
+        service.hydrate(from: Self.entitlements(tier: .free, billingState: .none))
+        // Yield once so any spawned Task would run if the guard failed.
+        await Task.yield()
+        XCTAssertFalse(dispatched, "first hydrate must skip the downgrade hook")
+    }
+
+    func test_hydrate_premiumToFree_dispatchesReconciliationHandler() async throws {
+        let service = makeServiceWithIsolatedDefaults()
+
+        // Prime to Premium.
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 250,
+        ))
+
+        let expectation = XCTestExpectation(description: "downgrade handler invoked")
+        let captureBox = HandlerCaptureBox()
+        service.tierDowngradeHandler = { previous, new, newCap in
+            await captureBox.record(previous: previous, new: new, newCap: newCap)
+            expectation.fulfill()
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 200, totalRememberedPost: 25, archivedCount: 175,
+            )
+        }
+        var captured: [[String: Any]] = []
+        service.reconciliationTelemetry = { properties in captured.append(properties) }
+
+        // Downgrade: Premium → Free.
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+
+        let snapshot = await captureBox.snapshot
+        XCTAssertEqual(snapshot.previous, .premium)
+        XCTAssertEqual(snapshot.new, .free)
+        XCTAssertEqual(snapshot.newCap, 25)
+        XCTAssertEqual(captured.count, 1)
+        XCTAssertEqual(captured[0]["archived_count"] as? Int, 175)
+
+        // Banner publishes after the async hop — give it a tick to settle.
+        await Task.yield()
+        XCTAssertEqual(service.pantryReconciliationBanner?.archivedCount, 175)
+    }
+
+    func test_hydrate_upgrade_doesNotDispatchReconciliation() async {
+        let service = makeServiceWithIsolatedDefaults()
+        // Prime to Free.
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+        var dispatched = false
+        service.tierDowngradeHandler = { _, _, _ in
+            dispatched = true
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 0, totalRememberedPost: 0, archivedCount: 0,
+            )
+        }
+
+        // Upgrade: Free → Premium.
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 250,
+        ))
+        await Task.yield()
+        XCTAssertFalse(dispatched, "upgrade path must not fire downgrade reconciliation")
+    }
+
+    /// Build an EntitlementService against an isolated UserDefaults
+    /// suite so the SCA-99 banner persistence path doesn't bleed
+    /// across tests. The suite is intentionally not removed in
+    /// teardown — `UserDefaults(suiteName:)` instances are
+    /// process-scoped and short-lived; XCTest reset between cases
+    /// is sufficient for the SCA-99 banner key.
+    private func makeServiceWithIsolatedDefaults() -> EntitlementService {
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        return EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [
@@ -429,5 +672,26 @@ final class EntitlementServiceTests: XCTestCase {
             cap: cap,
             periodEnd: "2026-05-17",
         )
+    }
+}
+
+/// SCA-99 helper: thread-safe capture box for the async tier-
+/// downgrade handler invocation. Records the (previous, new, newCap)
+/// triple the service forwarded so the test can assert against it
+/// after the Task hop resolves.
+actor HandlerCaptureBox {
+    struct Snapshot {
+        let previous: Tier
+        let new: Tier
+        let newCap: Int
+    }
+    private var captured: Snapshot?
+
+    func record(previous: Tier, new: Tier, newCap: Int) {
+        captured = Snapshot(previous: previous, new: new, newCap: newCap)
+    }
+
+    var snapshot: Snapshot {
+        captured ?? Snapshot(previous: .free, new: .free, newCap: 0)
     }
 }

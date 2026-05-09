@@ -833,10 +833,121 @@ final class PantryItemRepository {
     static let maxDisplayNameLength: Int = 200
     static let maxAmountTextLength: Int = 100
 
-    /// Mutate an existing pantry row's user-editable fields. Used by
-    /// `PantryEditSheet`. Bumps `updatedAt` so CloudKit sync propagates.
-    /// Trims whitespace and reapplies the same nil-on-blank rule as
-    /// `insertManual`.
+    // MARK: - SCA-99 / ADR 0035: tier-downgrade reconciliation
+
+    /// Outcome of `reconcileForTierChange`. Carries enough shape for
+    /// `EntitlementService` to emit `pantry_tier_downgrade_reconciled`
+    /// without re-reading Core Data: `archivedCount` is the headline
+    /// metric, and the (pre, post) pair anchors the dashboard's
+    /// "did we cap-clamp correctly" check.
+    struct ReconcileOutcome: Equatable, Sendable {
+        /// Count of `.remembered`, non-deleted rows BEFORE reconciliation.
+        let totalRememberedPre: Int
+        /// Count of `.remembered`, non-deleted rows AFTER reconciliation.
+        /// Equals `min(totalRememberedPre, newCap)` when archive ran;
+        /// equals `totalRememberedPre` when below-cap (no archive).
+        let totalRememberedPost: Int
+        /// Number of rows soft-archived from `.remembered` to
+        /// `.ephemeral` this pass. `0` when no reconciliation was
+        /// needed (`pre <= newCap`).
+        let archivedCount: Int
+    }
+
+    /// Reconcile the pantry's `.remembered` row count against a new
+    /// (smaller) standing-pantry cap. ADR 0035 / SCA-99.
+    ///
+    /// Selection rule: oldest `(pre - newCap)` `.remembered` rows
+    /// ordered by `lastSeenAt asc, createdAt asc` (rows with nil
+    /// `lastSeenAt` sort to the OLDEST end so they're the first
+    /// archived — a row that's never been seen is the weakest claim
+    /// on the standing-cap slot). Soft-archives by flipping
+    /// `typedMemoryState` to `.ephemeral` and stamping `expiresAt`
+    /// via the existing ephemeral formula so the row enters the
+    /// next morning's foreground sweep. Bumps `updatedAt` so
+    /// CloudKit propagates the change.
+    ///
+    /// Idempotent: a second call with the same `newCap` is a no-op
+    /// (`pre <= newCap` after the first archive). Re-entrant under
+    /// a tier-flap (Premium → Free → Premium → Free in webhook
+    /// retry storm): each call reads fresh count from Core Data and
+    /// archives only what's needed. Re-upgrade restoration (promoting
+    /// `.ephemeral` back to `.remembered`) is intentionally NOT
+    /// handled here — ADR 0035 defers that policy; the soft-archived
+    /// rows remain in CloudKit and can be promoted by a future API
+    /// when the UX is decided.
+    ///
+    /// `cap` is the post-downgrade cap from `EntitlementService.rememberedPantryCap`.
+    /// Pass `cap == 0` is treated the same as any other small cap —
+    /// the SCA-265 floor is the EntitlementService's job, not the
+    /// repository's.
+    @discardableResult
+    func reconcileForTierChange(
+        newCap: Int,
+        on household: HouseholdProfile,
+        now: Date = Date(),
+    ) throws -> ReconcileOutcome {
+        let context = controller.viewContext
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt == nil"),
+            NSPredicate(format: "memoryState == %@", PantryItem.MemoryState.remembered.rawValue),
+        ])
+        // Oldest first: nil-lastSeenAt sorts before any concrete date
+        // when ascending (the default), which lines up with the
+        // "weakest claim on the slot" intent. createdAt as the
+        // tiebreaker prevents a deterministic-but-arbitrary cut for
+        // rows that share a `lastSeenAt` (e.g. a multi-row scan).
+        request.sortDescriptors = [
+            NSSortDescriptor(key: "lastSeenAt", ascending: true),
+            NSSortDescriptor(key: "createdAt", ascending: true),
+        ]
+
+        let rows: [PantryItem]
+        do {
+            rows = try context.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+
+        let pre = rows.count
+        guard pre > newCap else {
+            // No archive needed. Return the pre/post pair so callers
+            // (and telemetry) still see the no-op landed.
+            return ReconcileOutcome(
+                totalRememberedPre: pre,
+                totalRememberedPost: pre,
+                archivedCount: 0,
+            )
+        }
+
+        let archiveCount = pre - newCap
+        let toArchive = rows.prefix(archiveCount)
+
+        for row in toArchive {
+            row.typedMemoryState = .ephemeral
+            // SCA-22 ephemeral lifecycle: stamp expiresAt so the row
+            // enters the next morning's foreground sweep. Without
+            // this, the archived row would linger as a weird
+            // ephemeral-without-expiry state — not invalid (the
+            // model allows nil expiresAt) but inconsistent with
+            // every other ephemeral-write site in the repository.
+            row.expiresAt = Self.expiresAtForEphemeral(now: now)
+            row.updatedAt = now
+        }
+
+        try controller.save()
+        Logger.coreData.info(
+            "PantryItemRepository reconcileForTierChange: archived \(archiveCount, privacy: .public) of \(pre, privacy: .public) remembered rows (newCap=\(newCap, privacy: .public))",
+        )
+        return ReconcileOutcome(
+            totalRememberedPre: pre,
+            totalRememberedPost: newCap,
+            archivedCount: archiveCount,
+        )
+    }
+
+    /// Edit a `PantryItem` in place with validation. Throws on
     func update(
         _ item: PantryItem,
         displayName: String,

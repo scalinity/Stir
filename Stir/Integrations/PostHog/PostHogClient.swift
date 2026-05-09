@@ -193,6 +193,33 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// only after success, so failures don't poison the schedule.
     /// Counts only; no item names per ADR 0009's privacy invariant.
     case pantryTombstoneReaperRan = "pantry_tombstone_reaper_ran"
+    /// SCA-99 / ADR 0035: emitted by `EntitlementService.applyTierChange`
+    /// after `PantryItemRepository.reconcileForTierChange` completes a
+    /// soft-archive pass on a tier-downgrade hydrate (Premium/Pro → Free
+    /// or Pro → Premium). Fires unconditionally on every detected
+    /// downgrade — including zero-archive passes (when `used <= cap`
+    /// already) — so the dashboard signal is "downgrade event reached
+    /// reconciliation" not "downgrade event archived something".
+    /// Missing emissions on a confirmed billing-state delta indicate
+    /// the `applyTierChange` hook is detached from `hydrate`.
+    ///
+    /// Properties:
+    ///   - `previous_tier`: free|premium|pro — the tier the snapshot
+    ///     was at before the new hydrate landed.
+    ///   - `new_tier`: free|premium|pro — the tier on the incoming
+    ///     entitlement.
+    ///   - `archived_count`: integer ≥ 0 — `.remembered` rows the
+    ///     reconciler soft-archived to `.ephemeral` this pass.
+    ///   - `total_remembered_pre`: integer ≥ 0 — count of
+    ///     `.remembered` rows before reconciliation (excludes
+    ///     soft-deleted).
+    ///   - `total_remembered_post`: integer ≥ 0 — count after.
+    ///     Equals `min(total_remembered_pre, new_cap)` when
+    ///     `archived_count > 0`.
+    ///
+    /// No item names or pantry content per ADR 0009's privacy
+    /// invariant.
+    case pantryTierDowngradeReconciled = "pantry_tier_downgrade_reconciled"
     case mealRated = "meal_rated"
     /// Fires when the user dismisses the outcome feedback sheet via Skip
     /// without submitting a rating. Complement to `meal_rated` — the pair

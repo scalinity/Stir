@@ -260,6 +260,15 @@ struct PantryListView: View {
     private func populatedList(vm: PantryListViewModel) -> some View {
         @Bindable var bindable = vm
         return VStack(spacing: 0) {
+            // SCA-99 / ADR 0035: tier-downgrade reconciliation banner.
+            // Surfaces above the header when EntitlementService has a
+            // pending banner from a Premium/Pro → Free or Pro → Premium
+            // hydrate that soft-archived `.remembered` rows to
+            // `.ephemeral`. Dismissed manually OR auto-dropped after
+            // 7 days via `RootView`'s scenePhase .active hook.
+            if let banner = entitlements.pantryReconciliationBanner {
+                reconciliationBanner(banner)
+            }
             // Header strip — total active (non-deleted) items in the
             // pantry. We previously displayed `vm.rememberedCount`
             // against the standing-pantry cap (e.g. "2 of 1,000 saved")
@@ -431,6 +440,35 @@ struct PantryListView: View {
                 },
             )
         }
+    }
+
+    /// SCA-99 / ADR 0035: non-blocking banner copy. Single tap on
+    /// "Dismiss" clears the slot + persisted UserDefaults backing so
+    /// the same downgrade event won't re-fire on the next foreground.
+    private func reconciliationBanner(_ banner: EntitlementService.ReconciliationBanner) -> some View {
+        HStack(alignment: .top, spacing: CGFloat.Stir.space2) {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                Text("Your \(banner.archivedCount) oldest pantry \(banner.archivedCount == 1 ? "item is" : "items are") now temporary.")
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ink900)
+                Text("Re-upgrade to Premium to make them permanent again.")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.ink500)
+            }
+            Spacer(minLength: CGFloat.Stir.space2)
+            Button {
+                entitlements.acknowledgeReconciliationBanner()
+            } label: {
+                Text("Dismiss")
+                    .stirFont(.labelMd)
+                    .foregroundStyle(Color.Stir.ember600)
+            }
+            .accessibilityLabel("Dismiss pantry reconciliation banner")
+        }
+        .padding(.horizontal, CGFloat.Stir.screenMargin)
+        .padding(.vertical, CGFloat.Stir.space3)
+        .background(Color.Stir.ember100)
+        .accessibilityElement(children: .combine)
     }
 
     private var emptyState: some View {

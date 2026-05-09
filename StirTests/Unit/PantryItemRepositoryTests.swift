@@ -382,6 +382,132 @@ final class PantryItemRepositoryTests: XCTestCase {
         XCTAssertEqual(try repo.countRemembered(for: household), 1)
     }
 
+    // MARK: - SCA-99 / ADR 0035 — reconcileForTierChange
+
+    func test_reconcileForTierChange_archives175_oldestFromCount200_at_cap25() throws {
+        // Premium → Free downgrade. 200 standing rows; new cap is 25.
+        // Reconciler should archive the 175 oldest by lastSeenAt asc.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        for i in 0..<200 {
+            let row = try seedItem(name: "item-\(i)", memoryState: .remembered)
+            // Stagger lastSeenAt so "oldest" is deterministic.
+            // Lower index = earlier lastSeenAt = first archived.
+            row.lastSeenAt = baseline.addingTimeInterval(TimeInterval(i))
+            row.createdAt = baseline.addingTimeInterval(TimeInterval(i))
+        }
+        try pc.viewContext.save()
+
+        let outcome = try repo.reconcileForTierChange(newCap: 25, on: household)
+
+        XCTAssertEqual(outcome.totalRememberedPre, 200)
+        XCTAssertEqual(outcome.totalRememberedPost, 25)
+        XCTAssertEqual(outcome.archivedCount, 175)
+
+        // Live count should match the post field. Ephemeral rows don't
+        // count toward `.remembered`.
+        XCTAssertEqual(try repo.countRemembered(for: household), 25)
+
+        // The oldest row (index 0) MUST have been archived.
+        let oldest = try fetchByName("item-0")
+        XCTAssertEqual(oldest?.typedMemoryState, .ephemeral)
+        XCTAssertNotNil(oldest?.expiresAt,
+                        "archived rows must inherit the ephemeral expiresAt stamp")
+
+        // The newest row (index 199) MUST have been kept.
+        let newest = try fetchByName("item-199")
+        XCTAssertEqual(newest?.typedMemoryState, .remembered)
+        XCTAssertNil(newest?.expiresAt,
+                     "kept .remembered rows leave expiresAt nil")
+    }
+
+    func test_reconcileForTierChange_belowCap_isNoOp() throws {
+        try seedItem(name: "olive oil", memoryState: .remembered)
+        try seedItem(name: "garlic", memoryState: .remembered)
+
+        let outcome = try repo.reconcileForTierChange(newCap: 25, on: household)
+        XCTAssertEqual(outcome.totalRememberedPre, 2)
+        XCTAssertEqual(outcome.totalRememberedPost, 2)
+        XCTAssertEqual(outcome.archivedCount, 0)
+        XCTAssertEqual(try repo.countRemembered(for: household), 2)
+    }
+
+    func test_reconcileForTierChange_sortsByLastSeenThenCreatedAt() throws {
+        // 3 rows, cap 2, expect 1 archived. Two rows share lastSeenAt;
+        // the one with the earlier createdAt is the tiebreaker pick.
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        let alpha = try seedItem(name: "alpha", memoryState: .remembered, lastSeenAt: baseline)
+        alpha.createdAt = baseline                           // tiebreaker pick — earliest createdAt
+        let beta = try seedItem(name: "beta", memoryState: .remembered, lastSeenAt: baseline)
+        beta.createdAt = baseline.addingTimeInterval(60)     // tied lastSeenAt, but newer createdAt
+        let gamma = try seedItem(name: "gamma", memoryState: .remembered, lastSeenAt: baseline.addingTimeInterval(3600))
+        gamma.createdAt = baseline.addingTimeInterval(3600)
+        try pc.viewContext.save()
+
+        let outcome = try repo.reconcileForTierChange(newCap: 2, on: household)
+        XCTAssertEqual(outcome.archivedCount, 1)
+
+        XCTAssertEqual(alpha.typedMemoryState, .ephemeral, "earliest createdAt at tied lastSeenAt is archived first")
+        XCTAssertEqual(beta.typedMemoryState, .remembered)
+        XCTAssertEqual(gamma.typedMemoryState, .remembered)
+    }
+
+    func test_reconcileForTierChange_idempotent_secondCallIsNoOp() throws {
+        for i in 0..<30 {
+            try seedItem(name: "item-\(i)", memoryState: .remembered)
+        }
+        let first = try repo.reconcileForTierChange(newCap: 25, on: household)
+        XCTAssertEqual(first.archivedCount, 5)
+
+        let second = try repo.reconcileForTierChange(newCap: 25, on: household)
+        XCTAssertEqual(second.archivedCount, 0,
+                        "second call with same cap must be a no-op — pre-count already at cap")
+        XCTAssertEqual(second.totalRememberedPre, 25)
+        XCTAssertEqual(second.totalRememberedPost, 25)
+    }
+
+    func test_reconcileForTierChange_excludesSoftDeletedFromSelection() throws {
+        // 30 .remembered rows + 50 soft-deleted .remembered rows. The
+        // archive count must be measured against the LIVE 30, not the
+        // mixed 80. Otherwise a user with a graveyard of tombstones
+        // would have actively-used rows archived on every downgrade.
+        for i in 0..<30 {
+            try seedItem(name: "live-\(i)", memoryState: .remembered)
+        }
+        for i in 0..<50 {
+            try seedItem(name: "tomb-\(i)", memoryState: .remembered, deleted: true)
+        }
+        let outcome = try repo.reconcileForTierChange(newCap: 25, on: household)
+        XCTAssertEqual(outcome.totalRememberedPre, 30)
+        XCTAssertEqual(outcome.archivedCount, 5)
+    }
+
+    func test_reconcileForTierChange_leavesEphemeralRowsUntouched() throws {
+        for i in 0..<20 {
+            try seedItem(name: "rmb-\(i)", memoryState: .remembered)
+        }
+        let ephemeral = try seedItem(name: "today-only", memoryState: .ephemeral)
+        let originalState = ephemeral.typedMemoryState
+
+        let outcome = try repo.reconcileForTierChange(newCap: 5, on: household)
+        XCTAssertEqual(outcome.totalRememberedPre, 20)
+        XCTAssertEqual(outcome.archivedCount, 15)
+        XCTAssertEqual(ephemeral.typedMemoryState, originalState,
+                        "ephemeral rows are not in scope for the cap and must not be touched")
+    }
+
+    /// Tiny helper for the SCA-99 tests — fetches a single row by
+    /// displayName so the sort-order assertions can pinpoint which row
+    /// landed in which state without scanning the whole pantry.
+    private func fetchByName(_ name: String) throws -> PantryItem? {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.fetchLimit = 1
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "displayName == %@", name),
+        ])
+        return try pc.viewContext.fetch(request).first
+    }
+
     // MARK: - Helpers
 
     /// Unwraps an `InsertManualOutcome.inserted(row)` for tests that

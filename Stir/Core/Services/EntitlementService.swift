@@ -12,6 +12,13 @@
 //     let every feature gate in the UI consult this.
 //   - Keychain-backed 24h snapshot for offline fallback when bootstrap fails.
 //
+// SCA-99 / ADR 0035: hydrate also detects effective-tier downgrades
+// (Premium/Pro → Free, or Pro → Premium) and dispatches a pantry
+// reconciliation pass via the `tierDowngradeHandler` closure that
+// `RootCoordinator` wires at init time. The handler returns a
+// `PantryItemRepository.ReconcileOutcome`; on `archivedCount > 0` the
+// service publishes a `ReconciliationBanner` for `PantryListView`.
+//
 // @Observable + @MainActor rather than actor so SwiftUI views get
 // synchronous property access on the main thread. Writes go through
 // `hydrate()` which is also MainActor-bound.
@@ -104,6 +111,48 @@ final class EntitlementService {
     /// launch `/v1/session/bootstrap` already hydrated the same data.
     private(set) var lastHydratedAt: Date?
 
+    /// SCA-99 / ADR 0035: non-blocking banner state surfaced to
+    /// `PantryListView` after a tier-downgrade soft-archive pass.
+    /// Nil when no banner is owed (no recent downgrade, or the
+    /// banner has been dismissed / aged past its 7-day TTL).
+    /// Persisted to UserDefaults keyed by canonical_user_key so a
+    /// launch after a webhook-driven downgrade still surfaces it.
+    private(set) var pantryReconciliationBanner: ReconciliationBanner?
+
+    /// SCA-99 / ADR 0035: handler dispatched on every effective-tier
+    /// downgrade detected in `hydrate(from:)`. `RootCoordinator` sets
+    /// this at init using its resolved household + pantry repository.
+    /// Returns the reconciliation outcome so the service can emit
+    /// telemetry + populate `pantryReconciliationBanner` synchronously
+    /// against the same data set the repo just wrote. Optional so
+    /// tests that don't need the reconciliation path skip the wiring.
+    var tierDowngradeHandler: (@MainActor (_ previousTier: Tier, _ newTier: Tier, _ newCap: Int) async throws -> PantryItemRepository.ReconcileOutcome)?
+
+    /// SCA-99 / ADR 0035: telemetry emitter, defaulted to
+    /// `PostHogClient.shared.capture(.pantryTierDowngradeReconciled, ...)`.
+    /// Test-overridable so unit tests can capture properties without
+    /// PostHog initialization.
+    var reconciliationTelemetry: (@MainActor (_ properties: [String: Any]) -> Void) = { properties in
+        PostHogClient.shared.capture(.pantryTierDowngradeReconciled, properties: properties)
+    }
+
+    /// Banner identity used by `PantryListView` to render the SCA-99
+    /// non-blocking reconciliation notice. `shownAt` anchors the
+    /// 7-day auto-dismiss TTL. `archivedCount` powers the copy
+    /// ("Your X oldest pantry items are now temporary").
+    struct ReconciliationBanner: Codable, Sendable, Equatable {
+        let previousTier: Tier
+        let newTier: Tier
+        let archivedCount: Int
+        let shownAt: Date
+
+        /// Banner self-dismisses 7 days after it was first published.
+        /// Decision lives in `dismissExpiredReconciliationBanner(now:)`
+        /// so a single `now` source-of-truth handles both the TTL
+        /// check and any future tier-flap edge cases.
+        static let autoDismissAfter: TimeInterval = 7 * 24 * 3600
+    }
+
     /// Convenience for bool-valued feature flags like `disable_scan_parse`.
     /// Respects is_enabled: a disabled flag always returns nil so callers
     /// fall back to default behavior.
@@ -113,14 +162,20 @@ final class EntitlementService {
     }
 
     private let keychain: any KeychainStoring
+    private let userDefaults: UserDefaults
 
     // MARK: - Init
 
-    init(keychain: any KeychainStoring = KeychainStorage.shared) {
+    init(
+        keychain: any KeychainStoring = KeychainStorage.shared,
+        userDefaults: UserDefaults = .standard,
+    ) {
         self.keychain = keychain
+        self.userDefaults = userDefaults
         // Attempt to re-hydrate from the last-known-good cached snapshot.
         // If bootstrap succeeds soon, it'll overwrite this.
         restoreFromCachedSnapshotIfFresh()
+        restorePantryReconciliationBanner()
     }
 
     // MARK: - Hydrate
@@ -129,6 +184,17 @@ final class EntitlementService {
         from entitlements: BootstrapResponse.Entitlements,
         flags: [BootstrapResponse.FeatureFlag] = [],
     ) {
+        // SCA-99 / ADR 0035: capture the prior effective-tier BEFORE
+        // reassignment so `applyTierChange` sees a real delta. The
+        // first hydrate after a cold launch starts from `tier=.free,
+        // billingState=.none` (init defaults) — comparing against
+        // those defaults would falsely fire "downgrade" on every
+        // first-launch Free user. The hydrationState gate below
+        // suppresses that.
+        let priorTier = self.tier
+        let priorEffectiveTier = self.effectiveTier
+        let priorHydrationState = self.hydrationState
+
         self.tier = entitlements.tier
         self.billingState = entitlements.billingState
         self.isTrial = entitlements.isTrial
@@ -157,6 +223,154 @@ final class EntitlementService {
         Logger.entitlement.info(
             "hydrated tier=\(self.tier.rawValue, privacy: .public) billing=\(self.billingState.rawValue, privacy: .public) voice=\(self.voiceEnabled, privacy: .public) flags=\(flags.count, privacy: .public)",
         )
+
+        // SCA-99 / ADR 0035: detect effective-tier downgrade and
+        // dispatch reconciliation. The hydrationState gate skips
+        // first-cold-hydrate (priorHydrationState == .loading) so a
+        // brand-new Free install doesn't fire reconciliation against
+        // its own default state. Subsequent hydrates (foreground
+        // refresh, RC webhook follow-up) compare priorEffectiveTier
+        // against the new effectiveTier and dispatch on a strictly
+        // narrower tier (Premium/Pro → Free, or Pro → Premium).
+        if case .loading = priorHydrationState {
+            // First hydrate this session — skip downgrade detection.
+            return
+        }
+        let newEffectiveTier = self.effectiveTier
+        if Self.isDowngrade(from: priorEffectiveTier, to: newEffectiveTier) {
+            applyTierChange(previous: priorTier, new: entitlements.tier)
+        }
+    }
+
+    /// Returns true when `to` is strictly narrower than `from` in tier
+    /// scope: `pro > premium > free`. Equal tiers and upgrades both
+    /// return false. Static so unit tests can pin the matrix
+    /// independently of an EntitlementService instance.
+    static func isDowngrade(from: Tier, to: Tier) -> Bool {
+        rank(of: to) < rank(of: from)
+    }
+
+    private static func rank(of tier: Tier) -> Int {
+        switch tier {
+        case .free:    return 0
+        case .premium: return 1
+        case .pro:     return 2
+        }
+    }
+
+    /// Dispatch the reconciliation handler against the new
+    /// (post-hydrate) cap. Async so the repository's CloudKit-bound
+    /// save() doesn't block the hydrate caller; the banner publishes
+    /// on the next runloop tick after the handler resolves.
+    private func applyTierChange(previous: Tier, new: Tier) {
+        guard let handler = tierDowngradeHandler else {
+            Logger.entitlement.info(
+                "tier downgrade detected (\(previous.rawValue, privacy: .public) → \(new.rawValue, privacy: .public)) but no tierDowngradeHandler wired — skipping reconciliation",
+            )
+            return
+        }
+        let newCap = self.rememberedPantryCap
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let outcome = try await handler(previous, new, newCap)
+                self.publishReconciliationOutcome(
+                    previous: previous,
+                    new: new,
+                    outcome: outcome,
+                )
+            } catch {
+                Logger.entitlement.error(
+                    "tier downgrade reconciliation failed: \(error.localizedDescription, privacy: .public)",
+                )
+            }
+        }
+    }
+
+    /// Fires telemetry and (when archivedCount > 0) publishes the
+    /// banner. Split out so tests can drive the publish path without
+    /// going through the async handler dispatch.
+    func publishReconciliationOutcome(
+        previous: Tier,
+        new: Tier,
+        outcome: PantryItemRepository.ReconcileOutcome,
+        now: Date = Date(),
+    ) {
+        reconciliationTelemetry([
+            "previous_tier": previous.rawValue,
+            "new_tier": new.rawValue,
+            "archived_count": outcome.archivedCount,
+            "total_remembered_pre": outcome.totalRememberedPre,
+            "total_remembered_post": outcome.totalRememberedPost,
+        ])
+        // Banner is informational — only surface when something was
+        // actually archived. A no-op reconciliation (user was below
+        // cap on downgrade) shouldn't pop a "your X oldest items are
+        // now temporary" banner with X=0.
+        guard outcome.archivedCount > 0 else { return }
+        let banner = ReconciliationBanner(
+            previousTier: previous,
+            newTier: new,
+            archivedCount: outcome.archivedCount,
+            shownAt: now,
+        )
+        self.pantryReconciliationBanner = banner
+        persistPantryReconciliationBanner(banner)
+    }
+
+    /// User-tap dismissal from the PantryListView banner. Clears the
+    /// observable slot AND the persisted UserDefaults backing so a
+    /// foreground after dismissal doesn't re-show the same banner.
+    func acknowledgeReconciliationBanner() {
+        self.pantryReconciliationBanner = nil
+        userDefaults.removeObject(forKey: Self.pantryReconciliationBannerDefaultsKey)
+    }
+
+    /// Auto-dismiss the banner if it's older than the 7-day TTL.
+    /// Called from RootCoordinator's scenePhase `.active` branch so
+    /// a long-quiescent banner self-clears without user action.
+    func dismissExpiredReconciliationBanner(now: Date = Date()) {
+        guard let banner = pantryReconciliationBanner else { return }
+        let age = now.timeIntervalSince(banner.shownAt)
+        if age >= ReconciliationBanner.autoDismissAfter {
+            self.pantryReconciliationBanner = nil
+            userDefaults.removeObject(forKey: Self.pantryReconciliationBannerDefaultsKey)
+        }
+    }
+
+    // MARK: - Banner persistence
+
+    private static let pantryReconciliationBannerDefaultsKey = "com.scalinity.stir.entitlement.pantryReconciliationBanner"
+
+    private func persistPantryReconciliationBanner(_ banner: ReconciliationBanner) {
+        do {
+            let data = try JSONEncoder.stir.encode(banner)
+            userDefaults.set(data, forKey: Self.pantryReconciliationBannerDefaultsKey)
+        } catch {
+            Logger.entitlement.warning(
+                "failed to persist pantry reconciliation banner: \(error.localizedDescription, privacy: .public)",
+            )
+        }
+    }
+
+    private func restorePantryReconciliationBanner() {
+        guard let data = userDefaults.data(forKey: Self.pantryReconciliationBannerDefaultsKey) else { return }
+        do {
+            let banner = try JSONDecoder.stir.decode(ReconciliationBanner.self, from: data)
+            // Restore subject to the same TTL the live banner respects;
+            // a > 7d-old banner from a stashed launch has no business
+            // re-surfacing.
+            let age = Date().timeIntervalSince(banner.shownAt)
+            if age < ReconciliationBanner.autoDismissAfter {
+                self.pantryReconciliationBanner = banner
+            } else {
+                userDefaults.removeObject(forKey: Self.pantryReconciliationBannerDefaultsKey)
+            }
+        } catch {
+            // Corrupted bytes — drop and move on. Pre-launch nothing
+            // depends on banner persistence surviving a shape change.
+            userDefaults.removeObject(forKey: Self.pantryReconciliationBannerDefaultsKey)
+        }
     }
 
     /// Mark hydration as failed when bootstrap itself errors out (NET-01).

@@ -82,6 +82,10 @@ struct RootView: View {
                 if coordinator.phase == .ready || coordinator.phase == .offlineFallback {
                     Task { await coordinator.refreshEntitlementsIfStale() }
                 }
+                // SCA-99 / ADR 0035: drop the pantry tier-downgrade
+                // banner once it ages past its 7-day TTL. No-op when
+                // no banner is set or the banner is still fresh.
+                coordinator.entitlements.dismissExpiredReconciliationBanner()
                 // widget_added Retention funnel (spec §15). Widget process
                 // writes a first-seen timestamp on its first getTimeline
                 // fetch; we drain + emit exactly once per installation.
