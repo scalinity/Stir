@@ -67,7 +67,7 @@ struct WelcomeView: View {
             HStack {
                 Spacer()
                 WelcomeBowl()
-                    .frame(width: 140, height: 84)
+                    .frame(width: 140, height: 110)
                     .accessibilityHidden(true) // decorative motif
                 Spacer()
             }
@@ -113,88 +113,107 @@ struct WelcomeView: View {
 // MARK: - WelcomeBowl
 
 /// Illustrated bowl motif for Welcome only. Reproduces mockup 01's SVG
-/// (steam wisps + ember rim + paper.200 bowl body + five ingredient
+/// (steam wisps + ember rim + paper.200 bowl body + six ingredient
 /// dots) as SwiftUI Canvas. Not an empty-state illustration; not a
 /// general icon — this is the one bespoke brand image in v1 and lives
 /// with its only consumer rather than in the icon catalog.
+///
+/// Coordinate system mirrors the mockup SVG viewBox `-10 -24 160 120`
+/// so paths port verbatim from the HTML source. Earlier revisions
+/// drifted into a closed two-curve "lens" bowl that read as a smiley
+/// face (SCA-290) — bowl body is now a single open half-ellipse, the
+/// rim sits on top, ingredients drop into the broth.
 ///
 /// Design-System.md §13 defers a general illustration library to v2;
 /// this one is scoped tightly to Welcome, not a library entry.
 private struct WelcomeBowl: View {
     var body: some View {
         Canvas { context, size in
-            let scaleX = size.width / 140
-            let scaleY = size.height / 84
-            let scale = min(scaleX, scaleY)
+            // Mockup viewBox: -10 -24 160 120 (width 160, height 120).
+            // Map SVG coords → canvas with uniform scale + offset so a
+            // 140×110 frame renders at ~scale 0.875.
+            let scale = min(size.width / 160, size.height / 120)
+            let offsetX = 10 * scale  // = -viewBoxMinX * scale
+            let offsetY = 24 * scale  // = -viewBoxMinY * scale
 
-            // Steam wisps
-            let wispStroke = GraphicsContext.Shading.color(Color.Stir.ink300)
-            let wispStyle = StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round)
-            for x in [50, 70, 90] {
-                let xp = CGFloat(x) * scale
-                var path = Path()
-                path.move(to: CGPoint(x: xp, y: 18 * scale))
-                path.addQuadCurve(
-                    to: CGPoint(x: xp, y: 0),
-                    control: CGPoint(x: xp + 4 * scale, y: 8 * scale),
-                )
-                context.stroke(path, with: wispStroke, style: wispStyle)
+            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: x * scale + offsetX, y: y * scale + offsetY)
             }
 
-            // Bowl body (below the rim) — paper200 fill, ember outline
-            // Renamed from `body` → `bowlBody` so it doesn't shadow the
-            // outer `WelcomeBowl.body` computed property. Review
-            // finding S9 (DB1).
-            var bowlBody = Path()
-            bowlBody.move(to: CGPoint(x: 16 * scale, y: 36 * scale))
-            bowlBody.addQuadCurve(
-                to: CGPoint(x: 124 * scale, y: 36 * scale),
-                control: CGPoint(x: 70 * scale, y: 90 * scale),
+            let strokeBowl = StrokeStyle(
+                lineWidth: 1.5 * scale,
+                lineCap: .round,
+                lineJoin: .round,
             )
-            bowlBody.addLine(to: CGPoint(x: 118 * scale, y: 62 * scale))
-            bowlBody.addQuadCurve(
-                to: CGPoint(x: 22 * scale, y: 62 * scale),
-                control: CGPoint(x: 70 * scale, y: 92 * scale),
-            )
-            bowlBody.closeSubpath()
-            context.fill(bowlBody, with: .color(Color.Stir.paper200))
-            context.stroke(
-                bowlBody,
-                with: .color(Color.Stir.ember600),
-                style: StrokeStyle(lineWidth: 1.5 * scale, lineJoin: .round),
-            )
+            let strokeRim = StrokeStyle(lineWidth: 1.5 * scale)
+            let strokeWisp = StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round)
 
-            // Rim ellipse — ember tint fill + ember outline
+            // Steam — three wavy S-curve wisps rising from the rim.
+            // Verbatim from mockup SVG paths; opacity 0.6 / 0.7 / 0.6.
+            let wisps: [(start: CGPoint, ctrl1: CGPoint, mid: CGPoint, ctrl2: CGPoint, end: CGPoint, opacity: Double)] = [
+                // M54 10 Q50 4 54 -2 Q58 -8 54 -14
+                (p(54, 10), p(50, 4), p(54, -2), p(58, -8), p(54, -14), 0.6),
+                // M70 8  Q66 2 70 -4 Q74 -10 70 -16
+                (p(70, 8), p(66, 2), p(70, -4), p(74, -10), p(70, -16), 0.7),
+                // M86 10 Q82 4 86 -2 Q90 -8 86 -14
+                (p(86, 10), p(82, 4), p(86, -2), p(90, -8), p(86, -14), 0.6),
+            ]
+            for wisp in wisps {
+                var path = Path()
+                path.move(to: wisp.start)
+                path.addQuadCurve(to: wisp.mid, control: wisp.ctrl1)
+                path.addQuadCurve(to: wisp.end, control: wisp.ctrl2)
+                context.stroke(
+                    path,
+                    with: .color(Color.Stir.ink300.opacity(wisp.opacity)),
+                    style: strokeWisp,
+                )
+            }
+
+            // Bowl body — single open half-ellipse hanging from the rim:
+            // M18 34 Q70 88 122 34. Fill closes the implicit shape;
+            // stroke renders only the visible arc.
+            var bowlBody = Path()
+            bowlBody.move(to: p(18, 34))
+            bowlBody.addQuadCurve(to: p(122, 34), control: p(70, 88))
+            context.fill(bowlBody, with: .color(Color.Stir.paper200))
+            context.stroke(bowlBody, with: .color(Color.Stir.ember600), style: strokeBowl)
+
+            // Rim ellipse drawn on top of the bowl body:
+            // cx=70 cy=34 rx=52 ry=7
             let rimRect = CGRect(
-                x: (70 - 56) * scale,
-                y: (34 - 8) * scale,
-                width: 112 * scale,
-                height: 16 * scale,
+                x: (70 - 52) * scale + offsetX,
+                y: (34 - 7) * scale + offsetY,
+                width: 104 * scale,
+                height: 14 * scale,
             )
             let rim = Path(ellipseIn: rimRect)
             context.fill(rim, with: .color(Color.Stir.ember100))
-            context.stroke(
-                rim,
-                with: .color(Color.Stir.ember600),
-                style: StrokeStyle(lineWidth: 1.5 * scale),
-            )
+            context.stroke(rim, with: .color(Color.Stir.ember600), style: strokeRim)
 
-            // Ingredients sitting on the rim
-            let ingredients: [(CGFloat, CGFloat, CGFloat, Color)] = [
-                (56, 32, 4, Color.Stir.ember600),
-                (70, 30, 3, Color.Stir.amber600),
-                (84, 32, 4, Color.Stir.sage600),
-                (64, 35, 2, Color.Stir.ink700),
-                (78, 35, 2, Color.Stir.ink700),
+            // Ingredients sitting in the broth (six dots — four colored,
+            // two small dark accents at half opacity).
+            let ingredients: [(cx: CGFloat, cy: CGFloat, r: CGFloat, color: Color, opacity: Double)] = [
+                (52, 32, 3.5, Color.Stir.ember600, 1.0),
+                (64, 33, 2.5, Color.Stir.amber600, 1.0),
+                (76, 32, 3.0, Color.Stir.sage600,  1.0),
+                (88, 33, 2.5, Color.Stir.ember600, 1.0),
+                (58, 35, 1.5, Color.Stir.ink700,   0.5),
+                (82, 35, 1.5, Color.Stir.ink700,   0.5),
             ]
-            for (cx, cy, r, color) in ingredients {
+            for ing in ingredients {
+                let center = p(ing.cx, ing.cy)
+                let rad = ing.r * scale
                 let rect = CGRect(
-                    x: (cx - r) * scale,
-                    y: (cy - r) * scale,
-                    width: 2 * r * scale,
-                    height: 2 * r * scale,
+                    x: center.x - rad,
+                    y: center.y - rad,
+                    width: 2 * rad,
+                    height: 2 * rad,
                 )
-                context.fill(Path(ellipseIn: rect), with: .color(color))
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(ing.color.opacity(ing.opacity)),
+                )
             }
         }
     }
