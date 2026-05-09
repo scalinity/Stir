@@ -203,7 +203,9 @@ Deno.serve(async (req) => {
   // rows stay wedged in 'processing' forever. Rare in practice but
   // essential for queue liveness (CA2-4).
   //
-  // Two-part sweep (review C11 fix):
+  // Two-part sweep (review C11 fix), now extracted to a SQL stored proc
+  // (SCA-125) so direct-DB tests can exercise the contract without going
+  // through the edge-runtime HTTP path:
   //   Part A: attempt_count < MAX_ATTEMPTS → back to 'pending' for retry.
   //   Part B: attempt_count >= MAX_ATTEMPTS → dead-letter to 'failed'.
   //           Pre-fix, these rows were permanently wedged because the
@@ -211,38 +213,24 @@ Deno.serve(async (req) => {
   //           They had burned their retry budget before the crash that
   //           left them in processing; the correct posture is terminal
   //           failure, not another retry attempt.
-  const stuckCutoff = new Date(Date.now() - STUCK_JOB_TIMEOUT_MINUTES * 60_000).toISOString();
   try {
-    const { data: reclaimed, error: reclaimErr } = await client
-      .from('notification_jobs')
-      .update({
-        state: 'pending',
-        error_message: 'reclaimed after stuck processing window',
-      })
-      .eq('state', 'processing')
-      .lt('attempt_count', MAX_ATTEMPTS)
-      .lt('updated_at', stuckCutoff)
-      .select('id');
-    if (reclaimErr) {
-      log.warn('reclaim_failed', { err: reclaimErr.message });
-    } else if (reclaimed && reclaimed.length > 0) {
-      log.info('stuck_jobs_reclaimed', { count: reclaimed.length });
-    }
-
-    const { data: deadLettered, error: deadErr } = await client
-      .from('notification_jobs')
-      .update({
-        state: 'failed',
-        error_message: 'reclaim_max_attempts_reached',
-      })
-      .eq('state', 'processing')
-      .gte('attempt_count', MAX_ATTEMPTS)
-      .lt('updated_at', stuckCutoff)
-      .select('id');
-    if (deadErr) {
-      log.warn('dead_letter_failed', { err: deadErr.message });
-    } else if (deadLettered && deadLettered.length > 0) {
-      log.warn('stuck_jobs_dead_lettered', { count: deadLettered.length });
+    const { data: sweepResult, error: sweepErr } = await client.rpc('stir_pgmq_reclaim_sweep', {
+      p_stale_minutes: STUCK_JOB_TIMEOUT_MINUTES,
+      p_max_attempts: MAX_ATTEMPTS,
+    });
+    if (sweepErr) {
+      log.warn('reclaim_sweep_failed', { err: sweepErr.message });
+    } else if (sweepResult) {
+      const summary = sweepResult as {
+        reclaimed_count?: number;
+        dead_lettered_count?: number;
+      };
+      if ((summary.reclaimed_count ?? 0) > 0) {
+        log.info('stuck_jobs_reclaimed', { count: summary.reclaimed_count });
+      }
+      if ((summary.dead_lettered_count ?? 0) > 0) {
+        log.warn('stuck_jobs_dead_lettered', { count: summary.dead_lettered_count });
+      }
     }
   } catch (err) {
     // Never fatal — the claim below still runs.
