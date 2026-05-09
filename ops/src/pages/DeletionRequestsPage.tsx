@@ -20,7 +20,10 @@ interface DeletionRow {
   requested_at: string;
   approved_at: string | null;
   started_at: string | null;
-  completed_at: string | null;
+  // SCA-244 (C1): `completed_at` removed — column was dropped server-
+  // side by migration 20260508000008_drop_deletion_requests_completed_at.
+  // Successful deletions are anchored on audit_log per ADR 0033, and
+  // the deletion_requests row itself is wiped by the cascade.
   failure_reason: string | null;
 }
 
@@ -152,11 +155,9 @@ export default function DeletionRequestsPage() {
                 approved {new Date(r.approved_at).toLocaleString()}
               </div>
             )}
-            {r.completed_at && (
-              <div className="text-xs text-neutral-400 mt-1">
-                completed {new Date(r.completed_at).toLocaleString()}
-              </div>
-            )}
+            {/* SCA-244 (C1): no `completed` row — column dropped + cascade
+                wipes deletion_requests on success per ADR 0033. Successful
+                deletions are visible in audit_log only. */}
             {r.failure_reason && (
               <div className="text-xs text-red-300 mt-1 whitespace-pre-wrap">
                 failure: {r.failure_reason}

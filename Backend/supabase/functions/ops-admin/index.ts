@@ -964,7 +964,14 @@ async function handleDeletionRequestsList(
   let query = ctx.client
     .from('deletion_requests')
     .select(
-      'id, canonical_user_key_hash, state, requested_at, approved_at, started_at, completed_at, failure_reason',
+      // SCA-244 (C1): `completed_at` was dropped by migration
+      // 20260508000008_drop_deletion_requests_completed_at.sql. ADR
+      // 0033 (deletion-fulfillment-ordering) anchors success on
+      // audit_log; deletion_requests rows are wiped by the cascade on
+      // success. Keeping the column in this SELECT after the drop
+      // produces a PostgREST `column does not exist` at every
+      // deletion_requests.list call.
+      'id, canonical_user_key_hash, state, requested_at, approved_at, started_at, failure_reason',
       { count: 'exact' },
     )
     .order('requested_at', { ascending: false });
