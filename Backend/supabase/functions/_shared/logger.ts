@@ -95,7 +95,7 @@ export function sanitizeErrorForLog(err: unknown): SanitizedError {
   if (err instanceof Error) {
     return {
       name: err.name,
-      message: err.message.slice(0, 200),
+      message: redactSensitiveSubstrings(err.message).slice(0, 200),
       kind: 'error',
     };
   }
@@ -103,4 +103,24 @@ export function sanitizeErrorForLog(err: unknown): SanitizedError {
   // recursing into arbitrary structure — a Zod issue or SDK error
   // object stringified raw can carry Zod's `received` echo.
   return { name: 'NonError', message: typeof err, kind: 'non_error' };
+}
+
+/// SCA-273 (S7 from /review-5): defense-in-depth redaction for known
+/// query-string credentials that the verifier (`_shared/cloudkit_identity.ts`)
+/// passes via URL params because Apple's API has no header alternative.
+/// Today no callsite logs the URL or its echo, but a future log line
+/// that captures `err.message` from a `fetch()` failure can include
+/// the full URL — and on some runtimes `TypeError`'s message embeds
+/// the request URL. Stripping the values from any string we sanitize
+/// makes the log path safe regardless of where the substring came from.
+///
+/// Pattern matches the literal `ckAPIToken=` / `ckWebAuthToken=`
+/// substrings (case-insensitive) and replaces the value up to the next
+/// `&`, `#`, whitespace, or end-of-string with `<REDACTED>`. Mirrors
+/// the existing FNV / HMAC-IP redaction discipline in `rate_limiter.ts`.
+function redactSensitiveSubstrings(input: string): string {
+  return input.replace(
+    /(ckAPIToken=|ckWebAuthToken=)([^&#\s]*)/gi,
+    (_match, key) => `${key}<REDACTED>`,
+  );
 }
