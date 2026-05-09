@@ -357,6 +357,8 @@
 		85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */; };
 		3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */; };
 		8B3E60A3B36F85AE3C73D5BC /* StirPlate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D230E72CEDAF340F4A81112 /* StirPlate.swift */; };
+		29E4E3053223D0DEE68075FF /* StepDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B517F0D7861F2F1422BC6B9 /* StepDots.swift */; };
+		DB80E19E94A78DE9A9A05B7E /* RecipePlan+Duration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6EAD77FE506844DFBB72138 /* RecipePlan+Duration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -711,6 +713,8 @@
 		9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirRowDivider.swift; sourceTree = "<group>"; };
 		9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNavigationTitle.swift; sourceTree = "<group>"; };
 		4D230E72CEDAF340F4A81112 /* StirPlate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirPlate.swift; sourceTree = "<group>"; };
+		9B517F0D7861F2F1422BC6B9 /* StepDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepDots.swift; sourceTree = "<group>"; };
+		E6EAD77FE506844DFBB72138 /* RecipePlan+Duration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Duration.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1009,7 +1013,8 @@
 				FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */,
 				4999CEF92E7CA2E35D80A0F2 /* SubstitutionEvent+Extensions.swift */,
 				68F32C1FC5D6A3A650A0B53D /* SuggestedDish+Extensions.swift */,
-			);
+							E6EAD77FE506844DFBB72138 /* RecipePlan+Duration.swift */,
+);
 			path = Models;
 			sourceTree = "<group>";
 		};
@@ -1403,6 +1408,7 @@
 				0DD635A75C6527D6DC491481 /* TutorialAnimations.swift */,
 				69BAD13E307EF27815805EA2 /* ChipFlowLayout.swift */,
 				3D72BFB8F09248583A91BFEA /* TutorialFlowHost.swift */,
+				9B517F0D7861F2F1422BC6B9 /* StepDots.swift */,
 );
 			path = Components;
 			sourceTree = "<group>";
@@ -1976,6 +1982,8 @@
 				0702ED6FF483756A9274DBF0 /* PantryInListPopulatedTutorial.swift in Sources */,
 				ACE2280D4ABEEBB4538619F7 /* PantryInListEmptyTutorial.swift in Sources */,
 				9432C4F5502844E82680B82D /* SavedMealsTutorial.swift in Sources */,
+				29E4E3053223D0DEE68075FF /* StepDots.swift in Sources */,
+				DB80E19E94A78DE9A9A05B7E /* RecipePlan+Duration.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};

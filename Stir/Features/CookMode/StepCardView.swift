@@ -90,7 +90,7 @@ struct StepCardView: View {
     private var tapModeBody: some View {
         VStack(spacing: 0) {
             topBar
-            Divider()
+            recipeStrip
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepHeader
@@ -140,56 +140,149 @@ struct StepCardView: View {
 
     // MARK: - Top bar
 
+    /// Cook Mode top bar — three-column layout per
+    /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:70-77`.
+    /// LEFT: 36pt rounded close button. CENTER: stacked column with
+    /// uppercase "Cook mode · Tap" eyebrow over `StepDots`. RIGHT: 36pt
+    /// rounded eye button (recipe-detail peek — semantics deferred,
+    /// see SCA-93 ticket; currently a visible affordance with no-op
+    /// action so the layout matches mockup pixel-for-pixel without
+    /// committing to a destination).
     private var topBar: some View {
         HStack(spacing: CGFloat.Stir.space3) {
-            Button {
-                viewModel.requestExitConfirm()
-            } label: {
-                Image.Stir.close
-                    .stirFont(.bodyMd).fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.ink900)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+            roundIconButton(
+                icon: Image.Stir.close,
+                accessibilityLabel: "Exit Cook Mode",
+                action: { viewModel.requestExitConfirm() },
+            )
+
+            Spacer()
+
+            VStack(spacing: 4) {
+                Text("Cook mode · Tap")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.ink500)
+                StepDots(
+                    step: viewModel.currentStepIndex + 1,
+                    total: max(viewModel.totalSteps, 1),
+                )
             }
-            .accessibilityLabel("Exit Cook Mode")
+            .accessibilityElement(children: .combine)
 
             Spacer()
 
-            // 2-line wrap + scale-down so titles like "Rosemary Infused
-            // Tomato Pasta" no longer truncate. The mockup
-            // (06_cook_mode_tap.html:70-85) puts the title in a separate
-            // recipe strip below the top bar, not centered inside it —
-            // refactor tracked in CLAUDE.md §Deferred. Fixed: 2026-04-28.
-            Text(viewModel.recipePlan.title ?? "Cook Mode")
-                .stirFont(.labelLg).fontWeight(.semibold)
-                .foregroundStyle(Color.Stir.ink900)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.85)
-
-            Spacer()
-
-            // Balance the x button — transparent ghost so the title stays centered.
-            Color.clear.frame(width: 44, height: 44)
+            // Eye-button affordance — the mockup's recipe-detail peek
+            // surface. Wiring the destination (modal sheet of the full
+            // recipe) is out of scope for SCA-93 per ticket: "Semantics
+            // TBD — recommend recipe-detail peek (modal sheet) since
+            // that's a pattern users will want anyway. Confirm with
+            // Daniel before wiring." Keeping the affordance visible
+            // for layout fidelity; tap is a no-op until the
+            // peek-sheet design lands.
+            roundIconButton(
+                icon: Image(systemName: "eye"),
+                accessibilityLabel: "Recipe overview",
+                action: {},
+            )
+            .disabled(true)
         }
-        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.horizontal, CGFloat.Stir.space4)
         .padding(.vertical, CGFloat.Stir.space2)
+    }
+
+    /// Recipe strip — sits between the top bar and the scrollable
+    /// instruction body. Mirrors mockup
+    /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:79-85`:
+    ///
+    ///     <recipe title (semibold)> · Step N of M       ~T min left
+    ///
+    /// Right-aligned remaining-time estimate uses
+    /// `RecipePlan.remainingDurationMinutes(fromStepIndex:)`. Rendered
+    /// only when there's a meaningful estimate — a recipe with no
+    /// `timerSeconds` on any step would otherwise show "~0 min left"
+    /// which reads as broken.
+    private var recipeStrip: some View {
+        let title = viewModel.recipePlan.title ?? "Cook Mode"
+        let remainingMin = viewModel.recipePlan.remainingDurationMinutes(
+            fromStepIndex: viewModel.currentStepIndex,
+        )
+        let stepLabel = "Step \(viewModel.currentStepIndex + 1) of \(viewModel.totalSteps)"
+
+        return HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space2) {
+            // Title + step counter share the leading half. Two separate
+            // Text views in an inner HStack rather than `Text + Text`
+            // concatenation — `stirFont(_:)` returns `some View`, not
+            // `Text`, so the `+` operator can't compose them. Visual
+            // result is identical: same baseline, 4pt gap between
+            // title and "· Step N of M". Title gets `.lineLimit(1)`
+            // with `.truncationMode(.tail)` so long titles ellipsize
+            // here; the full title remains accessible via the eye-
+            // button recipe-detail peek once that surface ships.
+            HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space1) {
+                Text(title)
+                    .stirFont(.labelMd).fontWeight(.semibold)
+                    .foregroundStyle(Color.Stir.ink700)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("· \(stepLabel)")
+                    .stirFont(.labelMd)
+                    .foregroundStyle(Color.Stir.ink500)
+                    .lineLimit(1)
+                    .layoutPriority(0) // title gets the room first
+            }
+
+            Spacer(minLength: CGFloat.Stir.space2)
+
+            if remainingMin > 0 {
+                Text("~\(remainingMin) min left")
+                    .stirFont(.labelMd)
+                    .foregroundStyle(Color.Stir.ink500)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, CGFloat.Stir.space4)
+        .padding(.bottom, CGFloat.Stir.space1)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 36pt rounded icon button with `paper200` fill. Mirrors the
+    /// mockup's circular top-bar action style (`width:36, height:36,
+    /// borderRadius:999, background:c.paper200`). Hit area kept at
+    /// 44pt via `contentShape` so the button stays accessibility-
+    /// compliant despite the smaller visual footprint.
+    private func roundIconButton(
+        icon: Image,
+        accessibilityLabel: String,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            icon
+                .stirFont(.labelMd).fontWeight(.semibold)
+                .foregroundStyle(Color.Stir.ink700)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle().fill(Color.Stir.paper200),
+                )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Content
 
+    @ViewBuilder
     private var stepHeader: some View {
-        HStack {
-            Text("Step \(viewModel.currentStepIndex + 1) of \(viewModel.totalSteps)")
+        if let step = viewModel.currentStep, let title = step.title, !title.isEmpty {
+            // Optional per-step title (e.g. "Searing"). The "Step N of
+            // M" counter previously also lived here — moved into the
+            // recipeStrip above the scroll body to match the mockup,
+            // so this header is title-only now and degrades to nothing
+            // when the step has no title.
+            Text(title)
                 .stirFont(.labelMd).fontWeight(.medium)
-                .foregroundStyle(Color.Stir.ink500)
-            Spacer()
-            if let step = viewModel.currentStep, let title = step.title, !title.isEmpty {
-                Text(title)
-                    .stirFont(.labelMd).fontWeight(.medium)
-                    .foregroundStyle(Color.Stir.ink700)
-                    .lineLimit(1)
-            }
+                .foregroundStyle(Color.Stir.ink700)
+                .lineLimit(1)
         }
     }
 
