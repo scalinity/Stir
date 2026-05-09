@@ -140,6 +140,23 @@ async function getProviderJwt(): Promise<string> {
   }
 }
 
+/**
+ * Test-only: clear the cached provider JWT and any in-flight mintingPromise.
+ *
+ * Used by `apns_hardening_test.ts` to exercise the cold-start mint-
+ * coalescing path (W11) without leaking state from previous tests in the
+ * same `deno test` process. **DO NOT call from production code** — the
+ * cached JWT is intentionally module-level so it amortizes across an
+ * Edge Function worker's lifetime.
+ *
+ * Underscore-prefixed by convention to mark "internal / test-facing."
+ */
+export function _resetApnsCacheForTests(): void {
+  cachedProviderJwt = null;
+  cachedProviderJwtExpiresAt = 0;
+  mintingPromise = null;
+}
+
 function base64Decode(b64: string): Uint8Array {
   const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
   const out = new Uint8Array(bin.length);
