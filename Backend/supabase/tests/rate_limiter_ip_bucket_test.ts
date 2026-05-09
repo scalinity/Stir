@@ -72,3 +72,70 @@ Deno.test('ipBucket: fallback path is deterministic (same IP → same FNV hex) w
     if (prior !== undefined) Deno.env.set('LOG_IP_SALT', prior);
   }
 });
+
+// ---------------------------------------------------------------------------
+// SCA-275 (S9 from /review-5): checkAndIncrement throw-propagation contract
+// ---------------------------------------------------------------------------
+//
+// ops-admin/index.ts (and every other caller) wraps `checkAndIncrement`
+// in a try/catch and falls open on any thrown error
+// (`log.warn('rate_limiter_failed', ...)` + continue). The fail-open
+// posture is the right choice — a `rate_limit_buckets` glitch must not
+// lock the console — but it depends on `checkAndIncrement` actually
+// throwing on RPC failures. If a future refactor swallowed the RPC
+// error and returned a "fake allowed" result, fail-open semantics would
+// silently flip to fail-closed-on-bug + every-request-allowed, and
+// ops dashboards would never see the rate-limiter glitch.
+//
+// Pin the contract: when the underlying Supabase RPC errors,
+// `checkAndIncrement` propagates rather than silently allowing.
+
+import { checkAndIncrement } from '../functions/_shared/rate_limiter.ts';
+
+Deno.test('checkAndIncrement: RPC error propagates (callers can fail-open)', async () => {
+  // Stub a Supabase client whose `.rpc(...)` returns a structured error.
+  // The real implementation would return PostgrestError shape; the test
+  // harness only needs to drive the same return-shape contract.
+  const stubClient = {
+    rpc: () =>
+      Promise.resolve({
+        data: null,
+        error: { message: 'simulated rate_limit_buckets infra failure' },
+      }),
+    // deno-lint-ignore no-explicit-any
+  } as any;
+
+  let threw = false;
+  try {
+    await checkAndIncrement(stubClient, 'ip:ops_admin_hourly', '203.0.113.42');
+  } catch (err) {
+    threw = true;
+    // The caught value is the structured error, not a wrapped Error
+    // instance — `if (error) throw error` re-throws verbatim.
+    if (typeof err !== 'object' || err === null) {
+      throw new Error(`expected structured error object, got: ${String(err)}`);
+    }
+  }
+  if (!threw) {
+    throw new Error('checkAndIncrement must throw on RPC error so callers can fail-open');
+  }
+});
+
+Deno.test('checkAndIncrement: empty result row throws (no SETOF row → no allowed shape)', async () => {
+  const stubClient = {
+    rpc: () => Promise.resolve({ data: [], error: null }),
+    // deno-lint-ignore no-explicit-any
+  } as any;
+
+  let threw = false;
+  try {
+    await checkAndIncrement(stubClient, 'ip:ops_admin_hourly', '203.0.113.42');
+  } catch {
+    threw = true;
+  }
+  if (!threw) {
+    throw new Error(
+      'checkAndIncrement must throw on empty SETOF — caller must NOT receive an undefined RateLimitResult',
+    );
+  }
+});
