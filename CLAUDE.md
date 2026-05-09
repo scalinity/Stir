@@ -307,6 +307,8 @@ pnpm run eval:grocery
 
 When changing a prompt, bump `prompt_versions.version` semver and start `rollout_pct` at 5%.
 
+**Multi-commit verifies in a worktree** must reckon with `supabase start`'s edge-runtime mount being bound to the directory the stack was started in — tests POSTing to edge functions hit the main-checkout's handler code, not the worktree's. Decision tree + Path A skip-list workflow + Path B full-restart workflow + ideal-fix triggers in `docs/runbooks/isolated-worktree-verification.md`.
+
 ---
 
 ## Git workflow
