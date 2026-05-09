@@ -89,6 +89,12 @@ Deno.test('verifyCloudKitIdentity: record mismatch fails closed', async () => {
 });
 
 Deno.test('verifyCloudKitIdentity: upstream rejection fails closed', async () => {
+  // SCA-270 (S4 from /review-5) updated this test: a 401 response is
+  // now `cloudkit_unauthorized` (split out of the original
+  // `cloudkit_rejected` catch-all). The fail-closed contract is
+  // unchanged — `verified: false` + the claim is stripped via
+  // `bodyWithVerifiedCloudKitOnly` for any non-`verified` reason
+  // except `verifier_unconfigured`.
   const result = await verifyCloudKitIdentity(
     body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
     {
@@ -103,7 +109,7 @@ Deno.test('verifyCloudKitIdentity: upstream rejection fails closed', async () =>
     },
   );
   assertEquals(result.verified, false);
-  assertEquals(result.reason, 'cloudkit_rejected');
+  assertEquals(result.reason, 'cloudkit_unauthorized');
   assertEquals(result.upstreamStatus, 401);
 });
 
@@ -152,7 +158,10 @@ Deno.test('verifyCloudKitIdentity: AbortSignal.timeout fires → cloudkit_timeou
   assertEquals(result.claimedRecordName, CK_RECORD);
 });
 
-Deno.test('verifyCloudKitIdentity: non-timeout fetch error → cloudkit_rejected (not cloudkit_timeout)', async () => {
+Deno.test('verifyCloudKitIdentity: non-timeout fetch error → cloudkit_unreachable (S4 split)', async () => {
+  // SCA-270 (S4 from /review-5): pre-split this returned
+  // `cloudkit_rejected`; now `cloudkit_unreachable` distinguishes
+  // network/DNS/TLS failures from HTTP-level rejections.
   const result = await verifyCloudKitIdentity(
     body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
     {
@@ -163,8 +172,55 @@ Deno.test('verifyCloudKitIdentity: non-timeout fetch error → cloudkit_rejected
     },
   );
   assertEquals(result.verified, false);
-  assertEquals(result.reason, 'cloudkit_rejected');
+  assertEquals(result.reason, 'cloudkit_unreachable');
   assertEquals(result.claimedRecordName, CK_RECORD);
+});
+
+Deno.test('verifyCloudKitIdentity: 401 response → cloudkit_unauthorized (S4 split)', async () => {
+  const result = await verifyCloudKitIdentity(
+    body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
+    {
+      apiToken: 'api-token',
+      fetchImpl: (() =>
+        Promise.resolve(new Response(
+          JSON.stringify({ serverErrorCode: 'AUTHENTICATION_REQUIRED' }),
+          { status: 401 },
+        ))) as typeof fetch,
+    },
+  );
+  assertEquals(result.verified, false);
+  assertEquals(result.reason, 'cloudkit_unauthorized');
+  assertEquals(result.upstreamStatus, 401);
+});
+
+Deno.test('verifyCloudKitIdentity: 503 response → cloudkit_rejected (Apple side broken; S4 catch-all)', async () => {
+  const result = await verifyCloudKitIdentity(
+    body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
+    {
+      apiToken: 'api-token',
+      fetchImpl: (() =>
+        Promise.resolve(new Response('Service Unavailable', { status: 503 }))) as typeof fetch,
+    },
+  );
+  assertEquals(result.verified, false);
+  // 5xx falls through to cloudkit_rejected (catch-all for non-401/403 non-OK).
+  assertEquals(result.reason, 'cloudkit_rejected');
+  assertEquals(result.upstreamStatus, 503);
+});
+
+Deno.test('verifyCloudKitIdentity: 200 OK + malformed JSON → cloudkit_invalid_response (S4 split)', async () => {
+  const result = await verifyCloudKitIdentity(
+    body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
+    {
+      apiToken: 'api-token',
+      fetchImpl: (() =>
+        // Body is valid HTTP but not JSON — response.json() throws.
+        Promise.resolve(new Response('not-json-at-all', { status: 200 }))) as typeof fetch,
+    },
+  );
+  assertEquals(result.verified, false);
+  assertEquals(result.reason, 'cloudkit_invalid_response');
+  assertEquals(result.upstreamStatus, 200);
 });
 
 // ---------------------------------------------------------------------------

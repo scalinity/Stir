@@ -17,10 +17,20 @@ export type CloudKitVerificationReason =
   | 'not_requested'
   | 'missing_web_auth_token'
   | 'verifier_unconfigured'
-  | 'cloudkit_rejected'
+  // SCA-270 (S4 from /review-5): split the original `cloudkit_rejected`
+  // catch-all into more specific reasons so an operator triaging a
+  // CloudKit incident can distinguish "Apple is unreachable" from
+  // "Apple said the credential is bad" from "Apple returned malformed
+  // JSON." `cloudkit_rejected` is retained as the fallback for non-
+  // categorized non-OK responses (5xx, redirects), so existing
+  // dashboards keyed on the literal don't break.
+  | 'cloudkit_unreachable'      // fetch() threw, non-timeout (DNS, TLS, connection refused)
+  | 'cloudkit_unauthorized'     // 401 or 403 — Apple rejected the credential pair
+  | 'cloudkit_invalid_response' // 200 OK but JSON parse failed
+  | 'cloudkit_rejected'         // catch-all: 5xx, redirects, other non-OK
   // SCA-247 (C4): Apple-side stall hit the 3s cap. Distinguished from
-  // `cloudkit_rejected` so operators can tell "Apple is slow" from
-  // "Apple said no" in incident triage.
+  // network throws (cloudkit_unreachable) so dashboards can split
+  // "Apple is slow" from "Apple is unreachable."
   | 'cloudkit_timeout'
   | 'record_mismatch'
   | 'verified';
@@ -93,15 +103,24 @@ export async function verifyCloudKitIdentity(
     const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
     return {
       verified: false,
-      reason: isTimeout ? 'cloudkit_timeout' : 'cloudkit_rejected',
+      // SCA-270 (S4): network-throw path is distinct from timeout
+      // (which has its own reason) and from non-OK HTTP responses
+      // (which have status codes we can read).
+      reason: isTimeout ? 'cloudkit_timeout' : 'cloudkit_unreachable',
       claimedRecordName,
     };
   }
 
   if (!response.ok) {
+    // SCA-270 (S4): split 401/403 ("Apple said no — credential bad")
+    // from everything-else-non-OK (5xx, redirects). The two paths
+    // imply different operator responses: 401/403 means rotate the
+    // ckAPIToken (or the user's iCloud account is compromised); 5xx
+    // means wait for Apple.
+    const isUnauthorized = response.status === 401 || response.status === 403;
     return {
       verified: false,
-      reason: 'cloudkit_rejected',
+      reason: isUnauthorized ? 'cloudkit_unauthorized' : 'cloudkit_rejected',
       claimedRecordName,
       upstreamStatus: response.status,
     };
@@ -113,7 +132,11 @@ export async function verifyCloudKitIdentity(
   } catch {
     return {
       verified: false,
-      reason: 'cloudkit_rejected',
+      // SCA-270 (S4): 200 OK + malformed JSON = Apple's response
+      // shape changed or a transient corruption. Distinguished from
+      // 5xx non-OK ("Apple is broken"). Both are fail-closed; the
+      // reason makes the difference legible to the operator.
+      reason: 'cloudkit_invalid_response',
       claimedRecordName,
       upstreamStatus: response.status,
     };
