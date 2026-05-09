@@ -221,11 +221,18 @@ struct PaywallView: View {
 
     private func primaryCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
         let package = offerings.primaryTrialPackage
+        // SCA-287: Apple grants the 7-day trial only once per Apple ID per
+        // subscription group. RC's `introductoryDiscount` reports the offer
+        // DEFINITION; per-user eligibility lives on `package.introEligibility`.
+        // Show "Start 7-day free trial" copy only when eligible (or unknown,
+        // per RC convention — Apple is the final arbiter). Ineligible users
+        // see "Subscribe annually" + the price they'll actually be charged.
+        let isTrialEligible = package?.introEligibility != .ineligible
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
             VStack(spacing: CGFloat.Stir.space1) {
-                Text("Start 7-day free trial")
+                Text(isTrialEligible ? "Start 7-day free trial" : "Subscribe annually")
                     .stirFont(.labelLg)
                 // Subtitle uses `paper50` at 85% alpha on the solid `ink900`
                 // background for visual hierarchy inside the CTA. Spec §3.3
@@ -234,9 +241,13 @@ struct PaywallView: View {
                 // the rationale doesn't apply, and the inverse ink/paper
                 // scale offers no 85%-equivalent step to use instead.
                 if let package {
-                    Text("then \(package.displayPrice)/\(package.periodDescription)")
-                        .stirFont(.bodySm)
-                        .foregroundStyle(Color.Stir.paper50.opacity(0.85))
+                    Text(
+                        isTrialEligible
+                            ? "then \(package.displayPrice)/\(package.periodDescription)"
+                            : "\(package.displayPrice)/\(package.periodDescription)"
+                    )
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.paper50.opacity(0.85))
                 } else {
                     Text("unavailable — check back later")
                         .stirFont(.bodySm)
@@ -293,15 +304,28 @@ struct PaywallView: View {
         // 6pt = off-scale tight eyebrow↔body pairing (space2=8pt visually
         // detaches the uppercase label from its body copy; space1=4pt is
         // too tight against the eyebrow's baked line height).
-        VStack(alignment: .leading, spacing: CGFloat.Stir.space2 - 2) {
-            Text("Trial terms")
+        //
+        // SCA-287: copy must reflect per-user trial eligibility. An ineligible
+        // user (already consumed the trial on this Apple ID for this
+        // subscription group) sees the auto-renew terms only — claiming "7
+        // days free" when Apple will charge full price is misleading and an
+        // App Review reject vector.
+        let isTrialEligible = (package?.introEligibility ?? .unknown) != .ineligible
+        return VStack(alignment: .leading, spacing: CGFloat.Stir.space2 - 2) {
+            Text(isTrialEligible ? "Trial terms" : "Subscription terms")
                 .stirFont(.labelEyebrow)
                 .foregroundStyle(Color.Stir.textTertiary)
             Group {
                 if let package {
-                    Text(
-                        "7 days free, then \(package.displayPrice) billed annually. Renews automatically until canceled. Cancel anytime in Settings > Apple ID > Subscriptions. Trial auto-converts on day 8."
-                    )
+                    if isTrialEligible {
+                        Text(
+                            "7 days free, then \(package.displayPrice) billed annually. Renews automatically until canceled. Cancel anytime in Settings > Apple ID > Subscriptions. Trial auto-converts on day 8."
+                        )
+                    } else {
+                        Text(
+                            "\(package.displayPrice) billed annually. Renews automatically until canceled. Cancel anytime in Settings > Apple ID > Subscriptions."
+                        )
+                    }
                 } else {
                     Text(
                         "7 days free, then Premium annual rate. Renews automatically until canceled."

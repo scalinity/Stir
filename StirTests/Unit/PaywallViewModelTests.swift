@@ -238,6 +238,51 @@ final class PaywallViewModelTests: XCTestCase {
         XCTAssertEqual(current?.packages.first?.productID, "stir.premium.annual.trial7")
     }
 
+    // MARK: - Intro-offer eligibility (SCA-287)
+
+    func test_load_propagatesIntroEligibility_throughVMOfferings() async {
+        // SCA-287: PaywallView reads `package.introEligibility` to decide
+        // CTA + disclosure copy. The VM is a pass-through — it must not
+        // strip or coerce the field. Regression guard: any future refactor
+        // that re-maps offerings inside the VM must preserve eligibility.
+        let ineligiblePackage = PaywallPackage(
+            productID: StirProduct.premiumAnnualTrial7.rawValue,
+            displayPrice: "$69.99",
+            periodDescription: "year",
+            introOfferDescription: "7-day free trial, then $69.99/year",
+            tier: .premium,
+            introEligibility: .ineligible,
+        )
+        let service = MockRevenueCatService()
+        service.offeringsResult = .success(PaywallOfferings(packages: [ineligiblePackage]))
+        let vm = Self.makeVM(service: service)
+
+        await vm.load()
+
+        let surfaced = vm.currentOfferings()?.primaryTrialPackage
+        XCTAssertEqual(surfaced?.productID, StirProduct.premiumAnnualTrial7.rawValue)
+        XCTAssertEqual(surfaced?.introEligibility, .ineligible)
+    }
+
+    func test_load_eligibleSurfacedAlongsideTrialBearingPackage() async {
+        // Symmetric coverage for the eligible branch — the View treats
+        // `.eligible` and `.unknown` identically (both show trial copy per
+        // RC convention), so this asserts the field plumbs through for
+        // `.eligible` too. Without this, a future regression that coerced
+        // .eligible → .unknown would still pass `test_load_propagates...`.
+        let eligible = Self.samplePackage(.premiumAnnualTrial7, eligibility: .eligible)
+        let service = MockRevenueCatService()
+        service.offeringsResult = .success(PaywallOfferings(packages: [eligible]))
+        let vm = Self.makeVM(service: service)
+
+        await vm.load()
+
+        XCTAssertEqual(
+            vm.currentOfferings()?.primaryTrialPackage?.introEligibility,
+            .eligible,
+        )
+    }
+
     // MARK: - Restore
 
     func test_restore_success_triggersRefresh() async {
@@ -306,14 +351,23 @@ final class PaywallViewModelTests: XCTestCase {
         )
     }
 
-    private static func samplePackage(_ product: StirProduct) -> PaywallPackage {
-        PaywallPackage(
+    private static func samplePackage(
+        _ product: StirProduct,
+        eligibility: IntroEligibility? = nil,
+    ) -> PaywallPackage {
+        // Default eligibility tracks the product's intro-offer shape:
+        // trial-bearing → `.unknown` (View renders trial copy per RC
+        // convention; eligibility query lands in production), non-trial
+        // → `.noOffer`. Tests can override either way for negative cases.
+        let resolved = eligibility ?? (product == .premiumAnnualTrial7 ? .unknown : .noOffer)
+        return PaywallPackage(
             productID: product.rawValue,
             displayPrice: product == .premiumAnnualTrial7 ? "$69.99" : "$9.99",
             periodDescription: product.rawValue.contains("annual") ? "year" : "month",
             introOfferDescription: product == .premiumAnnualTrial7
                 ? "7-day free trial, then $69.99/year" : nil,
             tier: product.tier,
+            introEligibility: resolved,
         )
     }
 }

@@ -91,6 +91,35 @@ struct PaywallPackage: Sendable, Equatable, Identifiable {
     let introOfferDescription: String?
     /// Tier this product maps to. Derived, not from RC.
     let tier: Tier
+    /// Whether THIS Apple ID is eligible for the product's intro offer (per
+    /// Apple's "one trial per Apple ID per subscription group" rule). The
+    /// existence of `introOfferDescription` only reflects the offer's
+    /// definition in App Store Connect — it does NOT reflect per-user
+    /// eligibility. View layer must branch CTA + disclosure copy on this
+    /// field so an ineligible user isn't shown "7-day free trial" copy
+    /// before being charged the full price.
+    ///
+    /// Default `.unknown` keeps existing call sites + tests source-compatible
+    /// (per RC convention, treat unknown as if eligible — show the trial copy).
+    var introEligibility: IntroEligibility = .unknown
+}
+
+/// Per-Apple-ID intro-offer eligibility, sourced from
+/// `Purchases.checkTrialOrIntroDiscountEligibility(productIdentifiers:)`.
+/// Apple enforces "one trial per Apple ID per subscription group"; ineligible
+/// users still see RC's offer DEFINITION on `StoreProduct.introductoryDiscount`,
+/// so we MUST query this separately to render correct paywall copy.
+enum IntroEligibility: Sendable, Equatable {
+    /// User can claim the intro offer (free trial, intro price, etc.).
+    case eligible
+    /// User has already consumed the intro offer; Apple charges full price.
+    case ineligible
+    /// RC SDK couldn't determine eligibility (cold cache, sign-in flap, etc.).
+    /// Treat as eligible per RC convention — Apple is the final arbiter.
+    case unknown
+    /// Product has no intro offer defined. Distinct from `.eligible` so
+    /// the View can elide "free trial" framing entirely.
+    case noOffer
 }
 
 enum PurchaseOutcome: Sendable, Equatable {
@@ -264,9 +293,51 @@ actor RevenueCatService: RevenueCatPurchasing {
                 periodDescription: periodDescription,
                 introOfferDescription: introOfferDescription,
                 tier: sku.tier,
+                introEligibility: introOfferDescription == nil ? .noOffer : .unknown,
             ))
         }
+
+        // Stamp per-Apple-ID intro-offer eligibility onto the packages that
+        // carry an offer definition. RC docs note this can take ~700ms cold;
+        // we share the existing `PaywallViewModel.withTimeout` 10s window
+        // around `offerings()` rather than carving out a separate timeout.
+        // Failures are non-fatal — we keep `.unknown` and the View renders
+        // the trial copy (matching prior behavior; eligibility check is a
+        // refinement, not a load-bearing gate).
+        let trialBearingIDs = mapped
+            .filter { $0.introEligibility != .noOffer }
+            .map { $0.productID }
+        if !trialBearingIDs.isEmpty {
+            let eligibility = await fetchIntroEligibility(productIDs: trialBearingIDs)
+            mapped = mapped.map { package in
+                guard let resolved = eligibility[package.productID] else { return package }
+                var copy = package
+                copy.introEligibility = resolved
+                return copy
+            }
+        }
         return PaywallOfferings(packages: mapped)
+    }
+
+    /// Query RC's intro-offer eligibility cache for the given product IDs.
+    /// Returns a map keyed by productID; missing entries indicate the SDK
+    /// couldn't resolve eligibility for that ID (caller treats as `.unknown`).
+    /// Non-throwing — eligibility is best-effort.
+    private func fetchIntroEligibility(productIDs: [String]) async -> [String: IntroEligibility] {
+        let raw = await Purchases.shared.checkTrialOrIntroDiscountEligibility(
+            productIdentifiers: productIDs,
+        )
+        var result: [String: IntroEligibility] = [:]
+        for (productID, value) in raw {
+            switch value.status {
+            case .eligible:           result[productID] = .eligible
+            case .ineligible:         result[productID] = .ineligible
+            case .noIntroOfferExists: result[productID] = .noOffer
+            case .unknown:            result[productID] = .unknown
+            @unknown default:         result[productID] = .unknown
+            }
+        }
+        return result
     }
 
     func purchase(productID: String) async throws -> PurchaseOutcome {
