@@ -44,7 +44,11 @@ Deno.env.delete('REVENUECAT_SECRET_API_KEY');
 import { assert, assertEquals } from 'jsr:@std/assert';
 import { createServiceClient } from '../functions/_shared/db.ts';
 import { createLogger } from '../functions/_shared/logger.ts';
-import { fulfillSweep, processOne } from '../functions/users-deletion-fulfill/index.ts';
+import {
+  fulfillSweep,
+  processOne,
+  type StepFunctions,
+} from '../functions/users-deletion-fulfill/index.ts';
 
 const TEST_PREFIX = 'install:test:sca88';
 
@@ -313,6 +317,145 @@ Deno.test('users-deletion-fulfill: SCA-222 (C1) — merged_into RESTRICT pre-res
     // we used a separate helper to insert it; the LIKE in cleanup() does
     // catch it because it starts with TEST_PREFIX).
     await cleanup(client, [seedA.canonicalUserKeyHash, hashB]);
+  }
+});
+
+Deno.test('users-deletion-fulfill: SCA-241 — blocking subsystem error prevents postgres sweep + leaves no audit row', async () => {
+  // Use the SCA-241 DI seam to stub stepPostHog → returns `{error}`
+  // without `requires_manual_action`. processOne should accumulate
+  // the error into blockingErrors, flip the row to 'failed', and
+  // skip the postgres sweep entirely. No app_users delete; no
+  // audit_log row.
+  const client = createServiceClient();
+  await cleanup(client);
+
+  const seed = await seedUser(client, 'blocking-error');
+  const log = await createLogger(crypto.randomUUID(), 'users-deletion-fulfill-test');
+  const stubs: Partial<StepFunctions> = {
+    posthog: () => Promise.resolve({ error: 'forced_test_blocking_error' }),
+  };
+  try {
+    const outcome = await processOne(
+      client,
+      {
+        id: seed.deletionRequestId,
+        canonical_user_key: seed.canonicalUserKey,
+        canonical_user_key_hash: seed.canonicalUserKeyHash,
+        external_refs_json: {},
+      },
+      log,
+      crypto.randomUUID(),
+      stubs,
+    );
+    assertEquals(outcome, 'failed');
+
+    // app_users row still present — postgres sweep was blocked.
+    const { data: postRow } = await client
+      .from('app_users')
+      .select('canonical_user_key')
+      .eq('canonical_user_key', seed.canonicalUserKey)
+      .maybeSingle();
+    assertEquals(
+      postRow?.canonical_user_key,
+      seed.canonicalUserKey,
+      'app_users row should still exist when subsystem blocks the sweep',
+    );
+
+    // No audit_log row for this user (audit-after-delete invariant —
+    // SCA-222 — only fires on success).
+    const { data: audits } = await client
+      .from('audit_log')
+      .select('id')
+      .eq('target_id', seed.canonicalUserKeyHash)
+      .eq('action', 'deletion_requests.fulfilled');
+    assertEquals(audits?.length, 0, 'no audit row should land on blocked sweep');
+
+    // deletion_requests state should now be 'failed' with the stub error.
+    const { data: req } = await client
+      .from('deletion_requests')
+      .select('state, failure_reason')
+      .eq('id', seed.deletionRequestId)
+      .single();
+    assertEquals(req?.state, 'failed');
+    assert(
+      typeof req?.failure_reason === 'string' &&
+        req!.failure_reason.includes('forced_test_blocking_error'),
+      `failure_reason should mention the stub error; got: ${req?.failure_reason}`,
+    );
+  } finally {
+    await cleanup(client, [seed.canonicalUserKeyHash]);
+  }
+});
+
+Deno.test('users-deletion-fulfill: SCA-241 — postgres sweep failure after subsystems succeed leaves no orphan audit', async () => {
+  // Use the SCA-241 DI seam to stub stepPostgres → returns `{error}`.
+  // All upstream subsystems succeed (or take their requires_manual_action
+  // branch); the postgres-sweep failure path runs at line 425 of the
+  // worker. With SCA-222's audit-after-delete reorder, the audit_log
+  // INSERT is unreachable on DELETE failure — this test pins that
+  // contract regression-style.
+  const client = createServiceClient();
+  await cleanup(client);
+
+  const seed = await seedUser(client, 'sweep-fail');
+  const log = await createLogger(crypto.randomUUID(), 'users-deletion-fulfill-test');
+  const stubs: Partial<StepFunctions> = {
+    postgres: () => Promise.resolve({ error: 'forced_test_sweep_failure' }),
+  };
+  try {
+    const outcome = await processOne(
+      client,
+      {
+        id: seed.deletionRequestId,
+        canonical_user_key: seed.canonicalUserKey,
+        canonical_user_key_hash: seed.canonicalUserKeyHash,
+        external_refs_json: {},
+      },
+      log,
+      crypto.randomUUID(),
+      stubs,
+    );
+    assertEquals(outcome, 'failed');
+
+    // app_users row still present — DELETE didn't run.
+    const { data: postRow } = await client
+      .from('app_users')
+      .select('canonical_user_key')
+      .eq('canonical_user_key', seed.canonicalUserKey)
+      .maybeSingle();
+    assertEquals(
+      postRow?.canonical_user_key,
+      seed.canonicalUserKey,
+      'app_users row should still exist when sweep stub returns error',
+    );
+
+    // No audit_log row — SCA-222 invariant: audit only inserts after
+    // a successful DELETE.
+    const { data: audits } = await client
+      .from('audit_log')
+      .select('id')
+      .eq('target_id', seed.canonicalUserKeyHash)
+      .eq('action', 'deletion_requests.fulfilled');
+    assertEquals(
+      audits?.length,
+      0,
+      'no audit row should land when postgres sweep fails — SCA-222 invariant',
+    );
+
+    // deletion_requests row carries the failed state + stub error.
+    const { data: req } = await client
+      .from('deletion_requests')
+      .select('state, failure_reason')
+      .eq('id', seed.deletionRequestId)
+      .single();
+    assertEquals(req?.state, 'failed');
+    assert(
+      typeof req?.failure_reason === 'string' &&
+        req!.failure_reason.includes('forced_test_sweep_failure'),
+      `failure_reason should mention the stub error; got: ${req?.failure_reason}`,
+    );
+  } finally {
+    await cleanup(client, [seed.canonicalUserKeyHash]);
   }
 });
 

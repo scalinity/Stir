@@ -357,6 +357,35 @@ interface WorkerSummary {
   partial: number;
 }
 
+// SCA-241: DI seam for the step* functions. processOne accepts an
+// optional partial override of the step set; defaults are the real
+// implementations. Tests inject stubs to exercise the blocking-error
+// path (subsystem returns `{error}` without `requires_manual_action`)
+// and the postgres-sweep-fail-after-subsystems-succeed path — neither
+// is reachable from synthetic external_refs_json injection because
+// SCA-227's `requires_manual_action` short-circuits prevent seeded
+// errors from surviving retry. The DI path is unreachable in
+// production: the real handler calls processOne with no `steps`
+// argument, so the override slot is purely a test seam.
+export interface StepFunctions {
+  posthog: (ctx: FulfillContext) => Promise<SubsystemRecord>;
+  sentry: (ctx: FulfillContext) => Promise<SubsystemRecord>;
+  revenuecat: (ctx: FulfillContext) => Promise<SubsystemRecord>;
+  cloudkit: (ctx: FulfillContext) => Promise<SubsystemRecord>;
+  postgres: (
+    ctx: FulfillContext,
+    client: ReturnType<typeof createServiceClient>,
+  ) => Promise<SubsystemRecord>;
+}
+
+const DEFAULT_STEPS: StepFunctions = {
+  posthog: stepPostHog,
+  sentry: stepSentry,
+  revenuecat: stepRevenueCat,
+  cloudkit: stepCloudKit,
+  postgres: stepPostgres,
+};
+
 async function processOne(
   client: ReturnType<typeof createServiceClient>,
   row: {
@@ -367,6 +396,7 @@ async function processOne(
   },
   log: Logger,
   requestId: string = crypto.randomUUID(),
+  stepOverrides: Partial<StepFunctions> = {},
 ): Promise<'completed' | 'partial' | 'failed'> {
   const ctx: FulfillContext = {
     rowId: row.id,
@@ -377,11 +407,13 @@ async function processOne(
     requestId,
   };
 
+  const steps: StepFunctions = { ...DEFAULT_STEPS, ...stepOverrides };
+
   // Run subsystems in order. Each writes its result into ctx.refs.
-  ctx.refs.posthog = await stepPostHog(ctx);
-  ctx.refs.sentry = await stepSentry(ctx);
-  ctx.refs.revenuecat = await stepRevenueCat(ctx);
-  ctx.refs.cloudkit = await stepCloudKit(ctx);
+  ctx.refs.posthog = await steps.posthog(ctx);
+  ctx.refs.sentry = await steps.sentry(ctx);
+  ctx.refs.revenuecat = await steps.revenuecat(ctx);
+  ctx.refs.cloudkit = await steps.cloudkit(ctx);
 
   // Persist external_refs_json BEFORE running the postgres sweep — the
   // sweep cascade-deletes deletion_requests itself, so this is the last
@@ -441,7 +473,7 @@ async function processOne(
 
   // All subsystems either completed or marked manual/client-action.
   // Run the postgres sweep.
-  ctx.refs.postgres = await stepPostgres(ctx, client);
+  ctx.refs.postgres = await steps.postgres(ctx, client);
 
   if (ctx.refs.postgres.error || !ctx.refs.postgres.completed_at) {
     // Postgres sweep failed AFTER subsystems succeeded. Re-flip to
