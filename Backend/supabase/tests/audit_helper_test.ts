@@ -74,3 +74,56 @@ Deno.test('writeAudit: insert failure returns null (does not throw)', async () =
 
   assertEquals(id, null);
 });
+
+// SCA-239 — non-UUID request_id values are coerced to NULL so the
+// audit row still lands. `requestIdFrom(req)` accepts a broader
+// shape than UUID; without coercion, a caller-supplied
+// `x-request-id: my-trace-1` would raise Postgres 22P02 and the
+// non-fatal posture would silently drop the entire row.
+
+Deno.test('writeAudit: non-UUID request_id is coerced to null + audit row still lands', async () => {
+  const log = await testLogger();
+  const svc = serviceClient();
+
+  const uniqAction = 'test.write.nonuuid.' + crypto.randomUUID();
+  const id = await writeAudit(svc, log, {
+    actor_id: null,
+    actor_email: null,
+    action: uniqAction,
+    target_table: 'app_users',
+    target_id: 'ck:test',
+    request_id: 'my-trace-1', // non-UUID — would 22P02 without coercion
+  });
+
+  assertNotEquals(id, null, 'audit row should still land when request_id is non-UUID');
+
+  const { data } = await svc
+    .from('audit_log')
+    .select('request_id')
+    .eq('id', id!)
+    .single();
+  assertEquals(data?.request_id, null, 'non-UUID request_id should be coerced to null');
+});
+
+Deno.test('writeAudit: UUID request_id is preserved on the row', async () => {
+  const log = await testLogger();
+  const svc = serviceClient();
+
+  const reqId = crypto.randomUUID();
+  const id = await writeAudit(svc, log, {
+    actor_id: null,
+    actor_email: null,
+    action: 'test.write.uuid.' + crypto.randomUUID(),
+    target_table: 'app_users',
+    target_id: 'ck:test',
+    request_id: reqId,
+  });
+
+  assertNotEquals(id, null);
+  const { data } = await svc
+    .from('audit_log')
+    .select('request_id')
+    .eq('id', id!)
+    .single();
+  assertEquals(data?.request_id, reqId);
+});

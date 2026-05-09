@@ -33,6 +33,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Logger } from './logger.ts';
 
+// SCA-239: audit_log.request_id is UUID-typed but `requestIdFrom`
+// accepts the broader `[A-Za-z0-9_\-:.]{1,128}` shape that any
+// caller-supplied x-request-id header is allowed to use. A non-UUID
+// value caused the entire INSERT to fail with Postgres 22P02; this
+// helper's non-fatal posture then silently lost the audit row.
+// Coerce non-UUID values to NULL so the audit row still lands —
+// dropping the correlation field is far better than dropping the
+// row.
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 export interface AuditEntry {
   actor_id: string | null;
   actor_email: string | null;
@@ -56,6 +67,19 @@ export async function writeAudit(
   entry: AuditEntry,
 ): Promise<string | null> {
   try {
+    // SCA-239: coerce non-UUID-shaped request_id values to NULL.
+    const safeRequestId = entry.request_id && UUID_RE.test(entry.request_id)
+      ? entry.request_id
+      : null;
+    if (entry.request_id && !safeRequestId) {
+      log.warn('audit_log_request_id_non_uuid', {
+        action: entry.action,
+        // First 8 chars only — bounded log surface, enough to grep for
+        // a specific upstream trace id without leaking its full value.
+        request_id_prefix: entry.request_id.slice(0, 8),
+      });
+    }
+
     const row = {
       actor_id: entry.actor_id,
       actor_email: entry.actor_email,
@@ -64,7 +88,7 @@ export async function writeAudit(
       target_id: entry.target_id,
       before_json: entry.before ?? null,
       after_json: entry.after ?? null,
-      request_id: entry.request_id ?? null,
+      request_id: safeRequestId,
     };
 
     const { data, error } = await client
