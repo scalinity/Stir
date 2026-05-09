@@ -7,18 +7,20 @@
 -- conditional in tone ("if multiple photos") so single-image performance
 -- doesn't regress.
 --
--- Rollout: is_default=TRUE at rollout_pct=100 — multi-image is Pro-gated
+-- Rollout: post-fix, the INSERT lands with is_default=FALSE and the atomic
+-- UPDATE on the trailing block promotes v1.1.0 to is_default=TRUE while
+-- demoting all other versions of pantry_parse — multi-image is Pro-gated
 -- at the entitlement layer (ENT-MULTI-IMAGE-01); the prompt-version
 -- canary is unnecessary because single-image traffic is the dominant
 -- path and the new instruction is additive (one extra paragraph).
 --
--- ATOMICITY (SCA-36 W1, hardened post-deploy):
+-- ATOMICITY (SCA-36 W1, hardened post-deploy; SCA-280 correctness fix):
 --   The original draft of this migration ran `UPDATE … is_default=FALSE`
 --   BEFORE `INSERT … ON CONFLICT DO NOTHING`. If v1.1.0 already existed
 --   (e.g. a rollback state where v1.1.0 was demoted), the INSERT would
 --   no-op and the feature_key would be left with NO default — every
 --   pantry-parse request would die with AI-01. The hardened pattern is:
---     1. INSERT v1.1.0 with whatever defaults; ON CONFLICT DO NOTHING.
+--     1. INSERT v1.1.0 with is_default=FALSE; ON CONFLICT DO NOTHING.
 --     2. UPDATE: set is_default = (version = '1.1.0') across all rows
 --        for feature_key='pantry_parse'. This unconditionally promotes
 --        v1.1.0 and demotes everything else in one atomic statement.
@@ -27,6 +29,27 @@
 --
 -- Idempotency: ON CONFLICT (feature_key, version) DO NOTHING + the
 -- final UPDATE re-asserts the desired final state.
+--
+-- IN-PLACE EDIT (SCA-280, correctness-blocks-fresh-init exception per
+-- CLAUDE.md §Schema truth):
+--   The original line-72 INSERT used is_default=TRUE, which collided
+--   with the partial unique index `uq_prompt_versions_one_default_per_feature`
+--   (defined in 20260418000006) at INSERT time on fresh `supabase db reset`
+--   — v1.0.0 was already is_default=TRUE from 20260418000016, and the
+--   partial unique index fires BEFORE ON CONFLICT can suppress it (ON
+--   CONFLICT only handles the named (feature_key, version) constraint).
+--   The atomic UPDATE on line 84 was supposed to be the load-bearing
+--   final-state setter, but it never ran because the INSERT aborted.
+--   Prod was unaffected (v1.0.0 was already demoted by an earlier step
+--   when this migration applied), but every fresh `supabase start` /
+--   `db reset` failed.
+--
+--   In-place edit per the correctness-fix exception (semantics
+--   preserved — the atomic UPDATE on line 84 is the load-bearing
+--   promotion, and is_default=FALSE is the safe transient state that
+--   the partial unique index permits): change line 72 from TRUE to
+--   FALSE. No new dated migration was viable because the broken
+--   migration ABORTS fresh init, so a forward fix could never run.
 
 -- ---------------------------------------------------------------------------
 -- v1.1.0 — pantry_parse with multi-image merge instruction
@@ -69,7 +92,7 @@ Household profile: {{household_profile_json}}
 Ingredient ontology excerpt: {{ingredient_ontology_slugs}}
 $TEMPLATE$,
   'pantry_parse_v1_schema',
-  TRUE,
+  FALSE, -- SCA-280: was TRUE; collided with uq_prompt_versions_one_default_per_feature on fresh init. Atomic UPDATE below promotes to TRUE.
   TRUE,
   100
 )
