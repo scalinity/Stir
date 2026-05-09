@@ -113,35 +113,24 @@ Deno.serve(async (req) => {
   }
 
   // -----------------------------------------------------------------------
-  // 2. Verify CloudKit claim, then resolve canonical key + scope logger
+  // 2a. IP rate limit (SCA-247 / C4 from /review-5: this gate now runs
+  // BEFORE the CloudKit verifier, not after).
   // -----------------------------------------------------------------------
-  const cloudKitVerification = await verifyCloudKitIdentity(parsed);
-  const identityBody = bodyWithVerifiedCloudKitOnly(parsed, cloudKitVerification);
-  const resolution = resolveCanonicalKey(identityBody);
-  const userLog = await createLogger(requestId, endpoint, resolution.canonical_user_key);
-  userLog.info('canonical_key_resolved', {
-    source_type: resolution.source_type,
-    has_cloudkit: Boolean(resolution.ck_canonical_key),
-    cloudkit_verification: cloudKitVerification.reason,
-    cloudkit_upstream_status: cloudKitVerification.upstreamStatus,
-  });
-
-  // -----------------------------------------------------------------------
-  // 3. DB work — service-role client (bypasses RLS)
-  // -----------------------------------------------------------------------
+  // 20 bootstraps per hour per source IP. Stops synthetic-install DoS +
+  // JWT-farming. Pre-C4 ordering ran AFTER the verifier so the 429 path
+  // could log against a user-scoped logger; the cost was that an
+  // attacker with valid-looking CK record names could drive 20 outbound
+  // calls to api.apple-cloudkit.com per IP/hr at our cost before any
+  // cap fired (and Apple-side stalls cascaded into bootstrap latency
+  // for everyone behind that IP). Reordering means the 429 logs against
+  // request-id only — acceptable because we don't trust the canonical
+  // key claim until the verifier confirms it anyway.
   const client = createServiceClient();
-
-  // -----------------------------------------------------------------------
-  // 3a. IP rate limit — 20 bootstraps per hour per source IP.
-  // Stops synthetic-install DoS + JWT-farming (per CLAUDE.md §Deferred,
-  // now lands in step 3). Runs AFTER Zod + canonical-key resolution so
-  // we have request-id + user-scoped logger available for the 429 path.
-  // -----------------------------------------------------------------------
   const sourceIP = extractSourceIP(req);
   try {
     const rl = await checkAndIncrement(client, 'ip:bootstrap_hourly', sourceIP);
     if (!rl.allowed) {
-      userLog.warn('rate_limited', {
+      log.warn('rate_limited', {
         scope: 'ip:bootstrap_hourly',
         source_ip_bucket: await ipBucket(sourceIP),
       });
@@ -155,8 +144,22 @@ Deno.serve(async (req) => {
   } catch (err) {
     // Fail open — rate limiter DB glitch shouldn't block a legitimate
     // first-install from ever reaching the app. Log + continue.
-    userLog.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
+    log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
   }
+
+  // -----------------------------------------------------------------------
+  // 2b. Verify CloudKit claim, then resolve canonical key + scope logger
+  // -----------------------------------------------------------------------
+  const cloudKitVerification = await verifyCloudKitIdentity(parsed);
+  const identityBody = bodyWithVerifiedCloudKitOnly(parsed, cloudKitVerification);
+  const resolution = resolveCanonicalKey(identityBody);
+  const userLog = await createLogger(requestId, endpoint, resolution.canonical_user_key);
+  userLog.info('canonical_key_resolved', {
+    source_type: resolution.source_type,
+    has_cloudkit: Boolean(resolution.ck_canonical_key),
+    cloudkit_verification: cloudKitVerification.reason,
+    cloudkit_upstream_status: cloudKitVerification.upstreamStatus,
+  });
 
   try {
     let isNewUser = false;

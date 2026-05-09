@@ -119,3 +119,50 @@ Deno.test('bodyWithVerifiedCloudKitOnly: strips unverified CK before resolution'
   assertEquals(stripped.cloudkit_user_record_name, undefined);
   assertEquals(stripped.cloudkit_web_auth_token, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// SCA-247 (C4 from /review-5): timeout-bounded fetch + cloudkit_timeout reason
+// ---------------------------------------------------------------------------
+
+Deno.test('verifyCloudKitIdentity: AbortSignal.timeout fires → cloudkit_timeout reason', async () => {
+  const result = await verifyCloudKitIdentity(
+    body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
+    {
+      apiToken: 'api-token',
+      // Stub fetch to throw the same DOMException shape AbortSignal.timeout
+      // produces — name === 'TimeoutError' is the discriminator the
+      // verifier uses to return cloudkit_timeout vs cloudkit_rejected.
+      fetchImpl: ((_url: URL | string, init?: RequestInit) => {
+        // Simulate the timeout that the *real* AbortSignal.timeout(3000)
+        // would have produced if the upstream stalled past 3s. We don't
+        // actually wait — we throw the exact DOMException the runtime
+        // would throw. Verifies the discriminator without slowing the
+        // test suite.
+        const sig = init?.signal;
+        if (sig?.aborted) {
+          throw sig.reason as DOMException;
+        }
+        // Otherwise synthesize a fresh TimeoutError.
+        throw new DOMException('signal timed out', 'TimeoutError');
+      }) as typeof fetch,
+    },
+  );
+  assertEquals(result.verified, false);
+  assertEquals(result.reason, 'cloudkit_timeout');
+  assertEquals(result.claimedRecordName, CK_RECORD);
+});
+
+Deno.test('verifyCloudKitIdentity: non-timeout fetch error → cloudkit_rejected (not cloudkit_timeout)', async () => {
+  const result = await verifyCloudKitIdentity(
+    body({ cloudkit_user_record_name: CK_RECORD, cloudkit_web_auth_token: 'web-auth-token' }),
+    {
+      apiToken: 'api-token',
+      fetchImpl: (() => {
+        throw new TypeError('network error');
+      }) as typeof fetch,
+    },
+  );
+  assertEquals(result.verified, false);
+  assertEquals(result.reason, 'cloudkit_rejected');
+  assertEquals(result.claimedRecordName, CK_RECORD);
+});

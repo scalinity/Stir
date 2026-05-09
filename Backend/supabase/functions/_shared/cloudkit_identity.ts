@@ -4,11 +4,24 @@ const DEFAULT_CLOUDKIT_CONTAINER = 'iCloud.com.scalinity.stir';
 const DEFAULT_CLOUDKIT_ENVIRONMENT = 'production';
 const CLOUDKIT_BASE_URL = 'https://api.apple-cloudkit.com';
 
+// SCA-247 (C4 from /review-5): cap any single CloudKit upstream call at
+// 3s. Bootstrap is the hottest path in the API surface, and Apple-side
+// stalls were previously bounded only by the Edge Function 150s wall,
+// which means an Apple incident would silently brick every iOS cold
+// start. Mirrors the 8s cap users-deletion-fulfill (SCA-224) uses for
+// Sentry/RevenueCat fetches; the bootstrap path picks a tighter cap
+// because it's user-facing latency, not a background worker.
+const CLOUDKIT_FETCH_TIMEOUT_MS = 3000;
+
 export type CloudKitVerificationReason =
   | 'not_requested'
   | 'missing_web_auth_token'
   | 'verifier_unconfigured'
   | 'cloudkit_rejected'
+  // SCA-247 (C4): Apple-side stall hit the 3s cap. Distinguished from
+  // `cloudkit_rejected` so operators can tell "Apple is slow" from
+  // "Apple said no" in incident triage.
+  | 'cloudkit_timeout'
   | 'record_mismatch'
   | 'verified';
 
@@ -62,9 +75,22 @@ export async function verifyCloudKitIdentity(
   const fetchImpl = deps.fetchImpl ?? fetch;
   let response: Response;
   try {
-    response = await fetchImpl(url, { method: 'GET' });
-  } catch {
-    return { verified: false, reason: 'cloudkit_rejected', claimedRecordName };
+    // SCA-247 (C4): hard 3s cap on the upstream call. AbortSignal.timeout
+    // surfaces as `DOMException` with `name === 'TimeoutError'`, which
+    // we distinguish from generic network failures so the bootstrap log
+    // and any future dashboards can split "Apple is slow" from "Apple
+    // said no" in incident triage.
+    response = await fetchImpl(url, {
+      method: 'GET',
+      signal: AbortSignal.timeout(CLOUDKIT_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+    return {
+      verified: false,
+      reason: isTimeout ? 'cloudkit_timeout' : 'cloudkit_rejected',
+      claimedRecordName,
+    };
   }
 
   if (!response.ok) {
