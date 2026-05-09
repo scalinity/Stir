@@ -396,9 +396,17 @@ extension EntitlementService {
     /// not enforced server-side because user content lives in
     /// CloudKit per north-star #3).
     var rememberedPantryCap: Int {
-        if let serverValue = serverStandingPantryCap {
+        if let serverValue = serverStandingPantryCap, serverValue > 0 {
             return serverValue
         }
+        // SCA-265 (W17 from /review-5): defensive floor against a future
+        // server-side bug or A/B that ships `0` (or negative). Returning
+        // 0 here would lock every pantry add out with no UI signal —
+        // the cap-enforcement path treats `count >= cap` as the lockout
+        // gate, so cap=0 means "every add fails." The Tier table
+        // guarantees Free=25 minimum, so any non-positive server value
+        // is a bug; treat it as missing and fall through to the on-
+        // device tier table rather than honoring it.
         return effectiveTier.rememberedPantryCap
     }
 }

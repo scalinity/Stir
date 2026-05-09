@@ -418,6 +418,30 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertEqual(service.rememberedPantryCap, 25)
     }
 
+    /// SCA-265 (W17 from /review-5): defensive floor against a future
+    /// server-side bug shipping `0` (or negative). Returning 0 here
+    /// would lock every pantry add out with no UI signal, since the
+    /// cap-enforcement path treats `count >= cap` as the lockout gate.
+    /// A non-positive value is treated as "missing" and falls through
+    /// to the on-device Tier table.
+    func test_rememberedPantryCap_serverZeroFallsBackToTierTable() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 0,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 250,
+                       "server cap=0 must fall back to Tier.rememberedPantryCap (Premium=250)")
+    }
+
+    func test_rememberedPantryCap_serverNegativeFallsBackToTierTable() {
+        let service = EntitlementService(keychain: MockKeychain())
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: -1,
+        ))
+        XCTAssertEqual(service.rememberedPantryCap, 25,
+                       "server cap=-1 must fall back to Tier.rememberedPantryCap (Free=25)")
+    }
+
     // MARK: - Helpers
 
     private static let defaultQuotas: [BootstrapResponse.Quota] = [
