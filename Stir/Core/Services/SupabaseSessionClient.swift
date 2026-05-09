@@ -415,6 +415,36 @@ actor SupabaseSessionClient {
                     // No identity cached — caller must handle.
                     throw StirError.auth(reason: reason, message: body.message)
                 }
+                // SCA-253 (W5 from /review-5): if the prior bootstrap had a
+                // CloudKit record claim AND the on-device token provider
+                // can no longer mint a fresh ckWebAuthToken (CK transient
+                // outage, app backgrounded mid-mint, provider torn down),
+                // a silent re-bootstrap WITHOUT the token would (post
+                // SCA-136 verifier activation) trigger the server's
+                // `missing_web_auth_token` strip — re-rooting the
+                // `ck:<record>` identity to `install:<uuid>` for the
+                // rest of the JWT lifetime. Detect that case and surface
+                // AUTH-01 to the caller instead of silently rebooting,
+                // so RootCoordinator can route through the SIWA re-flow
+                // (or a fresh CK status check on next foreground) rather
+                // than burning the user's identity on a transient.
+                //
+                // SCA-245 (C2) trust-mode era is fine without this guard
+                // because verifier_unconfigured preserves record_name —
+                // but once the verifier is activated, this is the gate
+                // that prevents a one-way identity shift.
+                if identity.cloudKitRecordName != nil {
+                    let freshToken = await resolveCloudKitWebAuthToken(
+                        explicitToken: nil,
+                        cloudKitRecordName: identity.cloudKitRecordName,
+                    )
+                    if freshToken == nil {
+                        Logger.supabase.warning(
+                            "silent re-bootstrap aborted: CK record claim cached but token provider returned nil; surfacing AUTH-01 to avoid identity-shift",
+                        )
+                        throw StirError.auth(reason: reason, message: body.message)
+                    }
+                }
                 _ = try await bootstrap(
                     installationID: identity.installationID,
                     cloudKitRecordName: identity.cloudKitRecordName,
