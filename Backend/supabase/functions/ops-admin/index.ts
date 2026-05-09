@@ -31,6 +31,7 @@ import {
   sanitizeErrorForLog,
 } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
+import { CANNED_FALLBACK_MAX_BYTES } from '../_shared/size_caps.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
 import {
   buildRate01Response,
@@ -104,9 +105,10 @@ const FlaggedOutputsListParams = z.object({
 // payload that doesn't match iOS's feature-specific shape causes silent
 // decode failures or wrong-content rendering. Minimum defense: require an
 // object (not a bare primitive / string / array) and cap serialized size
-// at 64 KiB. Per-feature schema-registry validation is a step-9 follow-up
-// (CLAUDE.md §Deferred).
-const CANNED_FALLBACK_MAX_BYTES = 65_536;
+// at 64 KiB (CANNED_FALLBACK_MAX_BYTES, sourced from _shared/size_caps.ts
+// per SCA-127 — pinned by the zod_check invariant test against the SQL
+// CHECK in migration 20260424000005). Per-feature schema-registry
+// validation is a step-9 follow-up (CLAUDE.md §Deferred).
 
 const FlaggedOutputsResolveParams = z.object({
   id: z.string().uuid(),

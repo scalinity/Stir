@@ -39,9 +39,11 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
+import {
+  CONTEXT_SNAPSHOT_MAX_BYTES,
+  FLAG_REASON_MAX_LEN,
+} from '../_shared/size_caps.ts';
 import { zodToFieldErrors } from '../_shared/validation.ts';
-
-const CONTEXT_SNAPSHOT_MAX_BYTES = 4096;
 
 const FlagOutputRequest = z.object({
   feature_key: z.enum([
@@ -54,7 +56,7 @@ const FlagOutputRequest = z.object({
     'cook_mode_realtime',
   ]),
   request_id: z.string().min(1).max(256),
-  flag_reason: z.string().min(1).max(500),
+  flag_reason: z.string().min(1).max(FLAG_REASON_MAX_LEN),
   // W22 (SA1 W1): 4 KiB cap on serialized JSON. Pre-fix there was only a
   // docstring comment claiming "max 4 KiB"; nothing enforced it. Postgres
   // JSONB TOAST accepts up to ~1 GB, so a single abusive row could freeze
