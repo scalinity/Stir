@@ -71,6 +71,12 @@ final class RootCoordinator {
     /// coordinator so tests can inject an isolated defaults-backed
     /// service and production avoids `.shared` drift.
     let widgetNudgeService: WidgetNudgeService
+    /// SCA-97 — pantry tombstone reaper. Hard-deletes soft-deleted
+    /// PantryItem rows past the 90-day retention window from the
+    /// foreground hook. DI'd here so RootView can dispatch through
+    /// the coordinator's instance and tests can swap the
+    /// PantryItemRepository / UserDefaults / PostHogClient seams.
+    let pantryTombstoneReaper: PantryTombstoneReaper
     /// HouseholdProfile accessor — owns existence checks at fast-path init
     /// and creation in the full-bootstrap path. Injected so tests can stub
     /// the on-disk profile state without touching Core Data directly.
@@ -345,6 +351,7 @@ final class RootCoordinator {
         voiceTurnRepository: VoiceTurnRepository? = nil,
         householdRepo: HouseholdProfileRepository? = nil,
         widgetNudgeService: WidgetNudgeService? = nil,
+        pantryTombstoneReaper: PantryTombstoneReaper? = nil,
         sharedStorage: SharedStorage = SharedStorage(),
         revenueCat: (any RevenueCatPurchasing)? = nil,
         fastPathMinLoadingDuration: Duration = .milliseconds(500),
@@ -372,6 +379,12 @@ final class RootCoordinator {
         self.voiceTurnRepository = voiceTurnRepository ?? VoiceTurnRepository(controller: persistenceController)
         self.widgetNudgeService = widgetNudgeService ?? WidgetNudgeService()
         self.householdRepo = householdRepo ?? HouseholdProfileRepository(controller: persistenceController)
+        // SCA-97: reaper wraps `self.pantryItemRepository` (note: NOT
+        // the parameter — already nil-coalesced above to the shared
+        // controller's repo) so swapping the repo in tests propagates.
+        self.pantryTombstoneReaper = pantryTombstoneReaper ?? PantryTombstoneReaper(
+            repository: self.pantryItemRepository,
+        )
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared
         self.fastPathMinLoadingDuration = fastPathMinLoadingDuration

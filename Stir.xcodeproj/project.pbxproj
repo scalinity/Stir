@@ -192,6 +192,8 @@
 		A65A00100000000F /* sample_solve.json in Resources */ = {isa = PBXBuildFile; fileRef = A65A001000000010 /* sample_solve.json */; };
 		A65A001000000011 /* WidgetNudgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000012 /* WidgetNudgeService.swift */; };
 		A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000014 /* WidgetNudgeServiceTests.swift */; };
+		A65A001000000021 /* PantryTombstoneReaper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000020 /* PantryTombstoneReaper.swift */; };
+		A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000022 /* PantryTombstoneReaperTests.swift */; };
 		8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */; };
 		8F67F920B57E8D212E47F398 /* MockKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBBD7443872E7B9C4154B6A /* MockKeychain.swift */; };
 		90FAD8F8685ACB0239361814 /* PrimaryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E82DDE255326CB1DF8B366BF /* PrimaryButton.swift */; };
@@ -500,6 +502,8 @@
 		A65A001000000010 /* sample_solve.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = sample_solve.json; sourceTree = "<group>"; };
 		A65A001000000012 /* WidgetNudgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeService.swift; sourceTree = "<group>"; };
 		A65A001000000014 /* WidgetNudgeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeServiceTests.swift; sourceTree = "<group>"; };
+		A65A001000000020 /* PantryTombstoneReaper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaper.swift; sourceTree = "<group>"; };
+		A65A001000000022 /* PantryTombstoneReaperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaperTests.swift; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
 		5760939C8F0B686F7EFE90EE /* CookModeRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookModeRoot.swift; sourceTree = "<group>"; };
 		579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
@@ -773,6 +777,7 @@
 				B11900AA1190AABBCC110002 /* HTTPErrorHandler.swift */,
 				ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */,
 				A65A001000000012 /* WidgetNudgeService.swift */,
+				A65A001000000020 /* PantryTombstoneReaper.swift */,
 				6DE4A6746B60DA63C17DB13D /* WidgetReloadCoordinator.swift */,
 			);
 			path = Services;
@@ -819,6 +824,7 @@
 				A65A001000000004 /* LeftoversFollowupSchedulerTests.swift */,
 				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
+				A65A001000000022 /* PantryTombstoneReaperTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
 				F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */,
@@ -1709,6 +1715,7 @@
 				A65A001000000003 /* LeftoversFollowupSchedulerTests.swift in Sources */,
 				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
+				A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
 				F1158A993CE98C45F369F12C /* PreferenceMemoryServiceTests.swift in Sources */,
@@ -1962,7 +1969,8 @@
 				F4FE6F63A80074970E95B690 /* WelcomeView.swift in Sources */,
 				5E8F656515AC048F68C62633 /* WidgetReloadCoordinator.swift in Sources */,
 				A65A001000000011 /* WidgetNudgeService.swift in Sources */,
-							245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */,
+				A65A001000000021 /* PantryTombstoneReaper.swift in Sources */,
+				245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */,
 				A34FCF1DDFCF240B1B2357A3 /* TutorialStepView.swift in Sources */,
 				679EF3AA3AEA60324302724C /* TutorialKey.swift in Sources */,
 				E606300A3573AEF1E1D89B01 /* TutorialManager.swift in Sources */,

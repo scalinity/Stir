@@ -767,6 +767,62 @@ final class PantryItemRepository {
         return rows.count
     }
 
+    /// SCA-97: hard-delete soft-deleted (`deletedAt != nil`) rows whose
+    /// tombstone is older than `cutoff`. Drives the tombstone reaper
+    /// — long-running users accumulate tombstones indefinitely under
+    /// the soft-delete-only contract (every UI/AI surface filters on
+    /// `deletedAt == nil`, so they're invisible but still occupy
+    /// CloudKit zone bytes and slow restore-from-iCloud).
+    ///
+    /// Caller computes `cutoff` (`now - retention`) and passes the
+    /// absolute date so this API stays unit-testable without time
+    /// faking. The reaper service's policy (90-day window, weekly
+    /// cadence) lives in `PantryTombstoneReaper`, not here — this
+    /// repo method is purely the "hard-delete rows older than X"
+    /// primitive.
+    ///
+    /// Idempotent: re-call after all stale tombstones are gone
+    /// returns 0 (the predicate filters `deletedAt != nil`, and any
+    /// row younger than the cutoff is excluded by the inequality).
+    /// One save at the end so the batch lands as a single CloudKit
+    /// propagation unit (vs N individual delete frames flooding the
+    /// sync queue). Errors propagate through `StirError.coreData`
+    /// per repo convention.
+    ///
+    /// Scoped to one `HouseholdProfile`. The reaper drives this once
+    /// per active household per cadence trigger, mirroring
+    /// `softDeleteExpired`.
+    @discardableResult
+    func purgeTombstones(olderThan cutoff: Date, for household: HouseholdProfile) throws -> Int {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "household == %@", household),
+            NSPredicate(format: "deletedAt != nil"),
+            NSPredicate(format: "deletedAt < %@", cutoff as NSDate),
+        ])
+        let context = controller.viewContext
+        let rows: [PantryItem]
+        do {
+            rows = try context.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+        guard !rows.isEmpty else { return 0 }
+        for row in rows {
+            // viewContext.delete propagates through
+            // NSPersistentCloudKitContainer's mirrored stores; a
+            // single context.save() at the end emits one batched
+            // CloudKit delete-record-zone request rather than N
+            // individual ones. CloudKit's tolerance for many small
+            // requests is fine, but the batched form is cheaper and
+            // doesn't compete with foreground sync traffic.
+            context.delete(row)
+        }
+        try controller.save()
+        Logger.coreData.info("PantryItemRepository purgeTombstones: \(rows.count, privacy: .public) stale tombstones hard-deleted")
+        return rows.count
+    }
+
     /// Length caps on user-typed pantry strings. Prevents a paste of
     /// (e.g.) a 1MB string from corrupting CloudKit sync — CloudKit's
     /// String fields tolerate ≤1MB but the sync envelope is much

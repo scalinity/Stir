@@ -181,6 +181,18 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// zeros outcome) so the event time-series stays continuous and
     /// missing emissions flag a wiring regression.
     case pantryAutoConsumeResolved = "pantry_auto_consume_resolved"
+    /// SCA-97: emitted by `PantryTombstoneReaper.runIfDue(...)` after
+    /// every successful purge pass — including zero-row passes — so
+    /// the funnel sees continuous cadence coverage. Properties:
+    ///   - `rows_purged`: integer ≥ 0 — rows hard-deleted this run
+    ///   - `retention_days`: integer — retention window in whole days
+    ///     (default 90; configurable for tests / future tier scaling)
+    ///
+    /// Failed runs (Core Data fault during fetch/save) emit nothing
+    /// and retry on the next foreground; the cadence timestamp moves
+    /// only after success, so failures don't poison the schedule.
+    /// Counts only; no item names per ADR 0009's privacy invariant.
+    case pantryTombstoneReaperRan = "pantry_tombstone_reaper_ran"
     case mealRated = "meal_rated"
     /// Fires when the user dismisses the outcome feedback sheet via Skip
     /// without submitting a rating. Complement to `meal_rated` — the pair

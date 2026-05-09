@@ -132,6 +132,14 @@ struct RootView: View {
                             "pantry softDeleteExpired failed: \(error.localizedDescription, privacy: .private)",
                         )
                     }
+                    // SCA-97: tombstone reaper. `runIfDue` gates on a
+                    // 7-day cadence stored in UserDefaults — repeated
+                    // foreground transitions in the same window are
+                    // free no-ops. Errors are caught + logged inside
+                    // the reaper; this call site never throws. Sits
+                    // alongside softDeleteExpired so both pantry-
+                    // hygiene sweeps share the same trigger.
+                    coordinator.pantryTombstoneReaper.runIfDue(for: household)
                 }
             }
         }
