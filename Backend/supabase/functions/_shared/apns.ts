@@ -55,6 +55,29 @@ let mintingPromise: Promise<string> | null = null;
 const PROVIDER_JWT_TTL_SECONDS = 30 * 60; // APNs accepts up to 60 min; we use 30.
 const APNS_FETCH_TIMEOUT_MS = 10_000; // Stall guard — APNs HTTP/2 normally < 500 ms.
 
+// Test-only fetch DI seam (SCA-115). Production code path uses
+// `globalThis.fetch` directly; integration tests substitute a mock that
+// records calls, scripts response codes, and asserts header shape without
+// hitting Apple. Keep the override module-scoped so a misuse in prod
+// would surface as a test-only export being called — there is no
+// public production path that sets this. Underscore-prefixed by
+// convention (matches `_resetApnsCacheForTests`).
+type ApnsFetch = (input: string, init: RequestInit) => Promise<Response>;
+let apnsFetchOverride: ApnsFetch | null = null;
+
+/**
+ * Test-only: install a fetch override the next `sendAPNsPush` call will
+ * use instead of `globalThis.fetch`.
+ *
+ * **DO NOT call from production code** — this is the dependency-injection
+ * seam called out in SCA-115. The production path resolves to
+ * `globalThis.fetch` on every call (no cache, no module-scoped state) so
+ * the override never persists past a test that explicitly clears it.
+ */
+export function _setApnsFetchOverrideForTests(fn: ApnsFetch | null): void {
+  apnsFetchOverride = fn;
+}
+
 export type APNsEnvironment = 'production' | 'sandbox';
 export type APNsCategory = 'reactivation' | 'import_completion' | 'cook_reminder' | 'billing_grace';
 
@@ -211,7 +234,9 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    const fetchImpl: ApnsFetch = apnsFetchOverride ??
+      ((input, init) => fetch(input, init));
+    res = await fetchImpl(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(apsPayload),

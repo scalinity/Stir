@@ -33,7 +33,7 @@ import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
-import { sendAPNsPush } from '../_shared/apns.ts';
+import { processPushSend } from './push_send.ts';
 
 const CLAIM_LIMIT = 10; // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
@@ -593,115 +593,6 @@ async function scheduleJobRetry(
 // push_send processor (step 8 — reactivation + import_completion pushes)
 // -----------------------------------------------------------------------------
 //
-// Payload shape (written by stir_ops_reactivation_enqueue + recipe-import
-// follow-on insert):
-//   {
-//     template:     'reactivation' | 'import_completion' | 'cook_reminder'
-//                   | 'billing_grace',
-//     title:        string,
-//     body:         string,
-//     deep_link:    'stir://...' (optional),
-//     apns_token:   string,
-//     environment:  'production' | 'sandbox',
-//   }
-//
-// Failure classification:
-//   - bad_device_token / unregistered → mark job COMPLETED (token is dead,
-//     not our bug); null out the token on device_installations so future
-//     enqueues skip it.
-//   - rate_limited / server_error    → THROW, lets the outer try/catch
-//     schedule a retry with backoff.
-//   - config_invalid / missing_secret → THROW and page; means our APNs
-//     signing config is wrong, not a per-device issue.
-
-// W24 (SA1 W3): runtime shape validation of push_send payload. Pre-fix
-// the handler used `as PushSendPayload` + presence check only — an errant
-// writer inserting a malformed payload would get no signal until APNs
-// rejected the malformed HTTP/2 request. Explicit Zod validation at the
-// boundary keeps the trust boundary explicit: `notification_jobs` is
-// service-role-only today, but one errant service caller (manual psql,
-// future recipe-import regression, etc.) can't cause CRLF-injection in
-// apns-collapse-id or misroute production pushes to sandbox.
-const PushSendPayloadSchema = z.object({
-  template: z.enum(['reactivation', 'import_completion', 'cook_reminder', 'billing_grace']),
-  title: z.string().min(1).max(256),
-  body: z.string().min(1).max(2048),
-  deep_link: z.string().regex(/^stir:\/\//).max(512).optional(),
-  apns_token: z.string().regex(/^[0-9a-fA-F]{64}$/),
-  environment: z.enum(['production', 'sandbox']),
-}).strict();
-
-type PushSendPayload = z.infer<typeof PushSendPayloadSchema>;
-
-async function processPushSend(
-  client: ReturnType<typeof createServiceClient>,
-  job: ClaimedJob,
-  log: Awaited<ReturnType<typeof createLogger>>,
-): Promise<void> {
-  const parsed = PushSendPayloadSchema.safeParse(job.payload_json);
-  if (!parsed.success) {
-    throw new Error(
-      `invalid push_send payload: ${
-        parsed.error.errors.map((e) => `${e.path.join('.')}=${e.message}`).join(', ')
-      }`,
-    );
-  }
-  const payload: PushSendPayload = parsed.data;
-
-  const result = await sendAPNsPush({
-    token: payload.apns_token,
-    environment: payload.environment,
-    category: payload.template,
-    alert: { title: payload.title, body: payload.body },
-    data: payload.deep_link ? { deep_link: payload.deep_link } : undefined,
-  });
-
-  if (result.ok) {
-    log.info('push_sent', {
-      job_id: job.id,
-      template: payload.template,
-      apns_id: result.apnsId,
-    });
-    await client
-      .from('notification_jobs')
-      .update({
-        state: 'completed',
-        processed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', job.id);
-    return;
-  }
-
-  // Failure path.
-  if (result.reason === 'bad_device_token') {
-    // Dead token — complete the job and null out device_installations.push_token
-    // so future reactivation/import-completion enqueues skip this device.
-    log.info('push_token_dead', {
-      job_id: job.id,
-      status: result.status,
-      apns_reason: result.apnsReason,
-    });
-    await client
-      .from('notification_jobs')
-      .update({
-        state: 'completed',
-        processed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        error_message: `apns rejected token: ${result.apnsReason ?? 'BadDeviceToken'}`,
-      })
-      .eq('id', job.id);
-    await client
-      .from('device_installations')
-      .update({ push_token: null, notifications_enabled: false })
-      .eq('push_token', payload.apns_token);
-    return;
-  }
-
-  // Other failures re-throw; outer loop schedules retry with backoff.
-  throw new Error(
-    `APNs push failed (reason=${result.reason}, status=${result.status}, apns=${
-      result.apnsReason ?? 'n/a'
-    })`,
-  );
-}
+// Extracted to ./push_send.ts (SCA-115) so integration tests can call
+// processPushSend directly with a mock APNs sender, without triggering
+// Deno.serve() via this module's top-level. Behavior is unchanged.
