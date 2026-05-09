@@ -455,6 +455,28 @@ async function processOne(
       deletion_request_id: row.id,
       err: persistErr.message,
     });
+    // SCA-258 (W10 from /review-5): pre-fix this branch logged the
+    // warn and CONTINUED into the postgres sweep. The sweep cascade-
+    // deletes deletion_requests itself, so a downstream audit-insert
+    // failure (rare but possible — same DB, same connection pool)
+    // would lose the upstream subsystem state forever (no surviving
+    // record of which Sentry/RC/PostHog wipes succeeded). Privacy
+    // promise wins over telemetry, but the recovery posture is
+    // tighter if we refuse to advance the sweep on persist-failure
+    // and let the next tick re-claim. The sibling step short-circuits
+    // (`completed_at`/`requires_manual_action`/`requires_client_action`)
+    // already preserve subsystem state across reclaim.
+    await client
+      .from('deletion_requests')
+      .update({
+        state: 'failed',
+        failure_reason: truncate(
+          `external_refs_persist_failed: ${persistErr.message}`,
+          FAILURE_REASON_MAX,
+        ),
+      })
+      .eq('id', row.id);
+    return 'failed';
   }
 
   // Postgres sweep runs ONLY if subsystems either completed or are
