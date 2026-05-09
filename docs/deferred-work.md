@@ -18,6 +18,7 @@ Each entry has an owner-step and a trigger condition. Don't fix proactively; wai
 - **Hard-pinned earlier deferrals** — IP rate limiting (step 3), Gemini Live API drift re-check (step 6 cheap-half), Mint endpoint auth re-test (step 6), ActivityKit Live Activity (step 7).
 - **Test-correctness debt** — voice_turn_usage_test ENT-VOICE-01→VOICE-SESSION-01 migration, pre-mint exact-boundary test, is_refresh=false direct pin, suspected flakes retained for re-recurrence diagnosis.
 - **Documentation drift** — PostHogClient $ai_trace doc-comment, Spec §6 sync gap (METHOD-NOT-ALLOWED-01), error envelope drift protection.
+- **Refactors deferred to next touch** — **TonightCoverHost struct/result-builder refactor (SCA-277 / S11 from /review-5)**: `tonightCoverHost(...)` is at 6 args (4 cover-content closures + activeModal binding + coordinator). Adding the 7th cover (most likely candidate: paywall, currently mounted on RootView per ADR's pre-existing comment) tips the call site into struct-of-closures or `@resultBuilder` territory. Defer until that 7th cover lands. Trigger: any new `.fullScreenCover` modifier added to TonightCoverHost.
 
 ---
 
