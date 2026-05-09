@@ -36,7 +36,7 @@
 // the call.
 //
 // SCA-88. Pairs with docs/runbooks/deletion-request-fulfillment.md and
-// docs/decisions/0031-deletion-fulfillment-ordering.md.
+// docs/decisions/0033-deletion-fulfillment-ordering.md.
 
 import { z } from 'zod';
 import { createServiceClient } from '../_shared/db.ts';

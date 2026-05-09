@@ -1,4 +1,4 @@
-# ADR 0031: Deletion fulfillment subsystem ordering — Postgres sweep last
+# ADR 0033: Deletion fulfillment subsystem ordering — Postgres sweep last
 
 - **Status**: Accepted
 - **Date**: 2026-05-08

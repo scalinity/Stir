@@ -9,7 +9,7 @@ admin approves the request in the ops console.
 Pairs with:
 - `Backend/supabase/functions/users-deletion-fulfill/index.ts` (worker)
 - `Backend/supabase/migrations/20260508000006_deletion_fulfill_cron.sql` (schedule)
-- `docs/decisions/0031-deletion-fulfillment-ordering.md` (subsystem ordering ADR)
+- `docs/decisions/0033-deletion-fulfillment-ordering.md` (subsystem ordering ADR; renumbered from 0031 in SCA-249)
 - `docs/legal/privacy-policy.md` §6 + §7.2 + §7.7 (the legal commitments)
 
 ## Lifecycle at a glance
