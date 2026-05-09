@@ -596,9 +596,19 @@ async function fulfillSweep(
 
   summary.claimed = claimed.length;
 
+  // SCA-266 (W18 from /review-5): per-row request_id correlation.
+  // Pre-fix every row in a tick shared the per-tick `requestId`, so a
+  // forensic ops query `WHERE audit_log.request_id = '...'` returned
+  // the audit row for whichever row failed PLUS four unrelated peers
+  // from the same tick. The audit_log.request_id column is TEXT
+  // (per migration 20260424000002 — see CLAUDE.md §"Schema truth"),
+  // so a `${tickId}:${rowId}` shape is supported. Per-row IDs preserve
+  // tick-level correlation (filter by prefix) while making per-row
+  // queries direct.
   for (const row of claimed) {
+    const perRowRequestId = `${requestId}:${row.id}`;
     try {
-      const outcome = await processOne(client, row, log, requestId);
+      const outcome = await processOne(client, row, log, perRowRequestId);
       if (outcome === 'completed') summary.completed += 1;
       else if (outcome === 'partial') summary.partial += 1;
       else summary.failed += 1;
