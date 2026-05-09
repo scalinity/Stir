@@ -166,3 +166,49 @@ Deno.test('verifyCloudKitIdentity: non-timeout fetch error → cloudkit_rejected
   assertEquals(result.reason, 'cloudkit_rejected');
   assertEquals(result.claimedRecordName, CK_RECORD);
 });
+
+// ---------------------------------------------------------------------------
+// SCA-246 (C3 from /review-5): orphan-token strip — predicate gates on
+// verification.verified, not on record_name presence
+// ---------------------------------------------------------------------------
+
+Deno.test('bodyWithVerifiedCloudKitOnly: orphan token (no record_name, token present, not_requested) is stripped', () => {
+  // Pre-C3, this body returned verbatim because record_name was nil
+  // and the helper short-circuited there. Token leaked through.
+  const original = body({ cloudkit_web_auth_token: 'orphan-token' });
+  const stripped = bodyWithVerifiedCloudKitOnly(original, {
+    verified: false,
+    reason: 'not_requested',
+  });
+  assertEquals(stripped.cloudkit_user_record_name, undefined);
+  assertEquals(stripped.cloudkit_web_auth_token, undefined);
+});
+
+Deno.test('bodyWithVerifiedCloudKitOnly: cloudkit_timeout strips both fields (fail-closed)', () => {
+  const original = body({
+    cloudkit_user_record_name: CK_RECORD,
+    cloudkit_web_auth_token: 'web-auth-token',
+  });
+  const stripped = bodyWithVerifiedCloudKitOnly(original, {
+    verified: false,
+    reason: 'cloudkit_timeout',
+    claimedRecordName: CK_RECORD,
+  });
+  assertEquals(stripped.cloudkit_user_record_name, undefined);
+  assertEquals(stripped.cloudkit_web_auth_token, undefined);
+});
+
+Deno.test('bodyWithVerifiedCloudKitOnly: verified=true returns body verbatim', () => {
+  const original = body({
+    cloudkit_user_record_name: CK_RECORD,
+    cloudkit_web_auth_token: 'web-auth-token',
+  });
+  const passed = bodyWithVerifiedCloudKitOnly(original, {
+    verified: true,
+    reason: 'verified',
+    claimedRecordName: CK_RECORD,
+    verifiedRecordName: CK_RECORD,
+  });
+  assertEquals(passed.cloudkit_user_record_name, CK_RECORD);
+  assertEquals(passed.cloudkit_web_auth_token, 'web-auth-token');
+});

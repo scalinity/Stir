@@ -138,7 +138,17 @@ export function bodyWithVerifiedCloudKitOnly(
   body: SessionBootstrapRequest,
   verification: CloudKitVerificationResult,
 ): SessionBootstrapRequest {
-  if (body.cloudkit_user_record_name == null || verification.verified) return body;
+  // SCA-246 (C3 from /review-5): the strip predicate now gates on
+  // `verification.verified`, not on `body.cloudkit_user_record_name ==
+  // null`. Pre-fix, an orphan-token shape (token present, record_name
+  // absent — Zod accepts both fields independently optional) hit the
+  // verifier, returned `not_requested`, and the helper saw record_name
+  // null → returned the body verbatim with the token still attached.
+  // Latent today (no downstream consumer reads the token past the
+  // verifier) but breaks the helper's contract: "return a body with no
+  // unverified CloudKit fields." Now: only the verified-CK happy path
+  // returns body verbatim; every other path strips both fields.
+  if (verification.verified) return body;
   const {
     cloudkit_user_record_name: _recordName,
     cloudkit_web_auth_token: _token,
