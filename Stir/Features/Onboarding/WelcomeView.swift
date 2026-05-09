@@ -182,10 +182,8 @@ private struct WelcomeBowl: View {
             // Rim ellipse drawn on top of the bowl body:
             // cx=70 cy=34 rx=52 ry=7
             let rimRect = CGRect(
-                x: (70 - 52) * scale + offsetX,
-                y: (34 - 7) * scale + offsetY,
-                width: 104 * scale,
-                height: 14 * scale,
+                origin: p(70 - 52, 34 - 7),
+                size: CGSize(width: 104 * scale, height: 14 * scale),
             )
             let rim = Path(ellipseIn: rimRect)
             context.fill(rim, with: .color(Color.Stir.ember100))

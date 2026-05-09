@@ -112,7 +112,7 @@ final class CookingSessionRepository {
         let request = NSFetchRequest<CookingSession>(entityName: "CookingSession")
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             NSPredicate(format: "recipePlan.household == %@", household),
-            NSPredicate(format: "status == %@", CookingSession.Status.completed.rawValue),
+            NSPredicate(format: "sessionStatus == %@", CookingSession.Status.completed.rawValue),
             NSPredicate(format: "endedAt != nil"),
         ])
         request.sortDescriptors = [NSSortDescriptor(key: "endedAt", ascending: false)]
