@@ -17,6 +17,33 @@
 # without the iOS hook noticing — the same red-main hazard SCA-181
 # fixed for iOS.
 #
+# SCA-208: two changes to the iOS gate, both rooted in the same
+# Xcode 26.x behavior — `-quiet` strips the "Executed N tests"
+# summary line entirely, leaving the log with just three
+# IDETestOperationsObserverDebug timing prints and a trailing
+# "Testing started". The previous stdout-grep gate had no signal
+# under -quiet, so every push fell through to SCA-185's "broken
+# gate" failure regardless of actual test outcome.
+#
+#   1. The success path now reads `xcrun xcresulttool get
+#      test-results summary` for the `result` / `passedTests` /
+#      `failedTests` / `totalTestCount` fields. Source of truth is
+#      the xcresult bundle, not the -quiet stdout log.
+#   2. A one-shot retry fires when xcodebuild exits non-zero AND the
+#      log carries the SBMainWorkspace
+#      "Application failed preflight checks" / "Simulator device
+#      failed to launch" substring (wedged sim before test runner
+#      installed). Retry flow: `simctl shutdown all` + boot
+#      iPhone 17 Pro + 5 s sleep + re-run of `xcodebuild test`
+#      exactly ONCE. Retry success emits a distinct
+#      `[pre-push] ✅ retried after sim flake` summary so the audit
+#      trail captures the event.
+#
+# Real test failures (xcresult.failedTests > 0) bypass retry. Real
+# compile errors (no xcresult bundle produced) also bypass retry —
+# the failure path detects the missing bundle and surfaces "compile
+# error or sim flake outside SCA-208 substring".
+#
 # Behavior:
 #   - Stage 1: xcodebuild test -scheme Stir on iPhone 17 Pro simulator.
 #   - Stage 2: deno test --config Backend/supabase/functions/deno.json
@@ -96,16 +123,85 @@ xcodebuild test \
 EXIT="$?"
 set -e
 
-# SCA-185 (review-CR-C2): a passing exit code with zero tests
-# executed means the gate is broken — refactored test scheme,
-# narrowed -only-testing, simulator hiccup that didn't surface.
-# Treat this as a failure regardless of exit code.
-COUNT_LINE="$(grep -E 'Executed [0-9]+ tests' "$TMPLOG" | tail -1 || true)"
-COUNT="$(echo "$COUNT_LINE" | sed -E 's/.*Executed ([0-9]+) tests.*/\1/' 2>/dev/null || echo "")"
+# SCA-208: sim-launch flake detection + one-shot retry. The hook
+# previously parsed `Executed N tests` from `-quiet` stdout, but on
+# Xcode 26.x `-quiet` drops that line entirely — the entire log is 4
+# lines: three IDETestOperationsObserverDebug timing prints and a
+# trailing "Testing started". The xcresult bundle is the only
+# reliable signal under -quiet, so the gate (success and zero-tests)
+# is computed from `xcrun xcresulttool get test-results summary`
+# instead. The retry below remains scoped to the original ticket
+# shape: EXIT != 0 + the SBMainWorkspace preflight substring → wedged
+# sim. Real test failures (non-zero failedTests in xcresult) and real
+# compile errors (no xcresult produced at all) bypass retry.
+RETRIED_AFTER_SIM_FLAKE=0
+if [ "$EXIT" != "0" ] \
+   && grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
+    echo "[pre-push] ⚠️  simulator preflight flake detected — resetting sim and retrying once"
+    xcrun simctl shutdown all >/dev/null 2>&1 || true
+    xcrun simctl boot "iPhone 17 Pro" >/dev/null 2>&1 || true
+    sleep 5
 
-if [ "$EXIT" = "0" ] && [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ]; then
-    SUMMARY="$(echo "$COUNT_LINE" | sed -E 's/.*(Executed [0-9]+ tests, with [0-9]+ failures).*/\1/' || true)"
-    echo "[pre-push] ✅ iOS: ${SUMMARY:-tests passed}"
+    set +e
+    xcodebuild test \
+        -scheme Stir \
+        -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+        -quiet \
+        > "$TMPLOG" 2>&1
+    EXIT="$?"
+    set -e
+    RETRIED_AFTER_SIM_FLAKE=1
+fi
+
+# SCA-208: locate the latest xcresult bundle and pull structured
+# pass/fail counts. Hoisted so both the success branch and the
+# existing SCA-187 failure-extraction path read the same DERIVED.
+DERIVED="$(xcodebuild -scheme Stir -showBuildSettings 2>/dev/null \
+            | awk -F' = ' '/^[[:space:]]*BUILD_DIR =/ {print $2; exit}' \
+            | sed 's|/Build/Products$||')"
+LATEST_XCRESULT=""
+if [ -n "$DERIVED" ] && [ -d "$DERIVED/Logs/Test" ]; then
+    LATEST_XCRESULT="$(ls -td "$DERIVED"/Logs/Test/*.xcresult/ 2>/dev/null | head -1)"
+fi
+
+XC_RESULT=""
+XC_PASSED=0
+XC_FAILED=0
+XC_TOTAL=0
+if [ -n "$LATEST_XCRESULT" ] && [ -d "$LATEST_XCRESULT" ]; then
+    XC_JSON="$(xcrun xcresulttool get test-results summary --path "$LATEST_XCRESULT" 2>/dev/null || true)"
+    if [ -n "$XC_JSON" ]; then
+        # Single python3 invocation — three roundtrips would parse the
+        # same JSON three times. Output: 'result|passed|failed|total'.
+        XC_LINE="$(printf '%s' "$XC_JSON" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print("|".join([
+        str(d.get("result", "")),
+        str(d.get("passedTests", 0)),
+        str(d.get("failedTests", 0)),
+        str(d.get("totalTestCount", 0)),
+    ]))
+except Exception:
+    print("||0|0|0")
+' 2>/dev/null || true)"
+        XC_RESULT="$(echo "$XC_LINE" | awk -F'|' '{print $1}')"
+        XC_PASSED="$(echo "$XC_LINE" | awk -F'|' '{print $2}')"
+        XC_FAILED="$(echo "$XC_LINE" | awk -F'|' '{print $3}')"
+        XC_TOTAL="$(echo "$XC_LINE" | awk -F'|' '{print $4}')"
+    fi
+fi
+
+# Success requires both the xcresult `result` field AND a non-zero
+# total — the latter preserves SCA-185's broken-gate guard (a build
+# that "passes" with zero tests is still a failure).
+if [ "$XC_RESULT" = "Passed" ] && [ "${XC_TOTAL:-0}" -gt 0 ]; then
+    if [ "$RETRIED_AFTER_SIM_FLAKE" = "1" ]; then
+        echo "[pre-push] ✅ retried after sim flake — iOS: $XC_PASSED/$XC_TOTAL tests passed"
+    else
+        echo "[pre-push] ✅ iOS: $XC_PASSED/$XC_TOTAL tests passed"
+    fi
     # iOS green — fall through to the deno test stage (SCA-220).
     IOS_PASSED=1
 fi
@@ -199,35 +295,27 @@ fi # end IOS_PASSED guard
 echo "[pre-push] ❌ push blocked"
 echo
 
-if [ "$EXIT" = "0" ] && [ "${COUNT:-0}" = "0" ]; then
-    echo "  reason: xcodebuild reported success but ran 0 tests."
-    echo "  this means the gate is broken — investigate the test scheme,"
-    echo "  -only-testing filter, or the simulator state before retrying."
-    echo
-    echo "--- last 60 lines of test log ---"
-    tail -n 60 "$TMPLOG"
-elif [ "$EXIT" = "0" ]; then
-    # Shouldn't reach: exit=0, count present, but >0 was false. Guard.
-    echo "  reason: xcodebuild exited 0 with unparseable test count."
-    echo
-    echo "--- last 60 lines of test log ---"
-    tail -n 60 "$TMPLOG"
-else
-    echo "  reason: $COUNT_LINE"
+if [ -z "$LATEST_XCRESULT" ]; then
+    # No xcresult means xcodebuild never produced one — typically a
+    # compile error before testing started, or a sim-launch flake that
+    # didn't match the SCA-208 substring (so retry didn't fire). The
+    # log tail has the real signal in either case.
+    echo "  reason: xcodebuild exited $EXIT with no xcresult bundle produced"
+    echo "  (likely a compile error, missing dependency, or sim flake outside the SCA-208 substring)"
+elif [ "$XC_RESULT" = "Passed" ] && [ "${XC_TOTAL:-0}" = "0" ]; then
+    echo "  reason: xcresult reports Passed but totalTestCount=0 — gate broken."
+    echo "  investigate the test scheme, -only-testing filter, or the simulator state."
+elif [ "${XC_FAILED:-0}" -gt 0 ]; then
+    echo "  reason: $XC_FAILED of $XC_TOTAL tests failed (xcresult.result=$XC_RESULT)"
     echo
 
     # SCA-187 (review-CR-W2): -quiet strips per-`Test Case` lines, so
     # the in-log grep is empty for failed-test enumeration. The
-    # xcresult bundle has the structural data — extract via xcresulttool.
-    DERIVED="$(xcodebuild -scheme Stir -showBuildSettings 2>/dev/null \
-                | awk -F' = ' '/^[[:space:]]*BUILD_DIR =/ {print $2; exit}' \
-                | sed 's|/Build/Products$||')"
-    if [ -n "$DERIVED" ] && [ -d "$DERIVED/Logs/Test" ]; then
-        LATEST_RESULT="$(ls -td "$DERIVED"/Logs/Test/*.xcresult/ 2>/dev/null | head -1)"
-        if [ -n "$LATEST_RESULT" ]; then
-            echo "--- failures (from xcresult) ---"
-            xcrun xcresulttool get test-results summary --path "$LATEST_RESULT" 2>/dev/null \
-                | python3 -c "
+    # xcresult bundle has the structural data — DERIVED + LATEST_XCRESULT
+    # are already hoisted above.
+    echo "--- failures (from xcresult) ---"
+    xcrun xcresulttool get test-results summary --path "$LATEST_XCRESULT" 2>/dev/null \
+        | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -243,13 +331,13 @@ try:
 except Exception as exc:
     print(f'  (xcresulttool parse failed: {exc})')
 " 2>/dev/null || echo "  (xcresulttool extraction failed — see tail)"
-            echo
-        fi
-    fi
-
-    echo "--- last 60 lines of test log ---"
-    tail -n 60 "$TMPLOG"
+else
+    echo "  reason: xcresult.result=$XC_RESULT (passed=$XC_PASSED failed=$XC_FAILED total=$XC_TOTAL exit=$EXIT)"
 fi
+
+echo
+echo "--- last 60 lines of test log ---"
+tail -n 60 "$TMPLOG"
 echo
 echo "Re-run locally with:"
 echo "  xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro'"
