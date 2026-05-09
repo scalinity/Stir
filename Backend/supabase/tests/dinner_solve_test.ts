@@ -220,7 +220,7 @@ Deno.test('dinner-solve: VAL-01 when feedback_summary.recent_meals[].taste is un
   const boot = await quickBootstrap({ installation_id: testInstallId() });
   const fs = validFeedbackSummary();
   // 'hated' is not in the enum (loved | good | ok | bad).
-  fs.recent_meals[0].taste = 'hated';
+  fs.recent_meals[0]!.taste = 'hated'; // SCA-280 typecheck fix: validFeedbackSummary guarantees ≥1 entry; non-null assertion satisfies noUncheckedIndexedAccess.
   const res = await callDinnerSolve(
     { ...validBody(), feedback_summary: fs },
     boot.session_jwt,
@@ -233,7 +233,7 @@ Deno.test('dinner-solve: VAL-01 when feedback_summary.recent_meals exceeds 10 en
   const boot = await quickBootstrap({ installation_id: testInstallId() });
   const fs = validFeedbackSummary();
   // Pad to 11 entries — schema max is 10 (mirrors iOS recentMealsCap=10).
-  const oneEntry = fs.recent_meals[0];
+  const oneEntry = fs.recent_meals[0]!; // SCA-280 typecheck fix: validFeedbackSummary guarantees ≥1 entry.
   fs.recent_meals = Array.from({ length: 11 }, (_, i) => ({
     ...oneEntry,
     title: `Meal ${i}`,
