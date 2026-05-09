@@ -80,6 +80,7 @@ Eval results from CI nightly runs against staging defaults (per spec §16):
 
 ## 5. Beta period (2-week minimum)
 
+- [ ] First TestFlight build uploaded + Beta App Review cleared (runbook: `docs/launch/testflight-setup.md`)
 - [ ] Apple TestFlight external group ran for ≥ 2 weeks
 - [ ] 10-15 testers recruited from spec §17 audience
 - [ ] Beta welcome email sent (`docs/launch/beta-welcome-email.md` — Daniel writes; deferred to Phase 7)
