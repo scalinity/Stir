@@ -216,6 +216,8 @@
 		A45696E727E29689E46AA055 /* RecipePlan+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5B766D5ACEB50FFDE05FF0 /* RecipePlan+Extensions.swift */; };
 		A85EEA8C2E168EBCBFEB7899 /* KitchenEquipment+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5D8820BFEA7D2A900E637B /* KitchenEquipment+Extensions.swift */; };
 		A89F3E0537CD069546AB3AFB /* SupabaseSessionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */; };
+		B11900AA1190AABBCC110001 /* HTTPErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11900AA1190AABBCC110002 /* HTTPErrorHandler.swift */; };
+		B11900AA1190AABBCC110003 /* HTTPErrorHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11900AA1190AABBCC110004 /* HTTPErrorHandlerTests.swift */; };
 		A903B2695334DC122C276C95 /* GroceryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D743D34F1D51B4AB708F17A8 /* GroceryListView.swift */; };
 		A950E4D0334CD7058DB08D01 /* StirToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DBA709C30DB047605482FD3 /* StirToast.swift */; };
 		AA628CBD9D02A7D0A5A95279 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4FB21256F0B5D56111DA49 /* AppGroup.swift */; };
@@ -400,6 +402,8 @@
 		06E0CF21FEE1210F2C2C9B15 /* RealtimeSessionReportingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionReportingTests.swift; sourceTree = "<group>"; };
 		BA8659C86F8FA415840FCC5E /* RealtimeSessionTranscriptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeSessionTranscriptTests.swift; sourceTree = "<group>"; };
 		07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSessionClient.swift; sourceTree = "<group>"; };
+		B11900AA1190AABBCC110002 /* HTTPErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPErrorHandler.swift; sourceTree = "<group>"; };
+		B11900AA1190AABBCC110004 /* HTTPErrorHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPErrorHandlerTests.swift; sourceTree = "<group>"; };
 		09652EECDE23A7B776FB92A8 /* RecipeImportRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeImportRepository.swift; sourceTree = "<group>"; };
 		0EFFD4E7336367634B26DBFD /* PendingImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingImport.swift; sourceTree = "<group>"; };
 		1106B6B1903590ECC6EB7227 /* OnboardingOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOptions.swift; sourceTree = "<group>"; };
@@ -750,6 +754,7 @@
 				374669111D98B028BEC3824D /* KeychainStorage.swift */,
 				64DEE059EEFAA65E84B23D8F /* SessionDTOs.swift */,
 				07BC3E756E4643BB3ED82E4C /* SupabaseSessionClient.swift */,
+				B11900AA1190AABBCC110002 /* HTTPErrorHandler.swift */,
 				ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */,
 				A65A001000000012 /* WidgetNudgeService.swift */,
 				6DE4A6746B60DA63C17DB13D /* WidgetReloadCoordinator.swift */,
@@ -828,6 +833,7 @@
 				D245E1B6F7A8C9D0E1F23456 /* SubstitutionRequestDTOTests.swift */,
 				E3338AB1A72A44CB0F1EA9C1 /* SubstitutionSheetViewModelTests.swift */,
 				C664FDE9CD56DD456A27FDF4 /* SupabaseSessionClientTests.swift */,
+				B11900AA1190AABBCC110004 /* HTTPErrorHandlerTests.swift */,
 				F2F9397C293DA3BBFFE5595D /* TimerServiceReconcileTests.swift */,
 				D98501A5E5030F48A1DD11F5 /* TimerServiceTests.swift */,
 				AFF0AB8E20B8FEEE5E1F06D2 /* VoiceSessionStateTests.swift */,
@@ -1708,6 +1714,7 @@
 				B12F4A39C5E6D7B8A901F234 /* SubstitutionRequestDTOTests.swift in Sources */,
 				F38CDECB559E08C7C760A273 /* SubstitutionSheetViewModelTests.swift in Sources */,
 				2381D2E6CB0F4740B3C58415 /* SupabaseSessionClientTests.swift in Sources */,
+				B11900AA1190AABBCC110003 /* HTTPErrorHandlerTests.swift in Sources */,
 				4A86932858851EEAC428A086 /* TimerActivityAttributes.swift in Sources */,
 				EA04C15B87DA8ED3560589D0 /* TimerServiceReconcileTests.swift in Sources */,
 				15E5F3952E09C849758C64EB /* TimerServiceTests.swift in Sources */,
@@ -1891,6 +1898,7 @@
 				2BBA8D5225EE48E18FD9158C /* SubstitutionSheetViewModel.swift in Sources */,
 				201C294CF2AC315CE35DADD8 /* SuggestedDish+Extensions.swift in Sources */,
 				A89F3E0537CD069546AB3AFB /* SupabaseSessionClient.swift in Sources */,
+				B11900AA1190AABBCC110001 /* HTTPErrorHandler.swift in Sources */,
 				FF707EDAE5ED2E58F3AF6183 /* TextButton.swift in Sources */,
 				95652C866B0E7C7364F21391 /* TimerActivityAttributes.swift in Sources */,
 				2D40D772E5045D1BA3973C38 /* TimerCountdownView.swift in Sources */,

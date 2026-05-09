@@ -199,23 +199,31 @@ actor SupabaseSessionClient {
             throw StirError.malformedResponse(description: "not an HTTPURLResponse")
         }
 
-        switch http.statusCode {
-        case 200 ..< 300:
+        // 2xx returns the live byte stream so the caller can consume SSE chunks.
+        // Any non-2xx fully drains the bytes into Data, hands them to the
+        // shared classifier, and throws — matching pre-extraction behavior
+        // (status checked once at header time; no 5xx retry on streams).
+        if (200 ..< 300).contains(http.statusCode) {
+            return (http, bytes)
+        }
+
+        let errData = try await readAllBytes(bytes)
+        let outcome = HTTPErrorHandler.classify(
+            status: http.statusCode,
+            data: errData,
+            requestPath: inRequest.url?.path ?? "?",
+        )
+
+        switch outcome {
+        case .success:
+            // Unreachable — guarded above.
             return (http, bytes)
 
-        case 401:
-            // Drain the error body so we can parse reason.
-            let errData = try await readAllBytes(bytes)
-            let body = try? parseErrorBody(errData)
-            let reason = AuthReason(rawValue: body?.reason ?? "missing") ?? .missing
-            logAuth01(
-                reason: reason,
-                message: body?.message ?? "stream 401",
-                endpoint: inRequest.url?.path ?? "?",
-            )
+        case let .auth(reason, message):
+            logAuth01(reason: reason, message: message, endpoint: inRequest.url?.path ?? "?")
             // reauth_required (ADR 0023) bypasses silent retry — see perform().
             if reason == .reauthRequired {
-                throw StirError.auth(reason: reason, message: body?.message ?? "reauth required")
+                throw StirError.auth(reason: reason, message: message)
             }
             if !retriedAuth, let identity = lastBootstrapIdentity {
                 _ = try await bootstrap(
@@ -224,47 +232,20 @@ actor SupabaseSessionClient {
                 )
                 return try await performStream(request: inRequest, retriedAuth: true)
             }
-            throw StirError.auth(reason: reason, message: body?.message ?? "session missing")
+            throw StirError.auth(reason: reason, message: message)
 
-        case 403:
-            let errData = try await readAllBytes(bytes)
-            let body = try parseErrorBody(errData)
-            let code = ErrorCode(rawValue: body.error) ?? .bill01
-            // VOICE-SESSION-01 is a lifecycle failure (session expired/
-            // superseded/foreign), NOT an entitlement failure — MUST
-            // NOT paywall the user. Route via a dedicated case so the
-            // handler rebuilds the voice driver silently. See ADR 0017.
-            if code == .voiceSession01 {
-                let reason = body.reason.flatMap(VoiceSessionReason.init(rawValue:))
-                throw StirError.voiceSessionInvalid(reason: reason, message: body.message)
-            }
-            throw StirError.entitlementRequired(code: code, message: body.message)
+        case let .validation(stirError, _):
+            // Stream variant intentionally does NOT capture VAL-01 to Sentry —
+            // matches pre-extraction behavior. perform() captures because its
+            // request body is the most-likely culprit; stream callers
+            // (dinner-solve) compose bodies that perform() already validated.
+            throw stirError
 
-        case 429:
-            let errData = try await readAllBytes(bytes)
-            let body = try? parseErrorBody(errData)
-            throw StirError.rateLimited(resetDate: nil, message: body?.message ?? "rate limited")
-
-        case 400:
-            let errData = try await readAllBytes(bytes)
-            let body = try parseErrorBody(errData)
-            let code = ErrorCode(rawValue: body.error) ?? .val01
-            if code == .val01 {
-                throw StirError.validation(fieldErrors: body.fieldErrors ?? [], message: body.message)
-            }
-            throw StirError.server(code: code, message: body.message, fieldErrors: body.fieldErrors ?? [])
-
-        case 500 ..< 600:
-            let errData = try await readAllBytes(bytes)
-            let body = try? parseErrorBody(errData)
-            throw StirError.server(
-                code: ErrorCode(rawValue: body?.error ?? "") ?? .ai01,
-                message: body?.message ?? "upstream error",
-                fieldErrors: body?.fieldErrors ?? [],
-            )
-
-        default:
-            throw StirError.malformedResponse(description: "unexpected stream status \(http.statusCode)")
+        case let .nonRetryableError(stirError),
+             let .retryable5xx(stirError),
+             let .unexpectedStatus(stirError):
+            // Stream has no 5xx-retry policy: surface immediately.
+            throw stirError
         }
     }
 
@@ -361,8 +342,14 @@ actor SupabaseSessionClient {
             throw StirError.malformedResponse(description: "not an HTTPURLResponse")
         }
 
-        switch http.statusCode {
-        case 200 ..< 300:
+        let outcome = HTTPErrorHandler.classify(
+            status: http.statusCode,
+            data: data,
+            requestPath: request.url?.path ?? "?",
+        )
+
+        switch outcome {
+        case .success:
             do {
                 return try JSONDecoder.stir.decode(Response.self, from: data)
             } catch {
@@ -372,103 +359,27 @@ actor SupabaseSessionClient {
                 throw StirError.malformedResponse(description: error.localizedDescription)
             }
 
-        case 400:
-            let body = try parseErrorBody(data)
-            let code = ErrorCode(rawValue: body.error) ?? .val01
-            if code == .val01 {
-                let fieldErrors = body.fieldErrors ?? []
-                let stirError = StirError.validation(
-                    fieldErrors: fieldErrors,
-                    message: body.message,
-                )
-                Logger.supabase.error(
-                    "VAL-01 at \(request.url?.path ?? "?", privacy: .public): \(body.message, privacy: .public)",
-                )
-                sentry.captureError(
-                    stirError,
-                    context: [
-                        "endpoint": request.url?.path ?? "?",
-                        "code": body.error,
-                        "field_errors": fieldErrors.map { "\($0.field):\($0.issue)" }
-                            .joined(separator: ","),
-                    ],
-                )
-                throw stirError
+        case let .auth(reason, message):
+            return try await handleAuthRetry(
+                reason: reason,
+                message: message,
+                originalRequest: request,
+                retriedAuth: retriedAuth,
+            ) { retriedRequest in
+                try await self.perform(retriedRequest, attempt: 0, retriedAuth: true)
             }
-            throw StirError.server(code: code, message: body.message, fieldErrors: body.fieldErrors ?? [])
 
-        case 401:
-            let body = try parseErrorBody(data)
-            let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
-            logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
-            // reauth_required (ADR 0023) short-circuits the silent-retry path.
-            // Admin used users.force_reauth and wants THIS user kicked — silent
-            // re-bootstrap would issue a fresh JWT (iat > reauth_required_at)
-            // and bypass the ceremony. Surface immediately so RootCoordinator
-            // can route to SIWA re-flow.
-            if reason == .reauthRequired {
-                throw StirError.auth(reason: reason, message: body.message)
-            }
-            if !retriedAuth {
-                // Silent re-bootstrap + retry ONCE.
-                guard let identity = lastBootstrapIdentity else {
-                    // No identity cached — caller must handle.
-                    throw StirError.auth(reason: reason, message: body.message)
-                }
-                // SCA-253 (W5 from /review-5): if the prior bootstrap had a
-                // CloudKit record claim AND the on-device token provider
-                // can no longer mint a fresh ckWebAuthToken (CK transient
-                // outage, app backgrounded mid-mint, provider torn down),
-                // a silent re-bootstrap WITHOUT the token would (post
-                // SCA-136 verifier activation) trigger the server's
-                // `missing_web_auth_token` strip — re-rooting the
-                // `ck:<record>` identity to `install:<uuid>` for the
-                // rest of the JWT lifetime. Detect that case and surface
-                // AUTH-01 to the caller instead of silently rebooting,
-                // so RootCoordinator can route through the SIWA re-flow
-                // (or a fresh CK status check on next foreground) rather
-                // than burning the user's identity on a transient.
-                //
-                // SCA-245 (C2) trust-mode era is fine without this guard
-                // because verifier_unconfigured preserves record_name —
-                // but once the verifier is activated, this is the gate
-                // that prevents a one-way identity shift.
-                if identity.cloudKitRecordName != nil {
-                    let freshToken = await resolveCloudKitWebAuthToken(
-                        explicitToken: nil,
-                        cloudKitRecordName: identity.cloudKitRecordName,
-                    )
-                    if freshToken == nil {
-                        Logger.supabase.warning(
-                            "silent re-bootstrap aborted: CK record claim cached but token provider returned nil; surfacing AUTH-01 to avoid identity-shift",
-                        )
-                        throw StirError.auth(reason: reason, message: body.message)
-                    }
-                }
-                _ = try await bootstrap(
-                    installationID: identity.installationID,
-                    cloudKitRecordName: identity.cloudKitRecordName,
-                )
-                // Rebuild the request with fresh JWT.
-                var retried = request
-                if let jwt = cachedJWT {
-                    retried.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-                }
-                return try await perform(retried, attempt: 0, retriedAuth: true)
-            }
-            // Retry already consumed — surface.
-            throw StirError.auth(reason: reason, message: body.message)
+        case let .validation(stirError, sentryContext):
+            Logger.supabase.error(
+                "VAL-01 at \(request.url?.path ?? "?", privacy: .public): \(sentryContext["code"] ?? "VAL-01", privacy: .public)",
+            )
+            sentry.captureError(stirError, context: sentryContext)
+            throw stirError
 
-        case 403:
-            let body = try parseErrorBody(data)
-            let code = ErrorCode(rawValue: body.error) ?? .bill01
-            throw StirError.entitlementRequired(code: code, message: body.message)
+        case let .nonRetryableError(stirError):
+            throw stirError
 
-        case 429:
-            let body = try? parseErrorBody(data)
-            throw StirError.rateLimited(resetDate: nil, message: body?.message ?? "rate limited")
-
-        case 500 ..< 600:
+        case let .retryable5xx(stirError):
             Logger.supabase.warning(
                 "5xx from \(request.url?.path ?? "?", privacy: .public): status=\(http.statusCode)",
             )
@@ -476,13 +387,19 @@ actor SupabaseSessionClient {
                 try await backoff(attempt: attempt)
                 return try await perform(request, attempt: attempt + 1, retriedAuth: retriedAuth)
             }
+            // Match pre-extraction behavior: surface as networkUnreachable
+            // (not the typed server error) so callers route to the offline UX.
+            // The classified `stirError` is intentionally discarded — it's
+            // available for future telemetry hooks but the retry-exhausted
+            // path keeps the legacy error shape for the presenter layer.
+            _ = stirError
             throw StirError.networkUnreachable(underlying: nil)
 
-        default:
+        case let .unexpectedStatus(stirError):
             Logger.supabase.error(
                 "unexpected status \(http.statusCode) from \(request.url?.path ?? "?", privacy: .public)",
             )
-            throw StirError.malformedResponse(description: "unexpected status \(http.statusCode)")
+            throw stirError
         }
     }
 
@@ -514,53 +431,36 @@ actor SupabaseSessionClient {
             throw StirError.malformedResponse(description: "not an HTTPURLResponse")
         }
 
-        switch http.statusCode {
-        case 200 ..< 300:
+        let outcome = HTTPErrorHandler.classify(
+            status: http.statusCode,
+            data: data,
+            requestPath: request.url?.path ?? "?",
+        )
+
+        switch outcome {
+        case .success:
             return
 
-        case 400:
-            let body = try parseErrorBody(data)
-            let code = ErrorCode(rawValue: body.error) ?? .val01
-            if code == .val01 {
-                throw StirError.validation(fieldErrors: body.fieldErrors ?? [], message: body.message)
-            }
-            throw StirError.server(code: code, message: body.message, fieldErrors: body.fieldErrors ?? [])
+        case let .auth(reason, message):
+            try await handleAuthRetryNoContent(
+                reason: reason,
+                message: message,
+                originalRequest: request,
+                retriedAuth: retriedAuth,
+            )
 
-        case 401:
-            let body = try parseErrorBody(data)
-            let reason = AuthReason(rawValue: body.reason ?? "missing") ?? .missing
-            logAuth01(reason: reason, message: body.message, endpoint: request.url?.path ?? "?")
-            // reauth_required (ADR 0023) bypasses silent retry — see perform().
-            if reason == .reauthRequired {
-                throw StirError.auth(reason: reason, message: body.message)
-            }
-            if !retriedAuth {
-                guard let identity = lastBootstrapIdentity else {
-                    throw StirError.auth(reason: reason, message: body.message)
-                }
-                _ = try await bootstrap(
-                    installationID: identity.installationID,
-                    cloudKitRecordName: identity.cloudKitRecordName,
-                )
-                var retried = request
-                if let jwt = cachedJWT {
-                    retried.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-                }
-                try await performNoContent(retried, attempt: 0, retriedAuth: true)
-                return
-            }
-            throw StirError.auth(reason: reason, message: body.message)
+        case let .validation(stirError, _):
+            // performNoContent intentionally does not capture VAL-01 to
+            // Sentry — matches pre-extraction behavior. Callers of the
+            // no-content variant (voice-turn-usage) carry server-validated
+            // bodies; a VAL-01 here is a programmer error worth surfacing
+            // through the standard error pipeline.
+            throw stirError
 
-        case 403:
-            let body = try parseErrorBody(data)
-            let code = ErrorCode(rawValue: body.error) ?? .bill01
-            throw StirError.entitlementRequired(code: code, message: body.message)
+        case let .nonRetryableError(stirError):
+            throw stirError
 
-        case 429:
-            let body = try? parseErrorBody(data)
-            throw StirError.rateLimited(resetDate: nil, message: body?.message ?? "rate limited")
-
-        case 500 ..< 600:
+        case let .retryable5xx(stirError):
             Logger.supabase.warning(
                 "5xx (no-content) from \(request.url?.path ?? "?", privacy: .public): status=\(http.statusCode)",
             )
@@ -569,10 +469,103 @@ actor SupabaseSessionClient {
                 try await performNoContent(request, attempt: attempt + 1, retriedAuth: retriedAuth)
                 return
             }
+            // Same retry-exhausted convention as `perform`. See comment there.
+            _ = stirError
             throw StirError.networkUnreachable(underlying: nil)
 
-        default:
-            throw StirError.malformedResponse(description: "unexpected no-content status \(http.statusCode)")
+        case .unexpectedStatus:
+            // Pre-extraction wording differed for no-content; preserve it so
+            // callers parsing log strings (or Sentry breadcrumbs) keep working.
+            throw StirError.malformedResponse(
+                description: "unexpected no-content status \(http.statusCode)",
+            )
+        }
+    }
+
+    /// Shared AUTH-01 silent-retry execution. Logs the reason + handles the
+    /// `reauth_required` short-circuit (ADR 0023) and the SCA-253 CK-token
+    /// freshness guard, then re-bootstraps and retries via the variant's
+    /// supplied closure. Used by `perform`; `performNoContent` calls a thin
+    /// twin because the void-returning shape can't share a generic `T` with
+    /// the typed-decode variant.
+    private func handleAuthRetry<T>(
+        reason: AuthReason,
+        message: String,
+        originalRequest: URLRequest,
+        retriedAuth: Bool,
+        retry: (URLRequest) async throws -> T,
+    ) async throws -> T {
+        logAuth01(reason: reason, message: message, endpoint: originalRequest.url?.path ?? "?")
+        // reauth_required (ADR 0023) short-circuits the silent-retry path.
+        // Admin used users.force_reauth and wants THIS user kicked — silent
+        // re-bootstrap would issue a fresh JWT (iat > reauth_required_at)
+        // and bypass the ceremony. Surface immediately so RootCoordinator
+        // can route to SIWA re-flow.
+        if reason == .reauthRequired {
+            throw StirError.auth(reason: reason, message: message)
+        }
+        if retriedAuth {
+            // Retry already consumed — surface.
+            throw StirError.auth(reason: reason, message: message)
+        }
+        // Silent re-bootstrap + retry ONCE.
+        guard let identity = lastBootstrapIdentity else {
+            // No identity cached — caller must handle.
+            throw StirError.auth(reason: reason, message: message)
+        }
+        // SCA-253 (W5 from /review-5): if the prior bootstrap had a
+        // CloudKit record claim AND the on-device token provider
+        // can no longer mint a fresh ckWebAuthToken (CK transient
+        // outage, app backgrounded mid-mint, provider torn down),
+        // a silent re-bootstrap WITHOUT the token would (post
+        // SCA-136 verifier activation) trigger the server's
+        // `missing_web_auth_token` strip — re-rooting the
+        // `ck:<record>` identity to `install:<uuid>` for the
+        // rest of the JWT lifetime. Detect that case and surface
+        // AUTH-01 to the caller instead of silently rebooting,
+        // so RootCoordinator can route through the SIWA re-flow
+        // (or a fresh CK status check on next foreground) rather
+        // than burning the user's identity on a transient.
+        if identity.cloudKitRecordName != nil {
+            let freshToken = await resolveCloudKitWebAuthToken(
+                explicitToken: nil,
+                cloudKitRecordName: identity.cloudKitRecordName,
+            )
+            if freshToken == nil {
+                Logger.supabase.warning(
+                    "silent re-bootstrap aborted: CK record claim cached but token provider returned nil; surfacing AUTH-01 to avoid identity-shift",
+                )
+                throw StirError.auth(reason: reason, message: message)
+            }
+        }
+        _ = try await bootstrap(
+            installationID: identity.installationID,
+            cloudKitRecordName: identity.cloudKitRecordName,
+        )
+        // Rebuild the request with fresh JWT.
+        var retried = originalRequest
+        if let jwt = cachedJWT {
+            retried.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        }
+        return try await retry(retried)
+    }
+
+    /// Void-returning twin of `handleAuthRetry` for `performNoContent`.
+    /// Identical policy; separate signature so the no-content path doesn't
+    /// allocate a wrapper for a discarded return value.
+    private func handleAuthRetryNoContent(
+        reason: AuthReason,
+        message: String,
+        originalRequest: URLRequest,
+        retriedAuth: Bool,
+    ) async throws {
+        try await handleAuthRetry(
+            reason: reason,
+            message: message,
+            originalRequest: originalRequest,
+            retriedAuth: retriedAuth,
+        ) { retried in
+            try await self.performNoContent(retried, attempt: 0, retriedAuth: true)
         }
     }
 
@@ -605,16 +598,6 @@ actor SupabaseSessionClient {
                     "endpoint": endpoint,
                     "auth_reason": reason.rawValue,
                 ],
-            )
-        }
-    }
-
-    private func parseErrorBody(_ data: Data) throws -> ErrorResponseBody {
-        do {
-            return try JSONDecoder.stir.decode(ErrorResponseBody.self, from: data)
-        } catch {
-            throw StirError.malformedResponse(
-                description: "failed to decode ErrorResponseBody: \(error.localizedDescription)",
             )
         }
     }
