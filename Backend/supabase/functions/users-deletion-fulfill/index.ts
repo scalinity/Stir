@@ -87,6 +87,14 @@ interface SubsystemRecord {
   // Set when the subsystem chose not to act because a server-side action
   // is impossible (CloudKit) or a secret is absent (best-effort skip).
   requires_manual_action?: boolean;
+  // SCA-272 (S6 from /review-5): explicit field for the CloudKit
+  // step's "wait for client to wipe its own zone" outcome. Pre-fix
+  // the field was reachable only via the `[key: string]: unknown`
+  // index signature, so a typo (`requires_clent_action`) would
+  // silently no-op against this interface. Declared here so
+  // TypeScript catches misspellings at the read sites
+  // (lines ~268, 445, 517 in this file).
+  requires_client_action?: boolean;
   // Error string on failure (truncated).
   error?: string;
   // Subsystem-specific opaque data (distinct_id_hash, app_user_id_hash, ...).
