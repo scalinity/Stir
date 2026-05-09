@@ -321,6 +321,8 @@ When changing a prompt, bump `prompt_versions.version` semver and start `rollout
 
 **Pre-commit gate (SCA-242 + SCA-89):** `scripts/git-hooks/pre-commit` runs two staged checks. Stage 1 (SCA-242) blocks any staged modification, deletion, or rename of `Backend/supabase/migrations/*.sql`; new dated migrations (`A` status) pass through. Stage 2 (SCA-89) invokes `scripts/pre-commit-checks/exhaustive-switch.py` to detect newly-added enum cases under `Stir/Core/` or `Stir/Shared/` and report any switch site that isn't exhaustive over the new case (and lacks `default:` / `@unknown default:`). Overrides: `SKIP_PRECOMMIT_MIGRATION_CHECK=1 SKIP_PRECOMMIT_MIGRATION_REASON='SCA-NNN: …'` (security-fix exception only); `SKIP_PRECOMMIT_EXHAUSTIVE_CHECK=1` (when xcodebuild's exhaustive check has already verified the change). xcodebuild remains the authoritative exhaustive-switch oracle — Stage 2 fails fast at commit time.
 
+**Post-commit CI (SCA-60 / SCA-90):** `.github/workflows/ci.yml` runs on every `push: branches: [main]` (and on PRs to main): macOS-15 runner builds Stir on iPhone 17 Pro / iOS 26 + runs `StirTests`; ubuntu-24.04 runner runs Deno unit tests on `_shared/` plus `deno fmt --check` and `deno lint`. Edge-runtime / supabase-stack-dependent backend tests are intentionally not in CI (Docker on the runner is slow + flaky); run those locally before merging risky backend changes. Branch protection on `main` is **signal-not-block** — Daniel ships solo and sometimes pushes hotfixes around CI; the workflow surfaces failures via GitHub's default email-on-failed-action notification rather than gating the push. If the email gets noisy, swap to a Slack webhook step in the workflow.
+
 ---
 
 ## Linear issue workflow
