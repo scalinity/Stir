@@ -86,9 +86,25 @@ enum StirDeepLink: Equatable {
             // SCA-64: stir://tonight?use_first=<uuid> from the use-soon
             // notification. UUID parse-failure falls through to nil
             // (the user still lands on Tonight Home; just no prefill).
-            let raw = components.queryItems?
-                .first(where: { $0.name == "use_first" })?.value
-            let id = raw.flatMap(UUID.init(uuidString:))
+            //
+            // SCA-264 (W16 from /review-5): require the `use_first`
+            // query KEY to be present before returning `.useSoon`.
+            // Bare `stir://tonight` URLs (OS share-back, app-link
+            // re-entry, manual user typing, future deep-links that
+            // route to Tonight without a use-soon intent) used to
+            // match the wildcard `_` and silently invoke
+            // UseSoonScheduler.recordAction(), polluting the
+            // unactioned-streak suppression metric. Now: only URLs
+            // that explicitly carry `use_first=` are treated as
+            // use-soon intents; everything else falls through to
+            // `.unknown` so StirDeepLinkHandler doesn't record an
+            // action it didn't actually receive.
+            let useFirstItem = components.queryItems?
+                .first(where: { $0.name == "use_first" })
+            guard let useFirstItem else {
+                return .unknown(raw: url.absoluteString)
+            }
+            let id = useFirstItem.value.flatMap(UUID.init(uuidString:))
             return .useSoon(useFirstPantryItemId: id)
         case ("solve", let parts) where parts.count == 1:
             guard let solveID = UUID(uuidString: parts[0]) else {
