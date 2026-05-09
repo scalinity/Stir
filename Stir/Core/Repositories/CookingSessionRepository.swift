@@ -168,6 +168,39 @@ final class CookingSessionRepository {
         }
     }
 
+    /// SCA-262 (W14 from /review-5): count-only query for the
+    /// widget-nudge eligibility gate. `recentCompletedSessions(limit:50)`
+    /// + Swift-side `endedAt > since` filter materialized up to 50
+    /// `CookingSession` NSManagedObjects per refresh on the
+    /// `TonightHomeView.refreshWidgetNudge` hot path. The view only
+    /// needs the COUNT (compared against a "≥3 sessions in last 14d"
+    /// threshold), so use `request.resultType = .countResultType`
+    /// to push the filter into Core Data.
+    ///
+    /// `endedAt != nil` is implicit on `sessionStatus == .completed`
+    /// in current code (markCompleted writes both atomically), but
+    /// the `endedAt > since` predicate naturally excludes any
+    /// hypothetical orphan completed-without-endedAt rows that a
+    /// future refactor could introduce.
+    func recentCompletedSessionsCount(
+        for household: HouseholdProfile,
+        since: Date,
+    ) throws -> Int {
+        let request = NSFetchRequest<NSNumber>(entityName: "CookingSession")
+        request.predicate = NSPredicate(
+            format: "household == %@ AND deletedAt == nil AND sessionStatus == %@ AND endedAt != nil AND endedAt > %@",
+            household,
+            CookingSession.Status.completed.rawValue,
+            since as NSDate,
+        )
+        request.resultType = .countResultType
+        do {
+            return try controller.viewContext.count(for: request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
+    }
+
     /// One row per non-deleted RecipePlan for the household, annotated with
     /// the most-recent completed CookingSession's endedAt + that session's
     /// rating (if rated). Sorted last-cooked-desc; un-cooked plans last,

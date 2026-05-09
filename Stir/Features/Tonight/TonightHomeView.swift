@@ -879,12 +879,17 @@ struct TonightHomeView: View {
             return
         }
         let now = Date()
-        let recentCount = ((try? cookingRepo.recentCompletedSessions(for: household, limit: 50)) ?? [])
-            .filter { session in
-                guard let endedAt = session.endedAt else { return false }
-                return now.timeIntervalSince(endedAt) <= 14 * 86_400
-            }
-            .count
+        // SCA-262 (W14 from /review-5): count-only Core Data query.
+        // Pre-fix this materialized up to 50 CookingSession
+        // NSManagedObjects per refresh just to filter-and-count
+        // those within the 14-day window. Push the predicate +
+        // count into Core Data via `recentCompletedSessionsCount`
+        // (resultType=.countResultType). Same hot path semantics,
+        // zero materialization.
+        let recentCount = (try? cookingRepo.recentCompletedSessionsCount(
+            for: household,
+            since: now.addingTimeInterval(-14 * 86_400),
+        )) ?? 0
         // SCA-254 (W6 from /review-5): always re-evaluate shouldShowNudge.
         // Pre-fix, an early-return when widgetNudgeVisible was already
         // true skipped the eligibility re-check on every refresh, so a
