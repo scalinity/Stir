@@ -557,7 +557,14 @@ async function fulfillSweep(
 
 // ---- HTTP entrypoint ----
 
-const RequestSchema = z.object({}).strict().optional();
+// SCA-240: `.passthrough()` so unknown keys silently pass through.
+// Previously `.strict()` would throw a ZodError on any extra key,
+// and SCA-231 dropped the try/catch — leaving the function in a
+// state where a first-party caller sending bogus JSON produced a
+// generic 500 instead of a typed VAL-01 400. With passthrough() the
+// parse is truly never-throw on any JSON value, restoring graceful
+// handling without re-introducing dead error-mapping code.
+const RequestSchema = z.object({}).passthrough().optional();
 
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
