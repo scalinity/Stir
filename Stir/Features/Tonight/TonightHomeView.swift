@@ -51,10 +51,20 @@ struct TonightHomeView: View {
     @State private var useSoonCandidate: UseSoonCandidate?
     @State private var widgetNudgeVisible = false
     @State private var activeModal: ActiveModal?
+    // SCA-251 (W3 from /review-5): widget guide state lifted out of
+    // ActiveModal. The scan cover and the widget setup guide are
+    // semantically different presentations (camera fullScreen vs
+    // instructional NavigationStack sheet) and were sharing a slot
+    // through `tonightCoverHost`'s scanCoverContent switch. Side
+    // effects of the conflation: (a) `.onChange(of: activeModal)`
+    // ran `refreshState()` after dismissing the instructional sheet
+    // (wasted Core Data fetches); (b) scanCoverContent grew a switch
+    // case unrelated to scan flows. Now: separate `@State` flag,
+    // mounted via `.sheet(isPresented:)`.
+    @State private var widgetGuidePresented = false
 
     enum ActiveModal: String, Identifiable {
         case scan
-        case widgetGuide
         var id: String { rawValue }
     }
 
@@ -175,6 +185,11 @@ struct TonightHomeView: View {
             solveAgainCover: solveAgainCoverContent,
             otherOptionsCover: otherOptionsCoverContent,
         )
+        // SCA-251 (W3 from /review-5): widget setup guide is a sheet-
+        // shaped instructional surface, not a fullScreen-cover-shaped
+        // camera flow. Mounted here so its dismiss doesn't trigger
+        // the activeModal onChange path that fires refreshState().
+        .sheet(isPresented: $widgetGuidePresented, content: widgetGuideSheet)
         // SCA-5 / SCA-19 — first-run feature tour. See
         // `tonightTourShouldPresent` for the gating contract.
         .tutorial(
@@ -225,6 +240,9 @@ struct TonightHomeView: View {
     // each cover's switch type-check in isolation. Functionally
     // identical to the inline form.
 
+    // SCA-251 (W3): scanCoverContent is now scan-only. The widget
+    // setup guide moved to a dedicated `.sheet(isPresented:)`
+    // attached to `body` directly (see widgetGuideSheet below).
     @ViewBuilder
     private func scanCoverContent(modal: ActiveModal) -> some View {
         switch modal {
@@ -240,11 +258,19 @@ struct TonightHomeView: View {
                     capturedCoordinator.presentPaywall(trigger)
                 },
             )
-        case .widgetGuide:
-            WidgetSetupGuideView(onDone: {
-                activeModal = nil
-            })
         }
+    }
+
+    /// SCA-251 (W3): WidgetSetupGuideView is sheet-shaped (NavigationStack
+    /// over a scrolling list of three numbered steps), not fullScreen-cover-
+    /// shaped. Mounted as a separate `.sheet(isPresented:)` adjacent to
+    /// `tonightCoverHost(...)` in body so its dismiss doesn't trigger
+    /// the activeModal onChange path that fires `refreshState()`.
+    @ViewBuilder
+    private func widgetGuideSheet() -> some View {
+        WidgetSetupGuideView(onDone: {
+            widgetGuidePresented = false
+        })
     }
 
     @ViewBuilder
@@ -666,7 +692,10 @@ struct TonightHomeView: View {
     private func showWidgetGuide() {
         coordinator.widgetNudgeService.recordActed()
         widgetNudgeVisible = false
-        activeModal = .widgetGuide
+        // SCA-251 (W3): present the instructional sheet via the
+        // dedicated `widgetGuidePresented` flag, not through
+        // ActiveModal's scan-cover slot.
+        widgetGuidePresented = true
     }
 
     private func dismissWidgetNudge() {
