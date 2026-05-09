@@ -34,7 +34,7 @@
 #      "Application failed preflight checks" / "Simulator device
 #      failed to launch" substring (wedged sim before test runner
 #      installed). Retry flow: `simctl shutdown all` + boot
-#      iPhone 17 Pro + 5 s sleep + re-run of `xcodebuild test`
+#      iPhone 17 Pro Max + 5 s sleep + re-run of `xcodebuild test`
 #      exactly ONCE. Retry success emits a distinct
 #      `[pre-push] ✅ retried after sim flake` summary so the audit
 #      trail captures the event.
@@ -45,7 +45,7 @@
 # error or sim flake outside SCA-208 substring".
 #
 # Behavior:
-#   - Stage 1: xcodebuild test -scheme Stir on iPhone 17 Pro simulator.
+#   - Stage 1: xcodebuild test -scheme Stir on iPhone 17 Pro Max simulator.
 #   - Stage 2: deno test --config Backend/supabase/functions/deno.json
 #             --allow-all Backend/supabase/tests/ — IF the local
 #             Supabase stack (localhost:54321) is reachable. Otherwise
@@ -109,7 +109,7 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-echo "[pre-push] running xcodebuild test on iPhone 17 Pro simulator (~17s)…"
+echo "[pre-push] running xcodebuild test on iPhone 17 Pro Max simulator (~17s)…"
 
 TMPLOG="$(mktemp -t stir-prepush-XXXXXX)"
 trap 'rm -f "$TMPLOG"' EXIT
@@ -117,7 +117,7 @@ trap 'rm -f "$TMPLOG"' EXIT
 set +e
 xcodebuild test \
     -scheme Stir \
-    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
     -quiet \
     > "$TMPLOG" 2>&1
 EXIT="$?"
@@ -139,13 +139,13 @@ if [ "$EXIT" != "0" ] \
    && grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
     echo "[pre-push] ⚠️  simulator preflight flake detected — resetting sim and retrying once"
     xcrun simctl shutdown all >/dev/null 2>&1 || true
-    xcrun simctl boot "iPhone 17 Pro" >/dev/null 2>&1 || true
+    xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
     sleep 5
 
     set +e
     xcodebuild test \
         -scheme Stir \
-        -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+        -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
         -quiet \
         > "$TMPLOG" 2>&1
     EXIT="$?"
@@ -350,7 +350,7 @@ echo "--- last 60 lines of test log ---"
 tail -n 60 "$TMPLOG"
 echo
 echo "Re-run locally with:"
-echo "  xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro'"
+echo "  xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'"
 echo
 echo "Emergency override (requires reason; documented in commit):"
 echo "  SKIP_PREPUSH_TESTS=1 SKIP_PREPUSH_REASON='…' git push"
