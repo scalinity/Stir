@@ -124,8 +124,11 @@ final class SolveViewModelPaywallTests: XCTestCase {
     // MARK: - Constraints use-first parsing
 
     func test_constraintsSheet_parseUseFirstDraft_trimsCommaAndLineSeparatedValues() {
+        // SCA from /review-5 S14: parseUseFirstDraft is now a top-level
+        // free function (was a static on ConstraintsSheet); the test
+        // call site dropped the type prefix accordingly.
         XCTAssertEqual(
-            ConstraintsSheet.parseUseFirstDraft(" spinach, salmon\n basil ,, "),
+            parseUseFirstDraft(" spinach, salmon\n basil ,, "),
             ["spinach", "salmon", "basil"],
         )
     }

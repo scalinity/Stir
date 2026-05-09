@@ -170,7 +170,7 @@ struct ConstraintsSheet: View {
     private func commit() {
         viewModel.constraints.maxTimeMinutes = maxTimeOptions[maxTimeIndex]
         viewModel.constraints.cuisineLeaning = cuisine.isEmpty ? nil : cuisine
-        viewModel.constraints.useFirst = Self.parseUseFirstDraft(useFirstDraft)
+        viewModel.constraints.useFirst = parseUseFirstDraft(useFirstDraft)
         viewModel.constraints.goal = goalDraft.isEmpty ? nil : goalDraft
         PostHogClient.shared.capture(.constraintsSet, properties: [
             "has_max_time": viewModel.constraints.maxTimeMinutes != nil,
@@ -181,10 +181,21 @@ struct ConstraintsSheet: View {
         ])
     }
 
-    static func parseUseFirstDraft(_ draft: String) -> [String] {
-        draft
-            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
+}
+
+/// SCA from /review-5 S14 (parent SCA-243): pure parser, lifted out
+/// of `ConstraintsSheet` to a top-level function. The previous
+/// shape (`static func` on the View) gated test-reachability through
+/// the SwiftUI type and made the function read like a private View
+/// helper. Free function composes better — usable from any constraint-
+/// editing surface (CookMode substitution sheet, future bulk-import
+/// flows) without importing the View type.
+///
+/// Splits on commas + newlines, trims whitespace, drops empties.
+/// e.g. " spinach, salmon\n basil ,, " → ["spinach", "salmon", "basil"].
+func parseUseFirstDraft(_ draft: String) -> [String] {
+    draft
+        .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
 }
