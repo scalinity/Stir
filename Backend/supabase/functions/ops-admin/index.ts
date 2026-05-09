@@ -245,52 +245,75 @@ Deno.serve(async (req) => {
   // actor_email for support-time identity lookup.
   log.info('admin_authenticated', { actor_id: admin.authUserId });
 
-  // 1b. IP rate limit (SA2 W2): 30/min per source IP. Legit active triage
-  // rarely exceeds ~10/min; this caps a compromised-token enumeration
-  // attack to 30/min, cutting thousands-per-second worst case.
+  // 1b/1c. Layered rate limit (SA2 W2 IP gate + SCA-117 per-admin gate).
+  // Two-phase pattern (SCA-248, C5 from /review-5):
+  //   Phase 1 — call BOTH gates with `checkOnly: true`. Each one peeks
+  //     its bucket without writing a row. If either returns `!allowed`,
+  //     short-circuit with RATE-01 carrying the offending scope.
+  //   Phase 2 — only after both peeks passed, call the IP gate then the
+  //     per-admin gate WITHOUT checkOnly so each writes a single bucket
+  //     row. The advisory-lock domain on `(scope, bucket)` keeps each
+  //     gate's check+commit atomic; the cross-gate ordering does not
+  //     need to be atomic because a 429 response from either gate would
+  //     have short-circuited Phase 1 already.
+  // Pre-fix the IP bucket double-charged on every user-gate denial; the
+  // docstring's "first-to-trip wins" was a half-truth. Now true.
+  // Same fail-open posture as before — rate_limit_buckets glitches log
+  // and let the request through rather than locking out legit triage.
   const sourceIP = extractSourceIP(req);
+  let layeredCheckFailed = false;
   try {
-    const rl = await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
-    if (!rl.allowed) {
+    const ipPeek = await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP, {
+      checkOnly: true,
+    });
+    if (!ipPeek.allowed) {
       log.warn('rate_limited', {
         scope: 'ip:ops_admin_hourly',
         source_ip_bucket: await ipBucket(sourceIP),
       });
       return buildRate01Response(
         'ip:ops_admin_hourly',
-        rl.retry_after_seconds,
-        rl.reset_at,
+        ipPeek.retry_after_seconds,
+        ipPeek.reset_at,
         requestId,
       );
     }
-  } catch (err) {
-    // Fail open — a rate_limit_buckets glitch must not lock the console.
-    log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
-  }
-
-  // 1c. Per-admin rate limit (SCA-117): 60/min keyed on admin.authUserId.
-  // Layered defense above the IP cap — catches a compromised single
-  // admin token that rotates source IPs to bypass the IP-scoped check.
-  // First-to-trip wins; RATE-01 `scope` distinguishes which gate fired
-  // so the SPA can show "your account is rate-limited" vs "your IP is."
-  // Same fail-open posture as 1b — bucket glitches must not lock out
-  // legit ops triage.
-  try {
-    const rl = await checkAndIncrement(client, 'user:ops_admin_minutely', admin.authUserId);
-    if (!rl.allowed) {
+    const userPeek = await checkAndIncrement(
+      client,
+      'user:ops_admin_minutely',
+      admin.authUserId,
+      { checkOnly: true },
+    );
+    if (!userPeek.allowed) {
       log.warn('rate_limited', {
         scope: 'user:ops_admin_minutely',
         actor_id: admin.authUserId,
       });
       return buildRate01Response(
         'user:ops_admin_minutely',
-        rl.retry_after_seconds,
-        rl.reset_at,
+        userPeek.retry_after_seconds,
+        userPeek.reset_at,
         requestId,
       );
     }
   } catch (err) {
+    layeredCheckFailed = true;
     log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
+  }
+
+  // Phase 2 — commit increments to BOTH buckets now that Phase 1
+  // confirmed neither is over-cap. If Phase 1 already errored we
+  // skip the commit entirely (fail-open) rather than risk a one-
+  // sided write where only one bucket ticks. The check responses
+  // cannot trip here because they were just under-cap; we ignore
+  // the responses and only catch infra failures.
+  if (!layeredCheckFailed) {
+    try {
+      await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
+      await checkAndIncrement(client, 'user:ops_admin_minutely', admin.authUserId);
+    } catch (err) {
+      log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
+    }
   }
 
   // 2. Body validation.

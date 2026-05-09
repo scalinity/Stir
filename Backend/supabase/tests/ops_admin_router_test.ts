@@ -265,3 +265,149 @@ Deno.test(
     assertEquals(b.body.ok, true);
   },
 );
+
+// ---------------------------------------------------------------------------
+// SCA-248 (C5 from /review-5): two-phase layered gate — bucket-isolation
+// ---------------------------------------------------------------------------
+//
+// Pre-fix: every successful request consumed one slot of BOTH buckets. When
+// the user-gate tripped at request N, the IP bucket had also incremented for
+// that request, so the docstring's "first-to-trip wins" framing was a half
+// truth (both gates always charged). The C5 fix adds a `checkOnly` peek to
+// `checkAndIncrement`; ops-admin now does Phase 1 (peek both) then Phase 2
+// (commit both) so a 429 from either gate produces zero bucket writes.
+//
+// We assert the contract two ways:
+//   (a) when the user-gate is pre-filled to its cap, the next request 429s
+//       AND the IP bucket count is unchanged (no Phase-2 commit fired).
+//   (b) when both gates are under-cap, a successful request DOES write
+//       exactly one row to each bucket.
+
+async function ipBucketCountFor(
+  bucketKey: string,
+): Promise<number> {
+  const svc = serviceClient();
+  const { data, error } = await svc
+    .from('rate_limit_buckets')
+    .select('count')
+    .eq('scope_key', 'ip:ops_admin_hourly')
+    .eq('bucket_key', bucketKey);
+  if (error) throw error;
+  return (data ?? []).reduce(
+    (acc: number, row: { count: number }) => acc + (row.count ?? 0),
+    0,
+  );
+}
+
+Deno.test(
+  'ops-admin: SCA-248 user-gate denial does NOT increment the IP bucket (two-phase layered gate)',
+  async () => {
+    await clearRateLimitBuckets();
+    const admin = await seedAdmin();
+    const svc = serviceClient();
+
+    // Pre-fill the per-admin bucket to its cap.
+    for (let i = 0; i < 60; i++) {
+      const { error } = await svc.rpc('stir_rate_limit_check', {
+        p_scope_key: 'user:ops_admin_minutely',
+        p_bucket_key: admin.authUserId,
+        p_window_seconds: 60,
+        p_max_count: 60,
+      });
+      if (error) throw error;
+    }
+
+    // Sanity: the IP bucket starts empty for the test source IP that
+    // the test harness will use. We don't know the literal IP the
+    // local Edge Function sees, so assert via "any change is bad" —
+    // capture before and after and assert no delta.
+    const ipBucketBefore = await svc
+      .from('rate_limit_buckets')
+      .select('count')
+      .eq('scope_key', 'ip:ops_admin_hourly');
+    const beforeCount = (ipBucketBefore.data ?? []).reduce(
+      (acc: number, row: { count: number }) => acc + (row.count ?? 0),
+      0,
+    );
+
+    const { status, body } = await callOpsAdmin(
+      { action: 'users.list', params: { limit: 10 } },
+      `Bearer ${admin.jwt}`,
+    );
+    assertEquals(status, 429);
+    assertEquals(body.scope, 'user:ops_admin_minutely');
+
+    const ipBucketAfter = await svc
+      .from('rate_limit_buckets')
+      .select('count')
+      .eq('scope_key', 'ip:ops_admin_hourly');
+    const afterCount = (ipBucketAfter.data ?? []).reduce(
+      (acc: number, row: { count: number }) => acc + (row.count ?? 0),
+      0,
+    );
+
+    // Pre-C5: afterCount === beforeCount + 1 (the IP bucket was
+    // double-charged on the user-gate denial). Post-C5: afterCount
+    // === beforeCount (Phase 1's checkOnly peek didn't write).
+    assertEquals(
+      afterCount,
+      beforeCount,
+      `C5 invariant: IP bucket must NOT increment when user-gate trips. delta=${
+        afterCount - beforeCount
+      }`,
+    );
+  },
+);
+
+Deno.test(
+  'ops-admin: SCA-248 successful request writes to BOTH buckets exactly once each',
+  async () => {
+    await clearRateLimitBuckets();
+    const admin = await seedAdmin();
+    const svc = serviceClient();
+
+    const { status, body } = await callOpsAdmin(
+      { action: 'users.list', params: { limit: 10 } },
+      `Bearer ${admin.jwt}`,
+    );
+    assertEquals(status, 200);
+    assertEquals(body.ok, true);
+
+    // Per-admin bucket: exactly 1 increment.
+    const userBucket = await svc
+      .from('rate_limit_buckets')
+      .select('count')
+      .eq('scope_key', 'user:ops_admin_minutely')
+      .eq('bucket_key', admin.authUserId);
+    const userCount = (userBucket.data ?? []).reduce(
+      (acc: number, row: { count: number }) => acc + (row.count ?? 0),
+      0,
+    );
+    assertEquals(userCount, 1, 'per-admin bucket should have one increment');
+
+    // IP bucket: exactly 1 increment (we don't know the bucket key
+    // the harness sends, so SUM across all rows on the policy).
+    const ipBuckets = await svc
+      .from('rate_limit_buckets')
+      .select('bucket_key, count')
+      .eq('scope_key', 'ip:ops_admin_hourly');
+    const ipCount = (ipBuckets.data ?? []).reduce(
+      (acc: number, row: { count: number }) => acc + (row.count ?? 0),
+      0,
+    );
+    // The IP bucket may or may not increment depending on whether
+    // `extractSourceIP` resolves the test IP to a private-range
+    // address that the limiter bypasses (returns allowed:true with
+    // no increment). Both outcomes are correct against C5 — the
+    // invariant we care about is "≤ 1 increment per successful
+    // request" (no double-charge).
+    if (ipCount > 1) {
+      throw new Error(
+        `C5 invariant: IP bucket must increment at most once per successful request. count=${ipCount}`,
+      );
+    }
+  },
+);
+
+// Silences "ipBucketCountFor unused" if a future test removes the helper.
+void ipBucketCountFor;

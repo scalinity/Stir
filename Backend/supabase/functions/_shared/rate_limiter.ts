@@ -155,6 +155,7 @@ export async function checkAndIncrement(
   client: SupabaseClient,
   scopeKey: RateLimitPolicyKey,
   bucketKey: string,
+  options: { checkOnly?: boolean } = {},
 ): Promise<RateLimitResult> {
   if (bucketKey.startsWith('ip:') || scopeKey.startsWith('ip:')) {
     // Only IP-scoped policies are affected by the private-IP skip; user-
@@ -173,11 +174,19 @@ export async function checkAndIncrement(
   }
 
   const policy = RATE_LIMIT_POLICIES[scopeKey];
+  // SCA-248 (C5): `checkOnly: true` lets callers stacking multiple
+  // rate-limit gates (ops-admin layers IP + per-admin) check the
+  // first gate without committing a bucket row. The second gate
+  // calls without `checkOnly` and writes the increment for both —
+  // the docstring's "first-to-trip wins" contract is now true.
+  // Backed by `stir_rate_limit_check`'s `p_increment` parameter
+  // (default TRUE), added in migration 20260508000010.
   const { data, error } = await client.rpc('stir_rate_limit_check', {
     p_scope_key: scopeKey,
     p_bucket_key: bucketKey,
     p_window_seconds: policy.windowSeconds,
     p_max_count: policy.maxCount,
+    p_increment: options.checkOnly !== true,
   });
   if (error) throw error;
   // RPC returns a SETOF row; supabase-js returns it as an array of one.
