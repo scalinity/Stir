@@ -55,7 +55,11 @@ Deno.test('stir_ops_list_users: service-role call returns paginated users', asyn
   // Expect at least our three seeded users.
   const keys = new Set(users.map((u) => u.canonical_user_key));
   for (const s of sessions) {
-    assertEquals(keys.has(s.canonical_user_key), true, `user ${s.canonical_user_key} should appear`);
+    assertEquals(
+      keys.has(s.canonical_user_key),
+      true,
+      `user ${s.canonical_user_key} should appear`,
+    );
   }
   assertEquals(total >= 3, true);
 });
@@ -176,7 +180,11 @@ Deno.test('stir_ops_reset_quota: zeros used_count + preserves cap_count', async 
     p_feature_key: 'dinner_solve',
   });
   assertEquals(error, null);
-  const result = data as { ok: boolean; before: { used_count: number; cap_count: number }; after: { used_count: number; cap_count: number } };
+  const result = data as {
+    ok: boolean;
+    before: { used_count: number; cap_count: number };
+    after: { used_count: number; cap_count: number };
+  };
   assertEquals(result.ok, true);
   assertEquals(result.before.used_count, 3);
   assertEquals(result.after.used_count, 0);
@@ -254,7 +262,10 @@ Deno.test('stir_ops_force_reauth: sets reauth_required_at + before/after snapsho
     p_canonical_user_key: session.canonical_user_key,
   });
   assertEquals(error, null);
-  const r = data as { before: { reauth_required_at: string | null }; after: { reauth_required_at: string } };
+  const r = data as {
+    before: { reauth_required_at: string | null };
+    after: { reauth_required_at: string };
+  };
   assertEquals(r.before.reauth_required_at, null);
   assertNotEquals(r.after.reauth_required_at, null);
 
@@ -291,6 +302,7 @@ Deno.test('stir_ops_list_voice_sessions: aggregates by trace_id + sorts by token
       output_tokens: 500,
       cost_usd: 0.01,
       latency_ms: 600,
+      session_id: longSession,
     });
   }
   // Seed 2 turns under shortSession (low cumulative tokens).
@@ -304,6 +316,7 @@ Deno.test('stir_ops_list_voice_sessions: aggregates by trace_id + sorts by token
       output_tokens: 100,
       cost_usd: 0.002,
       latency_ms: 600,
+      session_id: shortSession,
     });
   }
 
@@ -315,7 +328,9 @@ Deno.test('stir_ops_list_voice_sessions: aggregates by trace_id + sorts by token
     p_min_tokens: 0,
   });
   assertEquals(error, null);
-  const voiceSessions = (data as { sessions: Array<{ session_id: string; turn_count: number; cumulative_prompt_tokens: number }> }).sessions;
+  const voiceSessions = (data as {
+    sessions: Array<{ session_id: string; turn_count: number; cumulative_prompt_tokens: number }>;
+  }).sessions;
 
   const bySession = new Map(voiceSessions.map((s) => [s.session_id, s]));
   assertEquals(bySession.get(longSession)?.turn_count, 5);
@@ -344,6 +359,7 @@ Deno.test('stir_ops_list_voice_sessions: p_min_tokens filter excludes small sess
     output_tokens: 10000,
     cost_usd: 0.5,
     latency_ms: 600,
+    session_id: bigSession,
   });
   await svc.from('ai_request_log').insert({
     request_id: `voice:${smallSession}:0`,
@@ -354,6 +370,7 @@ Deno.test('stir_ops_list_voice_sessions: p_min_tokens filter excludes small sess
     output_tokens: 20,
     cost_usd: 0.001,
     latency_ms: 600,
+    session_id: smallSession,
   });
 
   const { data, error } = await svc.rpc('stir_ops_list_voice_sessions', {
@@ -464,6 +481,7 @@ Deno.test('stir_ops_cost_anomaly_scan: detects voice_session_tokens_over_cap', a
       output_tokens: 1000,
       cost_usd: 0.03,
       latency_ms: 600,
+      session_id: sessionId,
     });
   }
 

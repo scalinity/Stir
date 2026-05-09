@@ -424,6 +424,7 @@ Deno.test('ops-admin: voice_sessions.list surfaces runaway', async () => {
       output_tokens: 5000,
       cost_usd: 0.15,
       latency_ms: 600,
+      session_id: sid,
     });
   }
 
