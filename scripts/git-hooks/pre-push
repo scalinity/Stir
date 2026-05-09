@@ -248,7 +248,13 @@ set +e
 # `functions/realtime-session/index.ts` that resolve only from there.
 # Running with absolute-path test args from the repo root drops 11 tests
 # in the path-relative tier even though the rest of the suite is green.
-(cd Backend/supabase && deno test \
+#
+# NO_COLOR=1 — deno emits ANSI color codes that prefix the
+# `ok | N passed | M failed` summary line. The grep below uses
+# `^(ok|FAILED) \|` which fails to match a colorized line and
+# triggers the "0 tests — gate broken" failure path even on green
+# runs.
+(cd Backend/supabase && NO_COLOR=1 deno test \
     --config functions/deno.json \
     --allow-all \
     tests/) > "$DENOLOG" 2>&1
