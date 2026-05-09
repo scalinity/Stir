@@ -204,7 +204,7 @@ Column CHECK constraints:
 
 iOS `/v1/push/register` must send exactly `'production'` or `'sandbox'` — `'development'` rejected with VAL-01.
 
-**Immutable-migration policy.** Once a migration applies anywhere, its file is immutable. Forward-only fixes via a new dated migration that supersedes via `CREATE OR REPLACE` / `ALTER TABLE`. Supersession documented in both files. Cosmetic fixes forbidden — file a new migration even for typos.
+**Immutable-migration policy.** Once a migration applies anywhere, its file is immutable. Forward-only fixes via a new dated migration that supersedes via `CREATE OR REPLACE` / `ALTER TABLE`. Supersession documented in both files. Cosmetic fixes forbidden — file a new migration even for typos. Enforced by `scripts/git-hooks/pre-commit` (SCA-242) — any staged `M`/`D`/`R` on `Backend/supabase/migrations/*.sql` blocks the commit; override is `SKIP_PRECOMMIT_MIGRATION_CHECK=1 SKIP_PRECOMMIT_MIGRATION_REASON='SCA-NNN: …'` and is reserved for the security-fix exception below.
 
 **Security-fix exception.** A landed migration whose body is a live exposure surface (emits secret to log, drops permissions check, hard-codes credential) MAY be edited in place to neutralize the leak provided: (1) the active definition lives in a forward-dated migration; (2) the in-place edit replaces the leak's mechanism with a benign no-op (e.g. `RETURN 0;` stub) — never silently changes semantics; (3) the original COMMENT names the leak literal, superseder filename, and this exception; (4) commit message states the exception and class of leak (DSN, credential, permissions). Example: SCA-139 (`20260424000001` SENTRY_DSN log redaction).
 
@@ -314,6 +314,8 @@ When changing a prompt, bump `prompt_versions.version` semver and start `rollout
 **Rule:** every commit gets pushed to `origin/<branch>` in the same session, without asking. Pre-authorized. Solo dev — no PR gate. Amending and `--force-with-lease` to `main` are pre-authorized; both override user-level git rules. Plain `--force` (no lease) still needs explicit confirmation.
 
 **Pre-push gate (SCA-181):** `scripts/git-hooks/pre-push` runs full `xcodebuild test` (~17s) before every push and blocks on failure. Install via `./scripts/install-git-hooks.sh` (sets `git config core.hooksPath scripts/git-hooks`) once per clone. Emergency override: `SKIP_PREPUSH_TESTS=1 git push` — only for hot-fixes the agent has manually verified, document the reason in commit. The gate that would have caught SCA-176 + SCA-177.
+
+**Pre-commit gate (SCA-242):** `scripts/git-hooks/pre-commit` blocks any staged modification, deletion, or rename of `Backend/supabase/migrations/*.sql`. New dated migrations (`A` status) pass through. Override (security-fix exception only): `SKIP_PRECOMMIT_MIGRATION_CHECK=1 SKIP_PRECOMMIT_MIGRATION_REASON='SCA-NNN: …'`.
 
 ---
 

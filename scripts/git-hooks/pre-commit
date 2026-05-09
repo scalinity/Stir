@@ -1,0 +1,116 @@
+#!/bin/bash
+#
+# Pre-commit hook — guards against in-place edits to existing
+# Backend/supabase/migrations/*.sql files. Wired in via
+# `git config core.hooksPath scripts/git-hooks/` (see
+# scripts/install-git-hooks.sh).
+#
+# Rationale (SCA-242): CLAUDE.md §Schema truth states the
+# immutable-migration policy verbatim:
+#
+#   "Once a migration applies anywhere, its file is immutable.
+#    Forward-only fixes via a new dated migration that supersedes
+#    via CREATE OR REPLACE / ALTER TABLE. Cosmetic fixes forbidden
+#    — file a new migration even for typos."
+#
+# Caught a self-inflicted violation in the SCA-221 close-out: an
+# in-place comment-block edit to 20260508000007 was committed,
+# reverted, and re-landed at the call site. The slip is the kind
+# humans (and agents) make under pressure; this hook turns the
+# policy into a structural constraint.
+#
+# Behavior:
+#   - Allow: A (added) — new dated migrations.
+#   - Block: M (modified) on any Backend/supabase/migrations/*.sql.
+#   - Block: D (deleted) — immutable migrations don't get deleted.
+#   - Block: R (renamed) — would silently rename a landed migration.
+#   - Empty staging set: pass through (nothing to check).
+#
+# Override (matches SCA-181 pre-push pattern, including the
+# SCA-188 require-both-vars discipline):
+#   SKIP_PRECOMMIT_MIGRATION_CHECK=1 SKIP_PRECOMMIT_MIGRATION_REASON='…' git commit ...
+#
+# CLAUDE.md's §Schema truth security-fix exception is the only
+# legitimate reason to override:
+#   "A landed migration whose body is a live exposure surface
+#    (emits secret to log, drops permissions check, hard-codes
+#    credential) MAY be edited in place to neutralize the leak"
+#   …with strict conditions documented in CLAUDE.md.
+
+set -euo pipefail
+
+# SCA-188-style override discipline: require both vars.
+if [ "${SKIP_PRECOMMIT_MIGRATION_CHECK:-0}" = "1" ]; then
+    if [ -z "${SKIP_PRECOMMIT_MIGRATION_REASON:-}" ]; then
+        echo "[pre-commit] SKIP_PRECOMMIT_MIGRATION_CHECK=1 requires SKIP_PRECOMMIT_MIGRATION_REASON='…'"
+        echo "  example (security-fix exception per CLAUDE.md §Schema truth):"
+        echo "    SKIP_PRECOMMIT_MIGRATION_CHECK=1 \\"
+        echo "    SKIP_PRECOMMIT_MIGRATION_REASON='SCA-NNN: redact SENTRY_DSN from RAISE WARNING; superseded by 20260508000099_fix.sql' \\"
+        echo "    git commit ..."
+        exit 1
+    fi
+    echo "[pre-commit] ⚠️  BYPASSING migration-immutability check — reason: $SKIP_PRECOMMIT_MIGRATION_REASON"
+    exit 0
+fi
+
+# Collect staged paths under Backend/supabase/migrations/ with their
+# git status. Status codes: A added, M modified, D deleted, Rxxx
+# renamed (with similarity score). For renames, git reports two
+# paths: the old and the new. We treat any non-A status on a
+# migration path as a violation.
+VIOLATIONS=()
+while IFS=$'\t' read -r status path1 path2; do
+    # `git diff --cached --name-status -z` would be safer for paths
+    # with whitespace, but migration filenames are constrained. Skip
+    # the -z dance to keep the parse simple.
+    case "$status" in
+        A) continue ;;            # new migration — allowed
+        M) ;;                      # modified — fall through to block
+        D) ;;                      # deleted — fall through to block
+        R*) ;;                     # renamed — fall through to block
+        C*) ;;                     # copied — fall through to block
+        T*) continue ;;            # typechange (file mode) — allow; not policy-relevant
+        *) continue ;;             # unknown status — be permissive rather than spurious
+    esac
+
+    # path1 is the path we care about for non-rename. For rename (R*)
+    # / copy (C*), path1 is the old path, path2 is the new — both
+    # touch the migrations dir if either does.
+    for p in "$path1" "$path2"; do
+        [ -z "$p" ] && continue
+        case "$p" in
+            Backend/supabase/migrations/*.sql)
+                VIOLATIONS+=("$status $p")
+                ;;
+        esac
+    done
+done < <(git diff --cached --name-status --diff-filter=AMDRCT)
+
+if [ ${#VIOLATIONS[@]} -eq 0 ]; then
+    exit 0
+fi
+
+echo "[pre-commit] ❌ commit blocked — in-place edit to existing migration(s)"
+echo
+echo "  CLAUDE.md §Schema truth — immutable-migration policy:"
+echo "    Once a migration applies anywhere, its file is immutable."
+echo "    Forward-only fixes via a new dated migration that supersedes"
+echo "    via CREATE OR REPLACE / ALTER TABLE. Cosmetic fixes forbidden"
+echo "    — file a new migration even for typos."
+echo
+echo "  staged change(s) tripping the gate:"
+for v in "${VIOLATIONS[@]}"; do
+    echo "    $v"
+done
+echo
+echo "  to fix: revert the in-place edit and add a NEW dated migration"
+echo "  alongside it. The forward migration's CREATE OR REPLACE /"
+echo "  ALTER TABLE supersedes the original; both files document the"
+echo "  supersession in their COMMENT blocks."
+echo
+echo "  override (security-fix exception only — see CLAUDE.md §Schema truth):"
+echo "    SKIP_PRECOMMIT_MIGRATION_CHECK=1 \\"
+echo "    SKIP_PRECOMMIT_MIGRATION_REASON='SCA-NNN: …' \\"
+echo "    git commit ..."
+
+exit 1
