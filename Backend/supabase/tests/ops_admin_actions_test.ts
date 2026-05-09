@@ -188,7 +188,11 @@ Deno.test('ops-admin: flagged_outputs.resolve canned_fallback_pinned replaces ca
     request_id: requestId,
     feature_key: 'substitution',
     status_code: 200,
-    response_body: { substitution_text: 'BAD ORIGINAL' },
+    // SCA-284 Cluster D: canonical substitution shape uses `suggestion`
+    // per `_shared/canned_fallback_schemas.ts:86-96`. Pre-SCA-81 the
+    // test used `substitution_text` — the field name has never matched
+    // the model output, just the test's prior shape.
+    response_body: { suggestion: 'BAD ORIGINAL' },
   });
 
   const { data: flagged } = await svc.from('ops_flagged_outputs').insert({
@@ -199,7 +203,11 @@ Deno.test('ops-admin: flagged_outputs.resolve canned_fallback_pinned replaces ca
     flag_reason: 'leaked peanut allergen',
   }).select('id').single();
 
-  const safeFallback = { substitution_text: 'SAFE PINNED', constraint_safe: true };
+  // SCA-284 Cluster D: shape per `_shared/canned_fallback_schemas.ts`
+  // substitution allowlist (`suggestion`, `why`, `confidence`, ...).
+  // `constraint_safe` was a synthetic field that pre-dated SCA-81's
+  // per-feature validator and would now be rejected as not-allowed.
+  const safeFallback = { suggestion: 'SAFE PINNED', why: 'no allergens' };
   const { status } = await post(
     'flagged_outputs.resolve',
     { id: flagged!.id, action: 'canned_fallback_pinned', canned_fallback_json: safeFallback },
@@ -210,7 +218,7 @@ Deno.test('ops-admin: flagged_outputs.resolve canned_fallback_pinned replaces ca
   // Verify cache was overwritten.
   const { data: cache } = await svc.from('ai_response_cache')
     .select('response_body').eq('request_id', requestId).single();
-  assertEquals((cache?.response_body as { substitution_text: string }).substitution_text, 'SAFE PINNED');
+  assertEquals((cache?.response_body as { suggestion: string }).suggestion, 'SAFE PINNED');
 });
 
 Deno.test('ops-admin: flagged_outputs.resolve withdrawn deletes cache', async () => {

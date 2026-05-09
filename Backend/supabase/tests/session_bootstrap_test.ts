@@ -56,7 +56,10 @@ Deno.test('session-bootstrap: happy path install-only', async () => {
 
   // Every server flag seeded should appear. Count tracks every
   // ON CONFLICT-idempotent seed migration; bump when a new seed lands.
-  assertEquals(res.feature_flags.length, 9);
+  // SCA-284 Cluster C: bumped 9 → 10 (a 10th flag landed since the
+  // test was last updated; verified via a query against the seeded
+  // feature_flags table during the deno-suite triage).
+  assertEquals(res.feature_flags.length, 10);
   assertExists(res.session_jwt);
 });
 
@@ -312,7 +315,26 @@ Deno.test('session-bootstrap: VAL-01 on invalid JSON body', async () => {
 //   1. Banned CK row receiving install-scoped data via the merge.
 //   2. Install row being merged into a banned CK and left unrecoverable
 //      (merged_into is terminal; un-merging isn't supported).
-Deno.test('session-bootstrap: banned ck row rejects BEFORE alias-forward runs', async () => {
+// SCA-284 Cluster D / SCA-246: this integration test became
+// structurally unreachable when SCA-246 (fa2e949) flipped
+// `bodyWithVerifiedCloudKitOnly` to strip CK fields on
+// `!verification.verified` rather than on record_name presence.
+// Without a `cloudkit_web_auth_token` the verifier returns
+// `missing_web_auth_token`, the strip fires before the banned-ck
+// gate is consulted, and the bootstrap correctly resolves to
+// install-only (200, install row unchanged). The test's
+// no-merge invariants (install.status, used_count) still hold
+// post-strip — but via a different code path than the test was
+// asserting.
+//
+// The verified-mode banned-ck gate is exercised at the unit
+// level in `cloudkit_identity_test.ts`. Marking ignored here
+// follows the sibling alias-forward tests (lines 94, 145, 184)
+// that were already `ignore: true` for the same reason.
+Deno.test({
+  name: 'session-bootstrap: banned ck row rejects BEFORE alias-forward runs (requires live CloudKit verifier)',
+  ignore: true,
+  fn: async () => {
   const installId = testInstallId();
   const ck = testCkRecord();
   const client = serviceClient();
@@ -363,6 +385,7 @@ Deno.test('session-bootstrap: banned ck row rejects BEFORE alias-forward runs', 
     .eq('feature_key', 'dinner_solve')
     .single();
   assertEquals(installCounter?.used_count, 2, 'install counters must not leak to banned ck');
+  },
 });
 
 Deno.test('session-bootstrap: banned install-only user rejects with BILL-01', async () => {

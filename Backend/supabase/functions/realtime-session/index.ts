@@ -431,10 +431,18 @@ Deno.serve(async (req) => {
       tier: entitlement.tier,
       billing_state: entitlement.billing_state,
     });
+    // SCA-284 Cluster D: include tier + billing_state to match the
+    // ENT-VOICE-01 response shape from `cook-turn` and
+    // `voice-turn-usage`. iOS uses these for paywall trigger
+    // routing (annual-trial CTA shown to Free users).
     return jsonError(
       ErrorCode.ENT_VOICE_01,
       403,
-      { message: 'Cook Mode voice is a Premium feature.' },
+      {
+        message: 'Cook Mode voice is a Premium feature.',
+        tier: entitlement.tier,
+        billing_state: entitlement.billing_state,
+      },
       requestId,
     );
   }

@@ -117,6 +117,42 @@ export async function seedVoiceSessionOwner(args: {
   }
 }
 
+/** Promote a bootstrapped Free user to Premium. Optionally also bumps the
+ * voice_cook_session usage_counters cap so callers exercising the Voice
+ * cap path get a fresh budget.
+ *
+ * Consolidated from `voice_turn_usage_test.ts` + `realtime_session_test.ts`
+ * per the "consolidate when a third caller emerges" docstring (the third
+ * caller was the SCA-284 Cluster D dinner_solve leftovers tests). Both
+ * caller files copy this helper inline today; their copies should be
+ * removed in a follow-up commit.
+ */
+export async function promoteToPremium(
+  canonicalKey: string,
+  opts: { voiceCookCap?: number } = {},
+): Promise<void> {
+  const { serviceClient } = await import('./pg.ts');
+  const client = serviceClient();
+  const { error: entErr } = await client.from('entitlement_snapshots').upsert({
+    canonical_user_key: canonicalKey,
+    tier: 'premium',
+    billing_state: 'active',
+    is_trial: false,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'canonical_user_key' });
+  if (entErr) throw entErr;
+
+  if (opts.voiceCookCap !== undefined) {
+    const { error: quotaErr } = await client
+      .from('usage_counters')
+      .update({ cap_count: opts.voiceCookCap, updated_at: new Date().toISOString() })
+      .eq('canonical_user_key', canonicalKey)
+      .eq('feature_key', 'voice_cook_session');
+    if (quotaErr) throw quotaErr;
+  }
+}
+
 /** POST /v1/session/bootstrap — returns parsed body + status. */
 export async function callBootstrap(
   body: BootstrapBody | unknown,

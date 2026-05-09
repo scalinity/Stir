@@ -9,7 +9,7 @@
 // client, then assert the handler returns RATE-01 before calling Gemini.
 
 import { assertEquals, assertNotEquals } from '@std/assert';
-import { quickBootstrap, testInstallId, testIPHeaders } from './_helpers/factory.ts';
+import { promoteToPremium, quickBootstrap, testInstallId, testIPHeaders } from './_helpers/factory.ts';
 import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
 
 // Kong overrides x-real-ip; clear ip:bootstrap_hourly + ip:dinner_solve_daily
@@ -306,6 +306,12 @@ Deno.test('dinner-solve: leftovers wire-shape — fully-populated LeftoversItem 
   const installId = testInstallId();
   const boot = await quickBootstrap({ installation_id: installId });
 
+  // SCA-284 Cluster D: leftovers is Premium+ (ENT-LEFTOVERS-01 gate
+  // fires before RATE-01 for Free users). Promote to Premium so the
+  // request reaches Zod + rate limit; RATE-01 short-circuits the
+  // Gemini call.
+  await promoteToPremium(boot.canonical_user_key);
+
   // Seed quota at cap so we hit RATE-01 instead of paying for a real
   // Gemini call. RATE-01 fires AFTER Zod parse, so reaching it proves
   // the leftovers wire shape passed validation. Same trick as line
@@ -347,6 +353,9 @@ Deno.test('dinner-solve: leftovers wire-shape — display_name-only LeftoversIte
   const installId = testInstallId();
   const boot = await quickBootstrap({ installation_id: installId });
 
+  // SCA-284 Cluster D: see fully-populated test for rationale.
+  await promoteToPremium(boot.canonical_user_key);
+
   const client = serviceClient();
   const { error } = await client
     .from('usage_counters')
@@ -373,6 +382,9 @@ Deno.test('dinner-solve: leftovers wire-shape — display_name-only LeftoversIte
 Deno.test('dinner-solve: leftovers cap — 20 items parse, 21 reject', async () => {
   const installId = testInstallId();
   const boot = await quickBootstrap({ installation_id: installId });
+
+  // SCA-284 Cluster D: see fully-populated test for rationale.
+  await promoteToPremium(boot.canonical_user_key);
 
   const client = serviceClient();
   const { error } = await client

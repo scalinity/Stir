@@ -75,10 +75,17 @@ async function seedUser(
   const canonicalUserKey = `${TEST_PREFIX}-${suffix}-${crypto.randomUUID()}`;
   const canonicalUserKeyHash = await hashKey(canonicalUserKey);
 
-  await client.from('app_users').insert({
+  // SCA-284 Cluster B: source_type is NOT NULL on app_users with no
+  // default. Original seedUser missed it AND didn't await/check the
+  // insert result, so the row never landed and the downstream
+  // deletion_requests insert failed with deletion_requests_canonical_
+  // user_key_fkey violation.
+  const { error: appUserErr } = await client.from('app_users').insert({
     canonical_user_key: canonicalUserKey,
+    source_type: 'install',
     status: 'active',
   });
+  if (appUserErr) throw new Error(`seedUser app_users insert failed: ${appUserErr.message}`);
 
   const baseRow: Record<string, unknown> = {
     canonical_user_key: canonicalUserKey,
@@ -267,11 +274,14 @@ Deno.test('users-deletion-fulfill: SCA-222 (C1) — merged_into RESTRICT pre-res
   const seedA = await seedUser(client, 'merged-A');
   const keyB = `${TEST_PREFIX}-merged-B-${crypto.randomUUID()}`;
   const hashB = await hashKey(keyB);
-  await client.from('app_users').insert({
+  // SCA-284 Cluster B: same source_type-not-null fix as seedUser.
+  const { error: insBErr } = await client.from('app_users').insert({
     canonical_user_key: keyB,
+    source_type: 'install',
     status: 'merged',
     merged_into: seedA.canonicalUserKey,
   });
+  if (insBErr) throw new Error(`SCA-222 setup user B insert failed: ${insBErr.message}`);
   const log = await createLogger(crypto.randomUUID(), 'users-deletion-fulfill-test');
   try {
     const outcome = await processOne(
