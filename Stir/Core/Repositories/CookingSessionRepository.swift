@@ -196,6 +196,22 @@ final class CookingSessionRepository {
         // in the Saved tab automatically — observed as duplicate /
         // auto-saved meals in the wild.
         //
+        // SCA-261 (W13 from /review-5): pre-SCA-10 rows whose ONLY engagement
+        // signal was `isFavorite=YES` (heart-tapped, never cooked, never
+        // saved-via-cook-or-modern-favorite-action) are intentionally
+        // HIDDEN by this predicate. Pre-SCA-10 the OR-arm `isFavorite ==
+        // YES` covered them; SCA-151 dropped that arm because post-SCA-10
+        // every legitimate engagement (favorite OR cook) now writes
+        // `isSaved`. The narrow class of orphaned rows — favorited in
+        // closed beta, never cooked, never re-favorited since — surface
+        // again the moment the user re-taps the heart (setFavorite writes
+        // isSaved). Acceptable v1 behavior because (a) the affected
+        // population is a closed-beta tail, (b) the recovery action is
+        // a single tap, (c) avoiding a one-time `isFavorite=YES →
+        // isSaved=YES` migration removes a class of CloudKit/CoreData
+        // round-trip bugs we'd have to test for. Filed as SCA-261; this
+        // comment is the design record.
+        //
         // SUBQUERY (not ANY) — both `deletedAt == nil` and
         // `sessionStatus == completed` must match the SAME session row;
         // ANY would let a non-deleted session and a separate completed
