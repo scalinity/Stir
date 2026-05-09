@@ -364,7 +364,27 @@ Deno.serve(async (req) => {
           properties: {
             request_id: requestId,
             actor_id: 'system:server',
+            // SCA-255 (W7 from /review-5): `has_cloudkit_record`
+            // semantically changed in SCA-136 — pre-SCA-136 it
+            // meant "iOS sent a record_name claim"; post-SCA-136 it
+            // derives from the post-strip `resolution.source_type`,
+            // which means "verifier accepted CK." Existing PostHog
+            // dashboards keyed on the old name keep working
+            // (`has_cloudkit_record` retained as-is). The two new
+            // properties make the distinction explicit:
+            //   - `claimed_cloudkit_record`: iOS sent a non-null
+            //     `cloudkit_user_record_name` on the wire (what
+            //     pre-SCA-136 `has_cloudkit_record` actually
+            //     measured).
+            //   - `verified_cloudkit_record`: the verifier accepted
+            //     the claim AND the canonical key resolved to
+            //     `ck:<record>` (what post-SCA-136 `has_cloudkit_record`
+            //     measures).
+            // CLAUDE.md telemetry-list amendment is deferred until
+            // Daniel's active CLAUDE.md edit lands.
             has_cloudkit_record: resolution.source_type === 'cloudkit',
+            claimed_cloudkit_record: parsed.cloudkit_user_record_name != null,
+            verified_cloudkit_record: resolution.source_type === 'cloudkit',
             tier,
           },
         });
