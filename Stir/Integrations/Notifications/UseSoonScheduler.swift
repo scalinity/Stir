@@ -88,17 +88,22 @@ final class UseSoonScheduler {
         now: Date = .init(),
         household: HouseholdProfile,
     ) async {
-        // 1. Suppression check first — cheapest.
-        if let suppressedUntil = history.suppressedUntil, suppressedUntil > now {
-            telemetry.capture(.useSoonSuppressed, properties: [
-                "reason": "unactioned_streak",
-            ])
-            return
-        }
-        if history.firesInLastWeek(asOf: now).count >= NotificationHistoryStore.weeklyCap {
-            telemetry.capture(.useSoonSuppressed, properties: [
-                "reason": "weekly_cap",
-            ])
+        // 1. Suppression preflight via shared kit. The kit returns the
+        // reason; we map it to our telemetry event and bail.
+        if let reason = NotificationSchedulerKit.evaluateSuppression(
+            history: history,
+            now: now,
+        ) {
+            switch reason {
+            case .unactionedStreak:
+                telemetry.capture(.useSoonSuppressed, properties: [
+                    "reason": "unactioned_streak",
+                ])
+            case .weeklyCap:
+                telemetry.capture(.useSoonSuppressed, properties: [
+                    "reason": "weekly_cap",
+                ])
+            }
             return
         }
 
@@ -129,13 +134,19 @@ final class UseSoonScheduler {
 
         let fireDate = nextFireDate(from: now)
 
-        let authorized = await requestAuthorizationIfNeeded()
+        let authorized = await NotificationSchedulerKit.requestAuthorizationIfNeeded(
+            center: center,
+            logger: Logger.useSoon,
+        )
         guard authorized else {
             Logger.useSoon.info("notification auth denied — skipping schedule")
             return
         }
 
-        let prior = await pendingReminder()
+        let prior = await NotificationSchedulerKit.pendingRequest(
+            identifier: useSoonReminderID,
+            center: center,
+        )
         cancel()
 
         let displayName = candidate.displayName ?? "an ingredient"
@@ -161,8 +172,14 @@ final class UseSoonScheduler {
             trigger: trigger,
         )
 
-        do {
-            try await center.add(request)
+        let added = await NotificationSchedulerKit.addWithRollback(
+            request,
+            prior: prior,
+            center: center,
+            logger: Logger.useSoon,
+            contextLabel: "use-soon",
+        )
+        if added {
             history.recordScheduled(fireAt: fireDate)
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
@@ -171,22 +188,6 @@ final class UseSoonScheduler {
             Logger.useSoon.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public) item=\(displayName, privacy: .private(mask: .hash))",
             )
-        } catch {
-            Logger.useSoon.warning(
-                "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
-            )
-            // CA2-08: log rollback re-add failure rather than silently
-            // discarding via `try?` — leaves the user with no pending
-            // use-soon at all and we need a signal.
-            if let prior {
-                do {
-                    try await center.add(prior)
-                } catch {
-                    Logger.useSoon.error(
-                        "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending use-soon",
-                    )
-                }
-            }
         }
     }
 
@@ -231,33 +232,6 @@ final class UseSoonScheduler {
         let lastCompleted = (try? cookingSessions.mostRecentCompletedAt(for: household)) ?? nil
         guard let lastCompleted else { return false }
         return now.timeIntervalSince(lastCompleted) < 24 * 3600
-    }
-
-    private func pendingReminder() async -> UNNotificationRequest? {
-        let pending = await center.pendingNotificationRequests()
-        return pending.first { $0.identifier == useSoonReminderID }
-    }
-
-    private func requestAuthorizationIfNeeded() async -> Bool {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            return true
-        case .denied:
-            return false
-        case .notDetermined:
-            // CA2-09: don't silently collapse a thrown auth error to "denied".
-            do {
-                return try await center.requestAuthorization(options: [.alert, .sound])
-            } catch {
-                Logger.useSoon.warning(
-                    "requestAuthorization threw: \(error.localizedDescription, privacy: .private)",
-                )
-                return false
-            }
-        @unknown default:
-            return false
-        }
     }
 }
 

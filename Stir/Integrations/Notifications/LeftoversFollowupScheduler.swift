@@ -78,34 +78,45 @@ final class LeftoversFollowupScheduler {
         // future caller refactor) must not bypass the policy.
         let policyNow = Date()
 
-        // Suppression checks — emit telemetry on skip so we can size the
-        // suppression rate in the funnel.
-        if let suppressedUntil = history.suppressedUntil, suppressedUntil > policyNow {
-            telemetry.capture(.leftoversFollowupSuppressed, properties: [
-                "reason": "unactioned_streak",
-            ])
-            Logger.leftoversFollowup.info(
-                "suppressed until \(suppressedUntil.ISO8601Format(), privacy: .public) — skipping schedule",
-            )
-            return
-        }
-        if history.firesInLastWeek(asOf: policyNow).count >= NotificationHistoryStore.weeklyCap {
-            telemetry.capture(.leftoversFollowupSuppressed, properties: [
-                "reason": "weekly_cap",
-            ])
-            Logger.leftoversFollowup.info("weekly cap (2/7d) reached — skipping schedule")
+        // Suppression preflight via shared kit — both schedulers share the
+        // suppressedUntil + weekly-cap policy; the kit returns the reason
+        // and we emit the leftovers-specific telemetry event.
+        if let reason = NotificationSchedulerKit.evaluateSuppression(
+            history: history,
+            now: policyNow,
+        ) {
+            switch reason {
+            case let .unactionedStreak(until):
+                telemetry.capture(.leftoversFollowupSuppressed, properties: [
+                    "reason": "unactioned_streak",
+                ])
+                Logger.leftoversFollowup.info(
+                    "suppressed until \(until.ISO8601Format(), privacy: .public) — skipping schedule",
+                )
+            case .weeklyCap:
+                telemetry.capture(.leftoversFollowupSuppressed, properties: [
+                    "reason": "weekly_cap",
+                ])
+                Logger.leftoversFollowup.info("weekly cap (2/7d) reached — skipping schedule")
+            }
             return
         }
 
         let fireDate = nextFireDate(from: submittedAt)
 
-        let authorized = await requestAuthorizationIfNeeded()
+        let authorized = await NotificationSchedulerKit.requestAuthorizationIfNeeded(
+            center: center,
+            logger: Logger.leftoversFollowup,
+        )
         guard authorized else {
             Logger.leftoversFollowup.info("notification auth denied — skipping schedule")
             return
         }
 
-        let prior = await pendingReminder()
+        let prior = await NotificationSchedulerKit.pendingRequest(
+            identifier: leftoversFollowupID,
+            center: center,
+        )
         cancel()
 
         let content = UNMutableNotificationContent()
@@ -128,8 +139,14 @@ final class LeftoversFollowupScheduler {
             trigger: trigger,
         )
 
-        do {
-            try await center.add(request)
+        let added = await NotificationSchedulerKit.addWithRollback(
+            request,
+            prior: prior,
+            center: center,
+            logger: Logger.leftoversFollowup,
+            contextLabel: "followup",
+        )
+        if added {
             history.recordScheduled(fireAt: fireDate)
             telemetry.capture(.leftoversFollowupScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
@@ -137,23 +154,6 @@ final class LeftoversFollowupScheduler {
             Logger.leftoversFollowup.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        } catch {
-            Logger.leftoversFollowup.warning(
-                "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
-            )
-            // CA2-08: don't silently swallow rollback failure. If the
-            // re-add fails (auth state changing mid-call, system pressure),
-            // the user ends up with no leftovers followup at all and we
-            // need a signal — not silent discard.
-            if let prior {
-                do {
-                    try await center.add(prior)
-                } catch {
-                    Logger.leftoversFollowup.error(
-                        "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending followup",
-                    )
-                }
-            }
         }
     }
 
@@ -203,37 +203,6 @@ final class LeftoversFollowupScheduler {
             second: 0,
             of: nextDay,
         ) ?? nextDay
-    }
-
-    // MARK: - Private
-
-    private func pendingReminder() async -> UNNotificationRequest? {
-        let pending = await center.pendingNotificationRequests()
-        return pending.first { $0.identifier == leftoversFollowupID }
-    }
-
-    private func requestAuthorizationIfNeeded() async -> Bool {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            return true
-        case .denied:
-            return false
-        case .notDetermined:
-            // CA2-09: don't silently collapse a thrown auth error to "denied".
-            // If the system genuinely throws (authorization service down,
-            // parental restriction shape, etc.), capture so we have signal.
-            do {
-                return try await center.requestAuthorization(options: [.alert, .sound])
-            } catch {
-                Logger.leftoversFollowup.warning(
-                    "requestAuthorization threw: \(error.localizedDescription, privacy: .private)",
-                )
-                return false
-            }
-        @unknown default:
-            return false
-        }
     }
 }
 

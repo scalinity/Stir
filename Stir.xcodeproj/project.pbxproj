@@ -168,6 +168,8 @@
 		A65A001000000001 /* LeftoversFollowupScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000002 /* LeftoversFollowupScheduler.swift */; };
 		A65A001000000005 /* UseSoonScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000006 /* UseSoonScheduler.swift */; };
 		A65A001000000007 /* NotificationHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000008 /* NotificationHistoryStore.swift */; };
+		B17317300173FFAACC170001 /* NotificationSchedulerKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17317300173FFAACC170002 /* NotificationSchedulerKit.swift */; };
+		B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */; };
 		819E44609CB366A4A791A839 /* TimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F4A1DD9C752F0E6F25ADFC /* TimerLiveActivity.swift */; };
 		82079A96A7F44851F2DBAC7C /* RealtimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37216544E460CDD56A4AFF6D /* RealtimeSession.swift */; };
 		6EBB17D4668566404E93110E /* RealtimeSessionAudioIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A75F5CB3183A15F69F8EFC6 /* RealtimeSessionAudioIO.swift */; };
@@ -655,6 +657,8 @@
 		A65A001000000002 /* LeftoversFollowupScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftoversFollowupScheduler.swift; sourceTree = "<group>"; };
 		A65A001000000006 /* UseSoonScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseSoonScheduler.swift; sourceTree = "<group>"; };
 		A65A001000000008 /* NotificationHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistoryStore.swift; sourceTree = "<group>"; };
+		B17317300173FFAACC170002 /* NotificationSchedulerKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSchedulerKit.swift; sourceTree = "<group>"; };
+		B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSchedulerKitTests.swift; sourceTree = "<group>"; };
 		F1E2C13747300DBC63BC8BF9 /* SelectableChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChip.swift; sourceTree = "<group>"; };
 		F2075E34D782898B6DAC024A /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F22AE7BFB6D533E20798A3C4 /* StartNewDinnerSolveIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartNewDinnerSolveIntent.swift; sourceTree = "<group>"; };
@@ -801,6 +805,7 @@
 				579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */,
 				8B826DCA6393D026CC51F15B /* NotificationPreferencesStoreTests.swift */,
 				A65A001000000004 /* LeftoversFollowupSchedulerTests.swift */,
+				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
@@ -1111,6 +1116,7 @@
 			children = (
 				A65A001000000002 /* LeftoversFollowupScheduler.swift */,
 				A65A001000000008 /* NotificationHistoryStore.swift */,
+				B17317300173FFAACC170002 /* NotificationSchedulerKit.swift */,
 				9BCD3DF9316F0867951228BB /* NotificationPreferencesStore.swift */,
 				5BA5D3B10982CD095498B875 /* ReactivationScheduler.swift */,
 				761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */,
@@ -1675,6 +1681,7 @@
 				6ED22C864D819ECE7BD8690F /* Motion.swift in Sources */,
 				C99910CC8EC77949382366AE /* NotificationPreferencesStoreTests.swift in Sources */,
 				A65A001000000003 /* LeftoversFollowupSchedulerTests.swift in Sources */,
+				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
@@ -1914,6 +1921,7 @@
 				A3F7C6232C29044444C18041 /* Typography.swift in Sources */,
 				817B86409212D9D46EB748BF /* UserNotificationCenterClient.swift in Sources */,
 				A65A001000000001 /* LeftoversFollowupScheduler.swift in Sources */,
+				B17317300173FFAACC170001 /* NotificationSchedulerKit.swift in Sources */,
 				A65A001000000005 /* UseSoonScheduler.swift in Sources */,
 				A65A001000000007 /* NotificationHistoryStore.swift in Sources */,
 				AD737537FFA0AD5C5980B072 /* VoiceActiveStepView.swift in Sources */,
