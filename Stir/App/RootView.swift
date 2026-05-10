@@ -143,7 +143,13 @@ struct RootView: View {
                     // the reaper; this call site never throws. Sits
                     // alongside softDeleteExpired so both pantry-
                     // hygiene sweeps share the same trigger.
-                    coordinator.pantryTombstoneReaper.runIfDue(for: household)
+                    // SCA-300 W8: dispatched on a Task so the MainActor
+                    // scenePhase hook doesn't block on the bg-context
+                    // fetch + per-row delete + save (long-running users
+                    // accumulating thousands of tombstones would
+                    // otherwise stall the first foreground after a
+                    // 24h cadence release).
+                    Task { await coordinator.pantryTombstoneReaper.runIfDue(for: household) }
                 }
             }
         }

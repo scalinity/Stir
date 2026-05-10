@@ -111,11 +111,11 @@ final class PantryTombstoneReaperTests: XCTestCase {
 
     // MARK: - 0-tombstone case
 
-    func test_runIfDue_emptyPantry_returnsZero_andEmitsTelemetry() throws {
+    func test_runIfDue_emptyPantry_returnsZero_andEmitsTelemetry() async throws {
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let result = reaper.runIfDue(for: household)
+        let result = await reaper.runIfDue(for: household)
 
         XCTAssertEqual(result, 0, "empty pantry yields zero purged rows")
         XCTAssertEqual(captures.events.count, 1, "telemetry fires on every successful run, including zero-row passes")
@@ -124,13 +124,13 @@ final class PantryTombstoneReaperTests: XCTestCase {
         XCTAssertNotNil(reaper.lastRunAt, "lastRunAt is set on success even when zero rows were purged")
     }
 
-    func test_runIfDue_onlyLiveRows_returnsZero() throws {
+    func test_runIfDue_onlyLiveRows_returnsZero() async throws {
         try seed(name: "olive oil", deletedAt: nil)
         try seed(name: "garlic", deletedAt: nil)
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let result = reaper.runIfDue(for: household)
+        let result = await reaper.runIfDue(for: household)
 
         XCTAssertEqual(result, 0, "live rows are never purged")
         // Both rows must still be present and not deleted.
@@ -140,7 +140,7 @@ final class PantryTombstoneReaperTests: XCTestCase {
 
     // MARK: - Partial-tombstone case
 
-    func test_runIfDue_partialTombstones_purgesOnlyAged() throws {
+    func test_runIfDue_partialTombstones_purgesOnlyAged() async throws {
         let now = Date()
         let stale = try seed(name: "old basil", deletedAt: now.addingTimeInterval(-91 * 86_400))
         let staleID = stale.objectID
@@ -152,18 +152,23 @@ final class PantryTombstoneReaperTests: XCTestCase {
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let result = reaper.runIfDue(for: household, now: now)
+        let result = await reaper.runIfDue(for: household, now: now)
 
         XCTAssertEqual(result, 1, "only the row whose tombstone is past retention is purged")
-        XCTAssertNil(try? pc.viewContext.existingObject(with: staleID), "stale tombstone is hard-deleted")
-        XCTAssertNotNil(try? pc.viewContext.existingObject(with: freshID), "fresh tombstone survives")
-        XCTAssertNotNil(try? pc.viewContext.existingObject(with: liveID), "live row survives")
+        // SCA-300 W8: the reaper now hops to a background context, so
+        // we assert via a store-fetch (reflects committed state) rather
+        // than `viewContext.existingObject(...)` (which returns the
+        // viewContext's cached registered object until the async
+        // cross-context merge lands).
+        XCTAssertFalse(try storeHasRow(staleID), "stale tombstone is hard-deleted")
+        XCTAssertTrue(try storeHasRow(freshID), "fresh tombstone survives")
+        XCTAssertTrue(try storeHasRow(liveID), "live row survives")
         XCTAssertEqual(captures.events.first?.rowsPurged, 1)
     }
 
     // MARK: - All-stale case
 
-    func test_runIfDue_allStale_purgesEveryTombstone() throws {
+    func test_runIfDue_allStale_purgesEveryTombstone() async throws {
         let now = Date()
         let pastRetention = now.addingTimeInterval(-100 * 86_400)
         let a = try seed(name: "old a", deletedAt: pastRetention)
@@ -173,19 +178,20 @@ final class PantryTombstoneReaperTests: XCTestCase {
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let result = reaper.runIfDue(for: household, now: now)
+        let result = await reaper.runIfDue(for: household, now: now)
 
         XCTAssertEqual(result, 3)
-        // All three rows are gone from the store.
+        // All three rows are gone from the store. SCA-300 W8 store-fetch
+        // assertion — see partialTombstones for rationale.
         for id in [a.objectID, b.objectID, c.objectID] {
-            XCTAssertNil(try? pc.viewContext.existingObject(with: id))
+            XCTAssertFalse(try storeHasRow(id))
         }
         XCTAssertEqual(captures.events.first?.rowsPurged, 3)
     }
 
     // MARK: - Cadence throttle
 
-    func test_runIfDue_secondCallWithin24h_isNoOp() throws {
+    func test_runIfDue_secondCallWithin24h_isNoOp() async throws {
         let now = Date()
         try seed(name: "stale a", deletedAt: now.addingTimeInterval(-100 * 86_400))
         try seed(name: "stale b", deletedAt: now.addingTimeInterval(-100 * 86_400))
@@ -193,29 +199,29 @@ final class PantryTombstoneReaperTests: XCTestCase {
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let first = reaper.runIfDue(for: household, now: now)
+        let first = await reaper.runIfDue(for: household, now: now)
         // Reseed two more stale rows to prove the second call is gated
         // BEFORE the predicate runs (otherwise the second call would
         // purge these too).
         try seed(name: "stale c", deletedAt: now.addingTimeInterval(-100 * 86_400))
-        let second = reaper.runIfDue(for: household, now: now.addingTimeInterval(3_600))
+        let second = await reaper.runIfDue(for: household, now: now.addingTimeInterval(3_600))
 
         XCTAssertEqual(first, 2)
         XCTAssertEqual(second, 0, "second call within 24h is gated by cadence — no fetch, no purge")
         XCTAssertEqual(captures.events.count, 1, "throttled call emits no telemetry")
     }
 
-    func test_runIfDue_secondCallPast24h_reRuns() throws {
+    func test_runIfDue_secondCallPast24h_reRuns() async throws {
         let now = Date()
         try seed(name: "stale a", deletedAt: now.addingTimeInterval(-100 * 86_400))
 
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
 
-        let first = reaper.runIfDue(for: household, now: now)
+        let first = await reaper.runIfDue(for: household, now: now)
         try seed(name: "stale b", deletedAt: now.addingTimeInterval(-100 * 86_400))
         let later = now.addingTimeInterval(25 * 3_600)
-        let second = reaper.runIfDue(for: household, now: later)
+        let second = await reaper.runIfDue(for: household, now: later)
 
         XCTAssertEqual(first, 1)
         XCTAssertEqual(second, 1, "past the 24h cadence the reaper re-runs and purges the new tombstone")
@@ -224,7 +230,7 @@ final class PantryTombstoneReaperTests: XCTestCase {
 
     // MARK: - Predicate semantics
 
-    func test_runIfDue_neverDeletedRow_isImmune() throws {
+    func test_runIfDue_neverDeletedRow_isImmune() async throws {
         let now = Date()
         let live = try seed(name: "olive oil", deletedAt: nil)
         // Sanity: even with the cutoff far in the future, a live row
@@ -232,13 +238,13 @@ final class PantryTombstoneReaperTests: XCTestCase {
         // `deletedAt != nil AND deletedAt < cutoff` predicate.
         let captures = TelemetryCollector()
         let reaper = makeReaper(retention: 0, captures: captures)
-        let result = reaper.runIfDue(for: household, now: now)
+        let result = await reaper.runIfDue(for: household, now: now)
 
         XCTAssertEqual(result, 0, "live rows are immune even with a zero retention window")
         XCTAssertNotNil(try? pc.viewContext.existingObject(with: live.objectID))
     }
 
-    func test_runIfDue_isolatesByHousehold() throws {
+    func test_runIfDue_isolatesByHousehold() async throws {
         let now = Date()
         let other = HouseholdProfile(context: pc.viewContext)
         other.id = UUID()
@@ -264,7 +270,7 @@ final class PantryTombstoneReaperTests: XCTestCase {
 
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
-        let result = reaper.runIfDue(for: household, now: now)
+        let result = await reaper.runIfDue(for: household, now: now)
 
         XCTAssertEqual(result, 1, "only the supplied household's tombstones are purged")
         XCTAssertNotNil(
@@ -275,20 +281,38 @@ final class PantryTombstoneReaperTests: XCTestCase {
 
     // MARK: - Telemetry shape
 
-    func test_runIfDue_telemetryCarriesRetentionDays() throws {
+    func test_runIfDue_telemetryCarriesRetentionDays() async throws {
         let captures = TelemetryCollector()
         // Custom retention so the assertion isn't tautologically 90.
         let reaper = makeReaper(retention: 30 * 86_400, captures: captures)
-        _ = reaper.runIfDue(for: household)
+        _ = await reaper.runIfDue(for: household)
         XCTAssertEqual(captures.events.first?.retentionDays, 30)
     }
 
-    func test_reset_clearsCadenceKey() throws {
+    func test_reset_clearsCadenceKey() async throws {
         let captures = TelemetryCollector()
         let reaper = makeReaper(captures: captures)
-        _ = reaper.runIfDue(for: household)
+        _ = await reaper.runIfDue(for: household)
         XCTAssertNotNil(reaper.lastRunAt)
         reaper.reset()
         XCTAssertNil(reaper.lastRunAt)
+    }
+
+    // MARK: - Cross-context fetch helper
+
+    /// Returns true iff a PantryItem with `objectID == id` still exists
+    /// in the persistent store. Used by SCA-300 W8 tests: the reaper
+    /// deletes on a background context, and `viewContext.existingObject(with:)`
+    /// returns the viewContext's cached registered object until the
+    /// cross-context auto-merge notification fires (async). A fetch
+    /// hits the persistent store directly and reflects the committed
+    /// delete deterministically.
+    private func storeHasRow(_ id: NSManagedObjectID) throws -> Bool {
+        let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+        request.predicate = NSPredicate(format: "SELF == %@", id)
+        request.fetchLimit = 1
+        // Force a store hit rather than honoring row-cache state.
+        request.includesPendingChanges = false
+        return try pc.viewContext.fetch(request).first != nil
     }
 }

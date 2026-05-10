@@ -94,15 +94,24 @@ final class PantryTombstoneReaper {
     /// since the last successful run; otherwise returns 0 without
     /// touching Core Data.
     ///
+    /// SCA-300 W8: the repository call hops to a background NSManaged-
+    /// ObjectContext so this @MainActor entry point never blocks the
+    /// UI thread on disk I/O. The cadence gate + telemetry stay on
+    /// MainActor; only the fetch / `context.delete()` loop / `save()`
+    /// runs off-main.
+    ///
     /// - Parameters:
     ///   - household: scope for the purge
     ///   - now: current wall clock (override for tests)
     /// - Returns: number of rows hard-deleted this call. 0 when the
     ///   cadence gate held, when no rows were eligible, or when the
-    ///   purge errored. Telemetry only fires on a successful run with
-    ///   `count > 0`.
+    ///   purge errored. Telemetry fires on every successful run
+    ///   (including zero-row passes) so the cadence funnel sees
+    ///   continuous time-series coverage — see the design comment on
+    ///   `defaultTelemetry` below; it does NOT fire when the cadence
+    ///   gate short-circuits or when the purge throws.
     @discardableResult
-    func runIfDue(for household: HouseholdProfile, now: Date = Date()) -> Int {
+    func runIfDue(for household: HouseholdProfile, now: Date = Date()) async -> Int {
         // Cadence gate. last_run_at = nil treats as "never run" → run
         // immediately. New-install behavior: there's nothing to purge,
         // the run returns 0 + we mark last_run_at so subsequent
@@ -114,7 +123,7 @@ final class PantryTombstoneReaper {
 
         let cutoff = now.addingTimeInterval(-retention)
         do {
-            let purged = try repository.purgeTombstones(olderThan: cutoff, for: household)
+            let purged = try await repository.purgeTombstonesAsync(olderThan: cutoff, for: household)
             // Mark last_run_at AFTER success so a failed pass is
             // retried on the very next foreground rather than waiting
             // a full cadence cycle. A zero-row pass is still a success

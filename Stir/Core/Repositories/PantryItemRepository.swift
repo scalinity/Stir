@@ -823,6 +823,79 @@ final class PantryItemRepository {
         return rows.count
     }
 
+    /// SCA-300 W8: async variant of `purgeTombstones` that runs the
+    /// fetch + per-row `context.delete()` + `bg.save()` on a private-queue
+    /// background context, so the MainActor caller (the foreground
+    /// scenePhase hook in `RootView` → `PantryTombstoneReaper.runIfDue`)
+    /// doesn't block the UI thread when many tombstones are eligible
+    /// (90-day retention + long-running users = thousands of rows on
+    /// the first cadence trigger after upgrade).
+    ///
+    /// CloudKit mirroring requires per-row `context.delete()` —
+    /// `NSBatchDeleteRequest` bypasses `NSPersistentCloudKitContainer`'s
+    /// change tracking and the deletes would never propagate to other
+    /// devices. The per-row loop is the only correct shape here; the
+    /// only thing changing vs the sync variant is the context.
+    ///
+    /// Background-context saves propagate to `viewContext` via
+    /// `automaticallyMergesChangesFromParent` (enabled in
+    /// `PersistenceController.init`), so SwiftUI surfaces relying on
+    /// viewContext fetches see the deletes without manual merging.
+    /// `bg.perform { ... }` serializes the work onto the bg queue;
+    /// the async hop ensures the call site never blocks main.
+    ///
+    /// Same predicate, same idempotency, same error mapping as the sync
+    /// variant. The sync `purgeTombstones(...)` stays for any non-
+    /// MainActor callers that don't need the hop; the reaper uses this
+    /// async variant.
+    @discardableResult
+    func purgeTombstonesAsync(olderThan cutoff: Date, for household: HouseholdProfile) async throws -> Int {
+        let householdObjectID = household.objectID
+        let bg = controller.newBackgroundContext()
+
+        let purged: Int = try await bg.perform {
+            guard let bgHousehold = try bg.existingObject(with: householdObjectID) as? HouseholdProfile else {
+                throw StirError.coreData(underlying: NSError(
+                    domain: "PantryItemRepository",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "purgeTombstonesAsync: household not resolvable on background context"],
+                ))
+            }
+            let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "household == %@", bgHousehold),
+                NSPredicate(format: "deletedAt != nil"),
+                NSPredicate(format: "deletedAt < %@", cutoff as NSDate),
+            ])
+            let rows: [PantryItem]
+            do {
+                rows = try bg.fetch(request)
+            } catch {
+                throw StirError.coreData(underlying: error)
+            }
+            guard !rows.isEmpty else { return 0 }
+            for row in rows {
+                // CloudKit-mirrored stores require per-row context.delete()
+                // — NSBatchDeleteRequest bypasses NSPersistentCloudKit-
+                // Container's change tracking and the deletes would never
+                // propagate to peer devices. Keep the per-row loop.
+                bg.delete(row)
+            }
+            do {
+                try bg.save()
+            } catch {
+                bg.rollback()
+                throw StirError.coreData(underlying: error)
+            }
+            return rows.count
+        }
+
+        if purged > 0 {
+            Logger.coreData.info("PantryItemRepository purgeTombstonesAsync: \(purged, privacy: .public) stale tombstones hard-deleted (bg)")
+        }
+        return purged
+    }
+
     /// Length caps on user-typed pantry strings. Prevents a paste of
     /// (e.g.) a 1MB string from corrupting CloudKit sync — CloudKit's
     /// String fields tolerate ≤1MB but the sync envelope is much
@@ -851,6 +924,24 @@ final class PantryItemRepository {
         /// `.ephemeral` this pass. `0` when no reconciliation was
         /// needed (`pre <= newCap`).
         let archivedCount: Int
+        /// SCA-298 W21: sentinel marking whether the reconciliation
+        /// handler actually executed against Core Data. `true` for every
+        /// real `reconcileForTierChange` return — including the
+        /// `pre <= newCap` no-op path, which is a legitimate "downgrade
+        /// reached reconciliation" event. `false` only when the
+        /// EntitlementService's `tierDowngradeHandler` short-circuited
+        /// before invoking the repo (RootCoordinator was deallocated
+        /// mid-flight, or no `HouseholdProfile` was resolved). The
+        /// service uses this to suppress `pantry_tier_downgrade_reconciled`
+        /// telemetry on those skip paths so the dashboard signal stays
+        /// "downgrade reached reconciliation", not "downgrade reached
+        /// the handler closure".
+        ///
+        /// Defaulted to `true` so existing in-repo construction sites
+        /// (the two `return ReconcileOutcome(...)` paths in
+        /// `reconcileForTierChange`) keep their previous semantics
+        /// without per-site edits.
+        var handlerRan: Bool = true
     }
 
     /// Reconcile the pantry's `.remembered` row count against a new
@@ -886,6 +977,14 @@ final class PantryItemRepository {
         on household: HouseholdProfile,
         now: Date = Date(),
     ) throws -> ReconcileOutcome {
+        // SCA-298 W14: clamp at the top so a caller passing a negative
+        // (or zero) cap can't yield an `archiveCount = pre - newCap`
+        // value that exceeds the actual `toArchive` slice the prefix
+        // takes. EntitlementService.rememberedPantryCap already floors
+        // at 25, but the repository should be defensive — a future
+        // call site that bypasses the service shouldn't be able to
+        // corrupt the outcome's `archivedCount`.
+        let newCap = max(0, newCap)
         let context = controller.viewContext
         let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
@@ -937,13 +1036,19 @@ final class PantryItemRepository {
         }
 
         try controller.save()
+        // SCA-298 W14: source `archivedCount` from `toArchive.count`
+        // (post-prefix) rather than the computed `archiveCount`. They
+        // agree when `newCap >= 0` and `pre > newCap`, but anchoring
+        // on the actual slice we mutated makes the outcome
+        // self-consistent under any future bound-edge regression.
+        let actuallyArchived = toArchive.count
         Logger.coreData.info(
-            "PantryItemRepository reconcileForTierChange: archived \(archiveCount, privacy: .public) of \(pre, privacy: .public) remembered rows (newCap=\(newCap, privacy: .public))",
+            "PantryItemRepository reconcileForTierChange: archived \(actuallyArchived, privacy: .public) of \(pre, privacy: .public) remembered rows (newCap=\(newCap, privacy: .public))",
         )
         return ReconcileOutcome(
             totalRememberedPre: pre,
             totalRememberedPost: newCap,
-            archivedCount: archiveCount,
+            archivedCount: actuallyArchived,
         )
     }
 

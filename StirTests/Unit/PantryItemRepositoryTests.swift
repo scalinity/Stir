@@ -495,6 +495,76 @@ final class PantryItemRepositoryTests: XCTestCase {
                         "ephemeral rows are not in scope for the cap and must not be touched")
     }
 
+    /// SCA-300 W22: 5 nil-`lastSeenAt` rows + 5 concrete-date
+    /// `lastSeenAt` rows + `newCap = 5` must archive the 5 nil rows and
+    /// leave the 5 dated rows remembered.
+    ///
+    /// The repository sort is `lastSeenAt asc, createdAt asc`. Core
+    /// Data's default ascending sort places NULL FIRST (the SQL standard
+    /// is implementation-defined, but Core Data's SQLite store sorts
+    /// NULLs before non-NULLs ascending). The "weakest claim on the
+    /// slot" intent at `PantryItemRepository.reconcileForTierChange`
+    /// lines 859-862 relies on this — a row that's never been seen
+    /// (no lastSeenAt) should be the FIRST archived when we have to cap
+    /// the standing pantry.
+    ///
+    /// Guards against a future predicate / sort-descriptor refactor
+    /// silently flipping the NULL ordering (e.g. switching to a custom
+    /// predicate that uses `NSNumber`-coerced timestamps, or a
+    /// `lastSeenAt ?? distantPast` synthesis that would push nils to
+    /// the END of the ascending sort and archive active rows instead).
+    func test_reconcileForTierChange_archivesNilLastSeenAtBeforeConcreteDates() throws {
+        // Five rows with lastSeenAt = nil (never seen). Force the
+        // `lastSeenAt` attribute back to nil after `seedItem` writes
+        // its default `Date()` — KVC bypasses the non-optional default
+        // path the helper uses without changing the helper's signature.
+        var nilRows: [PantryItem] = []
+        for i in 0..<5 {
+            let row = try seedItem(name: "nil-\(i)", memoryState: .remembered)
+            row.setValue(nil, forKey: "lastSeenAt")
+            nilRows.append(row)
+        }
+        // Five rows with a concrete lastSeenAt (active pantry items).
+        var datedRows: [PantryItem] = []
+        let baseline = Date(timeIntervalSince1970: 1_700_000_000)
+        for i in 0..<5 {
+            let row = try seedItem(
+                name: "dated-\(i)",
+                memoryState: .remembered,
+                lastSeenAt: baseline.addingTimeInterval(TimeInterval(i) * 3_600),
+            )
+            datedRows.append(row)
+        }
+        try pc.viewContext.save()
+
+        let outcome = try repo.reconcileForTierChange(newCap: 5, on: household)
+
+        XCTAssertEqual(outcome.totalRememberedPre, 10)
+        XCTAssertEqual(outcome.totalRememberedPost, 5)
+        XCTAssertEqual(outcome.archivedCount, 5)
+
+        // All five nil-lastSeenAt rows MUST have flipped to .ephemeral
+        // (weakest-claim policy: a row that's never been seen is the
+        // first archived under cap pressure).
+        for row in nilRows {
+            XCTAssertEqual(
+                row.typedMemoryState,
+                .ephemeral,
+                "nil-lastSeenAt row \(row.displayName ?? "?") should be archived first",
+            )
+        }
+        // All five dated rows MUST still be .remembered. If even one
+        // landed in .ephemeral, the sort flipped NULLs to the END of
+        // the ascending order and the policy regressed.
+        for row in datedRows {
+            XCTAssertEqual(
+                row.typedMemoryState,
+                .remembered,
+                "concrete-date lastSeenAt row \(row.displayName ?? "?") must outlive nil-lastSeenAt rows under cap pressure",
+            )
+        }
+    }
+
     /// Tiny helper for the SCA-99 tests — fetches a single row by
     /// displayName so the sort-order assertions can pinpoint which row
     /// landed in which state without scanning the whole pantry.
