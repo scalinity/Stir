@@ -23,9 +23,18 @@ const STUCK_CUTOFF_MIN_AGO = 6; // STUCK_JOB_TIMEOUT_MINUTES in dispatch is 5; w
 
 async function invokeDispatch(): Promise<void> {
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  // SCA-308: pgmq-dispatch gate matches x-stir-cron-secret against
+  // STIR_PGMQ_DISPATCH_SECRET when the env var is set. Forward whatever
+  // is in the test env — empty string is the fail-open dev path and
+  // still accepted by the handler.
+  const cronSecret = Deno.env.get('STIR_PGMQ_DISPATCH_SECRET') ?? '';
   const res = await fetch(DISPATCH_URL, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'authorization': `Bearer ${anon}` },
+    headers: {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${anon}`,
+      'x-stir-cron-secret': cronSecret,
+    },
     body: '{}',
   });
   // Always consume the body to avoid Deno's "unconsumed response body" leak
