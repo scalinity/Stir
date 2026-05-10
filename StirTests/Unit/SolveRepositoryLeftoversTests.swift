@@ -279,13 +279,13 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
     // SCA-108: leftovers solves no longer auto-promote to Tonight. The
     // SCA-70 negative pairing in SolveRepositoryTonightPickTests
     // (`test_latestTonightPick_dinnerSolveReportsNotFromLeftovers`)
-    // remains the positive contract for non-leftovers solves; this
-    // test now asserts the inverse — when only a leftovers solve
-    // exists, `latestTonightPick` returns nil because the leftovers
-    // solve is filtered out at the predicate. The prior assertion
-    // (`pick.isFromLeftovers == true`) was the SCA-70 wire contract
-    // that became unreachable once SCA-108 made leftovers a side
-    // trip rather than a hero replacement.
+    // was retired in SCA-302 alongside the wire field; this test
+    // asserts the inverse — when only a leftovers solve exists,
+    // `latestTonightPick` returns nil because the leftovers solve is
+    // filtered out at the predicate. The prior SCA-70 wire contract
+    // (`pick.isFromLeftovers == true`) became unreachable once SCA-108
+    // made leftovers a side trip rather than a hero replacement, and
+    // SCA-302 retired the field outright.
     func test_createLeftoversSolveWithDish_doesNotPromoteToTonightPick_whenOnlyLeftoversExist() async throws {
         let source = try seedSourceRecipePlan(title: "Salmon dinner")
         let dish = makeDishCard(title: "Salmon fried rice", rank: 1)
@@ -331,10 +331,6 @@ final class SolveRepositoryLeftoversTests: XCTestCase {
             pick.title,
             "Earlier dinner",
             "SCA-108: prior dinner solve must remain the Tonight pick after a leftovers solve",
-        )
-        XCTAssertFalse(
-            pick.isFromLeftovers,
-            "SCA-108: latestTonightPick filters leftovers out; pick.isFromLeftovers is unreachable in practice",
         )
     }
 

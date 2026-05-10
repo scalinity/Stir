@@ -435,21 +435,6 @@ final class SolveRepository {
         /// rule values plus a synthetic "quick" tag when the dish is
         /// ≤30 min. Capped at 3 entries — mockup 03 shows three chips.
         let chips: [String]
-        /// SCA-70 visibility fix: true when the underlying
-        /// `MealSolveRequest.sourceRecipePlan != nil` — i.e., this
-        /// pick was promoted from a Leftovers handoff rather than a
-        /// regular dinner-solve. TonightHomeView surfaces a "From your
-        /// leftovers" eyebrow on the hero card so the user understands
-        /// what they're looking at; the "Solve again" affordance below
-        /// the hero is the documented escape hatch (LeftoversSolveView
-        /// helper text "Solve again to re-roll").
-        ///
-        /// SCA-110 swapped the underlying field from a bare-UUID
-        /// `sourceRecipePlanId` to the new `sourceRecipePlan`
-        /// relationship (lightweight migration of the Stir model).
-        /// Semantics unchanged — both expressions evaluate to the same
-        /// boolean post-migration.
-        let isFromLeftovers: Bool
     }
 
     /// Latest dish to surface as the Tonight hero card. Picks the user-
@@ -475,11 +460,12 @@ final class SolveRepository {
     /// hero card. Spec D4/D5 had ratified the auto-promote as the "user
     /// lands somewhere logical" mechanism, but landed on the inverse
     /// after user-side feedback: leftovers should be a side trip, not a
-    /// replacement of the dinner the user just rated. The `TonightPick`
-    /// model still carries `isFromLeftovers` for any future explicit-
-    /// promote path; with this filter the value is always `false` in
-    /// practice, but the wire field stays so the renderer code path
-    /// doesn't need to be deleted alongside.
+    /// replacement of the dinner the user just rated.
+    ///
+    /// SCA-302: the prior `TonightPick.isFromLeftovers` wire field is
+    /// fully retired. The eager `sourceRecipePlan == nil` predicate here
+    /// is the single source of truth — leftovers never reach Tonight, so
+    /// the dead boolean and its renderer branch are gone.
     private func latestCompletedSolve(for household: HouseholdProfile) -> MealSolveRequest? {
         let request = NSFetchRequest<MealSolveRequest>(entityName: "MealSolveRequest")
         request.predicate = NSPredicate(
@@ -532,7 +518,6 @@ final class SolveRepository {
             estimatedMinutes: Int(dish.estimatedMinutes),
             servings: Int(plan.servings),
             chips: chips,
-            isFromLeftovers: solve.sourceRecipePlan != nil,
         )
     }
 
