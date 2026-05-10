@@ -70,9 +70,11 @@ export type APNsSender = (input: APNsPushInput) => Promise<APNsPushResult>;
  * cook_reminder + billing_grace pushes).
  *
  * Failure classification:
- *   - bad_device_token / unregistered → mark job COMPLETED (token is dead,
- *     not our bug); null out the token on device_installations so future
- *     enqueues skip it.
+ *   - bad_device_token → mark job COMPLETED (token is dead, not our bug);
+ *     null out the token on device_installations so future enqueues skip
+ *     it. (SCA-305: APNs 410 Unregistered is mapped to bad_device_token
+ *     in _shared/apns.ts, so a standalone `unregistered` outcome never
+ *     reaches this code path.)
  *   - rate_limited / server_error    → THROW, lets the outer try/catch
  *     schedule a retry with backoff.
  *   - config_invalid / missing_secret → THROW and page; means our APNs

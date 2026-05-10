@@ -54,3 +54,11 @@ if (
       "Run 'supabase start' + re-generate the .env before re-running tests.",
   );
 }
+
+// SCA-305 — unlock the env-gated `_setApnsFetchOverrideForTests` DI seam.
+// The seam itself stays in production code (it's the cheapest mock surface
+// for ES256+APNs), but a synchronous throw fires on any call where this
+// env var isn't '1'. Every test that imports a test-helper picks up this
+// side-effect import first, so the gate is satisfied by the time any
+// `_setApnsFetchOverrideForTests(mock.fetch)` call lands.
+Deno.env.set('STIR_TEST_MODE', '1');

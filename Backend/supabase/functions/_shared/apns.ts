@@ -73,8 +73,24 @@ let apnsFetchOverride: ApnsFetch | null = null;
  * seam called out in SCA-115. The production path resolves to
  * `globalThis.fetch` on every call (no cache, no module-scoped state) so
  * the override never persists past a test that explicitly clears it.
+ *
+ * SCA-305: env-gated. The seam is preserved (deliberate DI surface,
+ * cheaper than a full mock-able transport interface) but any caller
+ * outside test mode throws synchronously. `STIR_TEST_MODE=1` is set by
+ * `tests/_helpers/env.ts` before any test imports this module; the
+ * deployed `supabase functions deploy` environment never sets it.
+ * The check is a fail-fast tripwire — there is no public production
+ * path that calls this, so the throw doubles as a regression guard if
+ * one is ever added by accident.
  */
 export function _setApnsFetchOverrideForTests(fn: ApnsFetch | null): void {
+  if (Deno.env.get('STIR_TEST_MODE') !== '1') {
+    throw new Error(
+      '_setApnsFetchOverrideForTests called outside test mode — this is a ' +
+        'test-only DI seam (SCA-115); production code must use globalThis.fetch. ' +
+        'Set STIR_TEST_MODE=1 in the test harness.',
+    );
+  }
   apnsFetchOverride = fn;
 }
 
