@@ -35,6 +35,32 @@ struct PaywallView: View {
     /// but larger than inline feature-row icons.
     private static let modalErrorIconSize: CGFloat = 40
 
+    /// Whether to render trial-flavored copy ("Start 7-day free trial",
+    /// "Trial terms", "7 days free, then...") for a primary-trial package.
+    ///
+    /// SCA-287 + SCA-294: must be exhaustive on `IntroEligibility`. The
+    /// trial copy only fits when RC reports the package as `.eligible` or
+    /// `.unknown` (per RC convention, treat unknown as eligible — Apple is
+    /// the final arbiter). `.ineligible` AND `.noOffer` both fall through
+    /// to the auto-renew-only "Subscribe annually" copy:
+    ///   - `.ineligible`: this Apple ID already consumed the trial.
+    ///   - `.noOffer`: the trial-bearing SKU on the dashboard side doesn't
+    ///     carry an intro offer (e.g. ASC dashboard drift, RC cache stale
+    ///     post-SCA-294, future SKU swap without iOS update). Showing
+    ///     "Start 7-day free trial" / "then $139.99/year" while Apple
+    ///     charges full price immediately is the exact UX failure SCA-287
+    ///     was meant to prevent — exhaustive matching makes that
+    ///     impossible to regress past.
+    ///
+    /// Pure / `static` so PaywallViewTrialCopyTests can exercise all four
+    /// IntroEligibility cases without instantiating SwiftUI.
+    static func shouldShowTrialCopy(for eligibility: IntroEligibility?) -> Bool {
+        switch eligibility ?? .unknown {
+        case .eligible, .unknown: return true
+        case .ineligible, .noOffer: return false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             contentView
@@ -180,16 +206,17 @@ struct PaywallView: View {
     private var featuresList: some View {
         // SCA-294: trial unlocks Pro for 7 days, so the feature list
         // anchors Pro's caps and Pro-exclusive features (multi-image scan).
-        // ADR 0015 copy spec — frequency framing ("every dinner" vs "27
-        // sessions/month") reads as benefit not rationing, and ages well
-        // if the cap shifts. Voice + multi-image lead as the durable Pro
-        // differentiators.
+        // ADR 0015 copy spec (amended by SCA-294 — original spec anchored
+        // Premium caps on the primary paywall) — frequency framing ("every
+        // dinner" vs "27 sessions/month") reads as benefit not rationing,
+        // and ages well if the cap shifts. Voice + multi-image lead as
+        // the durable Pro differentiators.
         //
         // iPhone SE (4.7") truncation watch: "Hands-free voice for every
-        // dinner" stays under 32 chars (well within the iPhone SE single-
-        // line budget at default Dynamic Type). If a future copy variant
-        // exceeds, promote a single Pro line to a section header above
-        // the bullet list as the fallback pattern.
+        // dinner" is the longest string in this list (well within iPhone
+        // SE's single-line budget at default Dynamic Type). If a future
+        // copy variant exceeds, promote a single Pro line to a section
+        // header above the bullet list as the fallback pattern.
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
             featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice for every dinner")
             featureRow(icon: Image.Stir.cook, title: "120 Dinner Solves per month")
@@ -223,13 +250,7 @@ struct PaywallView: View {
 
     private func primaryCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
         let package = offerings.primaryTrialPackage
-        // SCA-287: Apple grants the 7-day trial only once per Apple ID per
-        // subscription group. RC's `introductoryDiscount` reports the offer
-        // DEFINITION; per-user eligibility lives on `package.introEligibility`.
-        // Show "Start 7-day free trial" copy only when eligible (or unknown,
-        // per RC convention — Apple is the final arbiter). Ineligible users
-        // see "Subscribe annually" + the price they'll actually be charged.
-        let isTrialEligible = package?.introEligibility != .ineligible
+        let isTrialEligible = Self.shouldShowTrialCopy(for: package?.introEligibility)
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
@@ -312,12 +333,7 @@ struct PaywallView: View {
         // detaches the uppercase label from its body copy; space1=4pt is
         // too tight against the eyebrow's baked line height).
         //
-        // SCA-287: copy must reflect per-user trial eligibility. An ineligible
-        // user (already consumed the trial on this Apple ID for this
-        // subscription group) sees the auto-renew terms only — claiming "7
-        // days free" when Apple will charge full price is misleading and an
-        // App Review reject vector.
-        let isTrialEligible = (package?.introEligibility ?? .unknown) != .ineligible
+        let isTrialEligible = Self.shouldShowTrialCopy(for: package?.introEligibility)
         return VStack(alignment: .leading, spacing: CGFloat.Stir.space2 - 2) {
             Text(isTrialEligible ? "Trial terms" : "Subscription terms")
                 .stirFont(.labelEyebrow)

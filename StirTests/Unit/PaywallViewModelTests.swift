@@ -288,6 +288,33 @@ final class PaywallViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Trial copy guard (SCA-287 + SCA-294 regression)
+
+    func test_shouldShowTrialCopy_isExhaustiveOnIntroEligibility() {
+        // Regression guard: a future change that introduces a new
+        // IntroEligibility case without updating PaywallView.shouldShowTrialCopy
+        // will fail the switch's exhaustiveness check at compile time.
+        // This test pins the per-case behavior. Critical because the View's
+        // "Start 7-day free trial" vs "Subscribe annually" copy branches on
+        // this single helper — a wrong return value here means a user sees
+        // trial copy and gets charged full price (App Review reject + refund
+        // request risk).
+        XCTAssertTrue(PaywallView.shouldShowTrialCopy(for: .eligible))
+        XCTAssertTrue(PaywallView.shouldShowTrialCopy(for: .unknown))
+        XCTAssertTrue(PaywallView.shouldShowTrialCopy(for: nil),
+                      "nil (missing package) defaults to .unknown per the helper contract")
+        XCTAssertFalse(PaywallView.shouldShowTrialCopy(for: .ineligible),
+                       "user already consumed the trial — auto-renew copy only")
+        // SCA-294 regression: dashboard drift (intro offer not yet registered
+        // on the trial-bearing SKU in App Store Connect, or RC cache stale)
+        // surfaces as `.noOffer`. The pre-fix code used `!= .ineligible` which
+        // treated this as eligible, showing "Start 7-day free trial" while
+        // Apple would charge full price immediately. This assertion fails on
+        // the un-fixed code path.
+        XCTAssertFalse(PaywallView.shouldShowTrialCopy(for: .noOffer),
+                       "dashboard drift — no trial offer on the SKU; must not show trial copy")
+    }
+
     // MARK: - Restore
 
     func test_restore_success_triggersRefresh() async {

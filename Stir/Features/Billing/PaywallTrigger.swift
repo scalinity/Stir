@@ -151,13 +151,16 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
     /// frequency phrases here and in ProComparisonSheet in the same
     /// commit — the phrases must stay truthful to the enforced caps.
     var subheadline: String {
-        // Premium value prop — voice leads, then cadence, then surface
-        // features. Frequency-framed so it ages well if the cap changes
-        // later (ADR 0015 trigger-to-revisit).
-        let premiumValueProp = "Hands-free voice for ~3 dinners a week, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
         // Pro value prop — voice "every dinner" is the anchoring benefit;
         // exact cap (27) stays out of prose. 120 Dinner Solves acts as
         // a second anchor so the subhead works for non-voice Pro triggers.
+        //
+        // SCA-294 amendment: every trial-CTA path lands on Pro annual, so
+        // every subhead anchored to "what you'll get if you tap the CTA"
+        // is Pro-flavored. The previous `premiumValueProp` constant (40
+        // Solves, ~3 dinners a week voice) was retired in the same edit —
+        // those caps now only surface in ProComparisonSheet's Premium
+        // column and Settings → Plan & Billing tier-switch options.
         let proValueProp = "Voice cooking for every dinner, 120 Dinner Solves/mo, multi-image scan, priority inference, 1,000 pantry items."
         switch self {
         case .voiceAffordanceTapped:
@@ -198,7 +201,15 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
              .savedFavoritesGate,
              .widgetsGate,
              .leftoversGate:
-            return premiumValueProp
+            // SCA-294 amendment: trial CTA below these gates now lands on
+            // Pro annual ($139.99). Subhead must reflect Pro caps —
+            // otherwise the user reads "40 Dinner Solves/mo" in the
+            // subhead but pays Pro pricing for 120 on tap. Bait-and-switch
+            // copy is an App Review reject vector and a refund driver.
+            // ADR 0015 row classifications stay (these are still
+            // feature-gated triggers; the trial-tier swap shifts where
+            // the CTA lands, not what surface fired the paywall).
+            return proValueProp
         }
     }
 }
