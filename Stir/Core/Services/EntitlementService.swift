@@ -275,6 +275,26 @@ final class EntitlementService {
     /// `premium → free` downgrade it actually is, rather than the
     /// no-op `premium → premium` literal pair the dashboard's
     /// `WHERE previous_tier != new_tier` filter would drop.
+    ///
+    /// SCA-299: detached `Task` race-hardening. The Task closure
+    /// captures `(previousLiteral, newLiteral, previousEffective,
+    /// newEffective, newCap)` snapshotted at dispatch time, then at
+    /// Task START re-checks `self.tier == newLiteral`. When a
+    /// second hydrate has landed between dispatch and execution
+    /// (RC webhook retry storm, paywall-dismiss configBootstrap
+    /// racing the launch session-bootstrap), the captured `newCap`
+    /// is stale; we re-fetch `rememberedPantryCap` against the
+    /// CURRENT service state before calling the handler so we
+    /// reconcile against the post-flap cap, not the pre-flap one.
+    ///
+    /// SCA-299: on a thrown reconciliation error (CloudKit save
+    /// failure, repository fault) we persist a "pending
+    /// reconciliation" flag in UserDefaults keyed by service-scoped
+    /// constant. The next `hydrate(...)` call drains the flag via
+    /// `retryPendingReconciliationIfNeeded()` and dispatches a
+    /// fresh reconciliation against the current state. On the
+    /// successful path we also clear the flag so a transient
+    /// failure doesn't pin a retry forever.
     private func applyTierChange(
         previousLiteral: Tier,
         newLiteral: Tier,
@@ -287,11 +307,26 @@ final class EntitlementService {
             )
             return
         }
-        let newCap = self.rememberedPantryCap
+        let dispatchCap = self.rememberedPantryCap
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // SCA-299 stale-cap guard: if hydrate has landed AGAIN since
+            // this Task was dispatched, `self.tier` may have moved past
+            // `newLiteral` and `newCap` no longer reflects the current
+            // entitlement state. Re-fetch against current state before
+            // invoking the handler so the repo reconciles against the
+            // post-flap cap.
+            let effectiveCap: Int
+            if self.tier == newLiteral {
+                effectiveCap = dispatchCap
+            } else {
+                effectiveCap = self.rememberedPantryCap
+                Logger.entitlement.info(
+                    "applyTierChange Task observed tier flap dispatch=\(newLiteral.rawValue, privacy: .public) current=\(self.tier.rawValue, privacy: .public) — re-fetched newCap=\(effectiveCap, privacy: .public)",
+                )
+            }
             do {
-                let outcome = try await handler(previousLiteral, newLiteral, newCap)
+                let outcome = try await handler(previousLiteral, newLiteral, effectiveCap)
                 self.publishReconciliationOutcome(
                     previousLiteral: previousLiteral,
                     newLiteral: newLiteral,
@@ -299,10 +334,29 @@ final class EntitlementService {
                     newEffective: newEffective,
                     outcome: outcome,
                 )
+                // Successful reconciliation drains any pending-retry
+                // flag — a prior failure has been superseded by this
+                // good pass and we don't want to re-fire on next
+                // foreground.
+                self.clearPendingReconciliation()
             } catch {
                 Logger.entitlement.error(
-                    "tier downgrade reconciliation failed: \(error.localizedDescription, privacy: .public)",
+                    "tier downgrade reconciliation failed: \(error.localizedDescription, privacy: .public) — flagging for foreground retry",
                 )
+                // SCA-299 retry persistence: stamp a flag carrying the
+                // current effective tiers so the next foreground hydrate
+                // re-dispatches against the same downgrade. We persist
+                // the EFFECTIVE pair (not the literal pair) because the
+                // retry's job is to land the same dashboard event the
+                // failed attempt would have emitted; a paid-grace
+                // (billing_state='active') → expired-trial flap between
+                // failure and retry could otherwise replace one cohort
+                // event with another.
+                self.persistPendingReconciliation(PendingReconciliation(
+                    previousEffective: previousEffective,
+                    newEffective: newEffective,
+                    failedAt: Date(),
+                ))
             }
         }
     }
@@ -414,6 +468,101 @@ final class EntitlementService {
             // depends on banner persistence surviving a shape change.
             userDefaults.removeObject(forKey: Self.pantryReconciliationBannerDefaultsKey)
         }
+    }
+
+    // MARK: - Pending reconciliation (SCA-299)
+
+    /// Persisted record of a reconciliation pass that failed mid-flight
+    /// (handler threw, CloudKit save fault, repo error). Drained by
+    /// `retryPendingReconciliationIfNeeded()` from the next foreground
+    /// hydrate so a transient failure doesn't leave the user above the
+    /// new cap with no second chance.
+    ///
+    /// We persist the EFFECTIVE pair (not the literal pair) because the
+    /// retry's job is to land the same dashboard event the original
+    /// attempt would have emitted; a billing-state flap between failure
+    /// and retry (paid-grace `.active` → expired `.expired` on a
+    /// webhook double-fire) could otherwise replace one cohort event
+    /// with another.
+    struct PendingReconciliation: Codable, Sendable, Equatable {
+        let previousEffective: Tier
+        let newEffective: Tier
+        let failedAt: Date
+    }
+
+    /// UserDefaults key for the SCA-299 retry flag. Scoped to the
+    /// service-level domain so a launch after a CloudKit-save-fault
+    /// downgrade hydrate can drain the flag without owning Keychain
+    /// access.
+    static let pendingReconciliationDefaultsKey = "com.scalinity.stir.entitlement.pendingReconciliation"
+
+    private func persistPendingReconciliation(_ pending: PendingReconciliation) {
+        do {
+            let data = try JSONEncoder.stir.encode(pending)
+            userDefaults.set(data, forKey: Self.pendingReconciliationDefaultsKey)
+        } catch {
+            Logger.entitlement.warning(
+                "failed to persist pending reconciliation flag: \(error.localizedDescription, privacy: .public)",
+            )
+        }
+    }
+
+    /// Clears any persisted pending-reconciliation flag. Called on
+    /// successful reconciliation (so a prior failure doesn't pin
+    /// the retry forever) and by `retryPendingReconciliationIfNeeded()`
+    /// when the retry succeeds.
+    func clearPendingReconciliation() {
+        userDefaults.removeObject(forKey: Self.pendingReconciliationDefaultsKey)
+    }
+
+    /// Read the persisted retry flag, if any. Public for tests; the
+    /// production caller is `retryPendingReconciliationIfNeeded()`.
+    func loadPendingReconciliation() -> PendingReconciliation? {
+        guard let data = userDefaults.data(forKey: Self.pendingReconciliationDefaultsKey) else {
+            return nil
+        }
+        do {
+            return try JSONDecoder.stir.decode(PendingReconciliation.self, from: data)
+        } catch {
+            // Corrupted bytes — drop the flag. A persistent retry pinned
+            // to undecodable state is worse than dropping the failure
+            // event entirely; the next real downgrade will re-fire the
+            // hook.
+            Logger.entitlement.warning(
+                "pending reconciliation flag failed to decode (\(error.localizedDescription, privacy: .public)) — dropping",
+            )
+            userDefaults.removeObject(forKey: Self.pendingReconciliationDefaultsKey)
+            return nil
+        }
+    }
+
+    /// SCA-299 foreground-retry entrypoint. Called by `RootCoordinator`
+    /// from the scenePhase `.active` branch after every successful
+    /// hydrate. If a prior reconciliation Task threw, we re-dispatch
+    /// against the CURRENT entitlement state (so a billing-state flap
+    /// between failure and retry doesn't pin the wrong cohort), then
+    /// clear the flag on success.
+    ///
+    /// No-op when no flag is set. Safe to call repeatedly — the inner
+    /// `applyTierChange` is idempotent against the repository's
+    /// `reconcileForTierChange` (a second pass with the same cap is a
+    /// no-op once below the cap).
+    func retryPendingReconciliationIfNeeded() {
+        guard let pending = loadPendingReconciliation() else { return }
+        Logger.entitlement.info(
+            "retrying pending reconciliation (effective \(pending.previousEffective.rawValue, privacy: .public) → \(pending.newEffective.rawValue, privacy: .public), failedAt=\(pending.failedAt.ISO8601Format(), privacy: .public))",
+        )
+        // Re-dispatch using CURRENT literal tiers — the retry must
+        // reconcile against current state, not the snapshot the
+        // failure was taken against. We forward the persisted
+        // EFFECTIVE pair so the dashboard event still attributes to
+        // the original downgrade cohort.
+        applyTierChange(
+            previousLiteral: tier,
+            newLiteral: tier,
+            previousEffective: pending.previousEffective,
+            newEffective: pending.newEffective,
+        )
     }
 
     /// Mark hydration as failed when bootstrap itself errors out (NET-01).

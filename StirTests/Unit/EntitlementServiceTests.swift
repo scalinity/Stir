@@ -729,6 +729,151 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertFalse(dispatched, "upgrade path must not fire downgrade reconciliation")
     }
 
+    // MARK: - SCA-299: detached Task hardening
+
+    /// SCA-299: between `applyTierChange` dispatch and the Task's
+    /// @MainActor execution, a second hydrate lands. The Task captured
+    /// `newCap` from the FIRST hydrate but the service now reflects the
+    /// SECOND. The Task must re-fetch `rememberedPantryCap` against
+    /// current state before calling the handler, so the repo reconciles
+    /// against the post-flap cap.
+    func test_applyTierChange_staleNewCap_refetchesAgainstCurrentState() async throws {
+        let service = makeServiceWithIsolatedDefaults()
+
+        // Prime to Pro (cap 1000).
+        service.hydrate(from: Self.entitlements(
+            tier: .pro, billingState: .active, standingPantryCap: 1000,
+        ))
+
+        // Handler that records the cap it's invoked with.
+        let captureBox = HandlerCaptureBox()
+        let expectation = XCTestExpectation(description: "handler invoked after flap")
+        service.tierDowngradeHandler = { previous, new, newCap in
+            await captureBox.record(previous: previous, new: new, newCap: newCap)
+            expectation.fulfill()
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 0, totalRememberedPost: 0, archivedCount: 0,
+            )
+        }
+
+        // First downgrade: Pro → Premium (cap should be 250 by the time
+        // the Task runs). Then immediately a SECOND hydrate to Free
+        // (cap 25) before the Task gets the @MainActor — both hydrates
+        // run synchronously on this @MainActor test, but the Task body
+        // runs LATER. The Task must observe `tier=.free` and re-fetch
+        // newCap=25 rather than carrying the dispatched cap=250.
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 250,
+        ))
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+        let snapshot = await captureBox.snapshot
+        XCTAssertEqual(snapshot.newCap, 25,
+                       "Task must re-fetch newCap against post-flap state — pre-flap dispatched 250, post-flap is 25")
+    }
+
+    /// SCA-299: a thrown reconciliation error persists a
+    /// pending-reconciliation flag so the next foreground hydrate
+    /// can retry. Flag carries the EFFECTIVE pair so a billing-state
+    /// flap between failure and retry doesn't switch cohorts.
+    func test_applyTierChange_handlerThrows_persistsPendingReconciliationFlag() async throws {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let service = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 250,
+        ))
+
+        let expectation = XCTestExpectation(description: "handler invoked then threw")
+        service.tierDowngradeHandler = { _, _, _ in
+            expectation.fulfill()
+            throw EntitlementTestError.coreDataFault
+        }
+
+        // Premium → Free (effective downgrade).
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+        // Give the catch block a tick to persist.
+        await Task.yield()
+
+        let pending = service.loadPendingReconciliation()
+        XCTAssertNotNil(pending, "thrown handler must persist a pending-reconciliation flag")
+        XCTAssertEqual(pending?.previousEffective, .premium)
+        XCTAssertEqual(pending?.newEffective, .free)
+    }
+
+    /// SCA-299: retryPendingReconciliationIfNeeded re-dispatches the
+    /// handler and clears the flag on success. Called from
+    /// RootCoordinator's foreground refresh hook after every hydrate.
+    func test_retryPendingReconciliation_redispatches_andClearsFlag_onSuccess() async throws {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let service = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
+
+        // Hand-plant a pending-reconciliation flag, as if a prior
+        // Task had thrown.
+        let pending = EntitlementService.PendingReconciliation(
+            previousEffective: .premium,
+            newEffective: .free,
+            failedAt: Date().addingTimeInterval(-3600),
+        )
+        let data = try JSONEncoder.stir.encode(pending)
+        defaults.set(data, forKey: EntitlementService.pendingReconciliationDefaultsKey)
+        XCTAssertNotNil(service.loadPendingReconciliation(), "test setup precondition")
+
+        // Hydrate to Free so the retry's `applyTierChange(previousLiteral:
+        // tier, newLiteral: tier, ...)` doesn't trip the no-handler guard
+        // with a stale state. Also prime the handler to succeed.
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+
+        let expectation = XCTestExpectation(description: "retry handler invoked")
+        service.tierDowngradeHandler = { _, _, _ in
+            expectation.fulfill()
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 30, totalRememberedPost: 25, archivedCount: 5,
+            )
+        }
+
+        service.retryPendingReconciliationIfNeeded()
+        await fulfillment(of: [expectation], timeout: 1.0)
+        // Give the success path a tick to clear the flag.
+        await Task.yield()
+        XCTAssertNil(service.loadPendingReconciliation(),
+                     "successful retry must clear the pending-reconciliation flag")
+    }
+
+    /// SCA-299: retry no-ops when no flag is set. Important — the
+    /// foreground hook runs after every hydrate, so a path with no
+    /// pending failure mustn't accidentally fire a fresh reconciliation.
+    func test_retryPendingReconciliation_noFlag_isNoOp() async {
+        let service = makeServiceWithIsolatedDefaults()
+        service.hydrate(from: Self.entitlements(
+            tier: .free, billingState: .none, standingPantryCap: 25,
+        ))
+
+        var dispatched = false
+        service.tierDowngradeHandler = { _, _, _ in
+            dispatched = true
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 0, totalRememberedPost: 0, archivedCount: 0,
+            )
+        }
+        service.retryPendingReconciliationIfNeeded()
+        await Task.yield()
+        XCTAssertFalse(dispatched, "no flag → no retry dispatch")
+    }
+
     /// Build an EntitlementService against an isolated UserDefaults
     /// suite so the SCA-99 banner persistence path doesn't bleed
     /// across tests. The suite is intentionally not removed in
@@ -776,6 +921,11 @@ final class EntitlementServiceTests: XCTestCase {
             periodEnd: "2026-05-17",
         )
     }
+}
+
+/// SCA-299 helper: synthetic error class for the handler-throws path.
+enum EntitlementTestError: Error {
+    case coreDataFault
 }
 
 /// SCA-99 helper: thread-safe capture box for the async tier-

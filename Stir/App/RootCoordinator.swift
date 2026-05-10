@@ -1097,6 +1097,12 @@ final class RootCoordinator {
                 try await sessionClient.configBootstrap()
             }
             entitlements.hydrate(from: response.entitlements, flags: response.featureFlags)
+            // SCA-299: drain any pending reconciliation flag a prior
+            // failed Task left behind. Must run AFTER hydrate(...) so
+            // the retry's `applyTierChange` sees the post-refresh
+            // entitlement state. Safe to call when no flag is set — it's
+            // a no-op.
+            entitlements.retryPendingReconciliationIfNeeded()
             emitAccountStateChangeIfNeeded()
             Logger.coordinator.debug(
                 "foreground refresh ok tier=\(self.entitlements.tier.rawValue, privacy: .public)",
