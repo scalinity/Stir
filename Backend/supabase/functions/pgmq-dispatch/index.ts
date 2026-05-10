@@ -33,7 +33,7 @@ import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
-import { processPushSend } from './push_send.ts';
+import { processPushSend, validatePushEnvironment } from './push_send.ts';
 
 const CLAIM_LIMIT = 10; // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
@@ -518,6 +518,20 @@ async function maybeSendImportCompletionPush(
     log.info('push_opted_out', { category: 'import_completion' });
     return;
   }
+  // SCA-296 C1: PushSendPayloadSchema.environment is z.enum(['production',
+  // 'sandbox']) — a null/unexpected apns_environment passes the enqueue
+  // (notification_jobs.payload_json is jsonb, no shape check) but burns
+  // MAX_ATTEMPTS=3 attempts inside processPushSend's Zod validation and
+  // dead-letters the row. Net: a real user push silently dropped because
+  // a column we control was never populated. Guard at enqueue time.
+  const env = validatePushEnvironment(installRow.apns_environment);
+  if (!env) {
+    log.warn('push_env_missing', {
+      category: 'import_completion',
+      apns_environment: installRow.apns_environment,
+    });
+    return;
+  }
   // Queue the APNs send as its own job (step 8 will implement the sender).
   const { error: insErr } = await client
     .from('notification_jobs')
@@ -531,13 +545,25 @@ async function maybeSendImportCompletionPush(
         body: 'Your imported recipe is ready to cook.',
         deep_link: `stir://import/${importId}`,
         apns_token: installRow.push_token,
-        environment: installRow.apns_environment,
+        environment: env,
       },
     });
   if (insErr) {
     log.warn('push_job_insert_failed', { err: String(insErr) });
   }
 }
+
+// SCA-296 C1: narrow nullable apns_environment to the z.enum the downstream
+// PushSendPayloadSchema accepts. Returns null if the value isn't a valid
+// APNs environment so callers can skip enqueue + log a typed warning
+// instead of poisoning notification_jobs with a row that will burn
+// MAX_ATTEMPTS retries before dead-lettering. Kept inline to this module
+// (not pushed to _shared/) because the same shape lives in
+// revenuecat-webhook and the two call sites differ enough on logging
+// context that a shared helper would obscure the intent — duplicate the
+// 4-line guard at each site when the second one lands.
+// (helper relocated to ./push_send.ts so tests can import without
+// triggering the top-level Deno.serve in this module.)
 
 // -----------------------------------------------------------------------------
 // Job state helpers

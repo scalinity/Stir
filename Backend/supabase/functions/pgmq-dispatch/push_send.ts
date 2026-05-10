@@ -31,6 +31,27 @@ export const PushSendPayloadSchema = z.object({
 
 export type PushSendPayload = z.infer<typeof PushSendPayloadSchema>;
 
+// SCA-296 C1: narrow a nullable apns_environment (the schema lets
+// device_installations.apns_environment be NULL — the CHECK only
+// constrains non-null values) to the z.enum the downstream
+// PushSendPayloadSchema accepts. Returns null if the raw value isn't a
+// valid APNs environment so callers can skip enqueue + log a typed
+// warning instead of poisoning notification_jobs with a row that burns
+// MAX_ATTEMPTS retries before dead-lettering.
+//
+// Lives here (not _shared/) for two reasons: (a) it's the natural
+// neighbor of PushSendPayloadSchema.environment whose enum it mirrors;
+// (b) push_send.ts has no top-level Deno.serve, so tests can import it
+// without spinning a server. The revenuecat-webhook billing_grace
+// enqueue (revenuecat-webhook/index.ts:687,701) has the same shape
+// and should pick up this guard the next time it's touched (SCA-296
+// scope is pgmq-dispatch only).
+export function validatePushEnvironment(
+  raw: string | null | undefined,
+): 'production' | 'sandbox' | null {
+  return raw === 'production' || raw === 'sandbox' ? raw : null;
+}
+
 export interface PushSendJob {
   id: string;
   canonical_user_key: string;
@@ -60,9 +81,18 @@ export type APNsSender = (input: APNsPushInput) => Promise<APNsPushResult>;
 export async function processPushSend(
   client: ReturnType<typeof createServiceClient>,
   job: PushSendJob,
-  log: { info: (msg: string, fields?: Record<string, unknown>) => void },
+  log: {
+    info: (msg: string, fields?: Record<string, unknown>) => void;
+    // SCA-296 C2: warn severity for swallowed DB UPDATE errors. Optional
+    // so the existing test's quietLogger (info-only stub) keeps compiling;
+    // production createLogger always supplies warn. Fall back to info
+    // when absent so the line still lands somewhere.
+    warn?: (msg: string, fields?: Record<string, unknown>) => void;
+  },
   sender: APNsSender = sendAPNsPush,
 ): Promise<void> {
+  // Single warn shim so the call sites below don't repeat the fallback.
+  const logWarn = log.warn ?? log.info;
   const parsed = PushSendPayloadSchema.safeParse(job.payload_json);
   if (!parsed.success) {
     throw new Error(
@@ -87,7 +117,15 @@ export async function processPushSend(
       template: payload.template,
       apns_id: result.apnsId,
     });
-    await client
+    // SCA-296 C2: error must not be silently swallowed. If the row UPDATE
+    // fails after a successful APNs send the reclaim sweep will re-claim
+    // 'processing' and APNs gets a duplicate delivery. Match the
+    // index.ts:464-469 pattern (job_mark_complete_failed warning, retry
+    // path owns recovery). We don't re-throw here: APNs has already
+    // accepted the push, the outer loop's retry would issue a SECOND
+    // delivery — strictly worse than tolerating one duplicate from the
+    // reclaim sweep on the rare case the warning fires.
+    const { error: markErr } = await client
       .from('notification_jobs')
       .update({
         state: 'completed',
@@ -95,6 +133,13 @@ export async function processPushSend(
         updated_at: new Date().toISOString(),
       })
       .eq('id', job.id);
+    if (markErr) {
+      logWarn('job_mark_complete_failed', {
+        job_id: job.id,
+        branch: 'push_sent',
+        err: String(markErr),
+      });
+    }
     return;
   }
 
@@ -107,7 +152,14 @@ export async function processPushSend(
       status: result.status,
       apns_reason: result.apnsReason,
     });
-    await client
+    // SCA-296 C2: if either UPDATE fails we re-throw so the outer retry
+    // loop catches it. APNs has rejected the token, so a retry's
+    // sendAPNsPush will get the same bad_device_token reason and the
+    // second pass will null the token again — idempotent. Orphaning the
+    // row in 'processing' is strictly worse (reclaim sweep duplicates
+    // a no-op fetch to APNs; healthy tokens with the same string never
+    // get nulled).
+    const { error: jobUpdErr } = await client
       .from('notification_jobs')
       .update({
         state: 'completed',
@@ -116,10 +168,27 @@ export async function processPushSend(
         error_message: `apns rejected token: ${result.apnsReason ?? 'BadDeviceToken'}`,
       })
       .eq('id', job.id);
-    await client
+    if (jobUpdErr) {
+      logWarn('job_mark_complete_failed', {
+        job_id: job.id,
+        branch: 'bad_device_token',
+        err: String(jobUpdErr),
+      });
+      throw new Error(`notification_jobs UPDATE failed: ${jobUpdErr.message ?? String(jobUpdErr)}`);
+    }
+    const { error: installUpdErr } = await client
       .from('device_installations')
       .update({ push_token: null, notifications_enabled: false })
       .eq('push_token', payload.apns_token);
+    if (installUpdErr) {
+      logWarn('device_install_null_failed', {
+        job_id: job.id,
+        err: String(installUpdErr),
+      });
+      throw new Error(
+        `device_installations null UPDATE failed: ${installUpdErr.message ?? String(installUpdErr)}`,
+      );
+    }
     return;
   }
 
