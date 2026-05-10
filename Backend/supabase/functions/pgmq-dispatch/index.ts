@@ -37,7 +37,17 @@ import { processPushSend, validatePushEnvironment } from './push_send.ts';
 
 const CLAIM_LIMIT = 10; // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
-const RETRY_BACKOFF_SECONDS = [60, 300, 900]; // 1m, 5m, 15m
+// SCA-306 W15: MAX_ATTEMPTS=3 means a job that fails at attempt_count=0
+// (first run) AND attempt_count=1 (first retry) gets one more shot at
+// attempt_count=2 (second retry) before the next-attempt-failure check
+// at line ~275 (`nextAttempt >= MAX_ATTEMPTS`) dead-letters it. That's
+// 2 retry buckets, not 3. The legacy [60, 300, 900] third entry was
+// dead code — the scheduleJobRetry call at line ~280 looks up
+// RETRY_BACKOFF_SECONDS[job.attempt_count] only when
+// `nextAttempt < MAX_ATTEMPTS`, so attempt_count can only be 0 or 1
+// when we reach the lookup. Dropping the unused 900s entry makes the
+// shape line up with the policy at a glance.
+const RETRY_BACKOFF_SECONDS = [60, 300]; // 1m, 5m
 const STUCK_JOB_TIMEOUT_MINUTES = 5; // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
 const MODEL = GeminiModel.FlashLite;
@@ -549,7 +559,16 @@ async function maybeSendImportCompletionPush(
       },
     });
   if (insErr) {
+    // SCA-306 W13: surface push-job INSERT failure to the outer retry
+    // catch at the for-loop boundary (~line 261) instead of swallowing
+    // it with a log line. writeCache above and the notification_jobs
+    // UPDATE-to-completed are both idempotent on retry, so a full
+    // re-run of the recipe-import job after a transient INSERT failure
+    // produces the correct end state (cached body + push job in
+    // notification_jobs queued exactly once). Pre-fix the import-job
+    // would complete-successfully and the user would never see a push.
     log.warn('push_job_insert_failed', { err: String(insErr) });
+    throw new Error(`push_job_insert_failed: ${String(insErr)}`);
   }
 }
 
