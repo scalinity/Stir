@@ -238,7 +238,12 @@ final class EntitlementService {
         }
         let newEffectiveTier = self.effectiveTier
         if Self.isDowngrade(from: priorEffectiveTier, to: newEffectiveTier) {
-            applyTierChange(previous: priorTier, new: entitlements.tier)
+            applyTierChange(
+                previousLiteral: priorTier,
+                newLiteral: entitlements.tier,
+                previousEffective: priorEffectiveTier,
+                newEffective: newEffectiveTier,
+            )
         }
     }
 
@@ -262,10 +267,23 @@ final class EntitlementService {
     /// (post-hydrate) cap. Async so the repository's CloudKit-bound
     /// save() doesn't block the hydrate caller; the banner publishes
     /// on the next runloop tick after the handler resolves.
-    private func applyTierChange(previous: Tier, new: Tier) {
+    ///
+    /// SCA-298 W1: takes BOTH the literal RC tier and the effective
+    /// (post-billing-state-demotion) tier. Telemetry exposes the
+    /// effective pair so a Premium trial-expiry hydrate
+    /// (`tier=.premium, billingState=.expired`) reads as the
+    /// `premium → free` downgrade it actually is, rather than the
+    /// no-op `premium → premium` literal pair the dashboard's
+    /// `WHERE previous_tier != new_tier` filter would drop.
+    private func applyTierChange(
+        previousLiteral: Tier,
+        newLiteral: Tier,
+        previousEffective: Tier,
+        newEffective: Tier,
+    ) {
         guard let handler = tierDowngradeHandler else {
             Logger.entitlement.info(
-                "tier downgrade detected (\(previous.rawValue, privacy: .public) → \(new.rawValue, privacy: .public)) but no tierDowngradeHandler wired — skipping reconciliation",
+                "tier downgrade detected (effective \(previousEffective.rawValue, privacy: .public) → \(newEffective.rawValue, privacy: .public)) but no tierDowngradeHandler wired — skipping reconciliation",
             )
             return
         }
@@ -273,10 +291,12 @@ final class EntitlementService {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let outcome = try await handler(previous, new, newCap)
+                let outcome = try await handler(previousLiteral, newLiteral, newCap)
                 self.publishReconciliationOutcome(
-                    previous: previous,
-                    new: new,
+                    previousLiteral: previousLiteral,
+                    newLiteral: newLiteral,
+                    previousEffective: previousEffective,
+                    newEffective: newEffective,
                     outcome: outcome,
                 )
             } catch {
@@ -290,15 +310,38 @@ final class EntitlementService {
     /// Fires telemetry and (when archivedCount > 0) publishes the
     /// banner. Split out so tests can drive the publish path without
     /// going through the async handler dispatch.
+    ///
+    /// SCA-298 W1: telemetry now carries BOTH literal-tier and
+    /// effective-tier pairs so dashboards can distinguish trial-
+    /// expiry (literal `premium → premium`, effective `premium → free`)
+    /// from a true RC tier change (literal `premium → free`, effective
+    /// the same).
+    ///
+    /// SCA-298 W21: skips telemetry entirely when `outcome.handlerRan`
+    /// is `false` — the RootCoordinator dealloc-fallback path returns
+    /// a zeroed outcome that's indistinguishable from a legitimate
+    /// no-op reconciliation by counts alone. Emitting on that path
+    /// would pollute the "downgrade reached reconciliation" signal
+    /// with events where the handler never actually executed.
     func publishReconciliationOutcome(
-        previous: Tier,
-        new: Tier,
+        previousLiteral: Tier,
+        newLiteral: Tier,
+        previousEffective: Tier,
+        newEffective: Tier,
         outcome: PantryItemRepository.ReconcileOutcome,
         now: Date = Date(),
     ) {
+        guard outcome.handlerRan else {
+            Logger.entitlement.info(
+                "reconciliation outcome handlerRan=false (coordinator deallocated or no household) — skipping pantry_tier_downgrade_reconciled telemetry",
+            )
+            return
+        }
         reconciliationTelemetry([
-            "previous_tier": previous.rawValue,
-            "new_tier": new.rawValue,
+            "previous_tier": previousLiteral.rawValue,
+            "new_tier": newLiteral.rawValue,
+            "previous_effective_tier": previousEffective.rawValue,
+            "new_effective_tier": newEffective.rawValue,
             "archived_count": outcome.archivedCount,
             "total_remembered_pre": outcome.totalRememberedPre,
             "total_remembered_post": outcome.totalRememberedPost,
@@ -309,8 +352,8 @@ final class EntitlementService {
         // now temporary" banner with X=0.
         guard outcome.archivedCount > 0 else { return }
         let banner = ReconciliationBanner(
-            previousTier: previous,
-            newTier: new,
+            previousTier: previousLiteral,
+            newTier: newLiteral,
             archivedCount: outcome.archivedCount,
             shownAt: now,
         )

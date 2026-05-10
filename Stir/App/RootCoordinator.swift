@@ -403,12 +403,22 @@ final class RootCoordinator {
         // outlives the app session) drops the reconciliation
         // silently, which is the same outcome as the iOS process
         // dying mid-reconcile.
+        //
+        // SCA-298 W21: both short-circuit paths (coordinator dealloc,
+        // no resolved household) return `handlerRan: false` so
+        // `EntitlementService.publishReconciliationOutcome` suppresses
+        // `pantry_tier_downgrade_reconciled`. Without the sentinel
+        // the dealloc path returned `(0,0,0)` — indistinguishable from
+        // a legitimate below-cap no-op — and would emit a misleading
+        // "downgrade reached reconciliation" signal even though the
+        // repo never executed.
         self.entitlements.tierDowngradeHandler = { [weak self] _, _, newCap in
             guard let self else {
                 return PantryItemRepository.ReconcileOutcome(
                     totalRememberedPre: 0,
                     totalRememberedPost: 0,
                     archivedCount: 0,
+                    handlerRan: false,
                 )
             }
             guard let profile = self.household.profile else {
@@ -419,6 +429,7 @@ final class RootCoordinator {
                     totalRememberedPre: 0,
                     totalRememberedPost: 0,
                     archivedCount: 0,
+                    handlerRan: false,
                 )
             }
             return try self.pantryItemRepository.reconcileForTierChange(

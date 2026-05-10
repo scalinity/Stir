@@ -419,7 +419,12 @@ final class EntitlementServiceTests: XCTestCase {
         )
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         service.publishReconciliationOutcome(
-            previous: .premium, new: .free, outcome: outcome, now: now,
+            previousLiteral: .premium,
+            newLiteral: .free,
+            previousEffective: .premium,
+            newEffective: .free,
+            outcome: outcome,
+            now: now,
         )
 
         // Telemetry payload
@@ -427,6 +432,8 @@ final class EntitlementServiceTests: XCTestCase {
         let payload = captured[0]
         XCTAssertEqual(payload["previous_tier"] as? String, "premium")
         XCTAssertEqual(payload["new_tier"] as? String, "free")
+        XCTAssertEqual(payload["previous_effective_tier"] as? String, "premium")
+        XCTAssertEqual(payload["new_effective_tier"] as? String, "free")
         XCTAssertEqual(payload["archived_count"] as? Int, 175)
         XCTAssertEqual(payload["total_remembered_pre"] as? Int, 200)
         XCTAssertEqual(payload["total_remembered_post"] as? Int, 25)
@@ -451,7 +458,11 @@ final class EntitlementServiceTests: XCTestCase {
             archivedCount: 0,
         )
         service.publishReconciliationOutcome(
-            previous: .premium, new: .free, outcome: outcome,
+            previousLiteral: .premium,
+            newLiteral: .free,
+            previousEffective: .premium,
+            newEffective: .free,
+            outcome: outcome,
         )
 
         XCTAssertEqual(captured.count, 1, "telemetry fires unconditionally")
@@ -460,11 +471,41 @@ final class EntitlementServiceTests: XCTestCase {
                      "banner only surfaces when archivedCount > 0")
     }
 
+    /// SCA-298 W21: when `outcome.handlerRan == false` (the coordinator's
+    /// short-circuit paths for dealloc / no-household), the service must
+    /// suppress telemetry — the dashboard signal is "downgrade reached
+    /// reconciliation" and the handler never actually executed.
+    func test_publishReconciliationOutcome_handlerRanFalse_suppressesTelemetryAndBanner() {
+        let service = makeServiceWithIsolatedDefaults()
+        var captured: [[String: Any]] = []
+        service.reconciliationTelemetry = { properties in captured.append(properties) }
+
+        let skipped = PantryItemRepository.ReconcileOutcome(
+            totalRememberedPre: 0,
+            totalRememberedPost: 0,
+            archivedCount: 0,
+            handlerRan: false,
+        )
+        service.publishReconciliationOutcome(
+            previousLiteral: .premium,
+            newLiteral: .free,
+            previousEffective: .premium,
+            newEffective: .free,
+            outcome: skipped,
+        )
+        XCTAssertEqual(captured.count, 0, "handlerRan=false must skip telemetry")
+        XCTAssertNil(service.pantryReconciliationBanner,
+                     "handlerRan=false must skip the banner too")
+    }
+
     func test_acknowledgeReconciliationBanner_clearsObservableAndPersistedSlots() {
         let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
         let service = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
         service.publishReconciliationOutcome(
-            previous: .premium, new: .free,
+            previousLiteral: .premium,
+            newLiteral: .free,
+            previousEffective: .premium,
+            newEffective: .free,
             outcome: PantryItemRepository.ReconcileOutcome(
                 totalRememberedPre: 200, totalRememberedPost: 25, archivedCount: 175,
             ),
@@ -484,7 +525,10 @@ final class EntitlementServiceTests: XCTestCase {
         let service = makeServiceWithIsolatedDefaults()
         let shownAt = Date(timeIntervalSince1970: 1_700_000_000)
         service.publishReconciliationOutcome(
-            previous: .premium, new: .free,
+            previousLiteral: .premium,
+            newLiteral: .free,
+            previousEffective: .premium,
+            newEffective: .free,
             outcome: PantryItemRepository.ReconcileOutcome(
                 totalRememberedPre: 200, totalRememberedPost: 25, archivedCount: 175,
             ),
@@ -512,7 +556,10 @@ final class EntitlementServiceTests: XCTestCase {
         let writer = EntitlementService(keychain: MockKeychain(), userDefaults: defaults)
         let shownAt = Date()  // banner is fresh — well within TTL
         writer.publishReconciliationOutcome(
-            previous: .pro, new: .free,
+            previousLiteral: .pro,
+            newLiteral: .free,
+            previousEffective: .pro,
+            newEffective: .free,
             outcome: PantryItemRepository.ReconcileOutcome(
                 totalRememberedPre: 1_000, totalRememberedPost: 25, archivedCount: 975,
             ),
@@ -598,10 +645,66 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.newCap, 25)
         XCTAssertEqual(captured.count, 1)
         XCTAssertEqual(captured[0]["archived_count"] as? Int, 175)
+        XCTAssertEqual(captured[0]["previous_effective_tier"] as? String, "premium")
+        XCTAssertEqual(captured[0]["new_effective_tier"] as? String, "free")
 
         // Banner publishes after the async hop — give it a tick to settle.
         await Task.yield()
         XCTAssertEqual(service.pantryReconciliationBanner?.archivedCount, 175)
+    }
+
+    /// SCA-298 W1: Premium-trial-expiry hydrate — the LITERAL RC tier
+    /// stays `.premium` across the transition, but `billingState`
+    /// flipping `active → expired` (RC's `EXPIRATION` event) demotes
+    /// the EFFECTIVE tier `premium → free`. The downgrade hook must
+    /// still fire, and telemetry must carry the effective pair so
+    /// a dashboard filter on `WHERE previous_tier != new_tier` doesn't
+    /// drop the cohort that ADR 0035 was sized against.
+    func test_hydrate_premiumTrialExpiry_dispatchesReconciliationWithEffectiveTiers() async throws {
+        let service = makeServiceWithIsolatedDefaults()
+
+        // Prime to Premium (trial active).
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .active, standingPantryCap: 250,
+        ))
+
+        let expectation = XCTestExpectation(description: "downgrade handler invoked on trial expiry")
+        let captureBox = HandlerCaptureBox()
+        service.tierDowngradeHandler = { previous, new, newCap in
+            await captureBox.record(previous: previous, new: new, newCap: newCap)
+            expectation.fulfill()
+            return PantryItemRepository.ReconcileOutcome(
+                totalRememberedPre: 60, totalRememberedPost: 25, archivedCount: 35,
+            )
+        }
+        var captured: [[String: Any]] = []
+        service.reconciliationTelemetry = { properties in captured.append(properties) }
+
+        // Trial expiry: tier still .premium, billingState flips to .expired.
+        // EffectiveTier demotes premium → free; the downgrade gate must fire.
+        service.hydrate(from: Self.entitlements(
+            tier: .premium, billingState: .expired, standingPantryCap: 25,
+        ))
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+
+        // Handler still receives literal tiers — that's the RC source of
+        // truth for the closure's job (Core Data reconciliation against
+        // the new cap doesn't care about effective demotion).
+        let snapshot = await captureBox.snapshot
+        XCTAssertEqual(snapshot.previous, .premium, "handler receives literal tier")
+        XCTAssertEqual(snapshot.new, .premium, "literal tier unchanged on trial expiry")
+
+        // Telemetry carries BOTH pairs so the dashboard sees the real
+        // demotion. previous_tier and new_tier match the literal pair
+        // (both premium); previous_effective_tier / new_effective_tier
+        // reveal the premium → free demotion.
+        XCTAssertEqual(captured.count, 1)
+        XCTAssertEqual(captured[0]["previous_tier"] as? String, "premium")
+        XCTAssertEqual(captured[0]["new_tier"] as? String, "premium")
+        XCTAssertEqual(captured[0]["previous_effective_tier"] as? String, "premium")
+        XCTAssertEqual(captured[0]["new_effective_tier"] as? String, "free")
+        XCTAssertEqual(captured[0]["archived_count"] as? Int, 35)
     }
 
     func test_hydrate_upgrade_doesNotDispatchReconciliation() async {
