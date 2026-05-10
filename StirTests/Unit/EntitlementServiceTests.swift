@@ -874,6 +874,127 @@ final class EntitlementServiceTests: XCTestCase {
         XCTAssertFalse(dispatched, "no flag → no retry dispatch")
     }
 
+    // MARK: - SCA-301: standingPantryCap wire-fragility + V2 → V3 cross-decode
+
+    /// SCA-301 W11: wire `standingPantryCap` is now `Int?`. A server-
+    /// side regression that drops the field decodes to `nil`, and the
+    /// service falls back to `25` (Free panic value) at the boundary.
+    func test_hydrate_nilStandingPantryCap_fallsBackToPanicValue25() {
+        let service = makeServiceWithIsolatedDefaults()
+        // Build entitlements with standingPantryCap=nil (server regression).
+        let entitlements = BootstrapResponse.Entitlements(
+            tier: .premium,
+            billingState: .active,
+            isTrial: false,
+            expiresAt: nil,
+            voiceEnabled: false,
+            billingRetryBanner: false,
+            standingPantryCap: nil,
+            quotas: Self.defaultQuotas,
+        )
+        service.hydrate(from: entitlements)
+        XCTAssertEqual(service.serverStandingPantryCap, 25,
+                       "nil wire value must fall back to the Free panic value 25")
+        XCTAssertEqual(service.rememberedPantryCap, 25,
+                       "rememberedPantryCap respects the fallback (SCA-265 floor passes through)")
+    }
+
+    /// SCA-301 W12: when a fresh V2 snapshot exists and no V3 snapshot
+    /// has been written yet (user upgraded offline, V2 bytes on disk,
+    /// no successful post-upgrade bootstrap), the service must cross-
+    /// decode V2 → translate (cap=25 default) → persist V3 → delete V2.
+    /// The grace window must NOT be lost.
+    func test_restoreFromCache_v2Present_v3Absent_translatesForwardAndPreservesGrace() throws {
+        let keychain = MockKeychain()
+        // Plant a fresh V2 snapshot (Premium user, grace window valid).
+        // V2 has no `serverStandingPantryCap` field. Keys are camelCase
+        // because the Codable structs have no CodingKeys override.
+        let nowISO = ISO8601DateFormatter.stirWithoutFractional.string(from: Date())
+        let v2JSON = """
+        {
+            "tier": "premium",
+            "billingState": "active",
+            "isTrial": false,
+            "expiresAt": null,
+            "voiceEnabled": true,
+            "billingRetryBanner": false,
+            "quotas": [],
+            "cachedAt": "\(nowISO)"
+        }
+        """
+        try keychain.write(v2JSON, key: .entitlementSnapshotV2)
+
+        // Construct service against this keychain; init runs the restore path.
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        let service = EntitlementService(keychain: keychain, userDefaults: defaults)
+
+        // V2 grace window translates forward — Premium user stays Premium.
+        XCTAssertEqual(service.tier, .premium, "v2 grace must restore tier, not fall back to Free")
+        XCTAssertEqual(service.billingState, .active)
+        XCTAssertTrue(service.voiceEnabled)
+        // Translation defaults the cap to the Free panic value.
+        XCTAssertEqual(service.serverStandingPantryCap, 25)
+        if case .hydrated(.cachedSnapshot) = service.hydrationState {
+            // ok
+        } else {
+            XCTFail("expected hydrationState=.hydrated(.cachedSnapshot), got \(service.hydrationState)")
+        }
+        // V2 slot should be drained, V3 slot written.
+        XCTAssertNil(try keychain.read(key: .entitlementSnapshotV2),
+                     "v2 slot must be deleted after successful translation")
+        XCTAssertNotNil(try keychain.read(key: .entitlementSnapshotV3),
+                        "v3 slot must be populated by the translation")
+    }
+
+    /// SCA-301 W12: when BOTH v2 and v3 snapshots exist on disk (a
+    /// double-write scenario from a botched migration earlier), v3
+    /// wins. The V2 cross-decode path doesn't run because the V3 read
+    /// succeeded first.
+    func test_restoreFromCache_v3Present_takesPrecedenceOverV2() throws {
+        let keychain = MockKeychain()
+        let nowISO = ISO8601DateFormatter.stirWithoutFractional.string(from: Date())
+
+        // Plant a fresh V3 snapshot (Premium, cap=250). camelCase keys
+        // match the Codable derivation; quotas is `[]` because
+        // `[FeatureKey: QuotaSnapshot]` is a non-String-keyed Dictionary
+        // which Swift Codable serializes as a flat array (key/value
+        // pairs interleaved).
+        let v3JSON = """
+        {
+            "tier": "premium",
+            "billingState": "active",
+            "isTrial": false,
+            "expiresAt": null,
+            "voiceEnabled": true,
+            "billingRetryBanner": false,
+            "serverStandingPantryCap": 250,
+            "quotas": [],
+            "cachedAt": "\(nowISO)"
+        }
+        """
+        try keychain.write(v3JSON, key: .entitlementSnapshotV3)
+        // Plant a (different) V2 snapshot to ensure it's NOT what wins.
+        let v2JSON = """
+        {
+            "tier": "free",
+            "billingState": "none",
+            "isTrial": false,
+            "expiresAt": null,
+            "voiceEnabled": false,
+            "billingRetryBanner": false,
+            "quotas": [],
+            "cachedAt": "\(nowISO)"
+        }
+        """
+        try keychain.write(v2JSON, key: .entitlementSnapshotV2)
+
+        let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+        let service = EntitlementService(keychain: keychain, userDefaults: defaults)
+
+        XCTAssertEqual(service.tier, .premium, "v3 wins when both slots are present")
+        XCTAssertEqual(service.serverStandingPantryCap, 250, "v3 cap survives — no translation default")
+    }
+
     /// Build an EntitlementService against an isolated UserDefaults
     /// suite so the SCA-99 banner persistence path doesn't bleed
     /// across tests. The suite is intentionally not removed in

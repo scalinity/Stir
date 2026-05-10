@@ -93,9 +93,15 @@ final class EntitlementService {
     /// shape). iOS surfaces this when Apple is retrying a failed renewal and
     /// the user still has paid access in the grace window.
     private(set) var billingRetryBanner: Bool = false
-    /// SCA-100: server-shipped standing-pantry-cap. Required on the
-    /// wire post-SCA-207 — `BootstrapResponse.Entitlements.standingPantryCap`
-    /// is now non-optional. Default `25` (Free panic value) covers the
+    /// SCA-100: server-shipped standing-pantry-cap. SCA-301 W11 made
+    /// the wire field `Int?` defensively so a server-side regression
+    /// (revert, A/B kill, unreviewed migration) that drops
+    /// `standing_pantry_cap` can't trip `DecodingError.keyNotFound`
+    /// and crash hydrate. The contract still requires the server to
+    /// emit the field; a missing value falls back to `25` (the Free
+    /// panic value) at the EntitlementService boundary and the
+    /// SCA-265 floor in `rememberedPantryCap` clamps any non-positive
+    /// value that DOES decode. The init default `25` covers the
     /// pre-first-hydrate window only; a real bootstrap response always
     /// overwrites this.
     private(set) var serverStandingPantryCap: Int = 25
@@ -201,7 +207,14 @@ final class EntitlementService {
         self.expiresAt = entitlements.expiresAt
         self.voiceEnabled = entitlements.voiceEnabled
         self.billingRetryBanner = entitlements.billingRetryBanner
-        self.serverStandingPantryCap = entitlements.standingPantryCap
+        // SCA-301 W11: wire field is `Int?` defensively (see
+        // SessionDTOs.swift). The contract still requires the server
+        // to emit `standing_pantry_cap` on every successful entitlement
+        // response, but a missing value falls back to the Free panic
+        // value 25 here instead of crashing decode upstream. The
+        // SCA-265 floor in `rememberedPantryCap` is the second line
+        // of defense for negative / zero values that DO decode.
+        self.serverStandingPantryCap = entitlements.standingPantryCap ?? 25
         // Mirror the tier into the App Group so StirWidgets can gate
         // Premium content without a Supabase round-trip from the widget
         // process. Written on every hydrate so webhook/tier-change
@@ -652,12 +665,25 @@ final class EntitlementService {
 
     // MARK: - Cached snapshot (24h grace)
 
-    /// JSON-encodable snapshot kept in Keychain for the 24h offline fallback.
-    /// v3 shape — flipped `serverStandingPantryCap: Int? → Int` in step
-    /// SCA-207 to match the server-required wire field. Keychain account
-    /// name was bumped in lockstep (see `.entitlementSnapshotV3` in
-    /// `KeychainStorage`) so stale v2 snapshots are ignored rather than
-    /// decode-failing and corrupting the 24h grace window.
+    /// JSON-encodable snapshot kept in Keychain for the 24h offline
+    /// fallback.
+    ///
+    /// **v3 shape** — current. `serverStandingPantryCap` is the
+    /// server-resolved cap from the bootstrap response so the offline
+    /// path doesn't fall back to a tier-table value mid-grace.
+    ///
+    /// **v2 → v3 cross-decode (SCA-301 W12).** Earlier code deleted
+    /// the v2 slot before reading v3, which meant a user upgrading
+    /// offline (V2 bytes on disk, V3 not yet written, no successful
+    /// bootstrap since the upgrade) lost the entire grace window and
+    /// fell back to `tier=.free` defaults — Premium users briefly
+    /// saw Free-tier gates post-upgrade until bootstrap succeeded.
+    /// Now: read v3 first; if v3 is missing, decode v2 against
+    /// `PersistedSnapshotV2` (no `serverStandingPantryCap`),
+    /// translate by defaulting the cap to `25` (Free panic; the
+    /// service-layer floor protects against bad data), persist the
+    /// translated shape to v3, then delete v2. Idempotent — the
+    /// next launch finds v3 and skips the v2 path entirely.
     private struct PersistedSnapshot: Codable, Sendable {
         let tier: Tier
         let billingState: BillingState
@@ -666,10 +692,28 @@ final class EntitlementService {
         let voiceEnabled: Bool
         let billingRetryBanner: Bool
         /// SCA-100: cached so a Keychain-restore path (24h offline
-        /// fallback) carries the server-resolved cap. Non-optional
-        /// post-SCA-207 — the wire field is required, so a snapshot
-        /// without it is malformed by definition.
+        /// fallback) carries the server-resolved cap. Non-optional on
+        /// the v3 shape — translation from v2 (where the field was
+        /// omitted) inserts the panic value `25` rather than leaking a
+        /// nil through the service contract.
         let serverStandingPantryCap: Int
+        let quotas: [FeatureKey: QuotaSnapshot]
+        let cachedAt: Date
+    }
+
+    /// SCA-301 W12: v2 shape decoded ONLY by the cross-decode fallback
+    /// in `restoreFromCachedSnapshotIfFresh`. Identical to v3 minus the
+    /// `serverStandingPantryCap` field. Once SCA-301 ships to all
+    /// installs, the v2 slot will drain naturally; the fallback path
+    /// stays in place until a future cleanup ticket reclaims it (cheap
+    /// — both shapes share the same JSON envelope).
+    private struct PersistedSnapshotV2: Codable, Sendable {
+        let tier: Tier
+        let billingState: BillingState
+        let isTrial: Bool
+        let expiresAt: Date?
+        let voiceEnabled: Bool
+        let billingRetryBanner: Bool
         let quotas: [FeatureKey: QuotaSnapshot]
         let cachedAt: Date
     }
@@ -700,25 +744,35 @@ final class EntitlementService {
     }
 
     private func restoreFromCachedSnapshotIfFresh() {
-        // Best-effort cleanup of the v1/v2 snapshot keys. Pre-launch, nothing
-        // depends on legacy data surviving — but leaving stale bytes around is
-        // sloppy and makes future key audits harder. Delete-on-startup is
-        // idempotent (errSecItemNotFound is treated as success in
-        // `KeychainStorage.delete`).
+        // Best-effort cleanup of the v1 snapshot key — never written by
+        // this build and decode-incompatible with both v2 and v3 shapes.
+        // V2 is handled by the cross-decode fallback below and ONLY
+        // deleted after a successful translation to v3.
         try? keychain.delete(key: .entitlementSnapshotLegacyV1)
-        try? keychain.delete(key: .entitlementSnapshotV2)
 
+        // Try v3 first (current shape).
+        if tryRestoreV3() { return }
+        // Fall back to v2 with cross-decode → translate → persist v3 →
+        // delete v2. SCA-301 W12.
+        tryRestoreV2Translating()
+    }
+
+    /// Attempt to restore the v3 snapshot. Returns `true` when a fresh
+    /// v3 entry was loaded (caller skips the v2 fallback); `false` when
+    /// no v3 entry was found / decode failed / TTL expired.
+    @discardableResult
+    private func tryRestoreV3() -> Bool {
         do {
             guard let raw = try keychain.read(key: .entitlementSnapshotV3),
                   let data = raw.data(using: .utf8) else {
-                return
+                return false
             }
             let snapshot = try JSONDecoder.stir.decode(PersistedSnapshot.self, from: data)
             let age = Date().timeIntervalSince(snapshot.cachedAt)
             guard age < Self.cacheValidity else {
-                Logger.entitlement.info("cached snapshot stale (\(Int(age), privacy: .public)s) — discarding")
+                Logger.entitlement.info("cached v3 snapshot stale (\(Int(age), privacy: .public)s) — discarding")
                 try? keychain.delete(key: .entitlementSnapshotV3)
-                return
+                return false
             }
             self.tier = snapshot.tier
             self.billingState = snapshot.billingState
@@ -729,11 +783,63 @@ final class EntitlementService {
             self.serverStandingPantryCap = snapshot.serverStandingPantryCap
             self.quotas = snapshot.quotas
             self.hydrationState = .hydrated(source: .cachedSnapshot)
-            Logger.entitlement.info("restored entitlement snapshot from cache (age \(Int(age), privacy: .public)s)")
+            Logger.entitlement.info("restored entitlement v3 snapshot from cache (age \(Int(age), privacy: .public)s)")
+            return true
         } catch {
             Logger.entitlement.warning(
-                "cached snapshot restore failed: \(error.localizedDescription, privacy: .public)",
+                "v3 snapshot restore failed: \(error.localizedDescription, privacy: .public)",
             )
+            return false
+        }
+    }
+
+    /// SCA-301 W12: fall back to the v2 slot when v3 is absent.
+    /// Cross-decodes against `PersistedSnapshotV2`, translates by
+    /// defaulting `serverStandingPantryCap = 25` (the Free panic value;
+    /// matches the SCA-265 floor), writes the translated shape into the
+    /// v3 slot via `persistSnapshot()`, then deletes the v2 slot.
+    /// Idempotent — the next launch finds v3 and skips this path
+    /// entirely.
+    private func tryRestoreV2Translating() {
+        do {
+            guard let raw = try keychain.read(key: .entitlementSnapshotV2),
+                  let data = raw.data(using: .utf8) else {
+                return
+            }
+            let snapshot = try JSONDecoder.stir.decode(PersistedSnapshotV2.self, from: data)
+            let age = Date().timeIntervalSince(snapshot.cachedAt)
+            guard age < Self.cacheValidity else {
+                Logger.entitlement.info("cached v2 snapshot stale (\(Int(age), privacy: .public)s) — discarding without translation")
+                try? keychain.delete(key: .entitlementSnapshotV2)
+                return
+            }
+            self.tier = snapshot.tier
+            self.billingState = snapshot.billingState
+            self.isTrial = snapshot.isTrial
+            self.expiresAt = snapshot.expiresAt
+            self.voiceEnabled = snapshot.voiceEnabled
+            self.billingRetryBanner = snapshot.billingRetryBanner
+            // Default to 25 — translation can't recover a value the v2
+            // slot never persisted, and the Free panic value mirrors the
+            // SCA-265 floor. The next foreground bootstrap overwrites
+            // this with the real server-resolved cap.
+            self.serverStandingPantryCap = 25
+            self.quotas = snapshot.quotas
+            self.hydrationState = .hydrated(source: .cachedSnapshot)
+            Logger.entitlement.info(
+                "restored entitlement v2 snapshot from cache (age \(Int(age), privacy: .public)s) — translated to v3, cap defaulted to 25",
+            )
+            // Translate forward: persist v3 then drop v2.
+            persistSnapshot()
+            try? keychain.delete(key: .entitlementSnapshotV2)
+        } catch {
+            Logger.entitlement.warning(
+                "v2 snapshot cross-decode failed: \(error.localizedDescription, privacy: .public) — dropping v2 slot",
+            )
+            // V2 bytes that don't decode are useless — they're not going
+            // to start decoding on the next launch. Drop so we don't
+            // re-try every launch for nothing.
+            try? keychain.delete(key: .entitlementSnapshotV2)
         }
     }
 

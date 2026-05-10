@@ -57,11 +57,20 @@ struct BootstrapResponse: Decodable, Sendable, Equatable {
         /// against `effectiveTier(entitlement)` in
         /// `Backend/supabase/functions/_shared/entitlements.ts` so a
         /// stale RevenueCat row with `billing_state='expired'` correctly
-        /// demotes before the wire. SCA-207 sunset: this used to be
-        /// `Int?` with an iOS-side `Tier.rememberedPantryCap` fallback
-        /// for in-flight rolling-deploy / pre-SCA-100 server responses;
-        /// post-rollout the field is required.
-        let standingPantryCap: Int
+        /// demotes before the wire.
+        ///
+        /// SCA-207 promoted this to `Int` non-optional; SCA-301 W11
+        /// reverted to `Int?` for boundary-level defensive decoding.
+        /// The field IS required by contract — `entitlements.ts` always
+        /// emits it — but a server-side regression (revert, A/B kill,
+        /// unreviewed migration) that drops the key would otherwise
+        /// trip `DecodingError.keyNotFound` and crash hydrate. Treating
+        /// the wire as optional and falling back to `25` (the Free
+        /// panic value, matching `SCA-265` floor) at the EntitlementService
+        /// boundary keeps the app rendering Free-tier limits rather
+        /// than blank-screening. The SCA-265 service-layer floor is
+        /// preserved unchanged.
+        let standingPantryCap: Int?
         let quotas: [Quota]
 
         enum CodingKeys: String, CodingKey {

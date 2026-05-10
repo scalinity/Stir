@@ -72,12 +72,23 @@ extension KeychainKey {
     /// must too. A v2 snapshot decoded against the v3 struct would carry
     /// nil through `optional → required` and crash; bump the slot and
     /// delete v2 on init.
+    ///
+    /// SCA-301 W11 + W12 reversal: the wire field was demoted back to
+    /// `Int?` for boundary-level defensive decoding, and
+    /// `restoreFromCachedSnapshotIfFresh` now CROSS-DECODES v2 →
+    /// translates → persists v3 → drops v2 rather than blindly
+    /// pre-deleting v2. A user upgrading offline (V2 bytes on disk,
+    /// V3 not yet written, no successful post-upgrade bootstrap) no
+    /// longer falls back to Free defaults mid-grace. This slot stays
+    /// the live read/write target.
     static var entitlementSnapshotV3: KeychainKey {
         KeychainKey(service: defaultService, account: "entitlement_snapshot_v3")
     }
 
-    /// Legacy v2 slot. Deleted on EntitlementService init; never written
-    /// post-SCA-207.
+    /// Legacy v2 slot. SCA-301 W12: kept readable for cross-decode
+    /// fallback in `EntitlementService.restoreFromCachedSnapshotIfFresh`;
+    /// only deleted post-translation to v3 (or on stale/decode-fail).
+    /// Never written by current code.
     static var entitlementSnapshotV2: KeychainKey {
         KeychainKey(service: defaultService, account: "entitlement_snapshot_v2")
     }
