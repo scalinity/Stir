@@ -17,7 +17,10 @@ enum OnboardingRoute: Hashable, Sendable {
     case completionTransition
     /// SCA-67 — "See a sample" pushes the SampleShowcaseView onto the
     /// onboarding NavigationStack instead of the previous immediate-
-    /// bypass-to-Tonight. The showcase's "Try with your real kitchen"
-    /// CTA reuses the bypass logic; "Back to start" pops to Welcome.
+    /// bypass-to-Tonight. SCA-293 — the showcase's "Try with your real
+    /// kitchen" CTA pushes `.setupPreferences` (same destination as
+    /// Welcome's "Try it now"), so the sample-path user gets the same
+    /// preferences + kitchen setup as everyone else. "Back to start"
+    /// pops to Welcome.
     case sampleShowcase
 }

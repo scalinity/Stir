@@ -1109,14 +1109,15 @@ final class RootCoordinator {
     }
 
     /// Called by OnboardingRoot when the flow finishes — either via
-    /// the Setup 2 completion transition, a Skip-forward shortcut,
-    /// or the Welcome "See a sample" bypass. Fires the coordinator
-    /// phase flip + clears the onboarding VM.
+    /// the Setup 2 completion transition or a Skip-forward shortcut
+    /// (the SCA-67 "See a sample" bypass landed here too, until
+    /// SCA-293 routed the showcase commitment gesture through
+    /// Setup 1/2). Fires the coordinator phase flip + clears the
+    /// onboarding VM.
     ///
     /// Note: `onboarding_completed` PostHog emission is now owned by
-    /// OnboardingViewModel.fireOnboardingCompletedEvent() (called from
-    /// OnboardingCompletionView + the See-a-sample handler in
-    /// OnboardingRoot). Moved out of the coordinator so every
+    /// OnboardingViewModel.fireOnboardingCompletedEvent(), called from
+    /// OnboardingCompletionView. Moved out of the coordinator so the
     /// emission site picks up Spec §15 properties (duration_sec +
     /// skipped_steps) from the ViewModel — the coordinator doesn't
     /// hold the onboarding start-time anchor or the skipped-steps

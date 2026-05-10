@@ -481,21 +481,18 @@ final class OnboardingViewModel {
     /// BEFORE any auto-advance dwell, so a user who kills during the
     /// dwell still counts as completed (decision b).
     ///
-    /// Two emission sites:
-    ///   - `OnboardingCompletionView.task` (normal flow via Setup 2 +
-    ///     Skip shortcuts)
-    ///   - `OnboardingRoot` "See a sample" Welcome handler (stub path
-    ///     that bypasses Setup 1/2 entirely)
-    /// RootCoordinator.handleOnboardingFinished no longer emits —
-    /// ownership moved here so both ViewModel-mediated paths fire
-    /// through a single helper.
+    /// Single emission site: `OnboardingCompletionView.task` (every
+    /// path — Setup 2 "Finish setup", Skip shortcuts, and (SCA-293) the
+    /// sample-showcase path now that "Try with your real kitchen"
+    /// routes through Setup 1/2 instead of the SCA-67 immediate
+    /// bypass. RootCoordinator.handleOnboardingFinished no longer
+    /// emits — ownership lives here.
     func fireOnboardingCompletedEvent() {
-        // Belt-and-suspenders idempotency — even if both callers
-        // (`OnboardingCompletionView.task` + WelcomeView "See a sample"
-        // handler) are debounced, NavigationStack's `.task` re-fires
-        // on view re-appearance and a double-tap in the handler queue
-        // can land two dispatches before the first completes. Single
-        // flag covers both cases.
+        // Belt-and-suspenders idempotency — NavigationStack's `.task`
+        // can re-fire on `OnboardingCompletionView` re-appearance
+        // (e.g. user backs out of the dwell and returns), and a
+        // double-tap in the handler queue can land two dispatches
+        // before the first completes. Single flag covers both cases.
         guard !hasFiredCompletedEvent else { return }
         hasFiredCompletedEvent = true
 

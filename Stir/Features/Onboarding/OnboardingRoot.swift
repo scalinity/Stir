@@ -34,22 +34,29 @@ struct OnboardingRoot: View {
     /// (review finding C4).
     @State private var isAdvancing = false
 
+    /// Apply a synchronous routing decision from `OnboardingRouter`
+    /// to the navigation `path`. Centralised so the four pure handlers
+    /// (Welcome's two CTAs + SampleShowcase's two CTAs) all share the
+    /// `isAdvancing` guard + path-mutation logic and the regression-
+    /// pinning unit tests in `OnboardingRouterTests` cover the wire
+    /// contract those handlers depend on. Setup-1/Setup-2 handlers
+    /// stay imperative because they spawn async save Tasks (see
+    /// `OnboardingRouter.swift` for the design note).
+    private func dispatch(_ action: OnboardingRouter.Action) {
+        guard !isAdvancing else { return }
+        switch OnboardingRouter.handle(action) {
+        case .push(let route):
+            path.append(route)
+        case .popLast:
+            if !path.isEmpty { path.removeLast() }
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             WelcomeView(
-                onTryIt: {
-                    guard !isAdvancing else { return }
-                    path.append(.setupPreferences)
-                },
-                onSeeSample: {
-                    guard !isAdvancing else { return }
-                    // SCA-67: route into the showcase, NOT directly
-                    // into the bypass-to-Tonight. The showcase's "Try
-                    // with your real kitchen" CTA reuses the bypass
-                    // logic via OnboardingRoute.sampleShowcase →
-                    // SampleShowcaseView's onContinueOnboarding.
-                    path.append(.sampleShowcase)
-                },
+                onTryIt: { dispatch(.welcomeTryIt) },
+                onSeeSample: { dispatch(.welcomeSeeSample) },
             )
             .navigationDestination(for: OnboardingRoute.self) { route in
                 switch route {
@@ -147,35 +154,8 @@ struct OnboardingRoot: View {
                     )
                 case .sampleShowcase:
                     SampleShowcaseView(
-                        onPrimaryAction: {
-                            guard !isAdvancing else { return }
-                            isAdvancing = true
-                            // Reuse the original "See a sample" bypass
-                            // logic — persist zero-selection defaults,
-                            // record skips, complete onboarding inline
-                            // (no completion-transition for the sample
-                            // path), land on Tonight Home.
-                            Task {
-                                defer { isAdvancing = false }
-                                do {
-                                    try viewModel.savePreferences()
-                                    try viewModel.saveKitchen()
-                                    viewModel.recordSkip(over: "setup_preferences")
-                                    viewModel.recordSkip(over: "setup_kitchen")
-                                    try viewModel.completeOnboarding()
-                                    viewModel.fireOnboardingCompletedEvent()
-                                    onFinished()
-                                } catch {
-                                    Logger.ui.error(
-                                        "onboarding_sample_continue_failed: \(error.localizedDescription, privacy: .public)",
-                                    )
-                                    errorMessage = ErrorPresenter.present(.sync01).message
-                                }
-                            }
-                        },
-                        onBack: {
-                            path.removeLast()
-                        },
+                        onPrimaryAction: { dispatch(.sampleShowcasePrimary) },
+                        onBack: { dispatch(.sampleShowcaseBack) },
                     )
                 }
             }
