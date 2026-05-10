@@ -62,8 +62,16 @@ struct PaywallOfferings: Sendable, Equatable {
     var packages: [PaywallPackage]
 
     /// Helper for the primary CTA — the 7-day trial annual.
+    ///
+    /// SCA-294 (2026-05-09): trial migrated from `stir.premium.annual.trial7`
+    /// to `stir.pro.annual` for higher per-converted-user ROI ($139.99 vs
+    /// $69.99 AOV). The `.trial7` suffix on the Premium SKU's productID is
+    /// now historical — Apple doesn't allow productID renames, so we live
+    /// with the misnomer until a future IAP cleanup. The `StirProduct` enum
+    /// case name `premiumAnnualTrial7` is similarly historical; what carries
+    /// the trial is whichever SKU `primaryTrialPackage` resolves.
     var primaryTrialPackage: PaywallPackage? {
-        packages.first { $0.productID == StirProduct.premiumAnnualTrial7.rawValue }
+        packages.first { $0.productID == StirProduct.proAnnual.rawValue }
     }
 
     /// Helper for the monthly Premium secondary CTA.
@@ -77,6 +85,14 @@ struct PaywallOfferings: Sendable, Equatable {
 
     var proAnnualPackage: PaywallPackage? {
         packages.first { $0.productID == StirProduct.proAnnual.rawValue }
+    }
+
+    /// Premium annual (no trial post-SCA-294). Surfaced from
+    /// ProComparisonSheet's "Premium" column when comparing alongside the
+    /// Pro trial; keeps the cheaper-tier annual visible as a downgrade
+    /// option without burying it inside Settings.
+    var premiumAnnualPackage: PaywallPackage? {
+        packages.first { $0.productID == StirProduct.premiumAnnualTrial7.rawValue }
     }
 }
 

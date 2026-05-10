@@ -32,9 +32,9 @@ From 9+ turn sessions, N=4 refresh + pre-mint, 22% tool-call rate. Voice turn no
 
 ```
 stir.premium.monthly          $9.99/mo     no trial
-stir.premium.annual.trial7    $69.99/yr    7-day free trial (PRIMARY paywall CTA)
+stir.premium.annual.trial7    $69.99/yr    no trial (`.trial7` suffix historical, see SCA-294)
 stir.pro.monthly              $14.99/mo    no trial
-stir.pro.annual               $139.99/yr   no trial
+stir.pro.annual               $139.99/yr   7-day free trial (PRIMARY paywall CTA, post-SCA-294)
 ```
 
 Group `stir.subscriptions`. Family Sharing **off** all SKUs. **Apple fees:** Y1 non-SMB 30%; Y2+ 15%; SMB Program 15% from Y1 (check eligibility near launch).

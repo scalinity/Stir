@@ -61,7 +61,7 @@ Quick highlights load-bearing for everyday work:
 
 - Production models: `gemini-3-flash-preview` (text, scan/solve/sub/cook-fallback), `gemini-3.1-flash-lite-preview` (recipe import, grocery), `gemini-3.1-flash-live-preview` (voice, `thinkingLevel: minimal`). Live audio 25 tok/s both ways. **No caching on Live API** (ADR 0015).
 - Voice caps: free 0 / premium 13 / pro 27 sessions per month (ADR 0015). `max_output_tokens: 400` baked into mint (ADR 0010).
-- StoreKit SKUs: `stir.premium.monthly` $9.99 · `stir.premium.annual.trial7` $69.99 (PRIMARY paywall CTA, 7-day trial) · `stir.pro.monthly` $14.99 · `stir.pro.annual` $139.99. Family Sharing off, group `stir.subscriptions`.
+- StoreKit SKUs: `stir.premium.monthly` $9.99 · `stir.premium.annual.trial7` $69.99 (no trial; `.trial7` suffix is historical, see SCA-294) · `stir.pro.monthly` $14.99 · `stir.pro.annual` $139.99 (PRIMARY paywall CTA, 7-day trial). Family Sharing off, group `stir.subscriptions`.
 - Canonical user key: `ck:<userRecordName>` if CloudKit available, else `install:<keychainInstallId>`. Always alias forward.
 - `usage_counters.cap_count` SNAPSHOTTED at row-creation; never refreshed on tier upgrade. Atomic check via `UPDATE ... WHERE used_count < cap_count RETURNING ...`.
 - `voice_enabled` is SERVER-COMPUTED; `quotas` is an array (not keyed object) with `used`/`cap`/`period_end`.

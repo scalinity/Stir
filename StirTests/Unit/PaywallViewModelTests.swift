@@ -245,12 +245,17 @@ final class PaywallViewModelTests: XCTestCase {
         // CTA + disclosure copy. The VM is a pass-through — it must not
         // strip or coerce the field. Regression guard: any future refactor
         // that re-maps offerings inside the VM must preserve eligibility.
+        //
+        // SCA-294: trial-bearing SKU is now `stir.pro.annual` ($139.99),
+        // not `stir.premium.annual.trial7`. `primaryTrialPackage` resolves
+        // by productID match — this test puts a Pro-annual package with
+        // .ineligible into the offering and asserts plumbing.
         let ineligiblePackage = PaywallPackage(
-            productID: StirProduct.premiumAnnualTrial7.rawValue,
-            displayPrice: "$69.99",
+            productID: StirProduct.proAnnual.rawValue,
+            displayPrice: "$139.99",
             periodDescription: "year",
-            introOfferDescription: "7-day free trial, then $69.99/year",
-            tier: .premium,
+            introOfferDescription: "7-day free trial, then $139.99/year",
+            tier: .pro,
             introEligibility: .ineligible,
         )
         let service = MockRevenueCatService()
@@ -260,7 +265,7 @@ final class PaywallViewModelTests: XCTestCase {
         await vm.load()
 
         let surfaced = vm.currentOfferings()?.primaryTrialPackage
-        XCTAssertEqual(surfaced?.productID, StirProduct.premiumAnnualTrial7.rawValue)
+        XCTAssertEqual(surfaced?.productID, StirProduct.proAnnual.rawValue)
         XCTAssertEqual(surfaced?.introEligibility, .ineligible)
     }
 
@@ -270,7 +275,7 @@ final class PaywallViewModelTests: XCTestCase {
         // RC convention), so this asserts the field plumbs through for
         // `.eligible` too. Without this, a future regression that coerced
         // .eligible → .unknown would still pass `test_load_propagates...`.
-        let eligible = Self.samplePackage(.premiumAnnualTrial7, eligibility: .eligible)
+        let eligible = Self.samplePackage(.proAnnual, eligibility: .eligible)
         let service = MockRevenueCatService()
         service.offeringsResult = .success(PaywallOfferings(packages: [eligible]))
         let vm = Self.makeVM(service: service)
@@ -359,13 +364,25 @@ final class PaywallViewModelTests: XCTestCase {
         // trial-bearing → `.unknown` (View renders trial copy per RC
         // convention; eligibility query lands in production), non-trial
         // → `.noOffer`. Tests can override either way for negative cases.
-        let resolved = eligibility ?? (product == .premiumAnnualTrial7 ? .unknown : .noOffer)
+        //
+        // SCA-294: trial-bearing SKU is now `.proAnnual` ($139.99), not
+        // `.premiumAnnualTrial7`. The `.trial7` suffix on the Premium
+        // SKU is historical (Apple doesn't allow productID renames).
+        let isTrialBearing = product == .proAnnual
+        let resolved = eligibility ?? (isTrialBearing ? .unknown : .noOffer)
+        let displayPrice: String
+        switch product {
+        case .proAnnual:           displayPrice = "$139.99"
+        case .premiumAnnualTrial7: displayPrice = "$69.99"
+        case .proMonthly:          displayPrice = "$14.99"
+        case .premiumMonthly:      displayPrice = "$9.99"
+        }
         return PaywallPackage(
             productID: product.rawValue,
-            displayPrice: product == .premiumAnnualTrial7 ? "$69.99" : "$9.99",
+            displayPrice: displayPrice,
             periodDescription: product.rawValue.contains("annual") ? "year" : "month",
-            introOfferDescription: product == .premiumAnnualTrial7
-                ? "7-day free trial, then $69.99/year" : nil,
+            introOfferDescription: isTrialBearing
+                ? "7-day free trial, then $139.99/year" : nil,
             tier: product.tier,
             introEligibility: resolved,
         )

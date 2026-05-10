@@ -178,22 +178,24 @@ struct PaywallView: View {
     }
 
     private var featuresList: some View {
-        // Premium feature list — ADR 0015 copy spec. Frequency framing
-        // ("~3 dinners a week" vs "13 sessions/month") reads as benefit
-        // not rationing, and ages well if the cap ever comes back up.
-        // Voice bullet leads because it's the paid-tier differentiator.
+        // SCA-294: trial unlocks Pro for 7 days, so the feature list
+        // anchors Pro's caps and Pro-exclusive features (multi-image scan).
+        // ADR 0015 copy spec — frequency framing ("every dinner" vs "27
+        // sessions/month") reads as benefit not rationing, and ages well
+        // if the cap shifts. Voice + multi-image lead as the durable Pro
+        // differentiators.
         //
-        // iPhone SE (4.7") truncation watch: "Hands-free voice for ~3
-        // dinners a week" is the longest string in this list. If it
-        // wraps awkwardly under Dynamic Type, fall back to "Voice for
-        // ~3 dinners a week" (29 chars) and promote "Hands-free voice
-        // Cook Mode" to a section header above the bullet list.
+        // iPhone SE (4.7") truncation watch: "Hands-free voice for every
+        // dinner" stays under 32 chars (well within the iPhone SE single-
+        // line budget at default Dynamic Type). If a future copy variant
+        // exceeds, promote a single Pro line to a section header above
+        // the bullet list as the fallback pattern.
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-            featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice for ~3 dinners a week")
-            featureRow(icon: Image.Stir.cook, title: "40 Dinner Solves per month")
-            featureRow(icon: Image.Stir.pro, title: "Unlimited Saved Favorites")
+            featureRow(icon: Image.Stir.voiceWave, title: "Hands-free voice for every dinner")
+            featureRow(icon: Image.Stir.cook, title: "120 Dinner Solves per month")
+            featureRow(icon: Image.Stir.pro, title: "Multi-image pantry scan")
             featureRow(icon: Image.Stir.widgetFill, title: "Widgets + Shortcuts")
-            featureRow(icon: Image.Stir.leaf, title: "Leftovers mode")
+            featureRow(icon: Image.Stir.leaf, title: "Leftovers + unlimited favorites")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -272,12 +274,17 @@ struct PaywallView: View {
         // `.buttonStyle(.bordered)` would inherit the NavigationStack ember
         // tint and fight the ink primary CTA, so this composes the outline
         // explicitly.
-        let package = offerings.premiumMonthlyPackage
+        //
+        // SCA-294: secondary CTA matches the new Pro-trial primary identity.
+        // User who wants Pro but not annual taps Pro monthly here. User who
+        // prefers Premium taps "Compare plans" → ProComparisonSheet, which
+        // surfaces the Premium options as a downgrade alternative.
+        let package = offerings.proMonthlyPackage
         let isDisabled = package == nil || disablePurchaseFor == package?.productID
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
-            Text(package.map { "Premium monthly — \($0.displayPrice)/mo" } ?? "Premium monthly — unavailable")
+            Text(package.map { "Pro monthly — \($0.displayPrice)/mo" } ?? "Pro monthly — unavailable")
                 .stirFont(.labelLg)
                 .foregroundStyle(Color.Stir.textPrimary)
                 .frame(maxWidth: .infinity)

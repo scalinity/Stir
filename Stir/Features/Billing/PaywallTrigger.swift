@@ -95,7 +95,11 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
             // ADR 0015 copy spec: hero carries the benefit verb ("Cook
             // hands-free with voice") + trial CTA. Cap numbers live in
             // the subheadline / feature list below, never the hero.
-            return "Cook hands-free with voice. Start Premium free for 7 days."
+            //
+            // SCA-294: trial CTA now lands on Pro annual (was Premium).
+            // Hero says "Pro" so the headline matches the package the
+            // primary CTA actually purchases.
+            return "Cook hands-free with voice. Try Stir Pro free for 7 days."
         case .voiceCookQuotaExhausted:
             return "You've used this month's voice Cook Sessions. Upgrade to Pro for more."
         case .dinnerSolveQuotaExhausted:
@@ -157,9 +161,10 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         let proValueProp = "Voice cooking for every dinner, 120 Dinner Solves/mo, multi-image scan, priority inference, 1,000 pantry items."
         switch self {
         case .voiceAffordanceTapped:
-            // Free→Premium hero trigger — lead with the benefit verb,
-            // not the cap. ADR 0015 paywall copy table, row 1.
-            return "Cook hands-free with your voice, 40 Dinner Solves/mo, unlimited favorites, widgets, leftovers."
+            // SCA-294: trial unlocks Pro for 7 days, so subheadline cites
+            // Pro caps + Pro-exclusive multi-image scan. Frequency framing
+            // ("every dinner") for the voice cap stays per ADR 0015.
+            return "Cook hands-free with your voice, 120 Dinner Solves/mo, multi-image scan, unlimited favorites, widgets, leftovers."
         case .voiceCookQuotaExhausted:
             // Premium user hit monthly voice cap → Pro upsell. Voice is
             // THE reason they'd upgrade; "every dinner" removes the

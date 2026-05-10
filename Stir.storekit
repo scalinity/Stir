@@ -30,17 +30,22 @@
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "B1B1C2D3-E4F5-6789-ABCD-EF0123456701",
-          "introductoryOffer" : null,
+          "introductoryOffer" : {
+            "internalID" : "C1B1C2D3-E4F5-6789-ABCD-EF0123456701",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W",
+            "numberOfPeriods" : 1
+          },
           "localizations" : [
             {
-              "description" : "120 Dinner Solves/mo, 27 voice Cook Sessions/mo, multi-image scans, priority inference queue, 1,000 pantry items.",
+              "description" : "120 Dinner Solves/mo, 27 voice Cook Sessions/mo, multi-image scans, priority inference queue, 1,000 pantry items. 7-day free trial.",
               "displayName" : "Stir Pro Annual",
               "locale" : "en_US"
             }
           ],
           "productID" : "stir.pro.annual",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Pro Annual",
+          "referenceName" : "Pro Annual (7-day trial)",
           "subscriptionGroupID" : "A8B1C2D3-E4F5-6789-ABCD-EF0123456789",
           "type" : "RecurringSubscription",
           "winbackOffers" : []
@@ -74,22 +79,17 @@
           "familyShareable" : false,
           "groupNumber" : 3,
           "internalID" : "B3B1C2D3-E4F5-6789-ABCD-EF0123456703",
-          "introductoryOffer" : {
-            "internalID" : "C3B1C2D3-E4F5-6789-ABCD-EF0123456703",
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P1W",
-            "numberOfPeriods" : 1
-          },
+          "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "40 Dinner Solves/mo, 13 voice Cook Sessions/mo, widgets, shortcuts, leftovers mode, saved favorites. 7-day free trial.",
+              "description" : "40 Dinner Solves/mo, 13 voice Cook Sessions/mo, widgets, shortcuts, leftovers mode, saved favorites.",
               "displayName" : "Stir Premium Annual",
               "locale" : "en_US"
             }
           ],
           "productID" : "stir.premium.annual.trial7",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Premium Annual (7-day trial)",
+          "referenceName" : "Premium Annual",
           "subscriptionGroupID" : "A8B1C2D3-E4F5-6789-ABCD-EF0123456789",
           "type" : "RecurringSubscription",
           "winbackOffers" : []
