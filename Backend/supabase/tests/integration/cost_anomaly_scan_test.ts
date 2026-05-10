@@ -367,3 +367,111 @@ Deno.test('SCA-121 cost_anomaly_scan: session that crosses BOTH thresholds emits
     await cleanupUser(canonicalKey);
   }
 });
+
+// ---------------------------------------------------------------------------
+// SCA-303 (/review-5 W9) — concurrent-invocation regression guard.
+//
+// Pre-303 the dedup was a NOT EXISTS subquery inside the INSERT — two
+// concurrent scans both observed "no open row" and both INSERTed, producing
+// duplicate critical anomalies and double Sentry alerts. The 20260510221200
+// migration promoted dedup to partial UNIQUE indexes (uq_cost_anomalies_open
+// + uq_cost_anomalies_open_session) and rewrote the proc to use
+// ON CONFLICT DO NOTHING. This test fires two scans in parallel against a
+// seeded over-cap session and asserts exactly one row per anomaly_type
+// lands — the storage-layer dedup guarantee.
+// ---------------------------------------------------------------------------
+
+Deno.test('SCA-303 cost_anomaly_scan: concurrent invocations dedup via partial UNIQUE (TOCTOU guard)', async () => {
+  const canonicalKey = await seedUser();
+  const sessionId = crypto.randomUUID();
+  try {
+    // Seed a session that trips BOTH detectors (tokens-over-cap AND
+    // runaway) so we can verify dedup against both partial unique indexes
+    // in a single parallel run.
+    for (let i = 0; i < 21; i++) {
+      const ageSeconds = -660 + Math.floor((i * 660) / 20);
+      await insertVoiceTurn({
+        sessionId,
+        canonicalKey,
+        turnIndex: i + 1,
+        inputTokens: 1500,
+        outputTokens: 1500,
+        ageSeconds,
+      });
+    }
+
+    // Two parallel scans — simulate manual-ops-trigger racing the cron
+    // tick. Promise.all guarantees both RPC connections are open before
+    // either resolves; we want them to actually fight over the dedup.
+    await Promise.all([runScan(), runScan()]);
+
+    const svc = serviceClient();
+    const hash = await expectedHash(canonicalKey);
+    const { data: rows } = await svc
+      .from('cost_anomalies')
+      .select('anomaly_type, details_json')
+      .eq('canonical_user_key_hash', hash)
+      .order('anomaly_type');
+
+    // Exactly one row per anomaly_type — partial UNIQUE on
+    // (canonical_user_key_hash, anomaly_type, session_id) blocks the
+    // second INSERT cleanly via ON CONFLICT DO NOTHING.
+    const types = (rows ?? []).map((r) => r.anomaly_type as string).sort();
+    assertEquals(types, ['runaway_session', 'voice_session_tokens_over_cap']);
+    // Both rows reference the same session_id we seeded — confirms the
+    // dedup matched on the JSONB-expression column of the partial index.
+    for (const row of rows!) {
+      const details = row.details_json as Record<string, unknown>;
+      assertEquals(details.session_id, sessionId);
+    }
+  } finally {
+    await clearAnomaliesForUser(canonicalKey);
+    await cleanupUser(canonicalKey);
+  }
+});
+
+Deno.test('SCA-303 cost_anomaly_scan: distinct sessions both emit (per-session grain preserved)', async () => {
+  // Negative-space check on SCA-303: the partial UNIQUE has session_id in
+  // its expression columns, so two DIFFERENT sessions for the same user
+  // must each emit their own row — the dedup applies only within a single
+  // (user, anomaly_type, session_id) grain, not across sessions.
+  const canonicalKey = await seedUser();
+  const sessionA = crypto.randomUUID();
+  const sessionB = crypto.randomUUID();
+  try {
+    // Two distinct over-cap sessions for the same user.
+    await insertVoiceTurn({
+      sessionId: sessionA,
+      canonicalKey,
+      turnIndex: 1,
+      inputTokens: 30000,
+      outputTokens: 30000,
+      ageSeconds: -120,
+    });
+    await insertVoiceTurn({
+      sessionId: sessionB,
+      canonicalKey,
+      turnIndex: 1,
+      inputTokens: 30000,
+      outputTokens: 30000,
+      ageSeconds: -60,
+    });
+
+    await runScan();
+
+    const svc = serviceClient();
+    const hash = await expectedHash(canonicalKey);
+    const { data: rows } = await svc
+      .from('cost_anomalies')
+      .select('details_json')
+      .eq('canonical_user_key_hash', hash)
+      .eq('anomaly_type', 'voice_session_tokens_over_cap');
+    const sessionIds = (rows ?? [])
+      .map((r) => (r.details_json as Record<string, unknown>).session_id as string)
+      .sort();
+    assertEquals(sessionIds, [sessionA, sessionB].sort());
+  } finally {
+    await clearAnomaliesForUser(canonicalKey);
+    await cleanupUser(canonicalKey);
+  }
+});
