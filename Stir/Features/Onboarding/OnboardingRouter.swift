@@ -36,11 +36,10 @@ enum OnboardingRouter {
     }
 
     /// Side-effect to apply to the host's NavigationStack `path`.
-    /// `popLast` is a no-op when the path is empty (the host view
-    /// guards against the underflow rather than crashing — matches
-    /// SwiftUI's tolerant behavior on `path.removeLast()` when
-    /// `path` is non-empty in practice but provides defense if the
-    /// invariant slips).
+    /// `popLast` is safe to dispatch unconditionally because
+    /// `OnboardingRoot.dispatch` empty-path-guards before calling
+    /// `path.removeLast()` — `Array.removeLast()` traps on empty,
+    /// so the guard is load-bearing, not defensive.
     enum Command: Sendable, Equatable {
         case push(OnboardingRoute)
         case popLast

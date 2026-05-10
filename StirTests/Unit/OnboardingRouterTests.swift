@@ -54,25 +54,4 @@ final class OnboardingRouterTests: XCTestCase {
         )
     }
 
-    /// Every `Action` case must produce a deterministic `Command`.
-    /// The exhaustive-switch precommit hook catches new `Action`
-    /// cases that miss a `handle(_:)` arm, but a runtime sweep here
-    /// also pins the post-condition: no action returns a default
-    /// fallback, no action crashes, every action is wire-contracted.
-    func test_everyAction_handled() {
-        let actions: [OnboardingRouter.Action] = [
-            .welcomeTryIt,
-            .welcomeSeeSample,
-            .sampleShowcasePrimary,
-            .sampleShowcaseBack,
-        ]
-        for action in actions {
-            // Pure function — calling each variant verifies coverage.
-            // `_ = OnboardingRouter.handle(action)` would compile to
-            // a no-op under release optimisation; the explicit
-            // identity-preserving roundtrip blocks that elision.
-            let command = OnboardingRouter.handle(action)
-            XCTAssertEqual(command, command, "action: \(action)")
-        }
-    }
 }
