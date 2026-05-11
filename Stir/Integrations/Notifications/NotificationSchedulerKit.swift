@@ -141,7 +141,14 @@ enum NotificationSchedulerKit {
     /// - Returns: `true` when `request` was successfully added; `false` when
     ///   the add threw (rollback may or may not have succeeded — the caller
     ///   doesn't currently branch on rollback success).
-    @discardableResult
+    ///
+    /// SCA-315 S9: `@discardableResult` intentionally NOT applied. Both
+    /// production callers (`UseSoonScheduler`, `LeftoversFollowupScheduler`)
+    /// gate the post-add history/telemetry writes on this Bool, so a
+    /// future caller that silently dropped the return value would
+    /// emit stale `*_scheduled` events for an add that never landed.
+    /// Forcing callers to acknowledge the Bool (via `let _ = await ...`
+    /// or a branch) keeps the contract honest.
     static func addWithRollback(
         _ request: UNNotificationRequest,
         prior: UNNotificationRequest?,

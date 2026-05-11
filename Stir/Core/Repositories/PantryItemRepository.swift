@@ -792,6 +792,15 @@ final class PantryItemRepository {
     /// Scoped to one `HouseholdProfile`. The reaper drives this once
     /// per active household per cadence trigger, mirroring
     /// `softDeleteExpired`.
+    ///
+    /// SCA-315 S13: `NSBatchDeleteRequest` is INTENTIONALLY avoided
+    /// here. It bypasses `NSPersistentCloudKitContainer`'s mirrored
+    /// stores — the on-device row is gone, but the CloudKit-side
+    /// delete-record-zone request is never issued, so the tombstone
+    /// resurrects on the next sync from any other device. The
+    /// per-row `context.delete(...)` loop + single `context.save()`
+    /// is the only path that propagates through the mirror. Same
+    /// rationale on `purgeTombstonesAsync` below.
     @discardableResult
     func purgeTombstones(olderThan cutoff: Date, for household: HouseholdProfile) throws -> Int {
         let request = NSFetchRequest<PantryItem>(entityName: "PantryItem")

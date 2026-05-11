@@ -1665,6 +1665,19 @@ See §12.3. In addition:
 7. Prompt Versions
 8. Audit Log
 
+### `cost_anomalies.details_json` shape per `anomaly_type`
+
+SCA-315 S10: `cost_anomalies.details_json` is a `jsonb` column that varies in shape by `anomaly_type`. Pinning the shape here so future ops dashboards / Sentry breadcrumbs / Slack-alert formatters don't drift across detector revisions. The detector is `stir_ops_cost_anomaly_scan()` (`20260509144834_cost_anomaly_scan_session_id_rewrite.sql`); the dispatch path is `stir_ops_cost_anomaly_dispatch()` (`20260424000007_cost_anomaly_dispatch_canonical_tags.sql`).
+
+| `anomaly_type`                  | `severity`        | `details_json` shape                                                                                                                                                              |
+| ------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daily_spend_hard_cap`          | `critical`        | `{ "tier": "free"\|"premium"\|"pro", "spend_24h_usd": numeric, "call_count": int }` — fires when any tier exceeds $10/24h hard cap                                                |
+| `daily_spend_2x`                | `warn`            | Same shape as `daily_spend_hard_cap` — fires when Premium > $3 OR Pro > $8 in 24h (2× expected envelope)                                                                          |
+| `voice_session_tokens_over_cap` | `critical`        | `{ "session_id": text, "total_tokens": int, "turn_count": int, "started_at": timestamptz, "last_turn_at": timestamptz }` — single voice session crossed 50K cumulative tokens     |
+| `runaway_session`               | `critical`        | `{ "session_id": text, "turn_count": int, "duration_ms": numeric, "started_at": timestamptz, "last_turn_at": timestamptz, "total_tokens": int }` — single voice session ran > 10min AND > 20 turns |
+
+The dispatch path wraps the row in a Sentry-shaped envelope with `event_id = cost_anomalies.id`, `tags = { anomaly_type, severity }`, and `extra = details_json` verbatim. Dashboards that consume `extra.*` keys MUST handle the per-`anomaly_type` shape divergence — there is no shared subset across all four types beyond severity classification.
+
 ## 15. Telemetry Spec
 
 **Anchor metric**

@@ -1,24 +1,22 @@
 // SCA-115 — mock APNs HTTP/2 server fixture for integration tests.
 //
-// Two surfaces are exposed here, picked at the call site based on what
-// the test needs:
+// The exported surface is `scriptableApnsFetch(...)` — a fetch-shape
+// function that records every request and returns a scripted
+// Response. This is the seam `_setApnsFetchOverrideForTests()`
+// accepts in `_shared/apns.ts`. Every processPushSend integration
+// test wants this shape: deterministic, no socket setup, no port
+// selection, no cleanup. Asserts on header + URL shape happen on
+// the recorded calls.
 //
-//   1. `scriptableApnsFetch(...)` — a fetch-shape function that records
-//      every request and returns a scripted Response. This is the seam
-//      `_setApnsFetchOverrideForTests()` accepts in `_shared/apns.ts`.
-//      Ninety percent of integration tests want this shape: deterministic,
-//      no socket setup, no port selection, no cleanup. Asserts on header
-//      + URL shape happen on the recorded calls.
-//
-//   2. `startMockApnsServer(...)` — a real Deno HTTP server that speaks
-//      HTTP/1.1 (Deno's `serve` upgrades to HTTP/2 over TLS only — APNs
-//      requires HTTP/2 in production but the wire shape we exercise in
-//      tests is identical to HTTP/1.1 from the client's perspective).
-//      Useful for tests that exercise the full URLSession-style fetch
-//      stack (TLS, real connect timing) — present here for symmetry with
-//      the SCA-115 ticket's "Deno-based mock APNs HTTP/2 server fixture"
-//      requirement, even though the scriptable-fetch surface is what the
-//      processPushSend integration tests use.
+// SCA-315 S17: the original SCA-115 ticket also wired a
+// `startMockApnsServer(...)` real-Deno-server fixture for symmetry,
+// but it shipped without a caller and stayed unreferenced through
+// W2/W3/W4 review cycles. Deleted as dead weight; the
+// scriptable-fetch surface covers every integration test we
+// actually run. If a future test genuinely needs a real socket
+// (TLS handshake timing, HTTP/2 framing-level assertions), file a
+// fresh SCA-* and reintroduce — the prior shape is recoverable
+// from git history.
 //
 // The helper is shared with apns_test.ts / apns_hardening_test.ts via
 // follow-up consolidation if those tests want to migrate off
@@ -155,118 +153,4 @@ function headerInitToRecord(input: HeadersInit | undefined): Record<string, stri
     out[k.toLowerCase()] = v;
   }
   return out;
-}
-
-// -----------------------------------------------------------------------------
-// Real HTTP server variant (kept for completeness — present so the
-// scriptable-fetch surface above is the cheap default, with a real
-// server fallback ready for tests that need one).
-// -----------------------------------------------------------------------------
-
-export interface MockApnsServerHandle {
-  /** Base URL e.g. "http://127.0.0.1:53412". Append /3/device/<token>. */
-  url: string;
-  port: number;
-  /** Calls the server has received, in arrival order. */
-  calls: RecordedApnsRequest[];
-  /** Stop the server and resolve when all in-flight handlers have settled. */
-  shutdown: () => Promise<void>;
-  /** Push a scripted response (FIFO) — same semantics as scriptableApnsFetch. */
-  queueResponse: (resp: ScriptedApnsResponse) => void;
-}
-
-/** Spin up a real Deno HTTP server on a random port that scripts the
- *  same response queue as `scriptableApnsFetch`. Useful for end-to-end
- *  tests that need a real socket — but most processPushSend tests can
- *  use the cheaper fetch-DI seam.
- *
- *  HTTP/1.1 on the wire. APNs production is HTTP/2; the response shape
- *  (status code + apns-id header + JSON body on error) is identical at
- *  the application layer, which is what apns.ts inspects. */
-export async function startMockApnsServer(): Promise<MockApnsServerHandle> {
-  const calls: RecordedApnsRequest[] = [];
-  const queue: ScriptedApnsResponse[] = [];
-
-  const ac = new AbortController();
-  let resolvedPort = 0;
-
-  const server = Deno.serve(
-    {
-      port: 0, // random
-      hostname: '127.0.0.1',
-      signal: ac.signal,
-      onListen: ({ port }) => {
-        resolvedPort = port;
-      },
-    },
-    async (req) => {
-      const headerObj: Record<string, string> = {};
-      req.headers.forEach((v, k) => {
-        headerObj[k.toLowerCase()] = v;
-      });
-      let parsedBody: unknown;
-      try {
-        const text = await req.text();
-        parsedBody = text.length > 0 ? JSON.parse(text) : undefined;
-      } catch {
-        parsedBody = undefined;
-      }
-      calls.push({
-        url: req.url,
-        method: req.method,
-        headers: headerObj,
-        body: parsedBody,
-        receivedAt: new Date().toISOString(),
-      });
-
-      const next = queue.shift();
-      if (!next) {
-        return new Response(
-          JSON.stringify({ reason: 'NoScriptedResponse' }),
-          { status: 500, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      if (next.kind === 'throw') {
-        // Simulate a network failure by aborting the response.
-        return new Response(null, { status: 502 });
-      }
-      if (next.kind === 'ok') {
-        return new Response(null, {
-          status: 200,
-          headers: { 'apns-id': next.apnsId ?? `mock-apns-${calls.length}` },
-        });
-      }
-      return new Response(JSON.stringify({ reason: next.apnsReason }), {
-        status: next.status,
-        headers: { 'content-type': 'application/json' },
-      });
-    },
-  );
-
-  // Wait for onListen to populate the port (Deno.serve's signature
-  // resolves synchronously for the listener but onListen runs after).
-  // Simple busy-wait with a timeout cap to avoid races on slow CI.
-  const start = Date.now();
-  while (resolvedPort === 0 && Date.now() - start < 2000) {
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  if (resolvedPort === 0) {
-    ac.abort();
-    throw new Error('mock APNs server failed to bind a port within 2s');
-  }
-
-  return {
-    url: `http://127.0.0.1:${resolvedPort}`,
-    port: resolvedPort,
-    calls,
-    queueResponse: (resp) => queue.push(resp),
-    shutdown: async () => {
-      ac.abort();
-      try {
-        await server.finished;
-      } catch {
-        // AbortError is expected.
-      }
-    },
-  };
 }
