@@ -15,6 +15,11 @@ import OSLog
 
 @main
 struct StirApp: App {
+    /// AppDelegate adaptor — exists solely for APNs token callbacks
+    /// (SCA-316). SwiftUI's pure lifecycle has no equivalent surface.
+    /// Stays thin: forwards token + failure to APNsRegistrationCoordinator.
+    @UIApplicationDelegateAdaptor(StirAppDelegate.self) private var appDelegate
+
     private let configResult: Result<AppConfig, Error>
     @State private var coordinator: RootCoordinator?
 
@@ -61,7 +66,29 @@ struct StirApp: App {
             // delivery emits `reactivation_notification_opened` telemetry.
             StirNotificationDelegate.register()
 
-            _coordinator = State(wrappedValue: RootCoordinator(config: config))
+            let rootCoordinator = RootCoordinator(config: config)
+            // Step-8 APNs (SCA-316): wire the coordinator to AIDispatch so
+            // device-token callbacks from StirAppDelegate can POST to
+            // /v1/push/register. Configure must happen after AIDispatch is
+            // built (RootCoordinator.init does that). Trigger registration
+            // is done lazily — the coordinator only fires
+            // `UIApplication.registerForRemoteNotifications()` when the
+            // user has already granted notification permission, so first-
+            // launch users see the in-app prompt before the OS prompt.
+            APNsRegistrationCoordinator.shared.configure { [weak rootCoordinator] body in
+                guard let dispatch = rootCoordinator?.aiDispatch else {
+                    throw StirError.validation(
+                        fieldErrors: [],
+                        message: "RootCoordinator deallocated before push-register fired",
+                    )
+                }
+                return try await dispatch.pushRegister(request: body)
+            }
+            Task { @MainActor in
+                await APNsRegistrationCoordinator.shared.registerForRemoteNotificationsIfAuthorized()
+            }
+
+            _coordinator = State(wrappedValue: rootCoordinator)
             Logger.app.info("StirApp init ok build=\(config.build, privacy: .public)")
         } else if case .failure(let error) = result {
             Logger.app.error("StirApp config load failed: \(String(describing: error), privacy: .public)")
