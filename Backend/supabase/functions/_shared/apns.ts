@@ -318,7 +318,16 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
     if (res.status === 403) return 'config_invalid'; // MissingProviderToken
     if (res.status === 429) return 'rate_limited';
     if (res.status >= 500) return 'server_error';
-    return 'config_invalid';
+    // SCA-323: Apple documents only {400, 403, 410, 429} as 4xx APNs
+    // responses (https://developer.apple.com/documentation/usernotifications
+    // /sending_notification_requests_to_apns#Responses). Anything outside
+    // that set (rare 404 / 451 / 503 from gateway maintenance, etc.)
+    // pre-fix mapped to `config_invalid`, which `processPushSend` re-throws
+    // and pgmq-dispatch retries through MAX_ATTEMPTS, then dead-letters as
+    // a permanent config bug. Net: a transient 60s gateway blip burned the
+    // retry budget and silently dropped a real push. Treat unknowns as
+    // transient server errors so the retry loop has a chance to recover.
+    return 'server_error';
   })();
 
   return {
