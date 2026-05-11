@@ -34,6 +34,7 @@ import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
 import { processPushSend, validatePushEnvironment } from './push_send.ts';
+import type { APNsSender } from './push_send.ts';
 
 const CLAIM_LIMIT = 10; // one tick handles at most 10 jobs (bumped 3→10 2026-04-23)
 const MAX_ATTEMPTS = 3;
@@ -67,6 +68,34 @@ let warnedMissingSecret = false;
 // log.error is the breadcrumb surface).
 const RECLAIM_FAIL_SENTRY_THRESHOLD = 5;
 let consecutiveReclaimFailures = 0;
+
+// SCA-314 S7: module-scope APNsSender override for handler-level
+// integration tests. Tests install a mock sender via
+// `_setPushSendSenderOverrideForTests` and the handler threads it
+// into `processPushSend` at the boundary where pgmq-dispatch claims
+// `push_send` jobs. Mirrors the SCA-305 pattern in `_shared/apns.ts::
+// _setApnsFetchOverrideForTests`. Production never sets this, so the
+// processPushSend call falls back to its `sendAPNsPush` default.
+let testPushSendSenderOverride: APNsSender | null = null;
+
+/**
+ * Test-only setter for the handler-level APNsSender override.
+ *
+ * `STIR_TEST_MODE=1` must be set in the test harness; calling this
+ * outside test mode throws synchronously so a production accident
+ * (e.g. an integration test environment that boots the prod handler)
+ * can't quietly install a mock sender. Mirrors the contract of
+ * `_shared/apns.ts::_setApnsFetchOverrideForTests`.
+ */
+export function _setPushSendSenderOverrideForTests(sender: APNsSender | null): void {
+  if (Deno.env.get('STIR_TEST_MODE') !== '1') {
+    throw new Error(
+      '_setPushSendSenderOverrideForTests called outside test mode — this is a ' +
+        'production safety guard. Set STIR_TEST_MODE=1 in the test harness.',
+    );
+  }
+  testPushSendSenderOverride = sender;
+}
 
 /** Constant-time string compare; both inputs MUST be the same byte length. */
 function timingSafeEqual(a: string, b: string): boolean {
@@ -307,7 +336,18 @@ Deno.serve(async (req) => {
         await processRecipeImportAsync(client, job, log);
         results.push({ job_id: job.id, kind: job.kind, status: 'completed' });
       } else if (job.kind === 'push_send') {
-        await processPushSend(client, job, log);
+        // SCA-314 S7: when an integration test has installed a
+        // handler-level APNsSender override (STIR_TEST_MODE=1 +
+        // `_setPushSendSenderOverrideForTests(...)`), thread it
+        // through to processPushSend so the test can script
+        // response codes per scenario at the boundary where the
+        // dispatch tick claims the job. Production stays on the
+        // push_send.ts default (`sendAPNsPush`).
+        if (testPushSendSenderOverride) {
+          await processPushSend(client, job, log, testPushSendSenderOverride);
+        } else {
+          await processPushSend(client, job, log);
+        }
         results.push({ job_id: job.id, kind: job.kind, status: 'completed' });
       } else {
         await markJobFailed(client, job.id, `unknown kind: ${String(job.kind)}`);

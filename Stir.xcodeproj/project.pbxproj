@@ -64,6 +64,7 @@
 		34F5BB054D4402919ED8FD1A /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */; };
 		35AC70781E412739ED5B3A1F /* SavedMealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F35DD33113B45A04F1536B90 /* SavedMealsView.swift */; };
 		3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */; };
+		59F3C8A4064248499671655C /* PaywallSubheadlineDriftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5E8D2A589C4F0ABE8C41C2 /* PaywallSubheadlineDriftTests.swift */; };
 		7B4C8F02A19E82B5C3D71E64 /* SettingsRootViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9D5B24A1C8038F4B92D7E5 /* SettingsRootViewTests.swift */; };
 		373B720A9EB97C429D3E770E /* StirAppIntentsGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51409113088D5FC13B55348E /* StirAppIntentsGate.swift */; };
 		378FA665E786425D891D9BB9 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BE699B170519127799279F /* SharedStorage.swift */; };
@@ -633,6 +634,7 @@
 		D0DCB3763498E55B79C6FA15 /* CookTimerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookTimerRepository.swift; sourceTree = "<group>"; };
 		D10F98D2B68FE751D86384C7 /* SpeechFallbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackService.swift; sourceTree = "<group>"; };
 		D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallTelemetryTests.swift; sourceTree = "<group>"; };
+		6E5E8D2A589C4F0ABE8C41C2 /* PaywallSubheadlineDriftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallSubheadlineDriftTests.swift; sourceTree = "<group>"; };
 		6E9D5B24A1C8038F4B92D7E5 /* SettingsRootViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootViewTests.swift; sourceTree = "<group>"; };
 		D3F1C59757DD007948589427 /* GroceryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryViewModel.swift; sourceTree = "<group>"; };
 		D40A1B4A21CC6EFC11F1C3A1 /* SetupKitchenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupKitchenView.swift; sourceTree = "<group>"; };
@@ -834,6 +836,7 @@
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
 				F31E64117020FB255A16251F /* PreferenceMemoryServiceTests.swift */,
 				D279A41476DE0266247CD8FC /* PaywallTelemetryTests.swift */,
+				6E5E8D2A589C4F0ABE8C41C2 /* PaywallSubheadlineDriftTests.swift */,
 				EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */,
 				44F858F8920DDE3FF02BC6EA /* RealtimeSessionIdentityTests.swift */,
 				6B9101EC521BDF3B6C3FF08B /* RealtimeSessionPreMintTests.swift */,
@@ -1727,6 +1730,7 @@
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
 				F1158A993CE98C45F369F12C /* PreferenceMemoryServiceTests.swift in Sources */,
 				3724BB985AD975A318B6E9E2 /* PaywallTelemetryTests.swift in Sources */,
+				59F3C8A4064248499671655C /* PaywallSubheadlineDriftTests.swift in Sources */,
 				C3554305F7809FD347ADDCFC /* PaywallViewModelTests.swift in Sources */,
 				4B08729ECB7E8C9860338363 /* PendingImport.swift in Sources */,
 				56E60FF0F19911293746A834 /* Radius.swift in Sources */,
