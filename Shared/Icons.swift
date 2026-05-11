@@ -259,6 +259,13 @@ extension Image.Stir {
     /// "Keep Premium" / un-cancel affordance — reverts a pending
     /// cancellation while the sub is still in `cancelledActive`.
     static let uncancel = Image(systemName: "arrow.uturn.backward.circle")
+
+    // MARK: - Appearance
+
+    /// Appearance / theme section glyph (Settings → Appearance card).
+    /// Matches iOS Settings' own "Appearance" half-toned circle so the
+    /// affordance reads immediately as a light/dark mode control.
+    static let appearance = Image(systemName: "circle.lefthalf.filled")
 }
 
 // MARK: - Icon size scale

@@ -20,6 +20,17 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingShareImport: PendingImport?
 
+    // User-selected color scheme override, written by the Appearance
+    // card in `SettingsRootView`. Applied at the root via
+    // `.preferredColorScheme(_:)` below so every surface (tabs,
+    // sheets, full-screen covers, navigation chrome) honors the
+    // choice with no per-screen wiring.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+
+    private var appearance: AppearanceMode {
+        AppearanceMode(rawValue: appearanceRaw) ?? .system
+    }
+
     var body: some View {
         Group {
             switch coordinator.phase {
@@ -179,6 +190,12 @@ struct RootView: View {
                 }
             }
         }
+        // User-selected color scheme override. `nil` (the `.system`
+        // case) leaves SwiftUI's resolution to the iOS user-level
+        // setting; `.light` / `.dark` force the override. Sits at the
+        // root so the tab shell, modals, full-screen covers, and the
+        // paywall fullScreenCover above all inherit the choice.
+        .preferredColorScheme(appearance.colorScheme)
     }
 }
 

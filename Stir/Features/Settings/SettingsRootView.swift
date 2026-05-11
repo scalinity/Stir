@@ -46,6 +46,12 @@ struct SettingsRootView: View {
     @State private var isRestoring = false
     @State private var restoreToast: StirToastPayload?
 
+    // Persisted user override for the app-level color scheme. The
+    // picker in `appearanceSection` writes this; `RootView` reads it
+    // via the same `AppearanceMode.storageKey` and applies
+    // `.preferredColorScheme(_:)` so every surface honors the choice.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+
     var body: some View {
         // `@Bindable` wraps the @Observable coordinator so we can vend a
         // Binding to its `activeProComparison` slot below. The sheet
@@ -71,6 +77,7 @@ struct SettingsRootView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                 planBillingSection
+                appearanceSection
                 notificationsSection
                 householdSection
                 pantrySection
@@ -480,6 +487,83 @@ struct SettingsRootView: View {
                 .stirCard()
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Appearance
+
+    /// Appearance card — System / Light / Dark color-scheme override.
+    /// Renders as a 32-tile + title row over a horizontal `SelectableChip`
+    /// triad so the choice matches the rest of Settings' icon-tile
+    /// grammar while presenting three mutually-exclusive options as a
+    /// single tap target each. The chips reuse the design system's
+    /// accent selection treatment, so a selected option reads as
+    /// ember-tinted in light mode and ember-fill in dark mode without
+    /// any per-mode branching here.
+    ///
+    /// State lives in `@AppStorage(AppearanceMode.storageKey)` so the
+    /// selection survives relaunch; `RootView` observes the same key
+    /// and applies `.preferredColorScheme(_:)` at the top of the view
+    /// tree (one place, every surface).
+    private var appearanceSection: some View {
+        let binding = Binding<AppearanceMode>(
+            get: { AppearanceMode(rawValue: appearanceRaw) ?? .system },
+            set: { appearanceRaw = $0.rawValue },
+        )
+        return VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            SectionEyebrow("Appearance")
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+                HStack(alignment: .center, spacing: CGFloat.Stir.space3) {
+                    iconTile(Image.Stir.appearance)
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1 / 2) {
+                        Text("Theme")
+                            .stirFont(.labelLg)
+                            .foregroundStyle(Color.Stir.textPrimary)
+                        Text("Match your device, or pick Light or Dark.")
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.textTertiary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: CGFloat.Stir.space2)
+                }
+                // `ViewThatFits` picks the horizontal three-up layout
+                // by default and falls back to a vertical stack when
+                // the chips can't fit on one line — the practical
+                // trigger is Accessibility-tier Dynamic Type sizes
+                // (AX3+), where SelectableChip's fixedSize +
+                // lineLimit(1) would otherwise clip against the card's
+                // right edge. The chip view itself is unchanged across
+                // layouts so the selection visual stays consistent.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: CGFloat.Stir.space2) {
+                        appearanceChips(binding: binding)
+                        Spacer(minLength: 0)
+                    }
+                    VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                        appearanceChips(binding: binding)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Theme")
+            }
+            .padding(.horizontal, CGFloat.Stir.space3Half)
+            .padding(.vertical, CGFloat.Stir.space3Half)
+            .stirCard()
+        }
+    }
+
+    /// Three SelectableChips for the Appearance picker — extracted so
+    /// the horizontal + vertical `ViewThatFits` branches above share
+    /// one chip definition and can't drift apart.
+    @ViewBuilder
+    private func appearanceChips(binding: Binding<AppearanceMode>) -> some View {
+        ForEach(AppearanceMode.allCases) { mode in
+            SelectableChip(
+                label: mode.displayName,
+                isSelected: binding.wrappedValue == mode,
+                action: { binding.wrappedValue = mode },
+            )
         }
     }
 
