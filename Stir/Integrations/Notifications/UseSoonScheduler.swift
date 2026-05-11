@@ -28,11 +28,16 @@
 //     unactioned-streak math counts taps.
 //
 // Telemetry:
-//   * `use_soon_scheduled` { fire_at, item_display_name }
+//   * `use_soon_scheduled` { fire_at }
 //   * `use_soon_fired`     (delivery; via StirNotificationDelegate)
 //   * `use_soon_tapped`    (deep-link tap)
 //   * `use_soon_suppressed` { reason: "weekly_cap" | "unactioned_streak" |
 //                                     "recent_session" | "no_candidate" }
+//
+// SCA-320 / ADR 0009: telemetry + userInfo carry IDs/counts only — no
+// ingredient display name. Notification content title CAN reference the
+// display name (it's user-visible by design); the violations were the
+// telemetry property and the userInfo key, both removed.
 
 import CoreData
 import Foundation
@@ -157,7 +162,6 @@ final class UseSoonScheduler {
         content.userInfo = [
             "stir_notification_kind": "use_soon",
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
-            "use_first_display_name": displayName,
         ]
         content.interruptionLevel = .active
 
@@ -191,7 +195,6 @@ final class UseSoonScheduler {
             history.recordScheduled(fireAt: fireDate)
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
-                "item_display_name": displayName,
             ])
             Logger.useSoon.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public) item=\(displayName, privacy: .private(mask: .hash))",

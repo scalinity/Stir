@@ -286,7 +286,8 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     // SCA-64 — use-soon notification lifecycle. Same shape as
     // leftovers_followup_*; spec §15 + CLAUDE.md canonical. _suppressed
     // carries `reason ∈ {weekly_cap, unactioned_streak, recent_session,
-    // no_candidate}`. _scheduled carries {fire_at, item_display_name}.
+    // no_candidate}`. _scheduled carries {fire_at} only — ADR 0009
+    // forbids the previous `item_display_name` property (SCA-320).
     case useSoonScheduled  = "use_soon_scheduled"
     case useSoonFired      = "use_soon_fired"
     case useSoonTapped     = "use_soon_tapped"
