@@ -97,6 +97,27 @@ export function _setApnsFetchOverrideForTests(fn: ApnsFetch | null): void {
 export type APNsEnvironment = 'production' | 'sandbox';
 export type APNsCategory = 'reactivation' | 'import_completion' | 'cook_reminder' | 'billing_grace';
 
+// SCA-296 C1 / SCA-327: narrow a nullable apns_environment (the schema
+// lets device_installations.apns_environment be NULL — the CHECK only
+// constrains non-null values) to the two values downstream
+// PushSendPayloadSchema.environment accepts. Returns null if the raw
+// value isn't a valid APNs environment so callers can skip enqueue +
+// log a typed warning instead of poisoning notification_jobs with a
+// row that burns MAX_ATTEMPTS retries before dead-lettering.
+//
+// Originally lived in pgmq-dispatch/push_send.ts (SCA-296 C1). Hoisted
+// to _shared/apns.ts (SCA-327) so the second enqueue site —
+// revenuecat-webhook/index.ts BILLING_ISSUE — picks up the same guard
+// without a circular import on the push_send module (which carries
+// PushSendPayloadSchema + processPushSend, neither of which the webhook
+// needs). push_send.ts re-exports this so existing imports keep
+// working.
+export function validatePushEnvironment(
+  raw: string | null | undefined,
+): APNsEnvironment | null {
+  return raw === 'production' || raw === 'sandbox' ? raw : null;
+}
+
 export interface APNsPushInput {
   token: string;
   environment: APNsEnvironment;

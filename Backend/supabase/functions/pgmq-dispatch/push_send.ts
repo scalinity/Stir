@@ -10,7 +10,12 @@
 
 import { z } from 'zod';
 import type { createServiceClient } from '../_shared/db.ts';
-import { type APNsPushInput, type APNsPushResult, sendAPNsPush } from '../_shared/apns.ts';
+import {
+  type APNsPushInput,
+  type APNsPushResult,
+  sendAPNsPush,
+  validatePushEnvironment,
+} from '../_shared/apns.ts';
 
 // W24 (SA1 W3): runtime shape validation of push_send payload. Pre-fix
 // the handler used `as PushSendPayload` + presence check only — an errant
@@ -31,26 +36,11 @@ export const PushSendPayloadSchema = z.object({
 
 export type PushSendPayload = z.infer<typeof PushSendPayloadSchema>;
 
-// SCA-296 C1: narrow a nullable apns_environment (the schema lets
-// device_installations.apns_environment be NULL — the CHECK only
-// constrains non-null values) to the z.enum the downstream
-// PushSendPayloadSchema accepts. Returns null if the raw value isn't a
-// valid APNs environment so callers can skip enqueue + log a typed
-// warning instead of poisoning notification_jobs with a row that burns
-// MAX_ATTEMPTS retries before dead-lettering.
-//
-// Lives here (not _shared/) for two reasons: (a) it's the natural
-// neighbor of PushSendPayloadSchema.environment whose enum it mirrors;
-// (b) push_send.ts has no top-level Deno.serve, so tests can import it
-// without spinning a server. The revenuecat-webhook billing_grace
-// enqueue (revenuecat-webhook/index.ts:687,701) has the same shape
-// and should pick up this guard the next time it's touched (SCA-296
-// scope is pgmq-dispatch only).
-export function validatePushEnvironment(
-  raw: string | null | undefined,
-): 'production' | 'sandbox' | null {
-  return raw === 'production' || raw === 'sandbox' ? raw : null;
-}
+// SCA-327: validatePushEnvironment now lives in _shared/apns.ts so the
+// revenuecat-webhook BILLING_ISSUE enqueue can share the same guard
+// without circular-importing the push_send module. Re-exported here so
+// existing imports (tests, callers) keep resolving.
+export { validatePushEnvironment };
 
 export interface PushSendJob {
   id: string;
@@ -188,7 +178,9 @@ export async function processPushSend(
         err: String(installUpdErr),
       });
       throw new Error(
-        `device_installations null UPDATE failed: ${installUpdErr.message ?? String(installUpdErr)}`,
+        `device_installations null UPDATE failed: ${
+          installUpdErr.message ?? String(installUpdErr)
+        }`,
       );
     }
     return;

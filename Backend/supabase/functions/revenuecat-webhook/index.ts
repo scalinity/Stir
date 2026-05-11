@@ -29,7 +29,12 @@
 // payloads, auth header typos) should not generate retry storms on RC's
 // side. Only signature verify (a real security boundary) returns 401.
 
-import { createLogger, type Logger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
+import {
+  createLogger,
+  type Logger,
+  requestIdFrom,
+  sanitizeErrorForLog,
+} from '../_shared/logger.ts';
 import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { capturePosthogEvent } from '../_shared/posthog.ts';
 import { createServiceClient } from '../_shared/db.ts';
@@ -42,6 +47,7 @@ import {
   verifyAuthHeader,
 } from '../_shared/revenuecat.ts';
 import { ZodError } from 'zod';
+import { validatePushEnvironment } from '../_shared/apns.ts';
 
 const WEBHOOK_SECRET = Deno.env.get('REVENUECAT_WEBHOOK_SECRET');
 
@@ -638,11 +644,30 @@ async function enqueueBillingGracePushes(
   // here so billing_grace doesn't bypass the per-category gate. Default
   // to true when the field is missing (BILLING_ISSUE is service-class
   // information; users only "opted out" if they explicitly toggled it).
-  const billingPrefRaw =
-    (install.notification_prefs_json as Record<string, unknown> | null)?.['billing_grace'];
+  const billingPrefRaw = (install.notification_prefs_json as Record<string, unknown> | null)
+    ?.['billing_grace'];
   const billingPrefEnabled = billingPrefRaw === undefined || billingPrefRaw === true;
   if (!billingPrefEnabled) {
     log.info('billing_grace_push_skipped', { reason: 'category_opt_out' });
+    return;
+  }
+
+  // SCA-327: device_installations.apns_environment is nullable (the
+  // CHECK only constrains non-null values to 'production'|'sandbox').
+  // PushSendPayloadSchema.environment is z.enum(['production','sandbox']),
+  // so a null or other value passes the jsonb enqueue (notification_jobs.
+  // payload_json has no shape check) but burns MAX_ATTEMPTS=3 attempts
+  // inside processPushSend before dead-lettering — net: a real
+  // BILLING_ISSUE push silently dropped. Same bug class as SCA-296 C1
+  // in pgmq-dispatch; the guard helper is the same one hoisted to
+  // _shared/apns.ts. Skip enqueue + warn so the unhealthy device row
+  // shows up in logs rather than corroding the push funnel quietly.
+  const environment = validatePushEnvironment(install.apns_environment);
+  if (environment === null) {
+    log.warn('push_env_missing', {
+      category: 'billing_grace',
+      apns_environment: install.apns_environment,
+    });
     return;
   }
 
@@ -684,7 +709,7 @@ async function enqueueBillingGracePushes(
         body,
         deep_link: deepLink,
         apns_token: install.push_token,
-        environment: install.apns_environment,
+        environment,
       },
     },
     {
@@ -698,7 +723,7 @@ async function enqueueBillingGracePushes(
         body,
         deep_link: deepLink,
         apns_token: install.push_token,
-        environment: install.apns_environment,
+        environment,
       },
     },
   ];
