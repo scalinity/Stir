@@ -173,12 +173,13 @@ actor SupabaseSessionClient {
     func performAuthenticatedStream(
         _ request: URLRequest,
     ) async throws -> (response: HTTPURLResponse, bytes: URLSession.AsyncBytes) {
-        return try await performStream(request: request, retriedAuth: false)
+        return try await performStream(request: request, retriedAuth: false, retried5xx: false)
     }
 
     private func performStream(
         request inRequest: URLRequest,
         retriedAuth: Bool,
+        retried5xx: Bool,
     ) async throws -> (response: HTTPURLResponse, bytes: URLSession.AsyncBytes) {
         var request = inRequest
         request.addValue("text/event-stream", forHTTPHeaderField: "accept")
@@ -230,7 +231,11 @@ actor SupabaseSessionClient {
                     installationID: identity.installationID,
                     cloudKitRecordName: identity.cloudKitRecordName,
                 )
-                return try await performStream(request: inRequest, retriedAuth: true)
+                return try await performStream(
+                    request: inRequest,
+                    retriedAuth: true,
+                    retried5xx: retried5xx,
+                )
             }
             throw StirError.auth(reason: reason, message: message)
 
@@ -241,19 +246,52 @@ actor SupabaseSessionClient {
             // (dinner-solve) compose bodies that perform() already validated.
             throw stirError
 
+        case let .retryable5xx(stirError):
+            // SCA-297 (W5): give the stream variant ONE pre-stream-handoff
+            // retry on 5xx. Previously the stream path threw immediately on
+            // a single transient Gemini 502, while perform/performNoContent
+            // retried 3x — asymmetric user-visible behavior for the same
+            // upstream failure. One additional attempt is cheap (stream
+            // hasn't started yielding bytes yet) and preserves dinner-solve
+            // resilience when Gemini hiccups mid-handshake. The 0.5s backoff
+            // matches `perform`'s attempt-0 step.
+            Logger.supabase.warning(
+                "5xx (stream) from \(inRequest.url?.path ?? "?", privacy: .public): status=\(http.statusCode)",
+            )
+            if !retried5xx {
+                try await backoff(attempt: 0)
+                return try await performStream(
+                    request: inRequest,
+                    retriedAuth: retriedAuth,
+                    retried5xx: true,
+                )
+            }
+            throw stirError
+
         case let .nonRetryableError(stirError),
-             let .retryable5xx(stirError),
              let .unexpectedStatus(stirError):
-            // Stream has no 5xx-retry policy: surface immediately.
+            // Stream's non-retryable buckets surface immediately.
             throw stirError
         }
     }
 
     private func readAllBytes(_ bytes: URLSession.AsyncBytes) async throws -> Data {
         var buffer = Data()
+        let cap = 64 * 1024
         for try await byte in bytes {
             buffer.append(byte)
-            if buffer.count > 64 * 1024 { break } // safety cap on error bodies
+            if buffer.count >= cap { break } // safety cap on error bodies
+        }
+        if buffer.count >= cap {
+            // SCA-297 (W6): visibility for the silent-truncation case. A
+            // 64 KiB cap is fine for typed error envelopes (kilobytes at
+            // most), but if it ever trips the downstream `classify` is
+            // parsing an incomplete JSON tail — the .malformedResponse
+            // path is taken silently. Logging at warning level surfaces
+            // the truncation in Console.app + Sentry breadcrumbs.
+            Logger.supabase.warning(
+                "performStream error-body drained to cap (64 KiB) — body may be truncated, parsed error may be incomplete",
+            )
         }
         return buffer
     }
@@ -387,13 +425,13 @@ actor SupabaseSessionClient {
                 try await backoff(attempt: attempt)
                 return try await perform(request, attempt: attempt + 1, retriedAuth: retriedAuth)
             }
-            // Match pre-extraction behavior: surface as networkUnreachable
-            // (not the typed server error) so callers route to the offline UX.
-            // The classified `stirError` is intentionally discarded — it's
-            // available for future telemetry hooks but the retry-exhausted
-            // path keeps the legacy error shape for the presenter layer.
-            _ = stirError
-            throw StirError.networkUnreachable(underlying: nil)
+            // SCA-297 (W4): retry-exhausted policy lives in a single helper so
+            // perform + performNoContent stay in sync. Preserves the typed
+            // server StirError as `underlying:` so Sentry breadcrumbs +
+            // ErrorPresenter retain the upstream code (AI-01 vs INTERNAL-01)
+            // rather than collapsing every retry-exhausted 5xx to bare
+            // networkUnreachable.
+            throw handleRetryExhausted(stirError: stirError)
 
         case let .unexpectedStatus(stirError):
             Logger.supabase.error(
@@ -469,9 +507,8 @@ actor SupabaseSessionClient {
                 try await performNoContent(request, attempt: attempt + 1, retriedAuth: retriedAuth)
                 return
             }
-            // Same retry-exhausted convention as `perform`. See comment there.
-            _ = stirError
-            throw StirError.networkUnreachable(underlying: nil)
+            // SCA-297 (W4): shared retry-exhausted policy. See `perform`.
+            throw handleRetryExhausted(stirError: stirError)
 
         case .unexpectedStatus:
             // Pre-extraction wording differed for no-content; preserve it so
@@ -567,6 +604,18 @@ actor SupabaseSessionClient {
         ) { retried in
             try await self.performNoContent(retried, attempt: 0, retriedAuth: true)
         }
+    }
+
+    /// SCA-297 (W4): single source of truth for the retry-exhausted 5xx
+    /// policy used by both `perform` and `performNoContent`. Preserves the
+    /// upstream typed `StirError.server` as the `underlying:` so callers
+    /// (Sentry breadcrumbs, ErrorPresenter routing, future telemetry)
+    /// retain the original error code instead of collapsing to a bare
+    /// `networkUnreachable(underlying: nil)`. Wire shape — `.networkUnreachable`
+    /// — is preserved so the presenter layer's "offline UX" path still
+    /// fires on retry-exhausted Gemini hiccups, matching pre-SCA-297 behavior.
+    private nonisolated func handleRetryExhausted(stirError: StirError) -> StirError {
+        return .networkUnreachable(underlying: stirError)
     }
 
     /// Differentiated AUTH-01 logging per CLAUDE.md §"AUTH-01 response shape":

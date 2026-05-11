@@ -237,12 +237,77 @@ final class HTTPErrorHandlerTests: XCTestCase {
     }
 
     func test_5xx_withoutBody_defaultsToAI01() {
-        let result = HTTPErrorHandler.classify(status: 503, data: Data(), requestPath: "/x")
+        // SCA-297 (W3): on `/v1/ai/*` an empty/unparseable 5xx body still
+        // defaults to AI-01 — Gemini-specific user copy ("AI temporarily
+        // unavailable") is the right fit when the endpoint is an AI call.
+        let result = HTTPErrorHandler.classify(
+            status: 503,
+            data: Data(),
+            requestPath: "/v1/ai/dinner-solve",
+        )
         guard case let .retryable5xx(.server(code, message, _)) = result else {
             return XCTFail("expected .retryable5xx server")
         }
         XCTAssertEqual(code, .ai01)
         XCTAssertEqual(message, "upstream error")
+    }
+
+    func test_5xx_withoutBody_nonAIPath_defaultsToInternal01() {
+        // SCA-297 (W3): non-AI 5xx (session-bootstrap, config-bootstrap,
+        // ops-admin, push-register) MUST synthesize INTERNAL-01, NOT AI-01.
+        // Misrouting a gateway timeout as AI-01 would surface "AI temporarily
+        // unavailable" copy on a backend hiccup unrelated to Gemini.
+        let nonAIPaths = [
+            "/functions/v1/session-bootstrap",
+            "/functions/v1/config-bootstrap",
+            "/functions/v1/ops-admin/users",
+            "/functions/v1/push-register",
+        ]
+        for path in nonAIPaths {
+            let result = HTTPErrorHandler.classify(
+                status: 502,
+                data: Data(),
+                requestPath: path,
+            )
+            guard case let .retryable5xx(.server(code, _, _)) = result else {
+                XCTFail("expected .retryable5xx for \(path), got \(result)")
+                continue
+            }
+            XCTAssertEqual(code, .internal01, "path=\(path)")
+        }
+    }
+
+    func test_5xx_unparseableBody_nonAIPath_stillRoutesToInternal01() {
+        // Even when the body is present but malformed, the path-aware
+        // default-code logic should still route non-AI paths to INTERNAL-01.
+        let result = HTTPErrorHandler.classify(
+            status: 500,
+            data: Data("not json".utf8),
+            requestPath: "/functions/v1/session-bootstrap",
+        )
+        guard case let .retryable5xx(.server(code, message, _)) = result else {
+            return XCTFail("expected .retryable5xx server")
+        }
+        XCTAssertEqual(code, .internal01)
+        XCTAssertEqual(message, "upstream error")
+    }
+
+    func test_5xx_withBody_honorsServerProvidedCode_evenOnNonAIPath() {
+        // When the server DOES emit a typed code (e.g. RATE-01 at 5xx is
+        // contrived but possible; AI-01 from a non-AI proxy is more
+        // realistic), the path-aware default is bypassed — the wire code
+        // wins.
+        let body = #"{"error":"AI-01","message":"gemini upstream via gateway"}"#.data(using: .utf8)!
+        let result = HTTPErrorHandler.classify(
+            status: 502,
+            data: body,
+            requestPath: "/functions/v1/session-bootstrap",
+        )
+        guard case let .retryable5xx(.server(code, message, _)) = result else {
+            return XCTFail("expected .retryable5xx server")
+        }
+        XCTAssertEqual(code, .ai01)
+        XCTAssertEqual(message, "gemini upstream via gateway")
     }
 
     // MARK: - unexpected

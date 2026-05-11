@@ -90,10 +90,20 @@ enum HTTPErrorHandler {
             // throws. Both variants should log the 5xx via their own loggers
             // before invoking the retry path (status code surfaces in the
             // returned StirError already).
+            //
+            // SCA-297 (W3): Default-code selection is path-aware. AI endpoints
+            // (`/v1/ai/*`) keep the historical AI-01 fallback so the UI maps
+            // "AI temporarily unavailable" copy. Non-AI 5xx (gateway,
+            // session-bootstrap, config-bootstrap, ops-admin, push-register)
+            // synthesizes INTERNAL-01 — distinct from NET-01 so iOS copy can
+            // say "server" not "network", and it doesn't mis-attribute Gemini
+            // outages onto unrelated backend failures.
             let body = try? parseErrorBody(data)
+            let parsedCode = ErrorCode(rawValue: body?.error ?? "")
+            let defaultCode: ErrorCode = requestPath.contains("/v1/ai/") ? .ai01 : .internal01
             return .retryable5xx(
                 .server(
-                    code: ErrorCode(rawValue: body?.error ?? "") ?? .ai01,
+                    code: parsedCode ?? defaultCode,
                     message: body?.message ?? "upstream error",
                     fieldErrors: body?.fieldErrors ?? [],
                 ),
@@ -115,8 +125,17 @@ enum HTTPErrorHandler {
         let body: ErrorResponseBody
         do {
             body = try parseErrorBody(data)
+        } catch let stirError as StirError {
+            // `parseErrorBody` only ever throws `StirError.malformedResponse`
+            // (see its do/catch rethrow). Match on the concrete type so the
+            // SCA-119-era `as? StirError ?? .malformedResponse(...)` fallback
+            // — which was unreachable dead code (SCA-297 W16) — goes away.
+            return .nonRetryableError(stirError)
         } catch {
-            return .nonRetryableError(error as? StirError ?? .malformedResponse(
+            // Defensive: if `parseErrorBody`'s throw contract ever broadens
+            // beyond StirError, surface a stable malformed-response shape
+            // rather than crashing.
+            return .nonRetryableError(.malformedResponse(
                 description: "400 with unparseable body",
             ))
         }
@@ -160,8 +179,13 @@ enum HTTPErrorHandler {
         let body: ErrorResponseBody
         do {
             body = try parseErrorBody(data)
+        } catch let stirError as StirError {
+            // See classify400 — SCA-297 W16. `parseErrorBody` only throws
+            // `StirError.malformedResponse`; the prior `as?` fallback was
+            // unreachable.
+            return .nonRetryableError(stirError)
         } catch {
-            return .nonRetryableError(error as? StirError ?? .malformedResponse(
+            return .nonRetryableError(.malformedResponse(
                 description: "403 with unparseable body",
             ))
         }

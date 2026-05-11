@@ -194,6 +194,132 @@ final class SupabaseSessionClientTests: XCTestCase {
         XCTAssertEqual(callsBox.snapshot.count, 4)
     }
 
+    /// SCA-297 (W4): retry-exhausted 5xx now preserves the typed
+    /// `StirError.server` as `underlying:` instead of throwing
+    /// `.networkUnreachable(underlying: nil)`. Lets Sentry breadcrumbs +
+    /// ErrorPresenter retain the upstream code (AI-01 vs INTERNAL-01)
+    /// rather than collapsing every retry-exhausted 5xx into bare offline.
+    /// Wire shape — `.networkUnreachable` — is unchanged so callers
+    /// routing on "is offline" don't regress.
+    func test_5xx_retryExhausted_preservesUnderlyingTypedServerError() async throws {
+        MockURLProtocol.handler = { request in
+            let body = #"{"error":"INTERNAL-01","message":"gateway timeout"}"#.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!, body)
+        }
+        let client = SupabaseSessionClient(
+            config: Self.config(),
+            keychain: MockKeychain(),
+            urlSession: MockURLProtocol.stubSession(),
+            sentry: NoOpSentryReporter(),
+            clock: ImmediateClock(),
+        )
+
+        do {
+            _ = try await client.bootstrap(installationID: "iid", cloudKitRecordName: nil)
+            XCTFail("expected StirError.networkUnreachable")
+        } catch {
+            guard case let StirError.networkUnreachable(underlying) = error else {
+                return XCTFail("expected .networkUnreachable got \(error)")
+            }
+            // SCA-297 (W4): underlying MUST be the typed StirError.server,
+            // not nil — preserving the upstream code for ErrorPresenter
+            // routing + Sentry attribution.
+            guard let stirUnderlying = underlying as? StirError else {
+                return XCTFail("expected underlying StirError, got \(String(describing: underlying))")
+            }
+            guard case let .server(code, message, _) = stirUnderlying else {
+                return XCTFail("expected .server underlying, got \(stirUnderlying)")
+            }
+            XCTAssertEqual(code, .internal01)
+            XCTAssertEqual(message, "gateway timeout")
+        }
+    }
+
+    /// SCA-297 (W5): the streaming variant gained ONE pre-stream-handoff
+    /// retry on 5xx so a single transient Gemini 502 on dinner-solve no
+    /// longer surfaces immediately. Verifies attempt#2 succeeds: the
+    /// stream hand-off completes, body decodes, no throw.
+    func test_performStream_5xx_retriesOnceThenSucceeds() async throws {
+        let streamCalls = CallsBox()
+        MockURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            // Bootstrap calls always return a valid 200 bootstrap body so
+            // identity priming doesn't trip the stream retry counter.
+            if path == "/functions/v1/session-bootstrap" {
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Self.bootstrapResponseJSON())
+            }
+            // Only the dinner-solve stream participates in the W5 retry cadence.
+            streamCalls.append(path)
+            let streamAttempts = streamCalls.snapshot.count
+            if streamAttempts == 1 {
+                return (HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!,
+                        Data(#"{"error":"AI-01","message":"gemini hiccup"}"#.utf8))
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                    headerFields: ["Content-Type": "text/event-stream"])!,
+                    Data("data: {}\n\n".utf8))
+        }
+        let client = SupabaseSessionClient(
+            config: Self.config(),
+            keychain: MockKeychain(),
+            urlSession: MockURLProtocol.stubSession(),
+            sentry: NoOpSentryReporter(),
+            clock: ImmediateClock(),
+        )
+
+        // Prime identity so any AUTH-01 silent-retry path is also reachable —
+        // though this test doesn't traverse it, mirroring the production
+        // shape avoids accidental drift on a future change.
+        _ = try await client.bootstrap(installationID: "iid", cloudKitRecordName: nil)
+
+        let request = URLRequest(url: URL(string: "https://test.supabase.co/v1/ai/dinner-solve")!)
+        let (httpResponse, _) = try await client.performAuthenticatedStream(request)
+        XCTAssertEqual(httpResponse.statusCode, 200)
+        XCTAssertEqual(streamCalls.snapshot.count, 2, "expected original + 1 retry on 5xx")
+    }
+
+    /// SCA-297 (W5): pre-stream-handoff retry is SINGLE-shot. After the
+    /// retry also 5xx's, the typed `StirError.server` (NOT
+    /// `.networkUnreachable`) surfaces — distinct from the perform/
+    /// performNoContent retry-exhausted policy, because the stream path
+    /// hasn't actually begun yielding bytes and the caller (SolveViewModel)
+    /// still wants to know it was an upstream error, not "offline".
+    func test_performStream_5xx_retriesOnceThenThrowsServerError() async throws {
+        let streamCalls = CallsBox()
+        MockURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            if path == "/functions/v1/session-bootstrap" {
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                        Self.bootstrapResponseJSON())
+            }
+            streamCalls.append(path)
+            return (HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"error":"AI-01","message":"still down"}"#.utf8))
+        }
+        let client = SupabaseSessionClient(
+            config: Self.config(),
+            keychain: MockKeychain(),
+            urlSession: MockURLProtocol.stubSession(),
+            sentry: NoOpSentryReporter(),
+            clock: ImmediateClock(),
+        )
+        _ = try await client.bootstrap(installationID: "iid", cloudKitRecordName: nil)
+
+        let request = URLRequest(url: URL(string: "https://test.supabase.co/v1/ai/dinner-solve")!)
+        do {
+            _ = try await client.performAuthenticatedStream(request)
+            XCTFail("expected StirError.server")
+        } catch {
+            guard case let StirError.server(code, message, _) = error else {
+                return XCTFail("expected .server got \(error)")
+            }
+            XCTAssertEqual(code, .ai01)
+            XCTAssertEqual(message, "still down")
+        }
+        XCTAssertEqual(streamCalls.snapshot.count, 2, "expected original + 1 retry, no further attempts")
+    }
+
     // MARK: - Helpers
 
     private static func config() -> AppConfig {
