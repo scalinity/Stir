@@ -68,9 +68,14 @@ struct NotificationPrefsView: View {
             if !new {
                 ReactivationScheduler.shared.cancel()
             }
+            // SCA-316: flush prefs to /v1/push/register so backend
+            // pgmq-dispatch honors the new opt-in/out before its next
+            // fan-out. No-op until APNs token is acquired.
+            APNsRegistrationCoordinator.shared.flushPrefs()
         }
         .onChange(of: prefs.importCompletion) { _, new in
             store.setImportCompletion(new)
+            APNsRegistrationCoordinator.shared.flushPrefs()
         }
         .task {
             await refreshAuthorization()
@@ -130,6 +135,10 @@ struct NotificationPrefsView: View {
                 _ = try? await UNUserNotificationCenter.current()
                     .requestAuthorization(options: [.alert, .sound, .badge])
                 await refreshAuthorization()
+                // SCA-316: now that permission may have been granted,
+                // ask APNs for a device token. Coordinator no-ops if
+                // status didn't actually flip to .authorized.
+                await APNsRegistrationCoordinator.shared.registerForRemoteNotificationsIfAuthorized()
             }
         }
     }

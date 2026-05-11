@@ -263,6 +263,9 @@
 		C02E1B06BE1A8E32B8B3E767 /* NotificationPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BCD3DF9316F0867951228BB /* NotificationPreferencesStore.swift */; };
 		C1624675C7CF760A015E0575 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0C5B327FD1EFD0788845785 /* LoadingView.swift */; };
 		C200803A785580A86DBEE427 /* StirNotificationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */; };
+		A65A001000000051 /* APNsRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000050 /* APNsRegistrationCoordinator.swift */; };
+		A65A001000000053 /* StirAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000052 /* StirAppDelegate.swift */; };
+		A65A001000000055 /* APNsRegistrationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */; };
 		C2B82DB7F9CC8860B188BC0B /* LiveWebSocketTransportSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41EDE0B523D6A6FCCB81D2A7 /* LiveWebSocketTransportSecurityTests.swift */; };
 		C3554305F7809FD347ADDCFC /* PaywallViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */; };
 		C4D1BF905241B874117505F8 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9034881D462D6EE53C5EF90B /* ShareViewController.swift */; };
@@ -549,6 +552,9 @@
 		74C8F073249E8EEA78771A0B /* GroceryList+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GroceryList+Extensions.swift"; sourceTree = "<group>"; };
 		75142E3132B7B96CBE374625 /* FlagOutputService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlagOutputService.swift; sourceTree = "<group>"; };
 		761A3779D2203C1192F94225 /* StirNotificationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNotificationDelegate.swift; sourceTree = "<group>"; };
+		A65A001000000050 /* APNsRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APNsRegistrationCoordinator.swift; sourceTree = "<group>"; };
+		A65A001000000052 /* StirAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirAppDelegate.swift; sourceTree = "<group>"; };
+		A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APNsRegistrationCoordinatorTests.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
 		78604678E2CA07EB7DCA2028 /* VoiceTurnRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTurnRepository.swift; sourceTree = "<group>"; };
 		79EEF31ED777951AF778AD00 /* TextButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextButton.swift; sourceTree = "<group>"; };
@@ -828,6 +834,7 @@
 				579DFD0A26C0890A8746FF70 /* MockURLProtocol.swift */,
 				8B826DCA6393D026CC51F15B /* NotificationPreferencesStoreTests.swift */,
 				A65A001000000004 /* LeftoversFollowupSchedulerTests.swift */,
+				A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */,
 				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				A65A001000000022 /* PantryTombstoneReaperTests.swift */,
@@ -1142,6 +1149,7 @@
 		A73225084E0EE213E179FDCC /* Notifications */ = {
 			isa = PBXGroup;
 			children = (
+				A65A001000000050 /* APNsRegistrationCoordinator.swift */,
 				A65A001000000002 /* LeftoversFollowupScheduler.swift */,
 				A65A001000000008 /* NotificationHistoryStore.swift */,
 				B17317300173FFAACC170002 /* NotificationSchedulerKit.swift */,
@@ -1361,6 +1369,7 @@
 				392D02601EFD7683030D59D1 /* RootView.swift */,
 				781D75D0E66479C5877635BB /* Stir.entitlements */,
 				016A78A0278372166E393E65 /* StirApp.swift */,
+				A65A001000000052 /* StirAppDelegate.swift */,
 				B9D3B890CF05989A3C8E0E24 /* StirDeepLink.swift */,
 			);
 			path = App;
@@ -1722,6 +1731,7 @@
 				6ED22C864D819ECE7BD8690F /* Motion.swift in Sources */,
 				C99910CC8EC77949382366AE /* NotificationPreferencesStoreTests.swift in Sources */,
 				A65A001000000003 /* LeftoversFollowupSchedulerTests.swift in Sources */,
+				A65A001000000055 /* APNsRegistrationCoordinatorTests.swift in Sources */,
 				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */,
@@ -1936,6 +1946,8 @@
 				DCA61E2D1E63CBBF42E1D623 /* StepCardView.swift in Sources */,
 				4AD91364516A336582E7ED4B /* Stir.xcdatamodeld in Sources */,
 				F1C6D7813DA8274D0F34396F /* StirApp.swift in Sources */,
+				A65A001000000053 /* StirAppDelegate.swift in Sources */,
+				A65A001000000051 /* APNsRegistrationCoordinator.swift in Sources */,
 				373B720A9EB97C429D3E770E /* StirAppIntentsGate.swift in Sources */,
 				2A86FF2CBC76C2B79340E894 /* StirAppShortcutsProvider.swift in Sources */,
 				40453A0006723DFBC4204EB4 /* StirCardModifier.swift in Sources */,
