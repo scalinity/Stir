@@ -49,7 +49,12 @@ final class PantryTombstoneReaper {
     /// the reaper's CloudKit-zone-mutating work is hygiene-grade and
     /// daily is the tightest cadence that's worth running given the
     /// 90-day retention window.
-    nonisolated static let cadenceInterval: TimeInterval = 24 * 60 * 60
+    ///
+    /// SCA-311 S3: named `cadenceWindow` (not `cadenceInterval`) to
+    /// read as "skip if elapsed < this window" rather than "fires
+    /// every N seconds" — the reaper is foreground-triggered, not
+    /// timer-driven.
+    nonisolated static let cadenceWindow: TimeInterval = 24 * 60 * 60
 
     /// UserDefaults key for the last-run timestamp. Namespaced under
     /// `com.scalinity.stir.*` mirroring `ScanFlashMode`'s
@@ -78,7 +83,7 @@ final class PantryTombstoneReaper {
     init(
         repository: PantryItemRepository,
         retention: TimeInterval = PantryTombstoneReaper.defaultRetention,
-        cadence: TimeInterval = PantryTombstoneReaper.cadenceInterval,
+        cadence: TimeInterval = PantryTombstoneReaper.cadenceWindow,
         defaults: UserDefaults = .standard,
         telemetry: @MainActor @escaping (_ rowsPurged: Int, _ retentionDays: Int) -> Void = PantryTombstoneReaper.defaultTelemetry,
     ) {
@@ -176,6 +181,13 @@ final class PantryTombstoneReaper {
     /// Skipping no-op runs would conflate "reaper not running" with
     /// "reaper running cleanly" — the support story we want is
     /// "reaper ran today and purged N rows".
+    ///
+    /// SCA-311 S29: the `nonisolated static let` with `@MainActor`
+    /// closure type is the intentional shape — `nonisolated` lets the
+    /// init parameter default reference this from a non-MainActor
+    /// context (Swift 6 strict mode), while the closure itself still
+    /// hops back to the main actor before invoking `PostHogClient` so
+    /// the analytics call site stays main-actor-isolated.
     nonisolated static let defaultTelemetry: @MainActor (_ rowsPurged: Int, _ retentionDays: Int) -> Void = { rowsPurged, retentionDays in
         PostHogClient.shared.capture(
             .pantryTombstoneReaperRan,

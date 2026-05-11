@@ -61,7 +61,7 @@ final class PantryTombstoneReaperTests: XCTestCase {
     /// on event payload shape.
     private func makeReaper(
         retention: TimeInterval = PantryTombstoneReaper.defaultRetention,
-        cadence: TimeInterval = PantryTombstoneReaper.cadenceInterval,
+        cadence: TimeInterval = PantryTombstoneReaper.cadenceWindow,
         repository: PantryItemRepository? = nil,
         captures: TelemetryCollector,
     ) -> PantryTombstoneReaper {

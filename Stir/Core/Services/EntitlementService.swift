@@ -214,7 +214,14 @@ final class EntitlementService {
         // value 25 here instead of crashing decode upstream. The
         // SCA-265 floor in `rememberedPantryCap` is the second line
         // of defense for negative / zero values that DO decode.
-        self.serverStandingPantryCap = entitlements.standingPantryCap ?? 25
+        //
+        // SCA-311 S27: sanitize `<= 0` to nil at the decode boundary
+        // so the same `?? 25` fallback fires for both "missing" and
+        // "non-positive" — gives one place to reason about cap
+        // sanitization rather than relying solely on the read-time
+        // floor in `rememberedPantryCap`.
+        let sanitizedStandingCap: Int? = entitlements.standingPantryCap.flatMap { $0 > 0 ? $0 : nil }
+        self.serverStandingPantryCap = sanitizedStandingCap ?? 25
         // Mirror the tier into the App Group so StirWidgets can gate
         // Premium content without a Supabase round-trip from the widget
         // process. Written on every hydrate so webhook/tier-change
@@ -900,12 +907,15 @@ extension EntitlementService {
     /// risks are gone post-rollout, so the fallback is dropped — the
     /// wire field is now required.
     ///
-    /// SCA-265 floor (preserved): a server-side bug or A/B that ships
-    /// `0` (or negative) would lock every pantry add out with no UI
-    /// signal, since the cap-enforcement path treats `count >= cap` as
-    /// the lockout gate. Treat any non-positive value as a bug and
-    /// floor at the Free panic value 25 — the minimum cap under the
-    /// SCA-100 contract.
+    /// SCA-265 floor (defensive — server-bug guard): even with the
+    /// SCA-311 S27 decode-boundary sanitization, a future regression
+    /// that bypasses `hydrate(...)` (e.g. test fixture, direct keychain
+    /// restore, V2→V3 cross-decode path) could land a non-positive
+    /// `serverStandingPantryCap`. Treating any `<= 0` value as a bug
+    /// and flooring at the Free panic value 25 keeps the
+    /// cap-enforcement path (`count >= cap`) from silently locking
+    /// every pantry add out with no UI signal. This is belt-and-
+    /// suspenders to the boundary guard, not a transitional fallback.
     ///
     /// Used by `PantryListViewModel` and `ScanViewModel` for client-
     /// side quota gating on manual adds and scan upserts (the cap is

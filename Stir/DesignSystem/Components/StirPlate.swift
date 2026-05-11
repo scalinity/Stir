@@ -15,10 +15,13 @@
 // rather than a single shape parameterised by colour alone.
 //
 // Variants:
-//   - `.hero(tint: HeroTint = .salmon)` — full mockup-03 hero plate.
-//     Salmon fillet (or alternative protein tint), three sage greens,
-//     one lemon wedge, 14 rice grains, 3 sesame seeds. Used by
-//     `TonightPickHeroCard`.
+//   - `.hero` — full mockup-03 hero plate. Salmon fillet, three sage
+//     greens, one lemon wedge, 14 rice grains, 3 sesame seeds. Used by
+//     `TonightPickHeroCard`. SCA-311 S5: previously parameterized by a
+//     single-case `HeroTint` enum; collapsed since only `.salmon`
+//     shipped. Re-introduce the enum if/when a second protein tint
+//     ships — the migration is mechanical (re-add the enum, add a
+//     `tint:` associated value, route through `HeroPlate`).
 //   - `.option(tint: OptionTint)` — mockup-05 abstract option plate.
 //     Main centre dot keyed off ordinal rank; two accent dots; one
 //     dark dot; 10 rice grains. Used by `DishOptionCard`, where
@@ -35,21 +38,8 @@ import SwiftUI
 
 struct StirPlate: View {
     enum Variant {
-        case hero(tint: HeroTint = .salmon)
+        case hero
         case option(tint: OptionTint)
-    }
-
-    /// Hero-plate protein tints. Today only `.salmon` ships, but the enum
-    /// gives Cook Mode polish a single seam to add tofu / chicken plates
-    /// without touching the ZStack body.
-    enum HeroTint {
-        case salmon
-
-        var filletColor: Color {
-            switch self {
-            case .salmon: return Color.Stir.ember600
-            }
-        }
     }
 
     /// Option-plate tints, cycled by rank in `DishOptionCard`. Each tint
@@ -99,8 +89,8 @@ struct StirPlate: View {
     var body: some View {
         Group {
             switch variant {
-            case let .hero(tint):
-                HeroPlate(size: size, tint: tint)
+            case .hero:
+                HeroPlate(size: size)
             case let .option(tint):
                 OptionPlate(size: size, tint: tint)
             }
@@ -113,7 +103,11 @@ struct StirPlate: View {
 
 private struct HeroPlate: View {
     let size: CGFloat
-    let tint: StirPlate.HeroTint
+
+    /// Salmon fillet colour. Inlined from the retired `HeroTint.salmon`
+    /// seam (SCA-311 S5). When a second protein tint ships, restore the
+    /// enum and thread `tint: HeroTint` through here.
+    private var filletColor: Color { Color.Stir.ember600 }
 
     var body: some View {
         ZStack {
@@ -132,7 +126,7 @@ private struct HeroPlate: View {
             // Protein fillet — rounded ovoid in tint at 88% opacity,
             // overlaid with three pale grain lines.
             Capsule(style: .continuous)
-                .fill(tint.filletColor.opacity(0.88))
+                .fill(filletColor.opacity(0.88))
                 .frame(width: size * 0.40, height: size * 0.26)
                 .rotationEffect(.degrees(-8))
                 .offset(x: -size * 0.07, y: size * 0.02)
@@ -269,7 +263,7 @@ private struct OptionPlate: View {
 #if DEBUG
 #Preview("StirPlate — variants") {
     HStack(spacing: CGFloat.Stir.space4) {
-        StirPlate(.hero(), size: 180)
+        StirPlate(.hero, size: 180)
         VStack(spacing: CGFloat.Stir.space3) {
             StirPlate(.option(tint: .salmon), size: 88)
             StirPlate(.option(tint: .sage), size: 88)

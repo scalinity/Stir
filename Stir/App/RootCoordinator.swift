@@ -412,7 +412,13 @@ final class RootCoordinator {
         // a legitimate below-cap no-op — and would emit a misleading
         // "downgrade reached reconciliation" signal even though the
         // repo never executed.
-        self.entitlements.tierDowngradeHandler = { [weak self] _, _, newCap in
+        // SCA-311 S28: bind unused names `previousTier`/`newTier`
+        // explicitly (rather than `_, _, newCap`) so an audit of this
+        // closure can see the handler signature without jumping back
+        // to `EntitlementService.tierDowngradeHandler`'s declaration.
+        // The leading underscore on the unused locals keeps the
+        // compiler quiet about the unused bindings.
+        self.entitlements.tierDowngradeHandler = { [weak self] _previousTier, _newTier, newCap in
             guard let self else {
                 return PantryItemRepository.ReconcileOutcome(
                     totalRememberedPre: 0,

@@ -123,7 +123,7 @@ final class SolveRepository {
                 // Persisted schema defaults ambiguous (nil from wire)
                 // to `false` = required. Matches prior behavior before
                 // isOptional was made nullable on the wire.
-                row.isOptional = ing.isOptional ?? false
+                row.isOptional = ing.isOptional
                 row.sortOrder = Int16(clamping: idx)
                 row.typedSource = .ai
             }
@@ -296,6 +296,12 @@ final class SolveRepository {
                 row.displayName = ing.displayName
                 row.canonicalIngredientSlug = ing.canonicalSlug
                 row.amountText = ing.amountText
+                // SCA-311 S26 scope: only the first call site uses the
+                // local `IngredientInput.isOptional: Bool` (non-optional)
+                // and dropped its `?? false`. This site iterates the
+                // wire-shape `DishCard.RecipePlanWire.IngredientWire.isOptional`
+                // which is `Bool?` (AIDispatchDTOs.swift:448) because the
+                // model occasionally omits the field — keep the fallback.
                 row.isOptional = ing.isOptional ?? false
                 row.sortOrder = Int16(clamping: idx)
                 row.typedSource = .ai

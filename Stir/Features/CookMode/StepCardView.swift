@@ -176,15 +176,22 @@ struct StepCardView: View {
             // recipe) is out of scope for SCA-93 per ticket: "Semantics
             // TBD — recommend recipe-detail peek (modal sheet) since
             // that's a pattern users will want anyway. Confirm with
-            // Daniel before wiring." Keeping the affordance visible
-            // for layout fidelity; tap is a no-op until the
-            // peek-sheet design lands.
-            roundIconButton(
-                icon: Image(systemName: "eye"),
-                accessibilityLabel: "Recipe overview",
-                action: {},
-            )
-            .disabled(true)
+            // Daniel before wiring."
+            //
+            // SCA-311 S4: hidden under `if false` until the peek-sheet
+            // design lands. A `.disabled(true)` no-op reads as broken
+            // to beta testers; the affordance is suppressed entirely
+            // rather than dimmed. Re-enable by flipping `if false` to
+            // `if true` (or gating on a feature flag) when wiring the
+            // destination.
+            if false {
+                roundIconButton(
+                    icon: Image(systemName: "eye"),
+                    accessibilityLabel: "Recipe overview",
+                    action: {},
+                )
+                .disabled(true)
+            }
         }
         .padding(.horizontal, CGFloat.Stir.space4)
         .padding(.vertical, CGFloat.Stir.space2)

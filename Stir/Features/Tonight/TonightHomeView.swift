@@ -25,7 +25,7 @@
 //     if a second screen wants the same value.)
 //   - paper.200 plate pedestal up top with `HIGH MATCH` badge (sage)
 //     top-left and `SOLVED N MIN AGO` eyebrow top-right
-//   - SwiftUI-rendered `StirPlate(.hero())` — illustrated, not a photo
+//   - SwiftUI-rendered `StirPlate(.hero)` — illustrated, not a photo
 //     (per Spec §13: "photos of yet-to-be-cooked meals are always a
 //     lie")
 //   - paper.100 body with TONIGHT'S PICK (ember eyebrow), serif title,
@@ -1090,7 +1090,7 @@ private struct TonightPickHeroCard: View {
 
             VStack {
                 Spacer().frame(height: CGFloat.Stir.space4) // 16pt
-                StirPlate(.hero(), size: 180)
+                StirPlate(.hero, size: 180)
                 Spacer().frame(height: CGFloat.Stir.space1Half) // 6pt
             }
             .frame(maxWidth: .infinity)
@@ -1319,7 +1319,7 @@ private struct TonightPickHeroCard: View {
 }
 
 // PlateIllustration moved to Stir/DesignSystem/Components/StirPlate.swift
-// as `StirPlate(.hero(), size:)` (SCA-96). The salmon-fillet GeometryReader
+// as `StirPlate(.hero, size:)` (SCA-96). The salmon-fillet GeometryReader
 // (FD1-11) was retired during the move — the path is fully size-derived
 // and never needed parent-frame measurement.
 

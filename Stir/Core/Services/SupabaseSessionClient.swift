@@ -581,6 +581,18 @@ actor SupabaseSessionClient {
         )
         // Rebuild the request with fresh JWT.
         var retried = originalRequest
+        // SCA-311 S22: clear the Authorization header BEFORE the
+        // `if let jwt = cachedJWT` rebind. The retried request inherits
+        // `originalRequest`'s headers, which still carry the prior
+        // (now-stale, just-401'd) JWT. If the post-bootstrap path
+        // produces no fresh JWT (cachedJWT stayed nil — should not
+        // happen, but defensive), reusing the stale header would
+        // surface as another stale-`expired` 401 from PostgREST.
+        // Stripping unconditionally means a JWT-less retry reaches
+        // the server with no Authorization header at all, which
+        // PostgREST surfaces as `reason=missing` — the correct
+        // signal so RootCoordinator can route to SIWA re-flow.
+        retried.setValue(nil, forHTTPHeaderField: "Authorization")
         if let jwt = cachedJWT {
             retried.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         }

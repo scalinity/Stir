@@ -89,6 +89,10 @@ extension KeychainKey {
     /// fallback in `EntitlementService.restoreFromCachedSnapshotIfFresh`;
     /// only deleted post-translation to v3 (or on stale/decode-fail).
     /// Never written by current code.
+    // TODO(post-v1.1): retire entitlementSnapshotV2 slot — once all
+    // production users have a V3 snapshot persisted, the cross-decode
+    // path in `restoreFromCachedSnapshotIfFresh` and this key both
+    // become dead weight. Drop together; never write V2 in the meantime.
     static var entitlementSnapshotV2: KeychainKey {
         KeychainKey(service: defaultService, account: "entitlement_snapshot_v2")
     }
