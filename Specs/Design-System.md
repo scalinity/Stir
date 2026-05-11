@@ -301,6 +301,7 @@ Dark mode exception: one subtle shadow on Cook Mode step card to separate it fro
 | Update payment method — billing grace state | `creditcard` | `.creditCard` |
 | Restore purchases | `arrow.down.circle` | `.restore` |
 | Un-cancel / keep Premium | `arrow.uturn.backward.circle` | `.uncancel` |
+| Appearance / theme card (Settings) | `circle.lefthalf.filled` | `.appearance` |
 
 **Not in v1 — deferred to v2 custom icon set:**
 

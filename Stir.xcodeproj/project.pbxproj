@@ -20,6 +20,7 @@
 		0DBB9D4619D5040EAA57E65A /* AsyncTimeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FF891A25BC25AE6201DB21 /* AsyncTimeout.swift */; };
 		0F0D935AA6828583253F4984 /* AccountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF6131D62FD6AEE89E460F0 /* AccountState.swift */; };
 		0FD65AF6EC7FBABB0F28C65A /* NotificationPrefsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */; };
+		AA02C73F6D445E22BAF1FEF1 /* AppearanceMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA01B72E5C334D11A9F0EDE0 /* AppearanceMode.swift */; };
 		C61A1A001A6100000000C61A /* DeleteMyDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C61A1A001A6100000000C61B /* DeleteMyDataView.swift */; };
 		106BDB46DB5D832BEE1BCC94 /* RootCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A678963101108CE2077E4BE /* RootCoordinator.swift */; };
 		13D511EB32962FAF6A6AC4DE /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4714D34B06C97687599F9389 /* ErrorPresenter.swift */; };
@@ -81,6 +82,7 @@
 		404A71437E3D50A8F0FBF9B1 /* Icons.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91E50133C48D87663B85ECA /* Icons.swift */; };
 		40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */; };
 		DEAA93F28B2C45D8BE35F975 /* ScanFlashModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */; };
+		AA04E94F6D445E22BAF1FEF2 /* AppearanceModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA03D84E5C334D11A9F0EDE1 /* AppearanceModeTests.swift */; };
 		4251A10988292F425283C9A6 /* Shadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52C360FB0B332A41A4A112ED /* Shadow.swift */; };
 		437C0842FA7855A67EDA4BC1 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31D8A5D5C82DF5113FFE4A1 /* Spacing.swift */; };
 		454797BE4791137605A8A926 /* ImportRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12C55AD7E8B976D68E7020A /* ImportRoot.swift */; };
@@ -425,6 +427,7 @@
 		151133441B87DA5FA6CC975E /* LiveAudioPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAudioPipeline.swift; sourceTree = "<group>"; };
 		1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncTimeoutTests.swift; sourceTree = "<group>"; };
 		99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlashModeTests.swift; sourceTree = "<group>"; };
+		AA03D84E5C334D11A9F0EDE1 /* AppearanceModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceModeTests.swift; sourceTree = "<group>"; };
 		16EE773309B74D443CC75F9A /* ScanFlowRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowRoot.swift; sourceTree = "<group>"; };
 		173BC0B0F69A7DDDE7D12CB0 /* AIDispatchDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDispatchDecoderTests.swift; sourceTree = "<group>"; };
 		E8B2C6DAF50402938A6C5D8E /* BlankOptionalEncodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankOptionalEncodingTests.swift; sourceTree = "<group>"; };
@@ -691,6 +694,7 @@
 		FC62FC656E734BA0343A7A00 /* GroceryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryRepository.swift; sourceTree = "<group>"; };
 		FCCB19696B57826A5C37D47C /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
 		FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPrefsView.swift; sourceTree = "<group>"; };
+		AA01B72E5C334D11A9F0EDE0 /* AppearanceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceMode.swift; sourceTree = "<group>"; };
 		C61A1A001A6100000000C61B /* DeleteMyDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeleteMyDataView.swift; sourceTree = "<group>"; };
 		FF8D946132AFBD4013A90040 /* StirGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirGlyph.swift; sourceTree = "<group>"; };
 		"TEMP_25FC7C68-D3A9-4B34-A213-7B4A28DBF643" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
@@ -810,6 +814,7 @@
 				288F193547101468063792F0 /* AppIntentsGateTests.swift */,
 				1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */,
 				99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */,
+				AA03D84E5C334D11A9F0EDE1 /* AppearanceModeTests.swift */,
 				3A9DE9C3193E73E1AE97C1CF /* CookModeViewModelTests.swift */,
 				74687BC0971DA763E2AE8A2A /* CookModeVoiceIntegrationTests.swift */,
 				B5FFF2B81F4345047488F784 /* CookModeVoiceTraceAggregationTests.swift */,
@@ -1032,6 +1037,7 @@
 		699971EC776F51AE8DE0FFA2 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				AA01B72E5C334D11A9F0EDE0 /* AppearanceMode.swift */,
 				BBD287009FA0BEF2EC99BC52 /* HouseholdPreferencesView.swift */,
 				FD93A0E0BB000928DFE0EDC7 /* NotificationPrefsView.swift */,
 				1BE0F7D2870E6BDBBC41EDE6 /* SettingsRootView.swift */,
@@ -1698,6 +1704,7 @@
 				926AE33F4571D696CA9FDB71 /* AppIntentsGateTests.swift in Sources */,
 				40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */,
 				DEAA93F28B2C45D8BE35F975 /* ScanFlashModeTests.swift in Sources */,
+				AA04E94F6D445E22BAF1FEF2 /* AppearanceModeTests.swift in Sources */,
 				45E8176702FF4001797C10A4 /* CloudKitAccountChangeTests.swift in Sources */,
 				2D2311882A2127827CA3405A /* Colors.swift in Sources */,
 				FCF76E7B277686B408B1C983 /* CookModeViewModelTests.swift in Sources */,
@@ -1859,6 +1866,7 @@
 				B1FA3D0E121CD1200C2C638B /* Motion.swift in Sources */,
 				C02E1B06BE1A8E32B8B3E767 /* NotificationPreferencesStore.swift in Sources */,
 				0FD65AF6EC7FBABB0F28C65A /* NotificationPrefsView.swift in Sources */,
+				AA02C73F6D445E22BAF1FEF1 /* AppearanceMode.swift in Sources */,
 				C61A1A001A6100000000C61A /* DeleteMyDataView.swift in Sources */,
 				B1015880FB5F79E327B016C9 /* OCRService.swift in Sources */,
 				3D9E28432763AC59B7539298 /* OnboardingCompletionView.swift in Sources */,
