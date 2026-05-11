@@ -56,6 +56,18 @@ const MODEL = GeminiModel.FlashLite;
 const PGMQ_DISPATCH_SECRET = Deno.env.get('STIR_PGMQ_DISPATCH_SECRET') ?? '';
 let warnedMissingSecret = false;
 
+// SCA-313 S2 (CA1): module-scope counter tracking consecutive reclaim
+// sweep failures across the sweepErr branch + the catch-all wrapper.
+// Resets to zero on any successful sweep (sweepErr === null AND no
+// throw). A persistent reclaim-sweep failure means the queue is
+// silently wedging stuck-processing rows; once we cross the
+// SENTRY_THRESHOLD we emit a higher-severity `log.error` so the edge-
+// function log forwarder treats it as a Sentry-class breadcrumb
+// (the function runtime doesn't link the Sentry SDK directly —
+// log.error is the breadcrumb surface).
+const RECLAIM_FAIL_SENTRY_THRESHOLD = 5;
+let consecutiveReclaimFailures = 0;
+
 /** Constant-time string compare; both inputs MUST be the same byte length. */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -230,6 +242,14 @@ Deno.serve(async (req) => {
     });
     if (sweepErr) {
       log.warn('reclaim_sweep_failed', { err: sweepErr.message });
+      consecutiveReclaimFailures += 1;
+      if (consecutiveReclaimFailures >= RECLAIM_FAIL_SENTRY_THRESHOLD) {
+        log.error('reclaim_sweep_breadcrumb_threshold', {
+          consecutive_failures: consecutiveReclaimFailures,
+          threshold: RECLAIM_FAIL_SENTRY_THRESHOLD,
+          last_err: sweepErr.message,
+        });
+      }
     } else if (sweepResult) {
       const summary = sweepResult as {
         reclaimed_count?: number;
@@ -241,10 +261,24 @@ Deno.serve(async (req) => {
       if ((summary.dead_lettered_count ?? 0) > 0) {
         log.warn('stuck_jobs_dead_lettered', { count: summary.dead_lettered_count });
       }
+      // Successful sweep: reset the consecutive-failure counter so
+      // transient blips don't accumulate forever.
+      consecutiveReclaimFailures = 0;
+    } else {
+      // Null sweepResult with no error is still a "clean" return.
+      consecutiveReclaimFailures = 0;
     }
   } catch (err) {
     // Never fatal — the claim below still runs.
     log.warn('reclaim_unexpected', { err: err instanceof Error ? err.message : String(err) });
+    consecutiveReclaimFailures += 1;
+    if (consecutiveReclaimFailures >= RECLAIM_FAIL_SENTRY_THRESHOLD) {
+      log.error('reclaim_sweep_breadcrumb_threshold', {
+        consecutive_failures: consecutiveReclaimFailures,
+        threshold: RECLAIM_FAIL_SENTRY_THRESHOLD,
+        last_err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // ---- Claim up to CLAIM_LIMIT pending jobs atomically.

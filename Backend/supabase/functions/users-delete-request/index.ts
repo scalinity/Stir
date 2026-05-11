@@ -114,6 +114,34 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
+    // SCA-313 S12: differentiate timeout/connection-class errors from
+    // PostgREST RPC errors. The fail-open posture stays for PGRST*
+    // errors (rate-limiter logic glitch, bucket table missing/locked
+    // — proceed and let the DB-layer guards serialize); but a true
+    // connection-refused / timeout means Postgres is unreachable, so
+    // there is no DB-layer serialization to fall back on, and proceeding
+    // would either crash the next query anyway or write the row
+    // partway through. Surface 503 so the client retries.
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const errCode = (err as { code?: string } | null)?.code ?? '';
+    const isConnectionClass =
+      /econnrefused|etimedout|enotfound|connection refused|connect timeout|failed to fetch|fetch failed/i
+        .test(errMessage);
+    // PGRST-prefixed codes are PostgREST runtime errors (logic-class,
+    // not availability). Anything else without a PGRST prefix that
+    // smells like a connection error gets a 503.
+    if (isConnectionClass && !errCode.startsWith('PGRST')) {
+      userLog.error('rate_limiter_unavailable_connection_class', {
+        err: errMessage,
+        code: errCode,
+      });
+      return jsonError(
+        ErrorCode.NET_01,
+        503,
+        { message: 'Service temporarily unavailable; please retry.' },
+        requestId,
+      );
+    }
     // Fail-open per the comment block above. Log at error so the
     // dashboard surfaces RPC-level rate-limiter failures.
     userLog.error('rate_limiter_failed', err);

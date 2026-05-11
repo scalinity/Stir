@@ -65,9 +65,20 @@ final class EntitlementService {
         let periodEnd: String
 
         var periodEndDate: Date? {
-            ISO8601DateFormatter.stirWithoutFractional.date(from: periodEnd)
-                ?? ISO8601DateFormatter.stirWithFractional.date(from: periodEnd)
-                ?? EntitlementService.datePeriodFormatter.date(from: periodEnd)
+            // SCA-313 S25: log `.warning` when every formatter fails so
+            // a wire-shape drift (server sends a new ISO variant we
+            // don't accept yet) is visible in the unified log on the
+            // next bootstrap, rather than silently returning nil and
+            // dropping the resetDate UI throughout the quota surfaces.
+            // privacy: .public on the raw string is intentional — it's
+            // an ISO timestamp, not user content.
+            if let d = ISO8601DateFormatter.stirWithoutFractional.date(from: periodEnd) { return d }
+            if let d = ISO8601DateFormatter.stirWithFractional.date(from: periodEnd) { return d }
+            if let d = EntitlementService.datePeriodFormatter.date(from: periodEnd) { return d }
+            Logger.entitlement.warning(
+                "QuotaSnapshot.periodEndDate: all three formatters failed to parse '\(self.periodEnd, privacy: .public)'",
+            )
+            return nil
         }
 
         var remaining: Int { max(0, cap - used) }

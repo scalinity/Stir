@@ -237,7 +237,22 @@ final class UseSoonScheduler {
         now: Date,
         household: HouseholdProfile,
     ) -> Bool {
-        let lastCompleted = (try? cookingSessions.mostRecentCompletedAt(for: household)) ?? nil
+        // SCA-313 S31: prior shape `(try? ...) ?? nil` collapsed both
+        // "no recent session" (nil result) AND "Core Data threw" to
+        // nil → returned false → notification proceeded. A throw means
+        // we don't actually know whether the user just cooked, so the
+        // safer default is "assume recent session, suppress the nudge"
+        // — better to occasionally skip a use-soon than to wake the
+        // user with one we can't justify.
+        let lastCompleted: Date?
+        do {
+            lastCompleted = try cookingSessions.mostRecentCompletedAt(for: household)
+        } catch {
+            Logger.useSoon.warning(
+                "recentSessionCutoffViolated: cookingSessions.mostRecentCompletedAt threw — suppressing nudge as safe default. error=\(error.localizedDescription, privacy: .public)",
+            )
+            return true
+        }
         guard let lastCompleted else { return false }
         return now.timeIntervalSince(lastCompleted) < 24 * 3600
     }

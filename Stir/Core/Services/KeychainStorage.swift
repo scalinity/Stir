@@ -11,6 +11,15 @@
 // Access group is intentionally unset — step 7 (extensions) will introduce a
 // shared access group if Share Extension or Widgets need to read the session.
 // Default group is per-app, scoped by bundle ID.
+//
+// TODO(SCA-share-ext): V2→V3 entitlement-snapshot erase paths in
+// `EntitlementService.restoreFromCachedSnapshotIfFresh` use the
+// `kSecAttrAccessGroup`-default group. When the share extension target
+// lands and introduces a shared access group, the erase needs to be
+// re-run scoped per-access-group (default + shared) so the legacy V2
+// blob in the shared group doesn't strand and silently re-hydrate the
+// extension's cache. File the follow-up SCA-* ticket alongside the
+// share-extension landing PR.
 
 import Foundation
 import Security
@@ -213,7 +222,16 @@ struct KeychainStorage: KeychainStoring {
         case errSecSuccess, errSecItemNotFound:
             return
         default:
-            Logger.identity.error("keychain delete failed, OSStatus=\(status, privacy: .public)")
+            // SCA-313 S30: many callers use `try? keychain.delete(...)`
+            // because a missing-slot is the common shape on first launch.
+            // Real Keychain failures (OSStatus != errSecItemNotFound)
+            // shouldn't be silently swallowed — log at `.warning` so
+            // they show up in the unified log even when the caller
+            // discards the throw. The typed error still propagates for
+            // callers that DON'T use `try?` (e.g. test fixtures).
+            Logger.identity.warning(
+                "keychain delete failed (service=\(key.service, privacy: .public) account=\(key.account, privacy: .public)), OSStatus=\(status, privacy: .public)",
+            )
             throw KeychainStorageError.osStatus(status)
         }
     }

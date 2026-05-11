@@ -1002,14 +1002,20 @@ final class PantryItemRepository {
             NSSortDescriptor(key: "createdAt", ascending: true),
         ]
 
-        let rows: [PantryItem]
+        // SCA-313 S14: count first, then bounded-fetch only the archive
+        // slice. Prior shape did `fetch(request)` then `prefix(archiveCount)`,
+        // hydrating every remembered row before discarding the keep-set.
+        // At Pro→Free worst case (1000 → 25) that's 975 wasted hydrations;
+        // more importantly the no-archive-needed branch (Premium→Pro
+        // upgrade, repeat hydrate with cap unchanged) avoids any fetch
+        // at all.
+        let pre: Int
         do {
-            rows = try context.fetch(request)
+            pre = try context.count(for: request)
         } catch {
             throw StirError.coreData(underlying: error)
         }
 
-        let pre = rows.count
         guard pre > newCap else {
             // No archive needed. Return the pre/post pair so callers
             // (and telemetry) still see the no-op landed.
@@ -1021,7 +1027,17 @@ final class PantryItemRepository {
         }
 
         let archiveCount = pre - newCap
-        let toArchive = rows.prefix(archiveCount)
+        // Bound the fetch to exactly the slice we'll mutate. fetchLimit
+        // is paired with the same sortDescriptors above so Core Data
+        // returns the oldest `archiveCount` rows by `lastSeenAt asc`
+        // — the same prefix the old shape produced.
+        request.fetchLimit = max(0, archiveCount)
+        let toArchive: [PantryItem]
+        do {
+            toArchive = try context.fetch(request)
+        } catch {
+            throw StirError.coreData(underlying: error)
+        }
 
         for row in toArchive {
             row.typedMemoryState = .ephemeral
