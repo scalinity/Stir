@@ -179,8 +179,10 @@ Deno.serve(async (req) => {
       // (step-8 reactivation campaigns, ops dashboards). notification_
       // prefs_json remains the per-category source of truth; the
       // boolean is a cheap "any push at all?" index.
-      notifications_enabled: body.notification_prefs.import_completion ||
-        body.notification_prefs.reactivation,
+      // SCA-322: derive via `Object.values().some(Boolean)` so adding
+      // a new category to the schema auto-includes it instead of
+      // silently OR-rotting against the old enum.
+      notifications_enabled: Object.values(body.notification_prefs).some(Boolean),
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),
     })

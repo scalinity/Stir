@@ -44,9 +44,12 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
   return {
     apns_token: hex64(),
     environment: 'sandbox',
+    // SCA-322: schema requires all four prefs.
     notification_prefs: {
       import_completion: true,
       reactivation: false,
+      cook_reminder: true,
+      billing_grace: true,
     },
     ...overrides,
   };
@@ -84,7 +87,31 @@ Deno.test('push_register: VAL-01 when a notification_pref is not boolean', async
   const { session_jwt } = await quickBootstrap();
   const res = await callPushRegister(
     validBody({
-      notification_prefs: { import_completion: 'yes', reactivation: false },
+      notification_prefs: {
+        import_completion: 'yes',
+        reactivation: false,
+        cook_reminder: true,
+        billing_grace: true,
+      },
+    }),
+    session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('push_register: VAL-01 when a notification_pref is missing (.strict)', async () => {
+  // SCA-322: schema is .strict() — pre-fix users could omit fields
+  // and silently default-True; post-fix every category must be
+  // explicit so server reads consistent state.
+  const { session_jwt } = await quickBootstrap();
+  const res = await callPushRegister(
+    validBody({
+      notification_prefs: {
+        import_completion: true,
+        reactivation: true,
+        // cook_reminder + billing_grace deliberately omitted
+      },
     }),
     session_jwt,
   );
@@ -103,7 +130,12 @@ Deno.test('push_register: happy path persists push_token + env + prefs', async (
     validBody({
       apns_token: token,
       environment: 'production',
-      notification_prefs: { import_completion: true, reactivation: true },
+      notification_prefs: {
+        import_completion: true,
+        reactivation: true,
+        cook_reminder: true,
+        billing_grace: true,
+      },
     }),
     session_jwt,
   );

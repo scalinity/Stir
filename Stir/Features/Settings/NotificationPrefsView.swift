@@ -77,6 +77,13 @@ struct NotificationPrefsView: View {
             store.setImportCompletion(new)
             APNsRegistrationCoordinator.shared.flushPrefs()
         }
+        // SCA-322: cook_reminder + billing_grace are part of the
+        // wire schema and the local Preferences struct (so opt-out
+        // works the moment we expose UI), but neither has a Settings
+        // toggle yet — billing_grace is service-class info and
+        // cook_reminder has no backend enqueue path. When either gets
+        // a product surface, add `.onChange(of: prefs.<field>)` here
+        // and a `toggleRow` in `typesSection`.
         .task {
             await refreshAuthorization()
             // Re-seed prefs from the store in case the in-line @State

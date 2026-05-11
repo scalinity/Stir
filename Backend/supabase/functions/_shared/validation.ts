@@ -669,7 +669,14 @@ export type GroceryGenerateRequest = z.infer<typeof GroceryGenerateRequest>;
 //
 // apns_token: 64-hex-char Apple device token. Validated by length + charset.
 // environment: 'production' (release) or 'sandbox' (TestFlight + DEBUG).
-// notification_prefs: three flags iOS surfaces in Settings → Notifications.
+// notification_prefs: opt-in flags iOS surfaces in Settings → Notifications.
+//
+// SCA-322: prefs widened to cover every category in `APNsCategory`
+// (_shared/apns.ts). Pre-fix `cook_reminder` and `billing_grace`
+// (SCA-77) had no opt-out wire path because the schema only knew
+// about `import_completion` and `reactivation` — pgmq-dispatch
+// silently sent both regardless of user opt-out. Each category an
+// iOS user can receive needs a flag here.
 
 const APNS_TOKEN_REGEX = /^[0-9a-fA-F]{64}$/;
 
@@ -679,6 +686,8 @@ export const PushRegisterRequest = z.object({
   notification_prefs: z.object({
     import_completion: z.boolean(),
     reactivation: z.boolean(),
+    cook_reminder: z.boolean(),
+    billing_grace: z.boolean(),
   }).strict(),
 }).strict();
 

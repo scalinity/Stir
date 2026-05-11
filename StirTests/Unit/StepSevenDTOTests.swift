@@ -171,7 +171,12 @@ final class StepSevenDTOTests: XCTestCase {
         let body = PushRegisterRequest(
             apnsToken: String(repeating: "a", count: 64),
             environment: .sandbox,
-            notificationPrefs: .init(importCompletion: true, reactivation: false),
+            notificationPrefs: .init(
+                importCompletion: true,
+                reactivation: false,
+                cookReminder: true,
+                billingGrace: false,
+            ),
         )
         let json = try encoder.encode(body)
         let str = String(data: json, encoding: .utf8) ?? ""
@@ -179,6 +184,9 @@ final class StepSevenDTOTests: XCTestCase {
         XCTAssertTrue(str.contains("\"environment\":\"sandbox\""))
         XCTAssertTrue(str.contains("\"import_completion\":true"))
         XCTAssertTrue(str.contains("\"reactivation\":false"))
+        // SCA-322: new fields wire as snake_case keys.
+        XCTAssertTrue(str.contains("\"cook_reminder\":true"))
+        XCTAssertTrue(str.contains("\"billing_grace\":false"))
         XCTAssertFalse(str.contains("trial_reminder"), "wire field retired in SCA-74")
     }
 
