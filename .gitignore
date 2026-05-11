@@ -192,3 +192,11 @@ Thumbs.db
 *.orig
 logs/
 tmp/
+
+# -----------------------------------------------------------------------------
+# Human-facing HTML renders of spec / orientation
+# (Markdown is authoritative for Claude ingestion per user feedback;
+#  HTML versions are for human sharing/onboarding/scope review only.)
+# -----------------------------------------------------------------------------
+CLAUDE.html
+Specs/Stir-Full-Spec.html
