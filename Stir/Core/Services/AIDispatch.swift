@@ -315,12 +315,20 @@ actor AIDispatch {
         return response
     }
 
-    // MARK: - Push Register (step 7)
+    // MARK: - Push Register (step 8 — wired by SCA-316)
 
-    /// POST /v1/push/register. Called from iOS on first APNs token grant
-    /// and on every prefs-change in Settings → Notifications. Idempotent
-    /// by (canonical_user_key, installation_id, token, prefs) — reposts
-    /// with identical payload are a no-op UPDATE.
+    /// POST /v1/push/register. Wired by `APNsRegistrationCoordinator`
+    /// (SCA-316) — called on first APNs token grant from
+    /// `StirAppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`
+    /// and on every Settings → Notifications toggle change via
+    /// `flushPrefs()`. Server-side idempotency on (installation_id,
+    /// token, prefs) means reposts with identical payload are a no-op
+    /// UPDATE; the coordinator's own `Snapshot` cache short-circuits
+    /// the round-trip when nothing has changed.
+    ///
+    /// SCA-321: backend now keys on `installation_id` (not the
+    /// `last_seen_at DESC LIMIT 1` heuristic), so multi-install users
+    /// no longer clobber each other's push tokens.
     func pushRegister(request body: PushRegisterRequest) async throws -> PushRegisterResponse {
         let url = config.supabase.url.appendingPathComponent("/functions/v1/push-register")
         var request = URLRequest(url: url)
