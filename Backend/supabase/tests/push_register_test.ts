@@ -129,3 +129,60 @@ Deno.test('push_register: happy path persists push_token + env + prefs', async (
   assertEquals(data?.notification_prefs_json?.import_completion, true);
   assertEquals(data?.notification_prefs_json?.reactivation, true);
 });
+
+// ---------------------------------------------------------------------------
+// SCA-321 — multi-install isolation
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: multi-install — each install owns its own row', async () => {
+  // Two iOS installs sharing the same CloudKit identity (one user,
+  // two devices). Pre-fix the second POST clobbered whichever row
+  // `last_seen_at DESC LIMIT 1` surfaced; post-fix each install
+  // updates only its own `installation_id`-keyed row.
+  const ckRecordName = `_${crypto.randomUUID()}`;
+  const installA = crypto.randomUUID();
+  const installB = crypto.randomUUID();
+
+  const sessionA = await quickBootstrap({
+    installation_id: installA,
+    cloudkit_user_record_name: ckRecordName,
+  });
+  const sessionB = await quickBootstrap({
+    installation_id: installB,
+    cloudkit_user_record_name: ckRecordName,
+  });
+  // Both bootstraps land under the same canonical_user_key
+  // (`ck:<recordName>`), so the legacy `canonical_user_key`-only SELECT
+  // would have collapsed them.
+  assertEquals(sessionA.canonical_user_key, sessionB.canonical_user_key);
+
+  const tokenA = 'a'.repeat(64);
+  const tokenB = 'b'.repeat(64);
+
+  const resA = await callPushRegister(
+    validBody({ apns_token: tokenA }),
+    sessionA.session_jwt,
+  );
+  assertEquals(resA.status, 200);
+
+  const resB = await callPushRegister(
+    validBody({ apns_token: tokenB }),
+    sessionB.session_jwt,
+  );
+  assertEquals(resB.status, 200);
+
+  const client = serviceClient();
+  const { data: rowA } = await client
+    .from('device_installations')
+    .select('push_token')
+    .eq('installation_id', installA)
+    .single<{ push_token: string | null }>();
+  const { data: rowB } = await client
+    .from('device_installations')
+    .select('push_token')
+    .eq('installation_id', installB)
+    .single<{ push_token: string | null }>();
+
+  assertEquals(rowA?.push_token, tokenA, 'install A keeps its own token');
+  assertEquals(rowB?.push_token, tokenB, 'install B keeps its own token');
+});

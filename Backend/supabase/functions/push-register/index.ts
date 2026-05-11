@@ -1,15 +1,24 @@
 // POST /functions/v1/push-register
 // Logical endpoint: POST /v1/push/register (spec §3).
 //
-// Upserts APNs token + notification prefs on the caller's most recent
-// `device_installations` row. iOS calls:
+// Upserts APNs token + notification prefs on the calling install's
+// `device_installations` row (keyed on `installation_id` from the
+// session JWT). iOS calls:
 //   - on first token grant after UNUserNotificationCenter.requestAuthorization
 //   - on every prefs-change in Settings → Notifications
 //   - on token refresh (apns rotates tokens periodically)
 //
-// Idempotency: reposts with the same (canonical_user_key, environment,
-// apns_token, prefs) are a no-op UPDATE on the matching row. No new rows
-// created for duplicate registrations.
+// Idempotency: reposts with the same (installation_id, environment,
+// apns_token, prefs) are a no-op UPDATE on the matching row. No new
+// rows created for duplicate registrations.
+//
+// SCA-321: pre-fix this selected by `canonical_user_key` ordered by
+// `last_seen_at DESC LIMIT 1`. Multi-install users (one CK identity
+// across two iPhones) had Device B's POST clobber whichever row
+// `last_seen_at` happened to surface, leaving the other install's
+// row with a stale token. Now keyed on `installation_id` (still
+// AND-filtered by `canonical_user_key` as a belt-and-suspenders
+// guard against a hypothetical cross-user install_id mint).
 //
 // Used by:
 //   - pgmq-dispatch → APNs send for recipe_import_async completion (step 7)
@@ -122,15 +131,21 @@ Deno.serve(async (req) => {
     }, requestId);
   }
 
-  // ---- Upsert: find the most recent device_installation for this user
-  // and attach/update the apns token + prefs. If no install row exists
-  // (should be impossible after bootstrap), return VAL-01.
+  // ---- Upsert: target the calling install's device_installation row
+  // and attach/update the apns token + prefs. SCA-321: previously this
+  // selected by `canonical_user_key + ORDER BY last_seen_at DESC LIMIT
+  // 1`, which clobbered cross-device tokens for multi-install users
+  // (CK identity migrates across two iPhones; Device B's POST would
+  // overwrite Device A's row by `last_seen_at`, leaving Device A with
+  // a stale token but pgmq-dispatch reading it as current). The JWT
+  // already carries the calling install's `installation_id`; key the
+  // SELECT (and the UPDATE) on it directly so each install owns its
+  // own device_installations row.
   const { data: installRow, error: installReadErr } = await client
     .from('device_installations')
     .select('installation_id, push_token, notifications_enabled')
+    .eq('installation_id', claims.installation_id)
     .eq('canonical_user_key', claims.canonical_user_key)
-    .order('last_seen_at', { ascending: false })
-    .limit(1)
     .maybeSingle<{
       installation_id: string;
       push_token: string | null;
