@@ -31,24 +31,31 @@ final class ReactivationScheduler {
     private let center: any UserNotificationCenterClient
     private let calendar: Calendar
     private let preferences: NotificationPreferencesStore
+    private let telemetry: PostHogClient
 
     init(
         center: any UserNotificationCenterClient = UNUserNotificationCenter.current(),
         calendar: Calendar = .current,
         preferences: NotificationPreferencesStore = .shared,
+        telemetry: PostHogClient = .shared,
     ) {
         self.center = center
         self.calendar = calendar
         self.preferences = preferences
+        self.telemetry = telemetry
     }
 
     /// Schedule the 7-day reminder against `now + 7 days`. No-op when
     /// the user has opted out in Settings. Idempotent — re-scheduling
     /// after a second cook-in-the-same-week resets the 7-day clock.
     ///
-    /// Rollback pattern: snapshot any pending request before cancel,
-    /// restore on `add` failure so a transient UN error doesn't silently
-    /// erase the prior reminder.
+    /// SCA-318: routes through `NotificationSchedulerKit.addWithRollback`
+    /// for the dual-failure observability that SCA-309 added for
+    /// leftovers/use-soon. When primary `add` AND rollback re-add both
+    /// throw, this scheduler now emits
+    /// `notification_schedule_rollback_failed` with
+    /// `scheduler_id="reactivation"` instead of the prior silent
+    /// rollback.
     func scheduleAfterCook(now: Date = .init()) async {
         guard preferences.preferences.reactivation else {
             Logger.reactivation.info("reactivation disabled in prefs — skipping schedule")
@@ -56,13 +63,19 @@ final class ReactivationScheduler {
         }
         let fireDate = calendar.date(byAdding: .day, value: 7, to: now) ?? now.addingTimeInterval(7 * 86_400)
 
-        let authorized = await requestAuthorizationIfNeeded()
+        let authorized = await NotificationSchedulerKit.requestAuthorizationIfNeeded(
+            center: center,
+            logger: .reactivation,
+        )
         guard authorized else {
             Logger.reactivation.info("notification auth denied — skipping reactivation reminder")
             return
         }
 
-        let prior = await pendingReminder()
+        let prior = await NotificationSchedulerKit.pendingRequest(
+            identifier: reactivationReminderID,
+            center: center,
+        )
         cancel()
 
         let content = UNMutableNotificationContent()
@@ -86,18 +99,25 @@ final class ReactivationScheduler {
             trigger: trigger,
         )
 
-        do {
-            try await center.add(request)
+        let added = await NotificationSchedulerKit.addWithRollback(
+            request,
+            prior: prior,
+            center: center,
+            logger: .reactivation,
+            contextLabel: "reactivation reminder",
+            schedulerId: "reactivation",
+            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
+                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
+                    "scheduler_id": schedulerId,
+                    "identifier": identifier,
+                    "error_description": errorDescription,
+                ])
+            },
+        )
+        if added {
             Logger.reactivation.info(
                 "scheduled reactivation reminder fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        } catch {
-            Logger.reactivation.warning(
-                "reactivation reminder add failed: \(error.localizedDescription, privacy: .public) — rolling back",
-            )
-            if let prior {
-                try? await center.add(prior)
-            }
         }
     }
 
@@ -105,27 +125,6 @@ final class ReactivationScheduler {
     /// active users never receive the "haven't opened Stir" message.
     func cancel() {
         center.removePendingNotificationRequests(withIdentifiers: [reactivationReminderID])
-    }
-
-    // MARK: - Private
-
-    private func pendingReminder() async -> UNNotificationRequest? {
-        let pending = await center.pendingNotificationRequests()
-        return pending.first { $0.identifier == reactivationReminderID }
-    }
-
-    private func requestAuthorizationIfNeeded() async -> Bool {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            return true
-        case .denied:
-            return false
-        case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        @unknown default:
-            return false
-        }
     }
 }
 

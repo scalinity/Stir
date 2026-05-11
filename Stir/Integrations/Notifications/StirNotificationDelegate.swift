@@ -14,12 +14,28 @@
 // The delegate is installed at launch by StirApp via
 // `StirNotificationDelegate.register()`. It's a singleton because
 // UNUserNotificationCenter.delegate is a global slot.
+//
+// SCA-318 hardening:
+//   * `@MainActor` (was `@unchecked Sendable`). UN delegate callbacks
+//     hop to main automatically since iOS 16; the @unchecked + NSLock
+//     pattern was defending against a race that no longer exists. Drop
+//     both — the compiler now enforces what the lock was trying to.
+//   * Per-kind dedupe set keyed on `(NotificationKind, identifier)`.
+//     Old code shared one set across kinds, so a future per-fire
+//     identifier (or hypothetical cross-kind identifier collision)
+//     would silently suppress the second event. Each kind gets its
+//     own bucket with a soft 32-entry cap; today every kind uses a
+//     singleton identifier so the cap is essentially unreachable.
+//   * Single dispatch via `NotificationKind.from(_:)` instead of three
+//     `emitTelemetryIf*` helpers. Adding a new kind is now a one-line
+//     enum case + one switch arm — was three call sites.
 
 import AudioToolbox
 import Foundation
 import UserNotifications
 
-final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+@MainActor
+final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = StirNotificationDelegate()
 
     /// SystemSoundID for the foreground timer chime. 1057 is iOS's
@@ -28,17 +44,28 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     /// constant so a future swap to a custom-bundled chime only touches
     /// one place. `AudioServicesPlaySystemSound` respects the device
     /// silent switch, so the cue correctly stays silent when muted.
-    private static let tinkSoundID: SystemSoundID = 1057
+    /// Marked `nonisolated` so the `willPresent` callback (which is
+    /// `nonisolated` to satisfy the protocol's non-isolated requirement)
+    /// can reference it without an actor hop.
+    nonisolated private static let tinkSoundID: SystemSoundID = 1057
+
+    /// Soft cap per-kind to bound memory growth in case a future
+    /// notification kind starts using per-fire identifiers (rather than
+    /// the singleton-identifier pattern every current kind uses). Today
+    /// each kind has at most one entry in its bucket; the cap exists so
+    /// a regression doesn't grow the set unboundedly.
+    private static let dedupeCapPerKind = 32
 
     private let telemetry: PostHogClient
-    /// Identifiers we've already emitted reactivation telemetry for this
-    /// process lifetime. Guards against double-emission when a single
-    /// notification triggers both `willPresent` (foreground delivery) AND
-    /// `didReceive` (user subsequently taps the banner). The set stays
-    /// bounded — reactivation uses a singleton identifier so this is
-    /// a 1-entry set in practice.
-    private var emittedReminderIDs: Set<String> = []
-    private let emitLock = NSLock()
+
+    /// Identifiers we've already emitted a `*_fired` (or
+    /// `reactivation_notification_opened`) event for, bucketed per
+    /// notification kind. Guards against double-emission when the same
+    /// notification triggers BOTH `willPresent` (foreground delivery)
+    /// AND `didReceive` (user subsequently taps the banner). Per-kind
+    /// bucketing prevents an identifier collision across kinds from
+    /// silently suppressing a second kind's event.
+    private var emittedReminderIDs: [NotificationKind: Set<String>] = [:]
 
     init(telemetry: PostHogClient = .shared) {
         self.telemetry = telemetry
@@ -54,8 +81,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     // MARK: - UNUserNotificationCenterDelegate
 
     /// Delivery while app is foregrounded. Show banner + play sound so the
-    /// user notices, and emit reactivation telemetry on the 7-day cook
-    /// reminder.
+    /// user notices, and emit per-kind telemetry once.
     ///
     /// Timer notifications take a custom audio path: the system Tri-tone
     /// is too aggressive for a kitchen-cook chime, so we swap it for the
@@ -64,91 +90,104 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     /// delivery still uses `content.sound = .default` from the original
     /// `UNNotificationRequest` so the user gets a familiar, audible cue
     /// when the app isn't on screen.
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
+        withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void,
     ) {
-        emitTelemetryIfReactivation(notification)
-        emitTelemetryIfLeftoversFollowup(notification)
-        emitTelemetryIfUseSoon(notification)
-
         let userInfo = notification.request.content.userInfo
-        if TimerNotification.isTimer(from: userInfo) {
+        let isTimer = TimerNotification.isTimer(from: userInfo)
+        // Decide the presentation options up front so we can call the
+        // completion handler synchronously — UN expects this within the
+        // method body (not from a deferred Task) for foreground banners.
+        let options: UNNotificationPresentationOptions = isTimer
+            ? [.banner]
+            : [.banner, .sound]
+        if isTimer {
             // Single-note soft chime. We suppress `.sound` from the
             // presentation options so the system doesn't ALSO fire the
             // default Tri-tone on top of our chime.
             AudioServicesPlaySystemSound(Self.tinkSoundID)
-            completionHandler([.banner])
-            return
         }
-        completionHandler([.banner, .sound])
+        Task { @MainActor in
+            Self.shared.emitTelemetryIfNeeded(notification)
+        }
+        completionHandler(options)
     }
 
     /// Delivery when user taps a notification in-background → app foregrounds.
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void,
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void,
     ) {
-        emitTelemetryIfReactivation(response.notification)
-        emitTelemetryIfLeftoversFollowup(response.notification)
-        emitTelemetryIfUseSoon(response.notification)
+        Task { @MainActor in
+            Self.shared.emitTelemetryIfNeeded(response.notification)
+        }
         completionHandler()
     }
 
-    /// Emit `reactivation_notification_opened` with `trigger_kind` when the
-    /// 7-day cook-reminder fires (delivery OR tap-through). Dedupe on the
-    /// shared `emittedReminderIDs` set since reactivation uses its own
-    /// singleton identifier (`stir.reactivation.cook.7d`) so same-ID
-    /// double-invocation can't fire the event twice.
-    private func emitTelemetryIfReactivation(_ notification: UNNotification) {
+    // MARK: - Telemetry dispatch
+
+    /// Resolve the notification's kind (if recognized) and emit the
+    /// matching `*_fired`-class event exactly once per (kind, identifier)
+    /// across this process lifetime.
+    private func emitTelemetryIfNeeded(_ notification: UNNotification) {
         let userInfo = notification.request.content.userInfo
-        guard let triggerKind = ReactivationNotification.triggerKind(from: userInfo) else { return }
+        guard let kind = NotificationKind.from(userInfo) else { return }
 
-        let id = notification.request.identifier
-        emitLock.lock()
-        let shouldEmit = emittedReminderIDs.insert(id).inserted
-        emitLock.unlock()
-        guard shouldEmit else { return }
+        let identifier = notification.request.identifier
+        guard markEmitted(kind: kind, identifier: identifier) else { return }
 
-        // Route through the typed builder (same pattern as step-5/step-7
-        // telemetry — prevents property-name drift).
-        telemetry.capture(
-            .reactivationNotificationOpened,
-            properties: StepSevenTelemetry.reactivationNotificationOpened(triggerKind: triggerKind),
-        )
+        switch kind {
+        case .reactivation:
+            // Route through the typed builder (same pattern as
+            // step-5/step-7 telemetry — prevents property-name drift).
+            // `triggerKind` is required for this event; absent userInfo
+            // = malformed reactivation payload, so skip emission.
+            guard let triggerKind = ReactivationNotification.triggerKind(from: userInfo) else { return }
+            telemetry.capture(
+                .reactivationNotificationOpened,
+                properties: StepSevenTelemetry.reactivationNotificationOpened(triggerKind: triggerKind),
+            )
+        case .leftoversFollowup:
+            telemetry.capture(.leftoversFollowupFired, properties: [:])
+        case .useSoon:
+            telemetry.capture(.useSoonFired, properties: [:])
+        }
     }
 
-    /// Emit `leftovers_followup_fired` when the SCA-65 +20h notification
-    /// reaches the device. Same dedupe pattern as reactivation — uses the
-    /// shared `emittedReminderIDs` set since the leftovers followup uses
-    /// its own singleton identifier (`stir.leftovers.followup.20h`).
-    private func emitTelemetryIfLeftoversFollowup(_ notification: UNNotification) {
-        let userInfo = notification.request.content.userInfo
-        guard LeftoversFollowupNotification.isFollowup(from: userInfo) else { return }
-
-        let id = notification.request.identifier
-        emitLock.lock()
-        let shouldEmit = emittedReminderIDs.insert(id).inserted
-        emitLock.unlock()
-        guard shouldEmit else { return }
-
-        telemetry.capture(.leftoversFollowupFired, properties: [:])
+    /// Insert (kind, identifier) into the dedupe set. Returns `true` on
+    /// first sight (caller should emit), `false` when it's already
+    /// present (caller should skip). Evicts an arbitrary prior entry
+    /// when the bucket exceeds `dedupeCapPerKind` so memory stays bounded
+    /// if a future kind adopts per-fire identifiers.
+    private func markEmitted(kind: NotificationKind, identifier: String) -> Bool {
+        var bucket = emittedReminderIDs[kind] ?? []
+        let inserted = bucket.insert(identifier).inserted
+        if bucket.count > Self.dedupeCapPerKind {
+            // Pop an arbitrary stale entry. Set's removeFirst() is O(n)
+            // worst-case but the bucket is bounded at 32, so it's fine.
+            bucket.removeFirst()
+        }
+        emittedReminderIDs[kind] = bucket
+        return inserted
     }
+}
 
-    /// Emit `use_soon_fired` when the SCA-64 ingredient-expiry
-    /// notification reaches the device. Same dedupe pattern.
-    private func emitTelemetryIfUseSoon(_ notification: UNNotification) {
-        let userInfo = notification.request.content.userInfo
-        guard UseSoonNotification.isUseSoon(from: userInfo) else { return }
+// MARK: - NotificationKind
 
-        let id = notification.request.identifier
-        emitLock.lock()
-        let shouldEmit = emittedReminderIDs.insert(id).inserted
-        emitLock.unlock()
-        guard shouldEmit else { return }
+/// Single source of truth for the `userInfo["stir_notification_kind"]`
+/// values Stir's local notifications carry. Adding a new kind here +
+/// adding a switch arm in `emitTelemetryIfNeeded` is the full surface
+/// for wiring a new `*_fired`-class event into the delegate.
+enum NotificationKind: String, CaseIterable, Sendable {
+    case reactivation
+    case leftoversFollowup = "leftovers_followup"
+    case useSoon = "use_soon"
 
-        telemetry.capture(.useSoonFired, properties: [:])
+    static func from(_ userInfo: [AnyHashable: Any]) -> NotificationKind? {
+        guard let raw = userInfo["stir_notification_kind"] as? String else { return nil }
+        return NotificationKind(rawValue: raw)
     }
 }
