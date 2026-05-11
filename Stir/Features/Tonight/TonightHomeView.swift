@@ -620,7 +620,12 @@ struct TonightHomeView: View {
 
     private func handleUseSoonTap(_ candidate: UseSoonCandidate) {
         openSolveAgain(useFirstDisplayName: candidate.displayName)
-        PostHogClient.shared.capture(.useSoonTapped, properties: [:])
+        // SCA-317: route through UseSoonScheduler so the unactioned-streak
+        // counter clears AND telemetry fires from a single seam. Prior
+        // direct PostHog.capture() left history.markMostRecentActioned()
+        // un-called, so two consecutive card-only taps would silently arm
+        // the 14-day suppression even though the user was engaging.
+        UseSoonScheduler.shared.recordAction()
     }
 
     private func handleUseSoonPrefill(_ entry: RootCoordinator.UseSoonPrefillEntry) {
