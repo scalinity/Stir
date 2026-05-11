@@ -15,7 +15,7 @@
 
 - `stir_ops_cost_anomaly_scan()` runs every 15 min via pg_cron `stir-cost-anomaly-scan`.
 - `stir_ops_cost_anomaly_alert_dispatch()` runs every 1 min via pg_cron `stir-cost-anomaly-alert-dispatch` — reads unsent anomalies + POSTs Sentry store events via pg_net, stamps `alerted_at`.
-- Dedup: same (user_hash, anomaly_type) within 24h doesn't re-alert.
+- Dedup: at most one open row per `(canonical_user_key_hash, anomaly_type)` enforced by a partial UNIQUE INDEX on `WHERE resolved_at IS NULL` (SCA-303). The legacy 24h re-emit window is gone — `resolved_at` is now load-bearing; see [`cost-anomalies.md`](./cost-anomalies.md).
 
 ## Triage
 
@@ -29,7 +29,7 @@
 5. **Action**:
    - Confirmed abuse → `users.status` = banned via ops console Users page
    - Product bug → file GitHub issue + flip `disable_cook_realtime` / `disable_scan_parse` kill switch if active
-   - False positive → resolve anomaly via ops console (mark reviewed; dedup window re-opens for future occurrences)
+   - False positive → resolve anomaly via ops console (mark reviewed; this stamps `resolved_at` so the partial unique index allows future inserts of the same grain — see [`cost-anomalies.md`](./cost-anomalies.md))
    - Spend-budget tuning → edit `stir_ops_cost_anomaly_scan` thresholds in a migration
 
 ## Finding user from hash
