@@ -79,6 +79,14 @@ struct PaywallOfferings: Sendable, Equatable {
         packages.first { $0.productID == StirProduct.premiumMonthly.rawValue }
     }
 
+    /// Premium annual lookup. The `.trial7` raw-value suffix is historical
+    /// (SCA-294 migrated the trial off this SKU) — Apple doesn't allow
+    /// productID renames. PaywallView renders this as a flat-priced annual
+    /// option alongside the Pro trial.
+    var premiumAnnualPackage: PaywallPackage? {
+        packages.first { $0.productID == StirProduct.premiumAnnualTrial7.rawValue }
+    }
+
     var proMonthlyPackage: PaywallPackage? {
         packages.first { $0.productID == StirProduct.proMonthly.rawValue }
     }
