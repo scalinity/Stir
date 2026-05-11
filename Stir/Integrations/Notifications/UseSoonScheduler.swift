@@ -249,7 +249,7 @@ final class UseSoonScheduler {
             lastCompleted = try cookingSessions.mostRecentCompletedAt(for: household)
         } catch {
             Logger.useSoon.warning(
-                "recentSessionCutoffViolated: cookingSessions.mostRecentCompletedAt threw — suppressing nudge as safe default. error=\(error.localizedDescription, privacy: .public)",
+                "recentSessionCutoffViolated: cookingSessions.mostRecentCompletedAt threw — suppressing nudge as safe default. error=\(error.localizedDescription, privacy: .private)",
             )
             return true
         }
