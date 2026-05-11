@@ -122,6 +122,28 @@ enum NotificationSchedulerKit {
         return nil
     }
 
+    /// Outcome of `addWithRollback`. SCA-319: the prior `Bool` API
+    /// collapsed `.rolledBack` (prior is intact) and `.lostBoth` (no
+    /// pending follow-up at all) into the same `false`, hiding the
+    /// distinction every caller needs to surface user-recovery copy.
+    enum RollbackResult: Sendable, Equatable {
+        /// The new `request` was added successfully. Caller should
+        /// proceed with `*_scheduled` history + telemetry writes.
+        case added
+        /// Primary `add` threw, but the rollback re-add of `prior`
+        /// succeeded — the user has the same pending schedule they
+        /// had before this attempt. Caller should NOT emit
+        /// `*_scheduled` for the new request; the user is not in a
+        /// degraded state.
+        case rolledBack
+        /// Primary `add` threw AND either rollback re-add ALSO threw
+        /// OR there was no `prior` to restore — the user has NO
+        /// pending notification of this kind. Caller may surface
+        /// user-recovery copy or escalate; telemetry is already
+        /// emitted via `onRollbackFailure`.
+        case lostBoth
+    }
+
     /// Try to add `request`; on throw, attempt to re-add `prior` (if any).
     /// Logs the initial add failure at `warning`; if the rollback re-add also
     /// throws, logs at `error` so the user-has-no-pending-followup case is
@@ -138,17 +160,29 @@ enum NotificationSchedulerKit {
     /// of the rollback re-add error. Defaults to `nil` so test callers
     /// don't have to wire it.
     ///
-    /// - Returns: `true` when `request` was successfully added; `false` when
-    ///   the add threw (rollback may or may not have succeeded — the caller
-    ///   doesn't currently branch on rollback success).
+    /// SCA-319: callers MUST NOT pre-`cancel()` the prior request before
+    /// calling this helper. `UNUserNotificationCenter.add(_:)` replaces
+    /// an existing request with the same identifier atomically, so a
+    /// dedicated cancel step is redundant. Worse, when
+    /// `pendingRequest()` transiently returned `nil` due to a UN race
+    /// (or any caller-side staleness), the pre-cancel would erase a
+    /// still-existing prior schedule, leaving the rollback path with
+    /// `prior=nil` and the user with no pending notification on `add`
+    /// failure. Letting UN's same-identifier replacement handle the
+    /// swap eliminates the race.
+    ///
+    /// - Returns: a typed `RollbackResult` — `.added` (success),
+    ///   `.rolledBack` (primary failed but prior is intact), or
+    ///   `.lostBoth` (primary failed and no recovery — either no prior
+    ///   to restore, or rollback re-add also threw).
     ///
     /// SCA-315 S9: `@discardableResult` intentionally NOT applied. Both
     /// production callers (`UseSoonScheduler`, `LeftoversFollowupScheduler`)
-    /// gate the post-add history/telemetry writes on this Bool, so a
+    /// gate the post-add history/telemetry writes on this result, so a
     /// future caller that silently dropped the return value would
     /// emit stale `*_scheduled` events for an add that never landed.
-    /// Forcing callers to acknowledge the Bool (via `let _ = await ...`
-    /// or a branch) keeps the contract honest.
+    /// Forcing callers to acknowledge the result keeps the contract
+    /// honest.
     static func addWithRollback(
         _ request: UNNotificationRequest,
         prior: UNNotificationRequest?,
@@ -157,32 +191,44 @@ enum NotificationSchedulerKit {
         contextLabel: String,
         schedulerId: String = "",
         onRollbackFailure: NotificationRollbackFailureHandler? = nil,
-    ) async -> Bool {
+    ) async -> RollbackResult {
         do {
             try await center.add(request)
-            return true
+            return .added
         } catch {
             logger.warning(
                 "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
             )
-            if let prior {
-                do {
-                    try await center.add(prior)
-                } catch {
-                    logger.error(
-                        "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending \(contextLabel, privacy: .public)",
-                    )
-                    // SCA-309: surface the double-failure to telemetry.
-                    // Description is the OS-supplied error string — no
-                    // user content, satisfies ADR 0009.
-                    onRollbackFailure?(
-                        schedulerId,
-                        request.identifier,
-                        error.localizedDescription,
-                    )
-                }
+            guard let prior else {
+                // No prior to restore. The primary add failed, so the
+                // user has nothing pending of this kind.
+                logger.error(
+                    "no prior to roll back to — user has no pending \(contextLabel, privacy: .public)",
+                )
+                onRollbackFailure?(
+                    schedulerId,
+                    request.identifier,
+                    error.localizedDescription,
+                )
+                return .lostBoth
             }
-            return false
+            do {
+                try await center.add(prior)
+                return .rolledBack
+            } catch {
+                logger.error(
+                    "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending \(contextLabel, privacy: .public)",
+                )
+                // SCA-309: surface the double-failure to telemetry.
+                // Description is the OS-supplied error string — no
+                // user content, satisfies ADR 0009.
+                onRollbackFailure?(
+                    schedulerId,
+                    request.identifier,
+                    error.localizedDescription,
+                )
+                return .lostBoth
+            }
         }
     }
 }

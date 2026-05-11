@@ -147,7 +147,10 @@ final class UseSoonScheduler {
             identifier: useSoonReminderID,
             center: center,
         )
-        cancel()
+        // SCA-319: no pre-cancel(). UN.add(_:) replaces same-identifier
+        // requests atomically; an explicit cancel risks erasing the
+        // prior schedule on the pendingRequest()-returned-nil race,
+        // leaving rollback with nothing to restore.
 
         let displayName = candidate.displayName ?? "an ingredient"
         let content = UNMutableNotificationContent()
@@ -172,7 +175,7 @@ final class UseSoonScheduler {
             trigger: trigger,
         )
 
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
@@ -187,7 +190,8 @@ final class UseSoonScheduler {
                 ])
             },
         )
-        if added {
+        switch result {
+        case .added:
             history.recordScheduled(fireAt: fireDate)
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
@@ -196,6 +200,11 @@ final class UseSoonScheduler {
             Logger.useSoon.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public) item=\(displayName, privacy: .private(mask: .hash))",
             )
+        case .rolledBack, .lostBoth:
+            // .rolledBack: prior is intact; user keeps their existing
+            // schedule. .lostBoth: telemetry already fired via
+            // onRollbackFailure. Either way, no `*_scheduled` write.
+            break
         }
     }
 

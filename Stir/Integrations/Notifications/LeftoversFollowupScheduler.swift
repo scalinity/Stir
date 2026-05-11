@@ -117,7 +117,12 @@ final class LeftoversFollowupScheduler {
             identifier: leftoversFollowupID,
             center: center,
         )
-        cancel()
+        // SCA-319: no pre-cancel(). UN.add(_:) replaces an existing
+        // request with the same identifier atomically; an explicit
+        // cancel before add would erase the prior schedule on the
+        // race where pendingRequest() transiently returned nil even
+        // though one was actually pending — leaving rollback with
+        // nothing to restore on add failure.
 
         let content = UNMutableNotificationContent()
         content.title = "Tomorrow's dinner is already in your fridge"
@@ -139,7 +144,7 @@ final class LeftoversFollowupScheduler {
             trigger: trigger,
         )
 
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
@@ -154,7 +159,8 @@ final class LeftoversFollowupScheduler {
                 ])
             },
         )
-        if added {
+        switch result {
+        case .added:
             history.recordScheduled(fireAt: fireDate)
             telemetry.capture(.leftoversFollowupScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
@@ -162,6 +168,11 @@ final class LeftoversFollowupScheduler {
             Logger.leftoversFollowup.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
+        case .rolledBack, .lostBoth:
+            // .rolledBack: prior is intact; user keeps their existing
+            // schedule. .lostBoth: telemetry already fired via
+            // onRollbackFailure. Either way, no `*_scheduled` write.
+            break
         }
     }
 

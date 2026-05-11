@@ -76,7 +76,10 @@ final class ReactivationScheduler {
             identifier: reactivationReminderID,
             center: center,
         )
-        cancel()
+        // SCA-319: no pre-cancel(). UN.add(_:) handles same-identifier
+        // replacement atomically. The pre-cancel was racy when
+        // pendingRequest() transiently returned nil — it would erase
+        // the prior schedule the rollback path needed.
 
         let content = UNMutableNotificationContent()
         content.title = "Cook something tonight?"
@@ -99,7 +102,7 @@ final class ReactivationScheduler {
             trigger: trigger,
         )
 
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
@@ -114,10 +117,16 @@ final class ReactivationScheduler {
                 ])
             },
         )
-        if added {
+        switch result {
+        case .added:
             Logger.reactivation.info(
                 "scheduled reactivation reminder fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
+        case .rolledBack, .lostBoth:
+            // .rolledBack: prior is intact; user keeps their existing
+            // reminder. .lostBoth: telemetry already fired via
+            // onRollbackFailure.
+            break
         }
     }
 
