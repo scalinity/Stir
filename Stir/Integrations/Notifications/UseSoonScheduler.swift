@@ -28,11 +28,20 @@
 //     unactioned-streak math counts taps.
 //
 // Telemetry:
-//   * `use_soon_scheduled` { fire_at, item_display_name }
+//   * `use_soon_scheduled` { fire_at }
 //   * `use_soon_fired`     (delivery; via StirNotificationDelegate)
 //   * `use_soon_tapped`    (deep-link tap)
 //   * `use_soon_suppressed` { reason: "weekly_cap" | "unactioned_streak" |
-//                                     "recent_session" | "no_candidate" }
+//                                     "recent_session" | "no_candidate" |
+//                                     "no_displayable_candidate" }
+//
+// SCA-320: `item_display_name` dropped from `use_soon_scheduled` per
+// ADR 0009 — pantry labels are user content. The notification body
+// still uses the display name (user-facing rendering is fine), but
+// telemetry, OSLog, and userInfo carry only the pantry item ID.
+// `no_displayable_candidate` was added so a missing/empty displayName
+// triggers a clean suppression instead of the prior "Use an
+// ingredient before it goes" generic-fallback notification body.
 
 import CoreData
 import Foundation
@@ -132,6 +141,23 @@ final class UseSoonScheduler {
             return
         }
 
+        // SCA-320: previously the scheduler shipped a fallback notification
+        // body of "Use an ingredient before it goes" when displayName was
+        // nil — copy that reads as a bug. We now treat a missing
+        // displayName as a suppression case so the user never sees the
+        // generic copy. The candidate is otherwise valid; if a future
+        // upstream fixes the displayName backfill, the next schedule
+        // attempt picks it up automatically.
+        guard
+            let displayName = candidate.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !displayName.isEmpty
+        else {
+            telemetry.capture(.useSoonSuppressed, properties: [
+                "reason": "no_displayable_candidate",
+            ])
+            return
+        }
+
         let fireDate = nextFireDate(from: now)
 
         let authorized = await NotificationSchedulerKit.requestAuthorizationIfNeeded(
@@ -152,15 +178,20 @@ final class UseSoonScheduler {
         // prior schedule on the pendingRequest()-returned-nil race,
         // leaving rollback with nothing to restore.
 
-        let displayName = candidate.displayName ?? "an ingredient"
+        // `displayName` is the validated, trimmed value from the
+        // suppression guard above. Used in the user-facing title only.
         let content = UNMutableNotificationContent()
         content.title = "Use \(displayName) before it goes"
         content.body = "Want 3 dinner ideas built around it?"
         content.sound = .default
+        // SCA-320: ADR 0009 — no user content in userInfo (PostHog
+        // pulls userInfo via the deep-link handler if/when we widen
+        // the contract). Deep-link only needs the pantry item ID; the
+        // display name is fetched fresh from CoreData when the user
+        // taps. Dropped: `use_first_display_name`.
         content.userInfo = [
             "stir_notification_kind": "use_soon",
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
-            "use_first_display_name": displayName,
         ]
         content.interruptionLevel = .active
 
@@ -193,12 +224,15 @@ final class UseSoonScheduler {
         switch result {
         case .added:
             history.recordScheduled(fireAt: fireDate)
+            // SCA-320: dropped `item_display_name` per ADR 0009 — pantry
+            // labels are user content. The hashed OSLog item= breadcrumb
+            // is also dropped because the property it supported is gone;
+            // fire time alone is enough for ops + dashboards.
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
-                "item_display_name": displayName,
             ])
             Logger.useSoon.info(
-                "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public) item=\(displayName, privacy: .private(mask: .hash))",
+                "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
         case .rolledBack, .lostBoth:
             // .rolledBack: prior is intact; user keeps their existing
