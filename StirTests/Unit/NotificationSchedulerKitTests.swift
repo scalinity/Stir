@@ -251,6 +251,69 @@ final class NotificationSchedulerKitTests: XCTestCase {
         XCTAssertEqual(center.addCallCount, 2, "kit attempted both adds")
     }
 
+    /// SCA-309: when both the primary add AND the rollback re-add throw,
+    /// the kit invokes `onRollbackFailure` with the scheduler-supplied
+    /// `schedulerId`, the failing notification `identifier`, and the
+    /// rollback error's localized description. Schedulers wire this to
+    /// `PostHogClient.capture(.notificationScheduleRollbackFailed, ...)`
+    /// — without telemetry the "user has no pending follow-up at all"
+    /// outcome was OSLog-only.
+    func test_addWithRollback_bothFailures_invokesOnRollbackFailure_withSchedulerProperties() async {
+        let center = SpyCenter()
+        center.addBehavior = .alwaysFail(NSError(
+            domain: "test",
+            code: 9,
+            userInfo: [NSLocalizedDescriptionKey: "TestKit: simulated rollback fault"],
+        ))
+        let recorder = RollbackFailureRecorder()
+        let added = await NotificationSchedulerKit.addWithRollback(
+            makeRequest("stir.test.failing-id"),
+            prior: makeRequest("prior"),
+            center: center,
+            logger: logger,
+            contextLabel: "test",
+            schedulerId: "test_scheduler",
+            onRollbackFailure: { schedulerId, identifier, errorDescription in
+                recorder.record(
+                    schedulerId: schedulerId,
+                    identifier: identifier,
+                    errorDescription: errorDescription,
+                )
+            },
+        )
+        XCTAssertFalse(added, "both-failures branch returns false")
+
+        XCTAssertEqual(recorder.invocationCount, 1, "onRollbackFailure fires exactly once on the both-failures branch")
+        XCTAssertEqual(recorder.lastSchedulerId, "test_scheduler")
+        XCTAssertEqual(recorder.lastIdentifier, "stir.test.failing-id")
+        XCTAssertEqual(recorder.lastErrorDescription, "TestKit: simulated rollback fault")
+    }
+
+    /// SCA-309: when the primary add succeeds (or the rollback re-add
+    /// succeeds), the failure callback must NOT fire — the both-
+    /// failures branch is the only emit site.
+    func test_addWithRollback_primarySuccess_doesNotInvokeOnRollbackFailure() async {
+        let center = SpyCenter()
+        let recorder = RollbackFailureRecorder()
+        let added = await NotificationSchedulerKit.addWithRollback(
+            makeRequest("primary"),
+            prior: nil,
+            center: center,
+            logger: logger,
+            contextLabel: "test",
+            schedulerId: "test_scheduler",
+            onRollbackFailure: { schedulerId, identifier, errorDescription in
+                recorder.record(
+                    schedulerId: schedulerId,
+                    identifier: identifier,
+                    errorDescription: errorDescription,
+                )
+            },
+        )
+        XCTAssertTrue(added)
+        XCTAssertEqual(recorder.invocationCount, 0, "primary-success branch must not fire the rollback-failure callback")
+    }
+
     // MARK: - Helpers
 
     private func makeRequest(_ id: String) -> UNNotificationRequest {
@@ -259,6 +322,27 @@ final class NotificationSchedulerKitTests: XCTestCase {
             content: UNMutableNotificationContent(),
             trigger: nil,
         )
+    }
+}
+
+/// SCA-309 helper: @MainActor-bound recorder for the rollback-failure
+/// telemetry callback. The callback type is `@MainActor @Sendable`,
+/// and the kit calls it synchronously from `addWithRollback`'s
+/// `@MainActor` enum, so a class holding `var`s in @MainActor is
+/// safe and lets the test read recorded data immediately after
+/// `await addWithRollback(...)` returns — no Task hop required.
+@MainActor
+final class RollbackFailureRecorder {
+    private(set) var invocationCount = 0
+    private(set) var lastSchedulerId = ""
+    private(set) var lastIdentifier = ""
+    private(set) var lastErrorDescription = ""
+
+    func record(schedulerId: String, identifier: String, errorDescription: String) {
+        invocationCount += 1
+        lastSchedulerId = schedulerId
+        lastIdentifier = identifier
+        lastErrorDescription = errorDescription
     }
 }
 

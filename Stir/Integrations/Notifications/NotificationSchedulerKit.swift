@@ -47,6 +47,19 @@ enum NotificationSuppressReason: Sendable, Equatable {
     case weeklyCap
 }
 
+/// SCA-309: telemetry hook invoked when `addWithRollback` falls into the
+/// "primary add threw AND rollback re-add also threw" branch — the
+/// "user has no pending follow-up" outcome that OSLog alone hides.
+/// Callers wire this to `PostHogClient.shared.capture(
+/// .notificationScheduleRollbackFailed, ...)` with their scheduler-
+/// specific properties. Sendable so the kit can keep its `@MainActor`
+/// constraint without locking the caller in.
+typealias NotificationRollbackFailureHandler = @MainActor @Sendable (
+    _ schedulerId: String,
+    _ identifier: String,
+    _ errorDescription: String,
+) -> Void
+
 /// Static helpers shared by `LeftoversFollowupScheduler` + `UseSoonScheduler`.
 /// All `@MainActor` because the two schedulers are `@MainActor` and the
 /// `UNUserNotificationCenter` API surface is too.
@@ -114,6 +127,17 @@ enum NotificationSchedulerKit {
     /// throws, logs at `error` so the user-has-no-pending-followup case is
     /// observable rather than silently swallowed (CA2-08).
     ///
+    /// SCA-309: the both-failures branch ALSO invokes `onRollbackFailure`
+    /// (when supplied) so the scheduler can fire
+    /// `notification_schedule_rollback_failed` telemetry — turning the
+    /// dashboard-blind OSLog signal into an aggregable one. The callback
+    /// receives the scheduler-supplied `schedulerId` (the same prefix
+    /// used in the scheduler's own telemetry event names, e.g.
+    /// `"leftovers_followup"` or `"use_soon"`), the notification
+    /// `identifier` that failed to add, and the localized description
+    /// of the rollback re-add error. Defaults to `nil` so test callers
+    /// don't have to wire it.
+    ///
     /// - Returns: `true` when `request` was successfully added; `false` when
     ///   the add threw (rollback may or may not have succeeded — the caller
     ///   doesn't currently branch on rollback success).
@@ -124,6 +148,8 @@ enum NotificationSchedulerKit {
         center: any UserNotificationCenterClient,
         logger: Logger,
         contextLabel: String,
+        schedulerId: String = "",
+        onRollbackFailure: NotificationRollbackFailureHandler? = nil,
     ) async -> Bool {
         do {
             try await center.add(request)
@@ -138,6 +164,14 @@ enum NotificationSchedulerKit {
                 } catch {
                     logger.error(
                         "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending \(contextLabel, privacy: .public)",
+                    )
+                    // SCA-309: surface the double-failure to telemetry.
+                    // Description is the OS-supplied error string — no
+                    // user content, satisfies ADR 0009.
+                    onRollbackFailure?(
+                        schedulerId,
+                        request.identifier,
+                        error.localizedDescription,
                     )
                 }
             }

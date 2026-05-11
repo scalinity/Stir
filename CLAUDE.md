@@ -245,6 +245,7 @@ purchase_started, purchase_completed, restore_purchases_tapped,
 entitlement_state_changed, reactivation_notification_opened,
 leftovers_followup_{scheduled,fired,tapped,suppressed},
 use_soon_{scheduled,fired,tapped,suppressed},
+notification_schedule_rollback_failed,
 repeat_candidate_card_{shown,dismissed},
 sample_showcase_{viewed,exited},
 widget_nudge_{shown,dismissed},
@@ -264,6 +265,7 @@ Property notes (full contracts in spec §15):
 - `leftovers_dish_selected`: when Premium+ picks a dish from LeftoversRoot. Properties `rank` (1..3), `leftovers_items_count`, `prompt_version`, `source_recipe_plan_id`, `new_recipe_plan_id`.
 - `pantry_tier_downgrade_reconciled` (SCA-99 / ADR 0035; effective-tier pair SCA-298): emitted from `EntitlementService.publishReconciliationOutcome` after every detected effective-tier downgrade reconciliation pass — including zero-archive passes. Properties `{previous_tier, new_tier, previous_effective_tier, new_effective_tier, archived_count, total_remembered_pre, total_remembered_post}`. Literal `previous_tier`/`new_tier` are the unmodified RC tiers; `previous_effective_tier`/`new_effective_tier` are the post-billing-state-demotion tiers from `effectiveTier` — Premium trial-expiry emits literal `(premium, premium)` but effective `(premium, free)`, and cohort dashboards must filter on the effective pair. `archived_count == 0` is valid (user was already below the new cap); banner only surfaces when `archived_count > 0`. SCA-298 W21: telemetry is suppressed when `ReconcileOutcome.handlerRan == false` (RootCoordinator dealloc / no-household short-circuit). Counts only — no item names per ADR 0009.
 - `tutorial_*`: `tutorial_id` is snake_case `TutorialKey.rawValue` (tonight_tour, scan_capture, scan_review, dinner_options, dish_preview, cook_mode_tap, voice_mode, saved_meals, pantry_management, pantry_in_list_tour, pantry_in_list_tour_empty). `step_advanced` adds `from_step`/`to_step`. Lifecycle invariant: exactly one of {completed, skipped} per started. Disappear non-terminal — `suspend()` emits NO telemetry; tour re-arms when host re-appears. Funnel abandonment = `count(started) − count(completed) − count(skipped)`. No `reason` on `tutorial_skipped`.
+- `notification_schedule_rollback_failed` (SCA-309): emitted from `NotificationSchedulerKit.addWithRollback` only on the both-failures terminal state (primary add throws AND rollback re-add throws). Properties `{scheduler_id, identifier, error_description}`. `scheduler_id` ∈ `{leftovers_followup, use_soon}` (matches caller's telemetry-event prefix); `identifier` is the failing `UNNotificationRequest.identifier`; `error_description` is the OS-supplied `NSError.localizedDescription` from the rollback throw. Counts/strings only — no user content per ADR 0009. Single-success branches do NOT emit. Adding a new scheduler that delegates to the kit is a wire-contract change — update `NotificationSchedulerKit.swift` callers, spec §15 clarification, and this list in the same commit.
 
 **Ops surface events** (dotted form per ADR 0027):
 

@@ -178,6 +178,14 @@ final class UseSoonScheduler {
             center: center,
             logger: Logger.useSoon,
             contextLabel: "use-soon",
+            schedulerId: "use_soon",
+            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
+                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
+                    "scheduler_id": schedulerId,
+                    "identifier": identifier,
+                    "error_description": errorDescription,
+                ])
+            },
         )
         if added {
             history.recordScheduled(fireAt: fireDate)

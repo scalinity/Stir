@@ -258,6 +258,21 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     case voiceTurnStuckWatchdogFired = "voice_turn_stuck_watchdog_fired"
     // Reserved for step 8 (reactivation campaigns). CLAUDE.md canonical.
     case reactivationNotificationOpened = "reactivation_notification_opened"
+    /// SCA-309: emitted by `NotificationSchedulerKit.addWithRollback`
+    /// when BOTH the primary `UNUserNotificationCenter.add(...)` AND
+    /// the rollback re-add of the prior request throw. Counts
+    /// double-failure events so the dashboards see the "user has no
+    /// pending follow-up at all" outcome that OSLog alone hides.
+    /// Properties:
+    ///   - `scheduler_id`: string discriminating callers
+    ///     (e.g. `"leftovers_followup"`, `"use_soon"`); same value as
+    ///     the calling scheduler's telemetry-event prefix.
+    ///   - `identifier`: the notification identifier the kit tried to
+    ///     add (e.g. `"stir.leftoversFollowup.<sessionId>"`).
+    ///   - `error_description`: NSError.localizedDescription on the
+    ///     rollback re-add failure (the inner catch). Counts only —
+    ///     no user content per ADR 0009.
+    case notificationScheduleRollbackFailed = "notification_schedule_rollback_failed"
     // SCA-65 — leftovers followup scheduler lifecycle. Spec §15 +
     // CLAUDE.md canonical. _scheduled fires once per successful schedule
     // (post-cap, post-suppression checks); _fired emits at delivery via

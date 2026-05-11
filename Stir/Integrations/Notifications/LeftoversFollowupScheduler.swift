@@ -145,6 +145,14 @@ final class LeftoversFollowupScheduler {
             center: center,
             logger: Logger.leftoversFollowup,
             contextLabel: "followup",
+            schedulerId: "leftovers_followup",
+            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
+                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
+                    "scheduler_id": schedulerId,
+                    "identifier": identifier,
+                    "error_description": errorDescription,
+                ])
+            },
         )
         if added {
             history.recordScheduled(fireAt: fireDate)
