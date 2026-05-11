@@ -388,7 +388,7 @@ If 1 or 4 fail materially, stop and escalate — architectural, not tuning. 2/3/
 5. RevenueCat + paywall + entitlements (annual trial primary CTA).
 6. Cook Mode voice (Premium+). **Cheap-half drift check first**, then in-app validation gate, before any UX polish.
 7. Imports, widgets, shortcuts, leftovers.
-8. Telemetry dashboards, ops console, Sentry.
+8. Telemetry dashboards, ops console, Sentry. **[Shipped 2026-05: ops console + ops dashboards + Sentry wiring all complete. Remaining: PostHog product-funnel queries for `core_success_event`/`voice_conversion_event`, and APNs iOS-side registration (entitlement key + token registration + `AIDispatch.pushRegister` caller — backend pipeline already complete).]**
 9. Beta.
 
 Each step ends in something demoable. Don't interleave. **Risk:** steps 1–5 build toward Premium-tier economics that assume voice works. If step-6 validation uncovers a fundamental Gemini Live problem, Free is unaffected but Premium's core promise needs rework.
