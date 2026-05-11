@@ -109,11 +109,17 @@ enum PaywallTrigger: String, Sendable, CaseIterable, Equatable, Identifiable {
         case .recipeImportQuotaExhausted:
             return "You've used your import quota. Upgrade for unlimited imports."
         case .savedFavoritesGate:
-            return "Save your weeknight wins. Premium unlocks unlimited favorites."
+            // SCA-294 follow-up: trial CTA below is Pro Annual, so the
+            // hero shouldn't anchor on "Premium" — the user lands on a
+            // Pro-trial paywall with Premium offered as the cheaper
+            // alternative directly underneath.
+            return "Save your weeknight wins. Try Stir Pro free for 7 days."
         case .widgetsGate:
-            return "Widgets for one-tap dinner. Upgrade to Premium."
+            // SCA-294 follow-up: same reasoning as .savedFavoritesGate.
+            return "Widgets for one-tap dinner. Try Stir Pro free for 7 days."
         case .leftoversGate:
-            return "Turn leftovers into next dinner. Upgrade to Premium."
+            // SCA-294 follow-up: same reasoning as .savedFavoritesGate.
+            return "Turn leftovers into next dinner. Try Stir Pro free for 7 days."
         case .multiImageScanGate:
             return "Scan your whole kitchen at once. Upgrade to Pro."
         case .settingsUpgrade:

@@ -1,8 +1,11 @@
 // PaywallView
 //
-// Full-sheet paywall. Primary CTA = 7-day trial annual
-// (`stir.premium.annual.trial7`); monthly Premium is secondary; Pro lives
-// in a "Compare plans" sheet.
+// Full-sheet paywall. All four SKUs render inline so the user picks tier
+// + period on a single surface: Pro Annual (primary, 7-day trial, ink900),
+// Pro Monthly, Premium Annual, Premium Monthly. The trial lives on Pro
+// Annual (SCA-294). ProComparisonSheet is no longer reachable from this
+// surface — Settings keeps its own direct entry point for the feature
+// comparison.
 //
 // Apple surface requirements: trial terms visible before Subscribe, Restore
 // Purchases visible, ToS + Privacy linked, close button present.
@@ -19,7 +22,6 @@ struct PaywallView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var viewModel: PaywallViewModel
 
-    @State private var showProComparison = false
     @State private var restoreToast: StirToastPayload?
     @State private var successIconBounce = false
 
@@ -76,9 +78,6 @@ struct PaywallView: View {
                         }
                         .accessibilityLabel("Close")
                     }
-                }
-                .sheet(isPresented: $showProComparison) {
-                    ProComparisonSheet(viewModel: viewModel)
                 }
                 .stirToast($restoreToast)
                 .task {
@@ -141,8 +140,8 @@ struct PaywallView: View {
                     disablePurchaseFor: productID,
                 )
             }
-        case .succeeded:
-            successContent
+        case .succeeded(let productID):
+            successContent(productID: productID)
         case .purchasePending(let productID):
             pendingContent(productID: productID)
         case .purchaseFailed(let productID, let error):
@@ -171,9 +170,10 @@ struct PaywallView: View {
             heroHeader
             featuresList
             primaryCTA(offerings: offerings, disablePurchaseFor: disablePurchaseFor)
-            secondaryCTA(offerings: offerings, disablePurchaseFor: disablePurchaseFor)
+            proMonthlyCTA(offerings: offerings, disablePurchaseFor: disablePurchaseFor)
+            premiumPlansSection(offerings: offerings, disablePurchaseFor: disablePurchaseFor)
             trialDisclosureView(package: offerings.primaryTrialPackage)
-            compareAndRestoreRow
+            restoreRow
             legalLinks
         }
         .padding(.horizontal, CGFloat.Stir.space5)
@@ -291,15 +291,14 @@ struct PaywallView: View {
         }
     }
 
-    private func secondaryCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
+    private func proMonthlyCTA(offerings: PaywallOfferings, disablePurchaseFor: String?) -> some View {
         // `.buttonStyle(.bordered)` would inherit the NavigationStack ember
         // tint and fight the ink primary CTA, so this composes the outline
         // explicitly.
         //
-        // SCA-294: secondary CTA matches the new Pro-trial primary identity.
-        // User who wants Pro but not annual taps Pro monthly here. User who
-        // prefers Premium taps "Compare plans" → ProComparisonSheet, which
-        // surfaces the Premium options as a downgrade alternative.
+        // SCA-294: Pro monthly sits directly under the trial CTA — same Pro
+        // tier, no trial, for users who want monthly cadence. Premium
+        // plans live in `premiumPlansSection` below.
         let package = offerings.proMonthlyPackage
         let isDisabled = package == nil || disablePurchaseFor == package?.productID
         return Button {
@@ -327,6 +326,102 @@ struct PaywallView: View {
         }
     }
 
+    // MARK: - Premium plans (de-emphasized)
+
+    /// Premium plans section: an eyebrow divider plus two compact rows
+    /// (Annual + Monthly). Visually de-emphasized so the user clocks
+    /// "alternative tier" rather than "equal choice". No trial messaging
+    /// — neither Premium SKU carries one (SCA-294 moved the trial to Pro
+    /// Annual). Apple's "one trial per Apple ID per subscription group"
+    /// rule means a user who already burned the Pro trial would only see
+    /// the Premium rows here as the trial-less alternative.
+    @ViewBuilder
+    private func premiumPlansSection(
+        offerings: PaywallOfferings,
+        disablePurchaseFor: String?,
+    ) -> some View {
+        if offerings.premiumAnnualPackage != nil || offerings.premiumMonthlyPackage != nil {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    Text("Or choose Premium")
+                        .stirFont(.labelEyebrow)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                    Rectangle()
+                        .fill(Color.Stir.divider)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+                VStack(spacing: CGFloat.Stir.space2) {
+                    premiumPlanRow(
+                        package: offerings.premiumAnnualPackage,
+                        title: "Premium annual",
+                        priceSuffix: "/yr",
+                        unavailableLabel: "Premium annual — unavailable",
+                        disablePurchaseFor: disablePurchaseFor,
+                    )
+                    premiumPlanRow(
+                        package: offerings.premiumMonthlyPackage,
+                        title: "Premium monthly",
+                        priceSuffix: "/mo",
+                        unavailableLabel: "Premium monthly — unavailable",
+                        disablePurchaseFor: disablePurchaseFor,
+                    )
+                }
+            }
+        }
+    }
+
+    private func premiumPlanRow(
+        package: PaywallPackage?,
+        title: String,
+        priceSuffix: String,
+        unavailableLabel: String,
+        disablePurchaseFor: String?,
+    ) -> some View {
+        let isDisabled = package == nil || disablePurchaseFor == package?.productID
+        return Button {
+            if let package { Task { await viewModel.purchase(productID: package.productID) } }
+        } label: {
+            HStack(spacing: CGFloat.Stir.space2) {
+                Text(title)
+                    .stirFont(.labelMd)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                Spacer(minLength: CGFloat.Stir.space2)
+                if let package {
+                    Text("\(package.displayPrice)\(priceSuffix)")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                } else {
+                    Text(unavailableLabel)
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, CGFloat.Stir.space3)
+            .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary - 2)
+            .background(Color.Stir.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
+                    .stroke(Color.Stir.divider, lineWidth: 1),
+            )
+            .opacity(isDisabled ? 0.5 : 1)
+        }
+        .disabled(isDisabled)
+        .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            if case .purchasing(let id) = viewModel.state, id == package?.productID {
+                ProgressView()
+                    .tint(Color.Stir.textPrimary)
+                    .padding(.trailing, CGFloat.Stir.space3)
+            }
+        }
+        .accessibilityLabel(
+            package.map { "\(title), \($0.displayPrice)\(priceSuffix)" } ?? unavailableLabel,
+        )
+    }
+
     private func trialDisclosureView(package: PaywallPackage?) -> some View {
         // Apple requirement: auto-renew disclosure visible before subscribe.
         // 6pt = off-scale tight eyebrow↔body pairing (space2=8pt visually
@@ -351,7 +446,7 @@ struct PaywallView: View {
                     }
                 } else {
                     Text(
-                        "7 days free, then Premium annual rate. Renews automatically until canceled."
+                        "7 days free, then Pro annual rate. Renews automatically until canceled."
                     )
                 }
             }
@@ -362,15 +457,14 @@ struct PaywallView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var compareAndRestoreRow: some View {
+    private var restoreRow: some View {
         HStack {
-            Button("Compare plans") { showProComparison = true }
-                .stirFont(.labelMd)
             Spacer()
             Button("Restore purchases") {
                 Task { await handleRestoreTap() }
             }
             .stirFont(.labelMd)
+            Spacer()
         }
     }
 
@@ -414,8 +508,15 @@ struct PaywallView: View {
         .minimumScaleFactor(0.8)
     }
 
-    private var successContent: some View {
-        VStack(spacing: CGFloat.Stir.space4) {
+    private func successContent(productID: String) -> some View {
+        // SCA-294 follow-up: the trial buys Pro now, but the user can also
+        // pick Premium directly from the same paywall. Map the purchased
+        // SKU back through `StirProduct` so the welcome copy names the
+        // tier they actually bought — "Welcome to Premium" after a Pro
+        // purchase (or vice versa) reads as a billing bug, not chrome.
+        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        let welcomeCopy = tier == .pro ? "Welcome to Stir Pro." : "Welcome to Stir Premium."
+        return VStack(spacing: CGFloat.Stir.space4) {
             // Paywall success icon is the single exception to §6 icon.xl
             // (44pt) — 56pt reads as a celebration rather than chrome.
             Image.Stir.success
@@ -427,7 +528,7 @@ struct PaywallView: View {
                 .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.textPrimary)
                 .accessibilityAddTraits(.isHeader)
-            Text("Welcome to Premium.")
+            Text(welcomeCopy)
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.textTertiary)
         }
@@ -436,7 +537,14 @@ struct PaywallView: View {
     }
 
     private func pendingContent(productID: String) -> some View {
-        VStack(spacing: CGFloat.Stir.space4) {
+        // SCA-294 follow-up: pending copy names the tier the user actually
+        // bought (Ask-to-Buy can resolve days later, so the message has to
+        // age correctly when re-read in a notification or background-fetch
+        // toast). Default to "Pro" because the primary CTA buys Pro; any
+        // Premium-row tap routes through here too.
+        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        let tierWord = tier == .pro ? "Pro" : "Premium"
+        return VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
                 .tint(Color.Stir.ember600)
             Text("Purchase pending approval")
@@ -444,7 +552,7 @@ struct PaywallView: View {
                 .foregroundStyle(Color.Stir.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             Text(
-                "Your purchase is waiting for approval. You'll unlock Premium once it's approved. You can close this screen; Stir will catch up automatically."
+                "Your purchase is waiting for approval. You'll unlock \(tierWord) once it's approved. You can close this screen; Stir will catch up automatically."
             )
             .stirFont(.bodyMd)
             .foregroundStyle(Color.Stir.textTertiary)
