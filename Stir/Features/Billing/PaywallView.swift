@@ -383,17 +383,25 @@ struct PaywallView: View {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
             HStack(spacing: CGFloat.Stir.space2) {
-                Text(title)
-                    .stirFont(.labelMd)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                Spacer(minLength: CGFloat.Stir.space2)
+                // SCA-336: when package is nil, render only the unavailable
+                // label — previously this rendered both `Text(title)` on the
+                // left AND `Text(unavailableLabel)` on the right, repeating
+                // "Premium annual / Premium annual — unavailable" inline.
+                // (SCA-341 also makes the caller skip nil rows entirely
+                // when at least one sibling row is available, but this
+                // fallback still has to render cleanly for the all-nil
+                // edge case the caller is allowed to hand us.)
                 if let package {
+                    Text(title)
+                        .stirFont(.labelMd)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                    Spacer(minLength: CGFloat.Stir.space2)
                     Text("\(package.displayPrice)\(priceSuffix)")
                         .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.textTertiary)
                 } else {
                     Text(unavailableLabel)
-                        .stirFont(.bodySm)
+                        .stirFont(.labelMd)
                         .foregroundStyle(Color.Stir.textTertiary)
                 }
             }
