@@ -285,3 +285,72 @@ Deno.test('push_register: alias-forwarded user — pre-alias JWT routes via merg
   );
   assertEquals(row?.canonical_user_key, ckKey, 'row is keyed on ck:* after the alias-forward');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-365 — additional push-register coverage
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: identical re-POST is idempotent (single row, last_seen_at advances)', async () => {
+  // Per the iOS APNsRegistrationCoordinator design, a same-(token, prefs)
+  // re-POST is expected to be a server-side no-op UPDATE. SCA-321
+  // keyed the SELECT on installation_id; the second POST should write
+  // to the SAME row.
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const token = hex64();
+
+  const res1 = await callPushRegister(validBody({ apns_token: token }), session_jwt);
+  assertEquals(res1.status, 200);
+
+  // Capture last_seen_at after first POST.
+  const client = serviceClient();
+  const { data: firstRow } = await client
+    .from('device_installations')
+    .select('last_seen_at, installation_id')
+    .eq('canonical_user_key', canonical_user_key)
+    .single<{ last_seen_at: string; installation_id: string }>();
+  const firstSeen = firstRow?.last_seen_at;
+
+  // Wait a moment so last_seen_at can advance.
+  await new Promise<void>((r) => setTimeout(r, 1100));
+
+  const res2 = await callPushRegister(validBody({ apns_token: token }), session_jwt);
+  assertEquals(res2.status, 200);
+
+  // Assert: still exactly ONE row for this user; last_seen_at advanced.
+  const { data: rows } = await client
+    .from('device_installations')
+    .select('installation_id, last_seen_at')
+    .eq('canonical_user_key', canonical_user_key);
+  assertEquals(rows?.length, 1, 'idempotent re-POST must NOT create a new row');
+  if (rows && rows.length === 1) {
+    const lastSeen = (rows[0] as { last_seen_at: string }).last_seen_at;
+    if (firstSeen && lastSeen <= firstSeen) {
+      throw new Error(`last_seen_at must advance: first=${firstSeen} second=${lastSeen}`);
+    }
+  }
+});
+
+Deno.test('push_register: VAL-01 when installation_id row is gone (user-deletion race)', async () => {
+  // Repro the race: user-deletion worker runs between iOS holding a
+  // valid JWT and the next push-register POST. The row vanishes; the
+  // handler should emit VAL-01 with the spec-canonical 'session'
+  // field_errors entry.
+  const installId = crypto.randomUUID();
+  const { session_jwt, canonical_user_key } = await quickBootstrap({
+    installation_id: installId,
+  });
+  // Test-only: service-role delete to simulate the deletion worker.
+  const client = serviceClient();
+  await client
+    .from('device_installations')
+    .delete()
+    .eq('installation_id', installId)
+    .eq('canonical_user_key', canonical_user_key);
+
+  const res = await callPushRegister(validBody(), session_jwt);
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+  // Spec-canonical field shape so iOS can branch on it.
+  const fieldErrors = res.body.field_errors as Array<{ field: string }> | undefined;
+  assertEquals(fieldErrors?.[0]?.field, 'session');
+});

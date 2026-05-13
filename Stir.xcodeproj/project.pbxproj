@@ -268,6 +268,9 @@
 		A65A001000000051 /* APNsRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000050 /* APNsRegistrationCoordinator.swift */; };
 		A65A001000000053 /* StirAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000052 /* StirAppDelegate.swift */; };
 		A65A001000000055 /* APNsRegistrationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */; };
+		A65A001000000061 /* ReactivationSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000060 /* ReactivationSchedulerTests.swift */; };
+		A65A001000000063 /* UseSoonSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000062 /* UseSoonSchedulerTests.swift */; };
+		A65A001000000065 /* StirNotificationDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000064 /* StirNotificationDelegateTests.swift */; };
 		C2B82DB7F9CC8860B188BC0B /* LiveWebSocketTransportSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41EDE0B523D6A6FCCB81D2A7 /* LiveWebSocketTransportSecurityTests.swift */; };
 		C3554305F7809FD347ADDCFC /* PaywallViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC86ADF6F66E20CEF8823C99 /* PaywallViewModelTests.swift */; };
 		C4D1BF905241B874117505F8 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9034881D462D6EE53C5EF90B /* ShareViewController.swift */; };
@@ -558,6 +561,9 @@
 		A65A001000000050 /* APNsRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APNsRegistrationCoordinator.swift; sourceTree = "<group>"; };
 		A65A001000000052 /* StirAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirAppDelegate.swift; sourceTree = "<group>"; };
 		A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APNsRegistrationCoordinatorTests.swift; sourceTree = "<group>"; };
+		A65A001000000060 /* ReactivationSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactivationSchedulerTests.swift; sourceTree = "<group>"; };
+		A65A001000000062 /* UseSoonSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseSoonSchedulerTests.swift; sourceTree = "<group>"; };
+		A65A001000000064 /* StirNotificationDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNotificationDelegateTests.swift; sourceTree = "<group>"; };
 		781D75D0E66479C5877635BB /* Stir.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Stir.entitlements; sourceTree = "<group>"; };
 		78604678E2CA07EB7DCA2028 /* VoiceTurnRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTurnRepository.swift; sourceTree = "<group>"; };
 		79EEF31ED777951AF778AD00 /* TextButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextButton.swift; sourceTree = "<group>"; };
@@ -840,6 +846,9 @@
 				8B826DCA6393D026CC51F15B /* NotificationPreferencesStoreTests.swift */,
 				A65A001000000004 /* LeftoversFollowupSchedulerTests.swift */,
 				A65A001000000054 /* APNsRegistrationCoordinatorTests.swift */,
+				A65A001000000060 /* ReactivationSchedulerTests.swift */,
+				A65A001000000062 /* UseSoonSchedulerTests.swift */,
+				A65A001000000064 /* StirNotificationDelegateTests.swift */,
 				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				A65A001000000022 /* PantryTombstoneReaperTests.swift */,
@@ -1739,6 +1748,9 @@
 				C99910CC8EC77949382366AE /* NotificationPreferencesStoreTests.swift in Sources */,
 				A65A001000000003 /* LeftoversFollowupSchedulerTests.swift in Sources */,
 				A65A001000000055 /* APNsRegistrationCoordinatorTests.swift in Sources */,
+				A65A001000000061 /* ReactivationSchedulerTests.swift in Sources */,
+				A65A001000000063 /* UseSoonSchedulerTests.swift in Sources */,
+				A65A001000000065 /* StirNotificationDelegateTests.swift in Sources */,
 				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */,

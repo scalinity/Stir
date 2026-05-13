@@ -233,6 +233,50 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
+    /// SCA-365 (CR3 W2): when AIDispatch.pushRegister throws, the
+    /// snapshot cache MUST NOT be written — otherwise the next foreground
+    /// would short-circuit on the (token, prefs) tuple and never retry.
+    func test_handleDeviceToken_registerThrows_doesNotWriteSnapshot() async {
+        struct FakeError: Error {}
+        let coord = makeCoordinator()
+        var attempts = 0
+        coord.configure(register: { _ in
+            attempts += 1
+            throw FakeError()
+        })
+
+        coord.handleDeviceToken(Data([0xab, 0xcd]))
+        await yieldForPostTask()
+
+        XCTAssertEqual(attempts, 1, "registerFn was called")
+        XCTAssertNil(
+            defaults.data(forKey: "stir.apns.lastPushSnapshot.v2"),
+            "snapshot must NOT be cached on register-fn throw — next call must retry",
+        )
+    }
+
+    /// SCA-365 (CR3 W3): when iOS rotates the device token (different
+    /// bytes), the coordinator MUST re-POST. Snapshot equality includes
+    /// the token field per the SCA-322-shaped Snapshot struct.
+    func test_handleDeviceToken_differentToken_rePosts() async {
+        let recorder = PostRecorder()
+        let coord = makeCoordinator()
+        coord.configure(register: { body in
+            await recorder.record(body)
+            return PushRegisterResponse(installationID: "i-1", environment: "sandbox")
+        })
+
+        coord.handleDeviceToken(Data([0xab, 0xcd]))
+        await yieldForPostTask()
+        coord.handleDeviceToken(Data([0xde, 0xad, 0xbe, 0xef]))
+        await yieldForPostTask()
+
+        let posts = await recorder.posts
+        XCTAssertEqual(posts.count, 2, "token rotation must re-POST")
+        XCTAssertEqual(posts[0].apnsToken, "abcd")
+        XCTAssertEqual(posts[1].apnsToken, "deadbeef")
+    }
+
     /// SCA-354: rapid burst of flushPrefs() calls (user fat-fingers
     /// toggles in quick succession) should COALESCE to a single in-flight
     /// POST instead of N concurrent ones. The cancel-and-replace pattern
