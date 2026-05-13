@@ -77,15 +77,26 @@ Deno.test('ipBucket: fallback path is deterministic (same IP → same FNV hex) w
 // SCA-275 (S9 from /review-5): checkAndIncrement throw-propagation contract
 // ---------------------------------------------------------------------------
 //
-// ops-admin/index.ts (and every other caller) wraps `checkAndIncrement`
-// in a try/catch and falls open on any thrown error
-// (`log.warn('rate_limiter_failed', ...)` + continue). The fail-open
-// posture is the right choice — a `rate_limit_buckets` glitch must not
-// lock the console — but it depends on `checkAndIncrement` actually
+// ops-admin/index.ts and most authenticated /v1/* callers wrap
+// `checkAndIncrement` in a try/catch and fall OPEN on any thrown error
+// (`log.warn('rate_limiter_failed', ...)` + continue). For those
+// post-JWT endpoints fail-open is the right choice — a
+// `rate_limit_buckets` glitch must not lock the console or block paid
+// users mid-cook — but it depends on `checkAndIncrement` actually
 // throwing on RPC failures. If a future refactor swallowed the RPC
 // error and returned a "fake allowed" result, fail-open semantics would
 // silently flip to fail-closed-on-bug + every-request-allowed, and
 // ops dashboards would never see the rate-limiter glitch.
+//
+// SCA-373 EXCEPTION: session-bootstrap is the only PRE-auth endpoint
+// — the IP rate limit is the *only* defense against the synthetic-
+// install JWT-farming DoS that SCA-247 added the limiter to stop. So
+// session-bootstrap fails CLOSED (503 NET-01 + Retry-After) on a
+// thrown checkAndIncrement, breaking the fail-open default. The
+// throw-propagation contract this test pins is what makes BOTH
+// postures work — bootstrap reads the throw and returns 503; other
+// callers read the throw and continue. Future refactors must keep
+// the throw.
 //
 // Pin the contract: when the underlying Supabase RPC errors,
 // `checkAndIncrement` propagates rather than silently allowing.
