@@ -53,7 +53,18 @@ final class APNsRegistrationCoordinator {
 
     /// Last successfully-POSTed (token, prefs) snapshot. Coalesces
     /// no-op POSTs across cold launches and prefs-toggle re-flushes.
-    private static let lastPushKey = "stir.apns.lastPushSnapshot.v1"
+    ///
+    /// SCA-350: bumped to `.v2` because SCA-322 added two required
+    /// `let` properties (`cookReminder`, `billingGrace`) to `Snapshot`.
+    /// Decoding an SCA-316/317-era 4-key payload threw the missing-key
+    /// error, `try?` collapsed to `nil`, and the no-op short-circuit
+    /// at `postIfChanged` lost effect — every cold launch + prefs flush
+    /// re-POSTed against the `ip:push_register_hourly = 20` cap. The
+    /// `.v2` rename naturally invalidates the old payload; one clean
+    /// re-POST seeds the new shape on first launch under this build.
+    /// Future field additions to `Snapshot` MUST bump this key (or use
+    /// `decodeIfPresent` with sane defaults — pick one explicitly).
+    private static let lastPushKey = "stir.apns.lastPushSnapshot.v2"
 
     init(
         prefsStore: NotificationPreferencesStore = .shared,

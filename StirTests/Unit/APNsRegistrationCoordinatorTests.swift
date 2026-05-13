@@ -92,7 +92,41 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         // No way to assert "no post" without a recorder, but we can prove
         // it via the cache: a successful post writes a snapshot to
         // UserDefaults; absence proves no successful POST landed.
-        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"))
+        // SCA-350: cache key bumped to .v2 to invalidate SCA-316/317-era
+        // 4-key Snapshot payloads on upgrade.
+        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v2"))
+    }
+
+    /// SCA-350: an SCA-316/317-era cache payload (4 keys, missing
+    /// `cookReminder`/`billingGrace`) under the LEGACY .v1 key must
+    /// neither crash nor be read by the new coordinator. The .v2 rename
+    /// guarantees a clean reseed on first launch under post-SCA-322
+    /// builds, with one (idempotent) re-POST instead of an indefinite
+    /// retry-spam loop.
+    func test_legacyV1Snapshot_isIgnored_noCrash() async {
+        // Seed UserDefaults with the SCA-316/317-era 4-key shape.
+        let legacy = #"""
+            {"token":"deadbeef","environment":"sandbox","importCompletion":true,"reactivation":true}
+            """#
+        defaults.set(legacy.data(using: .utf8), forKey: "stir.apns.lastPushSnapshot.v1")
+
+        let recorder = PostRecorder()
+        let coord = makeCoordinator()
+        coord.configure(register: { body in
+            await recorder.record(body)
+            return PushRegisterResponse(installationID: "i-1", environment: "sandbox")
+        })
+
+        coord.handleDeviceToken(Data([0xde, 0xad, 0xbe, 0xef]))
+        await yieldForPostTask()
+
+        let posts = await recorder.posts
+        XCTAssertEqual(posts.count, 1, "first post under .v2 build is the natural reseed")
+        XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v2"),
+                        ".v2 cache is now seeded")
+        // .v1 payload is left in place (we don't garbage-collect old
+        // keys) but is never read again.
+        XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"))
     }
 
     func test_handleDeviceToken_configured_postsHexToken() async {
