@@ -92,12 +92,19 @@ struct PaywallOfferings: Sendable, Equatable {
     }
 
     /// Pro annual lookup by tier + period. **Currently aliases
-    /// `primaryTrialPackage`** because SCA-294 put the trial on the Pro
-    /// annual SKU. Kept as a distinct helper for callers that want "the
-    /// Pro annual package" semantically (e.g. ProComparisonSheet's Pro
-    /// column) without coupling to "the trial-bearing one" — if a future
+    /// `primaryTrialPackage`** (see above) because SCA-294 put the trial
+    /// on the Pro annual SKU. Kept as a distinct helper for callers that
+    /// want "the Pro annual package" semantically (e.g. ProComparisonSheet's
+    /// Pro column) without coupling to "the trial-bearing one" — if a future
     /// SCA migrates the trial elsewhere, `primaryTrialPackage` updates
     /// alone and this helper stays correct.
+    ///
+    /// SCA-342 — load-bearing alias: this comment is the only signal that
+    /// `proAnnualPackage` and `primaryTrialPackage` resolve to the same
+    /// SKU today. If the comment is lost in a future reformatting pass,
+    /// the alias relationship becomes invisible and the next SCA migrating
+    /// the trial may "fix" one helper and leave the other diverged. Keep
+    /// the cross-reference to `primaryTrialPackage` intact.
     var proAnnualPackage: PaywallPackage? {
         packages.first { $0.productID == StirProduct.proAnnual.rawValue }
     }

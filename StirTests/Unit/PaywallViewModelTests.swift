@@ -315,6 +315,52 @@ final class PaywallViewModelTests: XCTestCase {
                        "dashboard drift — no trial offer on the SKU; must not show trial copy")
     }
 
+    // MARK: - Tier-derivation helper (SCA-337 + SCA-340 regression)
+
+    func test_tierForPurchasedProductID_resolvesProSKUs() {
+        // SCA-294 routed the trial onto Pro Annual; SCA-332 made all four
+        // SKUs purchasable inline. The success / pending welcome copy
+        // routes through PaywallView.tier(forPurchasedProductID:). A wrong
+        // mapping here means "Welcome to Stir Premium" after a Pro purchase
+        // (or vice versa) — billing-bug-class UX.
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: StirProduct.proAnnual.rawValue),
+            .pro,
+        )
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: StirProduct.proMonthly.rawValue),
+            .pro,
+        )
+    }
+
+    func test_tierForPurchasedProductID_resolvesPremiumSKUs() {
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: StirProduct.premiumMonthly.rawValue),
+            .premium,
+        )
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: StirProduct.premiumAnnualTrial7.rawValue),
+            .premium,
+        )
+    }
+
+    func test_tierForPurchasedProductID_unknownSKUFallsBackToPro() {
+        // SCA-337: an unknown SKU (future promo, sandbox-only, RC-renamed
+        // productID) defaults to .pro so the welcome copy still matches
+        // the primary CTA. The helper also emits a Logger.paywall warning
+        // — verified at the call site, not testable here without log
+        // capture, but documented for grep traceability.
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: "stir.unknown.future.sku"),
+            .pro,
+        )
+        XCTAssertEqual(
+            PaywallView.tier(forPurchasedProductID: ""),
+            .pro,
+            "empty string falls through StirProduct(rawValue:) and hits the fallback",
+        )
+    }
+
     // MARK: - Restore
 
     func test_restore_success_triggersRefresh() async {

@@ -15,6 +15,7 @@
 // tonality). Ember stays on secondary surfaces via the NavigationStack
 // `.tint(Color.Stir.ember600)` at the top.
 
+import OSLog
 import SwiftUI
 
 struct PaywallView: View {
@@ -63,6 +64,28 @@ struct PaywallView: View {
         }
     }
 
+    /// Map a purchased StoreKit productID back to its `Tier` for tier-aware
+    /// success / pending copy.
+    ///
+    /// SCA-294 moved the trial to Pro Annual, so the `.pro` fallback is
+    /// conservative: an unknown SKU defaulting to "Welcome to Pro" matches
+    /// the primary CTA the user just paid for. The warning log surfaces
+    /// SKU drift (future promo, sandbox-only, or RC-renamed productID) in
+    /// observability instead of silent mis-copy.
+    ///
+    /// Pure / `static` so the three branches (Pro SKU, Premium SKU,
+    /// unknown→.pro) can be unit-tested without instantiating SwiftUI
+    /// (SCA-337 + SCA-340). Mirrors `shouldShowTrialCopy`.
+    static func tier(forPurchasedProductID productID: String) -> Tier {
+        guard let sku = StirProduct(rawValue: productID) else {
+            Logger.paywall.warning(
+                "tier-derivation fell back to .pro for unknown productID=\(productID, privacy: .public)",
+            )
+            return .pro
+        }
+        return sku.tier
+    }
+
     var body: some View {
         NavigationStack {
             contentView
@@ -85,6 +108,14 @@ struct PaywallView: View {
                         await viewModel.load()
                     }
                 }
+                // SCA-339: pattern-match is deliberately productID-agnostic.
+                // `handleSuccess()` only drives the celebration bounce + sheet
+                // dismiss — neither depends on which SKU was purchased. The
+                // productID-bound destructure happens in `contentView` →
+                // `successContent(productID:)`, which renders the tier-aware
+                // welcome copy. If a future `.succeededXxx` variant is added
+                // to PaywallViewModel.State, revisit this handler — `if case
+                // .succeeded` would silently match the new variant too.
                 .onChange(of: viewModel.state) { _, newState in
                     if case .succeeded = newState {
                         handleSuccess()
@@ -283,7 +314,14 @@ struct PaywallView: View {
             .foregroundStyle(Color.Stir.paper50)
             .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard))
         }
-        .disabled(package == nil || disablePurchaseFor == package?.productID)
+        // SCA-338: disable on ANY in-flight purchase, not only when this row
+        // is the in-flight one. `disablePurchaseFor != nil` is true for the
+        // whole `.purchasing(_)` state, so every sibling row (Pro Monthly,
+        // both Premium rows) greys out together while one purchase is in
+        // flight. PaywallViewModel.purchase already no-ops duplicate taps
+        // (line 173-178), so this was previously a dead-tap UX issue rather
+        // than a functional bug.
+        .disabled(package == nil || disablePurchaseFor != nil)
         .overlay(alignment: .center) {
             if case .purchasing(let id) = viewModel.state, id == package?.productID {
                 ProgressView().tint(Color.Stir.paper50)
@@ -300,7 +338,8 @@ struct PaywallView: View {
         // tier, no trial, for users who want monthly cadence. Premium
         // plans live in `premiumPlansSection` below.
         let package = offerings.proMonthlyPackage
-        let isDisabled = package == nil || disablePurchaseFor == package?.productID
+        // SCA-338: see primaryCTA — disabled while any purchase is in flight.
+        let isDisabled = package == nil || disablePurchaseFor != nil
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
@@ -351,21 +390,37 @@ struct PaywallView: View {
                         .frame(height: 1)
                         .accessibilityHidden(true)
                 }
+                // SCA-341: render only non-nil rows. The outer guard
+                // already gates the whole section on "at least one
+                // Premium package present", so a section is only shown
+                // when there's actually something purchasable inside.
+                // Previously both rows rendered unconditionally and a
+                // partial-availability RC config (one SKU rolling out,
+                // A/B variant, dashboard gap) surfaced a dimmed
+                // "Premium annual — unavailable" sibling next to a
+                // working row — looked like a broken UI rather than an
+                // intentional partial offering. `premiumPlanRow`'s nil
+                // fallback (SCA-336) is preserved for defense-in-depth
+                // if a future caller invokes it directly.
                 VStack(spacing: CGFloat.Stir.space2) {
-                    premiumPlanRow(
-                        package: offerings.premiumAnnualPackage,
-                        title: "Premium annual",
-                        priceSuffix: "/yr",
-                        unavailableLabel: "Premium annual — unavailable",
-                        disablePurchaseFor: disablePurchaseFor,
-                    )
-                    premiumPlanRow(
-                        package: offerings.premiumMonthlyPackage,
-                        title: "Premium monthly",
-                        priceSuffix: "/mo",
-                        unavailableLabel: "Premium monthly — unavailable",
-                        disablePurchaseFor: disablePurchaseFor,
-                    )
+                    if let pkg = offerings.premiumAnnualPackage {
+                        premiumPlanRow(
+                            package: pkg,
+                            title: "Premium annual",
+                            priceSuffix: "/yr",
+                            unavailableLabel: "Premium annual — unavailable",
+                            disablePurchaseFor: disablePurchaseFor,
+                        )
+                    }
+                    if let pkg = offerings.premiumMonthlyPackage {
+                        premiumPlanRow(
+                            package: pkg,
+                            title: "Premium monthly",
+                            priceSuffix: "/mo",
+                            unavailableLabel: "Premium monthly — unavailable",
+                            disablePurchaseFor: disablePurchaseFor,
+                        )
+                    }
                 }
             }
         }
@@ -378,27 +433,43 @@ struct PaywallView: View {
         unavailableLabel: String,
         disablePurchaseFor: String?,
     ) -> some View {
-        let isDisabled = package == nil || disablePurchaseFor == package?.productID
+        // SCA-338: see primaryCTA — disabled while any purchase is in flight.
+        let isDisabled = package == nil || disablePurchaseFor != nil
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
             HStack(spacing: CGFloat.Stir.space2) {
-                Text(title)
-                    .stirFont(.labelMd)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                Spacer(minLength: CGFloat.Stir.space2)
+                // SCA-336: when package is nil, render only the unavailable
+                // label — previously this rendered both `Text(title)` on the
+                // left AND `Text(unavailableLabel)` on the right, repeating
+                // "Premium annual / Premium annual — unavailable" inline.
+                // (SCA-341 also makes the caller skip nil rows entirely
+                // when at least one sibling row is available, but this
+                // fallback still has to render cleanly for the all-nil
+                // edge case the caller is allowed to hand us.)
                 if let package {
+                    Text(title)
+                        .stirFont(.labelMd)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                    Spacer(minLength: CGFloat.Stir.space2)
                     Text("\(package.displayPrice)\(priceSuffix)")
                         .stirFont(.bodySm)
                         .foregroundStyle(Color.Stir.textTertiary)
                 } else {
                     Text(unavailableLabel)
-                        .stirFont(.bodySm)
+                        .stirFont(.labelMd)
                         .foregroundStyle(Color.Stir.textTertiary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, CGFloat.Stir.space3)
+            // SCA-343: -2pt off-scale, shrinking the secondary padding by
+            // a hair so the Premium rows read as visually de-emphasized
+            // compared to the Pro Annual / Pro Monthly CTAs above (which
+            // use the full `controlVerticalPaddingSecondary`). Matches
+            // the off-scale spacing convention this file uses elsewhere
+            // (e.g. featureRow's `space1 / 2`, trialDisclosureView's
+            // `space2 - 2`).
             .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary - 2)
             .background(Color.Stir.backgroundCard)
             .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
@@ -412,9 +483,18 @@ struct PaywallView: View {
         .buttonStyle(.plain)
         .overlay(alignment: .trailing) {
             if case .purchasing(let id) = viewModel.state, id == package?.productID {
+                // SCA-335: hidden from VoiceOver — the button's own label
+                // already names the SKU + price, and the row dims via
+                // opacity when disabled. Without this, VoiceOver reads
+                // "Progress indicator" as a sibling element alongside
+                // the button label, producing two competing reads during
+                // the in-flight purchase. Mirrors the primaryCTA /
+                // proMonthlyCTA pattern (their ProgressViews carry only
+                // a tint, no label).
                 ProgressView()
                     .tint(Color.Stir.textPrimary)
                     .padding(.trailing, CGFloat.Stir.space3)
+                    .accessibilityHidden(true)
             }
         }
         .accessibilityLabel(
@@ -514,7 +594,10 @@ struct PaywallView: View {
         // SKU back through `StirProduct` so the welcome copy names the
         // tier they actually bought — "Welcome to Premium" after a Pro
         // purchase (or vice versa) reads as a billing bug, not chrome.
-        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        // SCA-337: routed through `Self.tier(forPurchasedProductID:)` so
+        // a future unknown SKU surfaces in the paywall logger instead of
+        // silently rendering Pro copy.
+        let tier = Self.tier(forPurchasedProductID: productID)
         let welcomeCopy = tier == .pro ? "Welcome to Stir Pro." : "Welcome to Stir Premium."
         return VStack(spacing: CGFloat.Stir.space4) {
             // Paywall success icon is the single exception to §6 icon.xl
@@ -542,7 +625,9 @@ struct PaywallView: View {
         // age correctly when re-read in a notification or background-fetch
         // toast). Default to "Pro" because the primary CTA buys Pro; any
         // Premium-row tap routes through here too.
-        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        // SCA-337: routed through `Self.tier(forPurchasedProductID:)` so
+        // an unknown SKU surfaces in the paywall logger.
+        let tier = Self.tier(forPurchasedProductID: productID)
         let tierWord = tier == .pro ? "Pro" : "Premium"
         return VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
