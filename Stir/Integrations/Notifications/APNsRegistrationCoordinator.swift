@@ -31,13 +31,29 @@ final class APNsRegistrationCoordinator {
 
     typealias PushRegisterFn = (PushRegisterRequest) async throws -> PushRegisterResponse
 
-    /// `aps-environment` entitlement is hardcoded to `development`, so iOS
-    /// always receives a sandbox-class token (the only kind APNs will mint
-    /// for that entitlement value). When App Store distribution lands,
-    /// flip the entitlement to `production` (or per-config) AND change
-    /// this constant to derive from `#if DEBUG`. The server CHECK
-    /// constraint accepts only `production` / `sandbox` (NOT `development`).
-    static let environment: PushRegisterRequest.Environment = .sandbox
+    /// SCA-368: derive from `#if DEBUG` so the wire-side `environment`
+    /// flips automatically with build configuration — matches the
+    /// `SentryReporter` pattern in `StirApp.swift:33-37`.
+    ///
+    /// The `aps-environment` entitlement (`Stir.entitlements`) and this
+    /// constant MUST agree on the APNs class. Today entitlement is
+    /// `development` (sandbox-class tokens) and this returns `.sandbox`
+    /// in DEBUG. Pre-prod release will require flipping the entitlement
+    /// to `production` (Release Xcode config); this constant then
+    /// auto-resolves to `.production`. If the entitlement flip is
+    /// forgotten, the wire-side environment will mismatch what APNs
+    /// minted the token for and registration will fail loudly in
+    /// dev/QA — the desired failure mode.
+    ///
+    /// Server CHECK constraint accepts only `production` / `sandbox`
+    /// (NOT `development`).
+    static var environment: PushRegisterRequest.Environment {
+        #if DEBUG
+        return .sandbox
+        #else
+        return .production
+        #endif
+    }
 
     private let prefsStore: NotificationPreferencesStore
     private let center: UserNotificationCenterClient
