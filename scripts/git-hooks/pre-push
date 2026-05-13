@@ -29,15 +29,17 @@
 #      test-results summary` for the `result` / `passedTests` /
 #      `failedTests` / `totalTestCount` fields. Source of truth is
 #      the xcresult bundle, not the -quiet stdout log.
-#   2. A one-shot retry fires when xcodebuild exits non-zero AND the
-#      log carries the SBMainWorkspace
+#   2. A one-shot retry fires when xcodebuild exits non-zero AND
+#      either (a) the log carries the SBMainWorkspace
 #      "Application failed preflight checks" / "Simulator device
 #      failed to launch" substring (wedged sim before test runner
-#      installed). Retry flow: `simctl shutdown all` + boot
-#      iPhone 17 Pro Max + 5 s sleep + re-run of `xcodebuild test`
-#      exactly ONCE. Retry success emits a distinct
-#      `[pre-push] ✅ retried after sim flake` summary so the audit
-#      trail captures the event.
+#      installed), or (b) SCA-364: the log is < 20 lines AND contains
+#      no test markers (silent test-runner death — observed twice in
+#      the SCA-334 session between consecutive xcodebuild invocations).
+#      Retry flow: `simctl shutdown all` + boot iPhone 17 Pro Max +
+#      5 s sleep + re-run of `xcodebuild test` exactly ONCE. Retry
+#      success emits a distinct `[pre-push] ✅ retried after sim flake`
+#      summary so the audit trail captures the event.
 #
 # Real test failures (xcresult.failedTests > 0) bypass retry. Real
 # compile errors (no xcresult bundle produced) also bypass retry —
@@ -109,6 +111,31 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# SCA-364: pre-warm the iPhone 17 Pro Max simulator before the first
+# xcodebuild test invocation. Two flake modes the SCA-208 retry path
+# misses are addressed here:
+#   1. Silent test-runner death between consecutive pushes — second
+#      `xcodebuild test` exits non-zero with an empty/tiny log and no
+#      xcresult, so the SBMainWorkspace substring grep below doesn't
+#      match and the retry path never fires.
+#   2. First-push-after-reboot — sim has never been booted, xcodebuild
+#      raises the SBMainWorkspace error on the FIRST attempt, retry
+#      catches it but burns ~30s on a recoverable condition.
+# Pre-warming the sim removes both: a fresh boot before each push run
+# gives xcodebuild a known-good destination. Cost is ~5-10s/push but
+# the saved debug cycles (each silent flake ate ~5 min in the SCA-334
+# session) easily justify the latency.
+#
+# Override: STIR_PREPUSH_SKIP_SIM_WARMUP=1 skips warmup for callers
+# who know the sim is already hot (e.g. running the hook back-to-back
+# from a script).
+if [ "${STIR_PREPUSH_SKIP_SIM_WARMUP:-0}" != "1" ]; then
+    echo "[pre-push] pre-warming iPhone 17 Pro Max simulator…"
+    xcrun simctl shutdown all >/dev/null 2>&1 || true
+    xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
+    sleep 4
+fi
+
 echo "[pre-push] running xcodebuild test on iPhone 17 Pro Max simulator (~17s)…"
 
 TMPLOG="$(mktemp -t stir-prepush-XXXXXX)"
@@ -135,9 +162,28 @@ set -e
 # sim. Real test failures (non-zero failedTests in xcresult) and real
 # compile errors (no xcresult produced at all) bypass retry.
 RETRIED_AFTER_SIM_FLAKE=0
-if [ "$EXIT" != "0" ] \
-   && grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
-    echo "[pre-push] ⚠️  simulator preflight flake detected — resetting sim and retrying once"
+SIM_FLAKE_REASON=""
+if [ "$EXIT" != "0" ]; then
+    if grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
+        SIM_FLAKE_REASON="SBMainWorkspace preflight"
+    else
+        # SCA-364: silent test-runner death detection. The original
+        # SBMainWorkspace substring catches one flake mode; a second
+        # mode — observed twice in the SCA-334 session (SCA-335,
+        # SCA-343) — is xcodebuild exiting non-zero with no test
+        # output at all. Heuristic: short log (no "Testing started"
+        # or "Testing failed" marker AND log < 20 lines) → silent
+        # death, not a real compile error.
+        TMPLOG_LINES="$(wc -l < "$TMPLOG" 2>/dev/null | tr -d ' ' || echo 0)"
+        if [ "${TMPLOG_LINES:-0}" -lt 20 ] \
+           && ! grep -qE 'Testing started|Testing failed|TEST FAILED|TEST SUCCEEDED|error:' "$TMPLOG"; then
+            SIM_FLAKE_REASON="silent test-runner death (log=${TMPLOG_LINES}L, no test markers)"
+        fi
+    fi
+fi
+
+if [ -n "$SIM_FLAKE_REASON" ]; then
+    echo "[pre-push] ⚠️  simulator flake detected ($SIM_FLAKE_REASON) — resetting sim and retrying once"
     xcrun simctl shutdown all >/dev/null 2>&1 || true
     xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
     sleep 5
