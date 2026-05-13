@@ -1,9 +1,12 @@
 // ProComparisonSheet
 //
-// Compare-plans modal launched from PaywallView. Side-by-side Premium vs
-// Pro so power users can self-upgrade without the paywall steering them
-// to Premium. Visual tokens resolve through Color.Stir / Font.Stir /
-// CGFloat.Stir — zero raw hex, font, or spacing literals.
+// Compare-plans modal launched from Settings (SCA-382). Side-by-side
+// Premium vs Pro feature matrix so power users can self-evaluate the
+// tiers. Both tiers are purchasable inline (SCA-384 added the Premium
+// half — previously the sheet only sold Pro and forced Premium-leaning
+// users to back out and use PaywallView's "Or choose Premium" section).
+// Visual tokens resolve through Color.Stir / Font.Stir / CGFloat.Stir
+// — zero raw hex, font, or spacing literals.
 
 import SwiftUI
 
@@ -256,6 +259,92 @@ struct ProComparisonSheet: View {
             .accessibilityLabel("Pro monthly, \(pkg.displayPrice) per month")
             .disabled(isPurchaseInFlight)
         }
+        // SCA-384: Premium half of the comparison sheet. Mirrors
+        // PaywallView.premiumPlansSection grammar (eyebrow divider +
+        // compact bordered rows). De-emphasized vs Pro CTAs above so
+        // tier hierarchy reads correctly: Pro is the recommended tier,
+        // Premium is the price-conscious alternative for users who
+        // explicitly want it. `isPurchaseInFlight` is shared with the
+        // Pro buttons so a single in-flight purchase greys all four
+        // SKUs together.
+        premiumCTAs(offerings: offerings)
+    }
+
+    /// Premium purchase buttons (annual + monthly). Rendered as a
+    /// de-emphasized section below the Pro CTAs with an "Or choose
+    /// Premium" eyebrow divider — matches PaywallView's grammar so the
+    /// two surfaces stay visually consistent. Section only renders if
+    /// at least one Premium SKU is purchasable; individual nil rows
+    /// are skipped (partial-availability RC configs surface as one
+    /// row instead of one row + one "unavailable" placeholder).
+    @ViewBuilder
+    private func premiumCTAs(offerings: PaywallOfferings) -> some View {
+        if offerings.premiumAnnualPackage != nil || offerings.premiumMonthlyPackage != nil {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    Text("Or choose Premium")
+                        .stirFont(.labelEyebrow)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                    Rectangle()
+                        .fill(Color.Stir.divider)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+                VStack(spacing: CGFloat.Stir.space2) {
+                    if let pkg = offerings.premiumAnnualPackage {
+                        premiumPlanButton(
+                            package: pkg,
+                            title: "Premium annual",
+                            priceSuffix: "/yr",
+                        )
+                    }
+                    if let pkg = offerings.premiumMonthlyPackage {
+                        premiumPlanButton(
+                            package: pkg,
+                            title: "Premium monthly",
+                            priceSuffix: "/mo",
+                        )
+                    }
+                }
+            }
+            .padding(.top, CGFloat.Stir.space2)
+        }
+    }
+
+    /// Single Premium plan row. Compact, bordered, de-emphasized vs
+    /// the Pro CTAs above. Disabled during any in-flight purchase
+    /// (shared `isPurchaseInFlight` guard with the Pro buttons).
+    private func premiumPlanButton(
+        package: PaywallPackage,
+        title: String,
+        priceSuffix: String,
+    ) -> some View {
+        Button {
+            Task { await viewModel.purchase(productID: package.productID) }
+        } label: {
+            HStack(spacing: CGFloat.Stir.space2) {
+                Text(title)
+                    .stirFont(.labelMd)
+                    .foregroundStyle(Color.Stir.textPrimary)
+                Spacer(minLength: CGFloat.Stir.space2)
+                Text("\(package.displayPrice)\(priceSuffix)")
+                    .stirFont(.bodySm)
+                    .foregroundStyle(Color.Stir.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, CGFloat.Stir.space3)
+            .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary - 2) // -2pt off-scale, matches PaywallView.premiumPlanRow
+            .background(Color.Stir.backgroundCard)
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
+                    .stroke(Color.Stir.divider, lineWidth: 1),
+            )
+            .opacity(isPurchaseInFlight ? 0.5 : 1)
+        }
+        .disabled(isPurchaseInFlight)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(package.displayPrice)\(priceSuffix)")
     }
 
     /// True while a purchase is in flight or has reached a terminal state
