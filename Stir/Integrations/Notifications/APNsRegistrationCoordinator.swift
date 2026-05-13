@@ -66,6 +66,21 @@ final class APNsRegistrationCoordinator {
     /// `decodeIfPresent` with sane defaults — pick one explicitly).
     private static let lastPushKey = "stir.apns.lastPushSnapshot.v2"
 
+    /// SCA-354: single in-flight POST Task. `schedulePost` cancels
+    /// any previous Task before spawning a new one, serializing
+    /// concurrent token-rotation / burst-toggle calls so they can't
+    /// race the snapshot cache (read+write across an `await
+    /// registerFn(...)` suspension previously interleaved between two
+    /// concurrent `postIfChanged` calls, both reading the same stale
+    /// snapshot, both POSTing, and the older response winning the
+    /// snapshot-cache write).
+    ///
+    /// `postIfChanged` already short-circuits when nothing changed,
+    /// so cancel-and-replace is cheap: the inner work-loop checks
+    /// `Task.isCancelled` cooperatively at the next suspension point
+    /// (the await on `registerFn`).
+    private var inFlightPost: Task<Void, Never>?
+
     init(
         prefsStore: NotificationPreferencesStore = .shared,
         center: UserNotificationCenterClient = UNUserNotificationCenter.current(),
@@ -93,7 +108,7 @@ final class APNsRegistrationCoordinator {
         registerFn = register
         Logger.notifications.info("apns_coordinator_configured")
         if currentTokenHex != nil {
-            Task { await postIfChanged(reason: "configure_replay") }
+            schedulePost(reason: "configure_replay")
         }
     }
 
@@ -105,7 +120,7 @@ final class APNsRegistrationCoordinator {
         let hex = data.map { String(format: "%02x", $0) }.joined()
         currentTokenHex = hex
         Logger.notifications.info("apns_device_token_received len=\(data.count, privacy: .public)")
-        Task { await postIfChanged(reason: "token_received") }
+        schedulePost(reason: "token_received")
     }
 
     /// AppDelegate forwards `application(_:didFailToRegisterForRemoteNotificationsWithError:)`.
@@ -143,11 +158,31 @@ final class APNsRegistrationCoordinator {
     /// Called from NotificationPrefsView toggle handlers. Re-POSTs the
     /// current prefs snapshot if we have a token; idempotency guard
     /// short-circuits when nothing changed (e.g., user toggled twice).
+    ///
+    /// SCA-354: routes through `schedulePost` so a burst-toggle
+    /// (user fat-fingers 4 toggles in 5s) coalesces to a single
+    /// in-flight POST instead of N concurrent ones racing the
+    /// snapshot cache.
     func flushPrefs() {
-        Task { await postIfChanged(reason: "prefs_flush") }
+        schedulePost(reason: "prefs_flush")
     }
 
     // MARK: - Private
+
+    /// SCA-354: cancel any in-flight POST and replace with a fresh
+    /// Task. Serializes concurrent calls into a single POST pipeline
+    /// so the read+write across an `await registerFn(...)` suspension
+    /// can't race two callers reading the same stale snapshot, both
+    /// POSTing, and the older response winning the snapshot-cache
+    /// write (which would defeat SCA-321's per-install keying
+    /// invariant). `postIfChanged` short-circuits on unchanged
+    /// snapshot so cancel-and-replace pays no extra round-trip cost.
+    private func schedulePost(reason: String) {
+        inFlightPost?.cancel()
+        inFlightPost = Task { [weak self] in
+            await self?.postIfChanged(reason: reason)
+        }
+    }
 
     private func postIfChanged(reason: String) async {
         guard let registerFn else {

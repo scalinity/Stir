@@ -233,6 +233,50 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
+    /// SCA-354: rapid burst of flushPrefs() calls (user fat-fingers
+    /// toggles in quick succession) should COALESCE to a single in-flight
+    /// POST instead of N concurrent ones. The cancel-and-replace pattern
+    /// in `schedulePost` cancels each prior Task before spawning the
+    /// next; only the final POST lands. Prior shape: 4 toggles → 4
+    /// concurrent Tasks all reading the same stale snapshot → 4 actual
+    /// POSTs against the `ip:push_register_hourly = 20` rate budget.
+    func test_flushPrefs_rapidBurst_coalescesToSinglePost() async {
+        let recorder = PostRecorder()
+        let coord = makeCoordinator()
+        coord.configure(register: { body in
+            await recorder.record(body)
+            return PushRegisterResponse(installationID: "i-1", environment: "sandbox")
+        })
+
+        // Seed a token so postIfChanged is allowed to fire.
+        coord.handleDeviceToken(Data([0xab, 0xcd]))
+        await yieldForPostTask()
+        let baselinePosts = await recorder.posts.count
+        XCTAssertEqual(baselinePosts, 1, "token receipt seeds the cache with the first POST")
+
+        // Burst: mutate prefs + flush 4 times in quick succession with
+        // NO yield between calls. Each schedulePost cancels its
+        // predecessor; only the final one survives to the await on
+        // registerFn.
+        let store = NotificationPreferencesStore(defaults: prefsDefaults)
+        store.setReactivation(false)
+        coord.flushPrefs()
+        store.setReactivation(true)
+        coord.flushPrefs()
+        store.setImportCompletion(false)
+        coord.flushPrefs()
+        store.setImportCompletion(true)
+        coord.flushPrefs()
+
+        await yieldForPostTask()
+
+        // Token + final-state-of-prefs matches baseline → idempotency
+        // guard short-circuits, no extra POST. If burst had raced, we'd
+        // see >0 additional POSTs.
+        let totalPosts = await recorder.posts.count
+        XCTAssertEqual(totalPosts, 1, "burst coalesces to zero additional POSTs (prefs round-tripped to original)")
+    }
+
     // MARK: - Failure handling
 
     func test_handleRegistrationFailure_doesNotCrash() {
