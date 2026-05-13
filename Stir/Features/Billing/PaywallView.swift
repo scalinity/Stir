@@ -412,9 +412,18 @@ struct PaywallView: View {
         .buttonStyle(.plain)
         .overlay(alignment: .trailing) {
             if case .purchasing(let id) = viewModel.state, id == package?.productID {
+                // SCA-335: hidden from VoiceOver — the button's own label
+                // already names the SKU + price, and the row dims via
+                // opacity when disabled. Without this, VoiceOver reads
+                // "Progress indicator" as a sibling element alongside
+                // the button label, producing two competing reads during
+                // the in-flight purchase. Mirrors the primaryCTA /
+                // proMonthlyCTA pattern (their ProgressViews carry only
+                // a tint, no label).
                 ProgressView()
                     .tint(Color.Stir.textPrimary)
                     .padding(.trailing, CGFloat.Stir.space3)
+                    .accessibilityHidden(true)
             }
         }
         .accessibilityLabel(
