@@ -25,7 +25,7 @@
 //                                              backoff
 //   - 403 MissingProviderToken / signing    → config bug; log + alert
 
-import * as jose from 'jose';
+import * as jose from "jose";
 
 // Env vars read inside each call (not at module load) so tests can inject
 // fake credentials after import. Real runtime reads are cheap (~µs).
@@ -36,10 +36,10 @@ function readApnsEnv(): {
   bundleId: string | undefined;
 } {
   return {
-    keyId: Deno.env.get('APNS_AUTH_KEY_ID'),
-    keyP8: Deno.env.get('APNS_AUTH_KEY_P8'),
-    teamId: Deno.env.get('APNS_TEAM_ID'),
-    bundleId: Deno.env.get('APNS_BUNDLE_ID'),
+    keyId: Deno.env.get("APNS_AUTH_KEY_ID"),
+    keyP8: Deno.env.get("APNS_AUTH_KEY_P8"),
+    teamId: Deno.env.get("APNS_TEAM_ID"),
+    bundleId: Deno.env.get("APNS_BUNDLE_ID"),
   };
 }
 
@@ -84,18 +84,22 @@ let apnsFetchOverride: ApnsFetch | null = null;
  * one is ever added by accident.
  */
 export function _setApnsFetchOverrideForTests(fn: ApnsFetch | null): void {
-  if (Deno.env.get('STIR_TEST_MODE') !== '1') {
+  if (Deno.env.get("STIR_TEST_MODE") !== "1") {
     throw new Error(
-      '_setApnsFetchOverrideForTests called outside test mode — this is a ' +
-        'test-only DI seam (SCA-115); production code must use globalThis.fetch. ' +
-        'Set STIR_TEST_MODE=1 in the test harness.',
+      "_setApnsFetchOverrideForTests called outside test mode — this is a " +
+        "test-only DI seam (SCA-115); production code must use globalThis.fetch. " +
+        "Set STIR_TEST_MODE=1 in the test harness.",
     );
   }
   apnsFetchOverride = fn;
 }
 
-export type APNsEnvironment = 'production' | 'sandbox';
-export type APNsCategory = 'reactivation' | 'import_completion' | 'cook_reminder' | 'billing_grace';
+export type APNsEnvironment = "production" | "sandbox";
+export type APNsCategory =
+  | "reactivation"
+  | "import_completion"
+  | "cook_reminder"
+  | "billing_grace";
 
 // SCA-296 C1 / SCA-327: narrow a nullable apns_environment (the schema
 // lets device_installations.apns_environment be NULL — the CHECK only
@@ -115,7 +119,7 @@ export type APNsCategory = 'reactivation' | 'import_completion' | 'cook_reminder
 export function validatePushEnvironment(
   raw: string | null | undefined,
 ): APNsEnvironment | null {
-  return raw === 'production' || raw === 'sandbox' ? raw : null;
+  return raw === "production" || raw === "sandbox" ? raw : null;
 }
 
 export interface APNsPushInput {
@@ -131,15 +135,20 @@ export interface APNsPushInput {
 
 export type APNsPushResult =
   | { ok: true; apnsId: string }
-  | { ok: false; reason: APNsFailureReason; status: number; apnsReason?: string };
+  | {
+    ok: false;
+    reason: APNsFailureReason;
+    status: number;
+    apnsReason?: string;
+  };
 
 export type APNsFailureReason =
-  | 'bad_device_token' // 400/410 — token dead, null it out
-  | 'config_invalid' // 403 / signing failure
-  | 'rate_limited' // 429
-  | 'server_error' // 5xx — retry via backoff
-  | 'network' // fetch threw
-  | 'missing_secret'; // env var missing at call time
+  | "bad_device_token" // 400/410 — token dead, null it out
+  | "config_invalid" // 403 / signing failure
+  | "rate_limited" // 429
+  | "server_error" // 5xx — retry via backoff
+  | "network" // fetch threw
+  | "missing_secret"; // env var missing at call time
 
 async function getProviderJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -155,7 +164,7 @@ async function getProviderJwt(): Promise<string> {
     const { keyId, keyP8, teamId } = readApnsEnv();
     if (!keyP8 || !keyId || !teamId) {
       throw new Error(
-        'APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID',
+        "APNs config missing: need APNS_AUTH_KEY_P8 + APNS_AUTH_KEY_ID + APNS_TEAM_ID",
       );
     }
 
@@ -163,15 +172,15 @@ async function getProviderJwt(): Promise<string> {
     // malformed DER/ASN.1; we let that propagate so operators see the real
     // parse error rather than an opaque "config_invalid".
     const rawPem = new TextDecoder().decode(base64Decode(keyP8));
-    const pem = rawPem.includes('BEGIN PRIVATE KEY')
+    const pem = rawPem.includes("BEGIN PRIVATE KEY")
       ? rawPem
       : `-----BEGIN PRIVATE KEY-----\n${
-        rawPem.match(/.{1,64}/g)?.join('\n') ?? rawPem
+        rawPem.match(/.{1,64}/g)?.join("\n") ?? rawPem
       }\n-----END PRIVATE KEY-----`;
 
     let privateKey;
     try {
-      privateKey = await jose.importPKCS8(pem, 'ES256');
+      privateKey = await jose.importPKCS8(pem, "ES256");
     } catch (err) {
       // Wrap with a clearer message; readers of logs should know this is
       // a deploy-time misconfig, not a wire/APNs problem.
@@ -183,7 +192,7 @@ async function getProviderJwt(): Promise<string> {
     }
 
     const minted = await new jose.SignJWT({})
-      .setProtectedHeader({ alg: 'ES256', kid: keyId })
+      .setProtectedHeader({ alg: "ES256", kid: keyId })
       .setIssuer(teamId)
       .setIssuedAt(now)
       .sign(privateKey);
@@ -218,17 +227,24 @@ export function _resetApnsCacheForTests(): void {
 }
 
 function base64Decode(b64: string): Uint8Array {
-  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
 /** Send a single APNs push. Never throws — all failures surface as structured results. */
-export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult> {
+export async function sendAPNsPush(
+  input: APNsPushInput,
+): Promise<APNsPushResult> {
   const { bundleId } = readApnsEnv();
   if (!bundleId) {
-    return { ok: false, reason: 'missing_secret', status: 0, apnsReason: 'APNS_BUNDLE_ID not set' };
+    return {
+      ok: false,
+      reason: "missing_secret",
+      status: 0,
+      apnsReason: "APNS_BUNDLE_ID not set",
+    };
   }
 
   let providerJwt: string;
@@ -237,36 +253,36 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
   } catch (err) {
     return {
       ok: false,
-      reason: err instanceof Error && err.message.includes('missing')
-        ? 'missing_secret'
-        : 'config_invalid',
+      reason: err instanceof Error && err.message.includes("missing")
+        ? "missing_secret"
+        : "config_invalid",
       status: 0,
       apnsReason: err instanceof Error ? err.message : String(err),
     };
   }
 
-  const host = input.environment === 'production'
-    ? 'api.push.apple.com'
-    : 'api.sandbox.push.apple.com';
+  const host = input.environment === "production"
+    ? "api.push.apple.com"
+    : "api.sandbox.push.apple.com";
   const url = `https://${host}/3/device/${encodeURIComponent(input.token)}`;
 
   const apsPayload: Record<string, unknown> = {
     aps: {
       alert: { title: input.alert.title, body: input.alert.body },
-      sound: 'default',
-      'thread-id': input.threadId ?? input.category,
-      'content-available': 1,
+      sound: "default",
+      "thread-id": input.threadId ?? input.category,
+      "content-available": 1,
     },
     ...(input.data ?? {}),
   };
 
   const headers: Record<string, string> = {
-    'authorization': `bearer ${providerJwt}`,
-    'apns-topic': bundleId,
-    'apns-push-type': 'alert',
-    'apns-priority': '5',
-    'apns-collapse-id': input.category,
-    'content-type': 'application/json',
+    "authorization": `bearer ${providerJwt}`,
+    "apns-topic": bundleId,
+    "apns-push-type": "alert",
+    "apns-priority": "5",
+    "apns-collapse-id": input.category,
+    "content-type": "application/json",
   };
 
   let res: Response;
@@ -274,7 +290,7 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
     const fetchImpl: ApnsFetch = apnsFetchOverride ??
       ((input, init) => fetch(input, init));
     res = await fetchImpl(url, {
-      method: 'POST',
+      method: "POST",
       headers,
       body: JSON.stringify(apsPayload),
       signal: AbortSignal.timeout(APNS_FETCH_TIMEOUT_MS),
@@ -282,22 +298,35 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
   } catch (err) {
     return {
       ok: false,
-      reason: 'network',
+      reason: "network",
       status: 0,
       apnsReason: err instanceof Error ? err.message : String(err),
     };
   }
 
   if (res.ok) {
-    return { ok: true, apnsId: res.headers.get('apns-id') ?? '' };
+    return { ok: true, apnsId: res.headers.get("apns-id") ?? "" };
   }
 
   // APNs returns JSON {reason:"BadDeviceToken"|"Unregistered"|...} on error.
   let apnsReason: string | undefined;
   try {
     const errBody = await res.json();
-    apnsReason = typeof errBody?.reason === 'string' ? errBody.reason : undefined;
+    apnsReason = typeof errBody?.reason === "string"
+      ? errBody.reason
+      : undefined;
   } catch { /* ignore */ }
+
+  // SCA-352: 401 = ExpiredProviderToken / InvalidProviderToken. The cached
+  // provider JWT we just signed is wrong — invalidate it so the NEXT call
+  // (whether retry or fresh) mints fresh. Pre-fix: the cache stayed valid
+  // and attempts 2 + 3 burned against the same bad JWT, dead-lettering a
+  // legitimate push every NTP-skew or key-rotation race window.
+  if (res.status === 401) {
+    cachedProviderJwt = null;
+    cachedProviderJwtExpiresAt = 0;
+    mintingPromise = null;
+  }
 
   // Classify by BOTH status and apnsReason. Apple documents 400 as covering
   // BadDeviceToken *and* a family of payload/config bugs (BadExpirationDate,
@@ -306,28 +335,41 @@ export async function sendAPNsPush(input: APNsPushInput): Promise<APNsPushResult
   // null out healthy push tokens on payload regressions. 410 is always
   // Unregistered (dead token). Everything else routes by status.
   const failReason = ((): APNsFailureReason => {
-    if (res.status === 410) return 'bad_device_token';
+    if (res.status === 410) return "bad_device_token";
     if (res.status === 400) {
       // 400 + explicit BadDeviceToken/BadExpirationDate mapping per Apple:
       // BadDeviceToken is the only 400 that means "token is dead and future
       // sends to this token will keep failing." Everything else is a
       // config/payload bug — retryable only after ops intervention.
-      if (apnsReason === 'BadDeviceToken') return 'bad_device_token';
-      return 'config_invalid';
+      if (apnsReason === "BadDeviceToken") return "bad_device_token";
+      return "config_invalid";
     }
-    if (res.status === 403) return 'config_invalid'; // MissingProviderToken
-    if (res.status === 429) return 'rate_limited';
-    if (res.status >= 500) return 'server_error';
-    // SCA-323: Apple documents only {400, 403, 410, 429} as 4xx APNs
+    // SCA-352: 401 ExpiredProviderToken — terminal, retries against the
+    // same expired JWT all fail (the cache invalidation above lets the
+    // NEXT job mint fresh; this call is dead-lettered with an
+    // operator-actionable error_message).
+    if (res.status === 401) return "config_invalid";
+    if (res.status === 403) return "config_invalid"; // MissingProviderToken
+    // SCA-352: 404 (path bug) and 405 (Method Not Allowed) are documented
+    // Apple permanent failures — treating them as transient under SCA-323
+    // burns the retry budget against a known-bad request.
+    if (res.status === 404 || res.status === 405) return "config_invalid";
+    // SCA-352: 408 (request timeout) is genuinely transient; longer
+    // backoff curve fits via rate_limited rather than the default
+    // server_error.
+    if (res.status === 408) return "rate_limited";
+    if (res.status === 429) return "rate_limited";
+    if (res.status >= 500) return "server_error";
+    // SCA-323: Apple documents only {400, 401, 403, 410, 429} as 4xx APNs
     // responses (https://developer.apple.com/documentation/usernotifications
     // /sending_notification_requests_to_apns#Responses). Anything outside
-    // that set (rare 404 / 451 / 503 from gateway maintenance, etc.)
-    // pre-fix mapped to `config_invalid`, which `processPushSend` re-throws
-    // and pgmq-dispatch retries through MAX_ATTEMPTS, then dead-letters as
-    // a permanent config bug. Net: a transient 60s gateway blip burned the
+    // that set (rare 451/503 from gateway maintenance, etc.) pre-fix
+    // mapped to `config_invalid`, which `processPushSend` re-throws and
+    // pgmq-dispatch retries through MAX_ATTEMPTS, then dead-letters as a
+    // permanent config bug. Net: a transient 60s gateway blip burned the
     // retry budget and silently dropped a real push. Treat unknowns as
     // transient server errors so the retry loop has a chance to recover.
-    return 'server_error';
+    return "server_error";
   })();
 
   return {

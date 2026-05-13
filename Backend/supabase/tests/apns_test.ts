@@ -293,9 +293,52 @@ Deno.test("sendAPNsPush: 400 with unparseable body → reason=config_invalid (co
 // the retry budget on a 60s gateway blip. Treat unknown 4xx as
 // retryable `server_error` so the retry loop has a chance to recover.
 
-Deno.test("sendAPNsPush: 404 (gateway maintenance) → reason=server_error (SCA-323)", async () => {
+// SCA-352 reclassified 404 + 405 from "server_error retry" to
+// "config_invalid permanent" — they're documented Apple permanent
+// failures (path bug / Method Not Allowed) and burning the retry
+// budget against them is wasteful. The 451 fallthrough is what
+// SCA-323 was originally about — unrecognized statuses still go to
+// server_error so a future Apple-side widening doesn't dead-letter.
+
+Deno.test("sendAPNsPush: 404 → reason=config_invalid (SCA-352, was server_error in SCA-323)", async () => {
   const { restore } = installMockFetch(() =>
     new Response(null, { status: 404 })
+  );
+  try {
+    const result = await sendAPNsPush({
+      token: "x",
+      environment: "sandbox",
+      category: "reactivation",
+      alert: { title: "t", body: "b" },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) assertEquals(result.reason, "config_invalid");
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("sendAPNsPush: 405 Method Not Allowed → reason=config_invalid (SCA-352)", async () => {
+  const { restore } = installMockFetch(() =>
+    new Response(null, { status: 405 })
+  );
+  try {
+    const result = await sendAPNsPush({
+      token: "x",
+      environment: "sandbox",
+      category: "reactivation",
+      alert: { title: "t", body: "b" },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) assertEquals(result.reason, "config_invalid");
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("sendAPNsPush: 451 (legal/blocked, unknown) → reason=server_error (SCA-323 fallthrough)", async () => {
+  const { restore } = installMockFetch(() =>
+    new Response(null, { status: 451 })
   );
   try {
     const result = await sendAPNsPush({
@@ -311,9 +354,12 @@ Deno.test("sendAPNsPush: 404 (gateway maintenance) → reason=server_error (SCA-
   }
 });
 
-Deno.test("sendAPNsPush: 451 (legal/blocked) → reason=server_error (SCA-323)", async () => {
+Deno.test("sendAPNsPush: 401 ExpiredProviderToken → reason=config_invalid (SCA-352)", async () => {
   const { restore } = installMockFetch(() =>
-    new Response(null, { status: 451 })
+    new Response(
+      JSON.stringify({ reason: "ExpiredProviderToken" }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )
   );
   try {
     const result = await sendAPNsPush({
@@ -323,7 +369,25 @@ Deno.test("sendAPNsPush: 451 (legal/blocked) → reason=server_error (SCA-323)",
       alert: { title: "t", body: "b" },
     });
     assertEquals(result.ok, false);
-    if (!result.ok) assertEquals(result.reason, "server_error");
+    if (!result.ok) assertEquals(result.reason, "config_invalid");
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("sendAPNsPush: 408 Request Timeout → reason=rate_limited (SCA-352)", async () => {
+  const { restore } = installMockFetch(() =>
+    new Response(null, { status: 408 })
+  );
+  try {
+    const result = await sendAPNsPush({
+      token: "x",
+      environment: "sandbox",
+      category: "reactivation",
+      alert: { title: "t", body: "b" },
+    });
+    assertEquals(result.ok, false);
+    if (!result.ok) assertEquals(result.reason, "rate_limited");
   } finally {
     restore();
   }
