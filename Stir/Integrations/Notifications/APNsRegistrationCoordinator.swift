@@ -130,7 +130,12 @@ final class APNsRegistrationCoordinator {
     /// improve.
     func handleRegistrationFailure(_ error: Error) {
         Logger.notifications.warning(
-            "apns_registration_failed err=\(error.localizedDescription, privacy: .public)",
+            // SCA-366: error.localizedDescription marked .private to match
+            // sibling lines (NotificationSchedulerKit.swift:99,200,220).
+            // URLSession + APNs errors can carry URLs/hostnames in the
+            // localizedDescription; .public would leak them into
+            // sysdiagnose / Console.app capture.
+            "apns_registration_failed err=\(error.localizedDescription, privacy: .private)",
         )
     }
 
@@ -224,7 +229,9 @@ final class APNsRegistrationCoordinator {
             )
         } catch {
             Logger.notifications.warning(
-                "apns_post_failed trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .public)",
+                // SCA-366: err marked .private (URL/host content); trigger
+                // remains .public (closed-vocabulary string).
+                "apns_post_failed trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .private)",
             )
         }
     }

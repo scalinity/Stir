@@ -130,7 +130,11 @@ final class UseSoonScheduler {
             candidates = try pantry.fetchExpiringSoon(now: now, for: household)
         } catch {
             Logger.useSoon.warning(
-                "fetchExpiringSoon failed: \(error.localizedDescription, privacy: .public) — skipping",
+                // SCA-366: error.localizedDescription marked .private to
+                // match sibling line at :295 (SCA-313 Core-Data error log).
+                // CoreData NSError.localizedDescription can carry entity
+                // names + predicate fragments in fault descriptions.
+                "fetchExpiringSoon failed: \(error.localizedDescription, privacy: .private) — skipping",
             )
             return
         }
