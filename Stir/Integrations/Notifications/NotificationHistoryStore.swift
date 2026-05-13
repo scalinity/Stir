@@ -89,12 +89,23 @@ final class NotificationHistoryStore {
 
     /// Mark the most recent fire as actioned. Also clears any active
     /// suppression — the user just demonstrated engagement.
+    ///
+    /// SCA-376: suppression-clear is unconditional. Even when the
+    /// history is empty (no prior fires), the user's engagement (e.g.
+    /// a use-soon card tap from TonightHomeView routed via
+    /// UseSoonScheduler.recordAction) clears any phantom suppression
+    /// entry. The pre-fix early-return at `guard let last ...`
+    /// skipped the removeObject call, leaving a stale suppression-until
+    /// date in place for the entire 14-day window even though the
+    /// user engaged.
     func markMostRecentActioned(at _: Date) {
+        // SCA-376: clear suppression FIRST (always), then mark fire
+        // actioned IFF history exists.
+        defaults.removeObject(forKey: suppressionKey)
         var entries = load()
         guard let last = entries.indices.last else { return }
         entries[last].actioned = true
         save(entries)
-        defaults.removeObject(forKey: suppressionKey)
     }
 
     /// Test seam — wipe both buckets.

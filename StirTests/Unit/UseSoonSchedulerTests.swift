@@ -100,11 +100,29 @@ final class UseSoonSchedulerTests: XCTestCase {
 
     // MARK: - recordAction
 
-    // SCA-376 contract test ("recordAction clears suppression even on empty
-    // history") deferred to that ticket's PR — the production fix to
-    // NotificationHistoryStore lands separately. The current behavior is
-    // pinned by NotificationHistoryStore tests; this scheduler-level
-    // assertion will land with the SCA-376 fix.
+    /// SCA-376: card-tap engagement (TonightHomeView → recordAction)
+    /// clears suppression even when fire history is empty. Pre-fix, the
+    /// guard let in markMostRecentActioned early-returned and skipped
+    /// the suppression-clear; a stale 14-day suppression-until could
+    /// persist even after the user demonstrated engagement.
+    func test_recordAction_emptyHistory_clearsSuppression() {
+        // Pre-arm a phantom suppression entry under the same key
+        // UseSoonScheduler uses internally.
+        defaults.set(
+            Date().addingTimeInterval(7 * 86_400),
+            forKey: "stir.use_soon.suppressed_until.v1",
+        )
+        let scheduler = UseSoonScheduler(
+            center: SpyCenter(),
+            calendar: .current,
+            defaults: defaults,
+        )
+        scheduler.recordAction()
+        XCTAssertNil(
+            defaults.object(forKey: "stir.use_soon.suppressed_until.v1"),
+            "SCA-376: card-tap engagement clears suppression even on empty history",
+        )
+    }
 }
 
 // MARK: - Test doubles
