@@ -59,14 +59,27 @@ final class NotificationPreferencesStoreTests: XCTestCase {
 
     // MARK: - Bulk replace
 
-    func test_replace_updatesBoth() {
+    func test_replace_updatesAll() {
         let input = NotificationPreferencesStore.Preferences(
             reactivation: false,
             importCompletion: false,
+            cookReminder: false,
+            billingGrace: false,
         )
         store.replace(with: input)
         let out = store.preferences
         XCTAssertFalse(out.reactivation)
         XCTAssertFalse(out.importCompletion)
+        XCTAssertFalse(out.cookReminder)
+        XCTAssertFalse(out.billingGrace)
+    }
+
+    // SCA-322: defaults are TRUE (opt-in UX).
+    func test_defaults_areOptIn() {
+        let prefs = store.preferences
+        XCTAssertTrue(prefs.reactivation)
+        XCTAssertTrue(prefs.importCompletion)
+        XCTAssertTrue(prefs.cookReminder)
+        XCTAssertTrue(prefs.billingGrace)
     }
 }

@@ -120,7 +120,17 @@ final class NotificationHistoryStore {
     }
 
     private func save(_ entries: [Entry]) {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        defaults.set(data, forKey: stateKey)
+        do {
+            let data = try JSONEncoder().encode(entries)
+            defaults.set(data, forKey: stateKey)
+        } catch {
+            // SCA-319: mirror the load() warning at line 115. A silent
+            // encode failure would mean the rolling cap silently stops
+            // working — both sides of the persistence path now log on
+            // failure so a future Entry-shape regression is observable.
+            Logger.notifications.warning(
+                "NotificationHistoryStore encode failed for key=\(self.stateKey, privacy: .public): \(error.localizedDescription, privacy: .private)",
+            )
+        }
     }
 }

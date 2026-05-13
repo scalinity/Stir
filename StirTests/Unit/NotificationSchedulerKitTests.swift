@@ -189,65 +189,65 @@ final class NotificationSchedulerKitTests: XCTestCase {
 
     // MARK: - addWithRollback
 
-    func test_addWithRollback_addSucceeds_returnsTrue_noRollback() async {
+    func test_addWithRollback_addSucceeds_returnsAdded_noRollback() async {
         let center = SpyCenter()
         let request = makeRequest("primary")
         let prior = makeRequest("prior")
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
             logger: logger,
             contextLabel: "test",
         )
-        XCTAssertTrue(added)
+        XCTAssertEqual(result, .added)
         XCTAssertEqual(center.addedIdentifiers, ["primary"], "only the primary add fires on success")
     }
 
-    func test_addWithRollback_addFails_attemptsRollbackAndReturnsFalse() async {
+    func test_addWithRollback_addFails_attemptsRollbackAndReturnsRolledBack() async {
         let center = SpyCenter()
         let request = makeRequest("primary")
         let prior = makeRequest("prior")
         // Fail the first add; succeed the second (rollback).
         center.addBehavior = .failOnce(NSError(domain: "test", code: 2))
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
             logger: logger,
             contextLabel: "test",
         )
-        XCTAssertFalse(added)
+        XCTAssertEqual(result, .rolledBack)
         XCTAssertEqual(center.addedIdentifiers, ["prior"], "rollback re-added the prior request")
     }
 
-    func test_addWithRollback_noPriorRequest_skipsRollback() async {
+    func test_addWithRollback_noPriorRequest_returnsLostBoth() async {
         let center = SpyCenter()
         center.addBehavior = .alwaysFail(NSError(domain: "test", code: 3))
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
             prior: nil,
             center: center,
             logger: logger,
             contextLabel: "test",
         )
-        XCTAssertFalse(added)
+        XCTAssertEqual(result, .lostBoth)
         XCTAssertEqual(center.addedIdentifiers, [], "no prior == nothing to rollback to")
     }
 
-    func test_addWithRollback_bothFailures_returnsFalse() async {
+    func test_addWithRollback_bothFailures_returnsLostBoth() async {
         let center = SpyCenter()
         center.addBehavior = .alwaysFail(NSError(domain: "test", code: 4))
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
             prior: makeRequest("prior"),
             center: center,
             logger: logger,
             contextLabel: "test",
         )
-        XCTAssertFalse(added)
+        XCTAssertEqual(result, .lostBoth)
         // Both attempted, both failed — kit logs the rollback failure
-        // (CA2-08) and returns false.
+        // (CA2-08) and returns .lostBoth.
         XCTAssertEqual(center.addCallCount, 2, "kit attempted both adds")
     }
 
@@ -266,7 +266,7 @@ final class NotificationSchedulerKitTests: XCTestCase {
             userInfo: [NSLocalizedDescriptionKey: "TestKit: simulated rollback fault"],
         ))
         let recorder = RollbackFailureRecorder()
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("stir.test.failing-id"),
             prior: makeRequest("prior"),
             center: center,
@@ -281,7 +281,7 @@ final class NotificationSchedulerKitTests: XCTestCase {
                 )
             },
         )
-        XCTAssertFalse(added, "both-failures branch returns false")
+        XCTAssertEqual(result, .lostBoth, "both-failures branch returns .lostBoth")
 
         XCTAssertEqual(recorder.invocationCount, 1, "onRollbackFailure fires exactly once on the both-failures branch")
         XCTAssertEqual(recorder.lastSchedulerId, "test_scheduler")
@@ -295,7 +295,7 @@ final class NotificationSchedulerKitTests: XCTestCase {
     func test_addWithRollback_primarySuccess_doesNotInvokeOnRollbackFailure() async {
         let center = SpyCenter()
         let recorder = RollbackFailureRecorder()
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
             prior: nil,
             center: center,
@@ -310,7 +310,7 @@ final class NotificationSchedulerKitTests: XCTestCase {
                 )
             },
         )
-        XCTAssertTrue(added)
+        XCTAssertEqual(result, .added)
         XCTAssertEqual(recorder.invocationCount, 0, "primary-success branch must not fire the rollback-failure callback")
     }
 

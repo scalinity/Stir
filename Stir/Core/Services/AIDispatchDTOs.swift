@@ -1267,10 +1267,22 @@ struct PushRegisterRequest: Encodable, Sendable {
     struct NotificationPrefs: Encodable, Sendable, Equatable {
         let importCompletion: Bool
         let reactivation: Bool
+        // SCA-322: added so the wire schema covers every category
+        // declared in `APNsCategory` (Backend/_shared/apns.ts).
+        // cook_reminder has no backend enqueue path today but the
+        // wire field exists so users opting out are honored the
+        // moment that lands. billing_grace is already enqueued by
+        // revenuecat-webhook on BILLING_ISSUE events; gating reads
+        // `notification_prefs_json.billing_grace` so the iOS opt-out
+        // is now actually plumbed through.
+        let cookReminder: Bool
+        let billingGrace: Bool
 
         enum CodingKeys: String, CodingKey {
             case importCompletion = "import_completion"
             case reactivation
+            case cookReminder = "cook_reminder"
+            case billingGrace = "billing_grace"
         }
     }
 }

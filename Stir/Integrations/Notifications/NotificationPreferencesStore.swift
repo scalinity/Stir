@@ -7,12 +7,18 @@
 // writes through this store; ReactivationScheduler + the async-
 // import delivery path each check their own key before scheduling.
 //
-// Server sync: the step-7 backend `/v1/push/register` accepts a
-// `notification_prefs` sub-object but iOS only sends it alongside
-// an APNs device token. Until APNs-token acquisition ships (step 8
-// AppDelegate-style registration), prefs stay local and inform
-// scheduling decisions client-side only. When the server sync lands,
-// it'll flush this store's snapshot via AIDispatch.pushRegister.
+// Server sync: SCA-316 wired `APNsRegistrationCoordinator.flushPrefs()`
+// to push this store's snapshot to `/v1/push/register` on every toggle
+// change AND on first APNs token grant. Idempotency on the server
+// short-circuits no-op POSTs.
+//
+// SCA-322 widening: `cookReminder` and `billingGrace` added so iOS
+// covers every category in `APNsCategory` (Backend/_shared/apns.ts).
+// `cook_reminder` has no backend enqueue path today; `billing_grace`
+// is enqueued by `revenuecat-webhook` on BILLING_ISSUE events and
+// gated server-side on `notification_prefs_json.billing_grace`. All
+// four prefs default TRUE (opt-in UX) and surface as Settings
+// toggles in NotificationPrefsView.
 
 import Foundation
 
@@ -26,16 +32,26 @@ final class NotificationPreferencesStore {
         /// Async-import completion (>5000 char paste → pgmq worker →
         /// APNs push when parse finishes).
         var importCompletion: Bool
+        /// Cook reminder push (no backend enqueue path today; field
+        /// reserved for the future cook_reminder template).
+        var cookReminder: Bool
+        /// Billing grace push fired by revenuecat-webhook when Apple's
+        /// auto-renew throws BILLING_ISSUE during the grace window.
+        var billingGrace: Bool
 
         static let defaults = Preferences(
             reactivation: true,
             importCompletion: true,
+            cookReminder: true,
+            billingGrace: true,
         )
     }
 
     private let defaults: UserDefaults
-    private static let reactKey     = "stir.notif.reactivation.v1"
-    private static let importKey    = "stir.notif.importCompletion.v1"
+    private static let reactKey         = "stir.notif.reactivation.v1"
+    private static let importKey        = "stir.notif.importCompletion.v1"
+    private static let cookReminderKey  = "stir.notif.cookReminder.v1"
+    private static let billingGraceKey  = "stir.notif.billingGrace.v1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -47,6 +63,8 @@ final class NotificationPreferencesStore {
         Preferences(
             reactivation: readBool(Self.reactKey, default: true),
             importCompletion: readBool(Self.importKey, default: true),
+            cookReminder: readBool(Self.cookReminderKey, default: true),
+            billingGrace: readBool(Self.billingGraceKey, default: true),
         )
     }
 
@@ -60,11 +78,21 @@ final class NotificationPreferencesStore {
         defaults.set(enabled, forKey: Self.importKey)
     }
 
+    func setCookReminder(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.cookReminderKey)
+    }
+
+    func setBillingGrace(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.billingGraceKey)
+    }
+
     // MARK: - Bulk replace (used by server sync when it lands)
 
     func replace(with prefs: Preferences) {
         setReactivation(prefs.reactivation)
         setImportCompletion(prefs.importCompletion)
+        setCookReminder(prefs.cookReminder)
+        setBillingGrace(prefs.billingGrace)
     }
 
     // MARK: - Private

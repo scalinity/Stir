@@ -233,7 +233,11 @@ Deno.serve(async (req) => {
         ErrorCode.AUTH_01,
         401,
         {
-          reason: 'signature_invalid' as never,
+          // SCA-324: `signature_invalid` is part of the canonical
+          // `AuthReason` union (errors.ts:113), so the prior
+          // `as never` cast was vestigial — drift-prone if the union
+          // ever loses this value. Pass the typed literal directly.
+          reason: 'signature_invalid',
           message: 'Missing or invalid pgmq-dispatch shared secret.',
         },
         requestId,

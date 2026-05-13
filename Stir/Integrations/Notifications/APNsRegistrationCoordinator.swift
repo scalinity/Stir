@@ -142,6 +142,8 @@ final class APNsRegistrationCoordinator {
             environment: Self.environment.rawValue,
             importCompletion: prefs.importCompletion,
             reactivation: prefs.reactivation,
+            cookReminder: prefs.cookReminder,
+            billingGrace: prefs.billingGrace,
         )
         if let last = readLastSnapshot(), last == snapshot {
             Logger.notifications.debug("apns_post_skipped reason=unchanged trigger=\(reason, privacy: .public)")
@@ -153,6 +155,8 @@ final class APNsRegistrationCoordinator {
             notificationPrefs: .init(
                 importCompletion: prefs.importCompletion,
                 reactivation: prefs.reactivation,
+                cookReminder: prefs.cookReminder,
+                billingGrace: prefs.billingGrace,
             ),
         )
         do {
@@ -175,6 +179,8 @@ final class APNsRegistrationCoordinator {
         let environment: String
         let importCompletion: Bool
         let reactivation: Bool
+        let cookReminder: Bool
+        let billingGrace: Bool
     }
 
     private func readLastSnapshot() -> Snapshot? {

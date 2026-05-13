@@ -32,12 +32,16 @@
 //   * `use_soon_fired`     (delivery; via StirNotificationDelegate)
 //   * `use_soon_tapped`    (deep-link tap)
 //   * `use_soon_suppressed` { reason: "weekly_cap" | "unactioned_streak" |
-//                                     "recent_session" | "no_candidate" }
+//                                     "recent_session" | "no_candidate" |
+//                                     "no_displayable_candidate" }
 //
-// SCA-320 / ADR 0009: telemetry + userInfo carry IDs/counts only — no
-// ingredient display name. Notification content title CAN reference the
-// display name (it's user-visible by design); the violations were the
-// telemetry property and the userInfo key, both removed.
+// SCA-320: `item_display_name` dropped from `use_soon_scheduled` per
+// ADR 0009 — pantry labels are user content. The notification body
+// still uses the display name (user-facing rendering is fine), but
+// telemetry, OSLog, and userInfo carry only the pantry item ID.
+// `no_displayable_candidate` was added so a missing/empty displayName
+// triggers a clean suppression instead of the prior "Use an
+// ingredient before it goes" generic-fallback notification body.
 
 import CoreData
 import Foundation
@@ -137,6 +141,23 @@ final class UseSoonScheduler {
             return
         }
 
+        // SCA-320: previously the scheduler shipped a fallback notification
+        // body of "Use an ingredient before it goes" when displayName was
+        // nil — copy that reads as a bug. We now treat a missing
+        // displayName as a suppression case so the user never sees the
+        // generic copy. The candidate is otherwise valid; if a future
+        // upstream fixes the displayName backfill, the next schedule
+        // attempt picks it up automatically.
+        guard
+            let displayName = candidate.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !displayName.isEmpty
+        else {
+            telemetry.capture(.useSoonSuppressed, properties: [
+                "reason": "no_displayable_candidate",
+            ])
+            return
+        }
+
         let fireDate = nextFireDate(from: now)
 
         let authorized = await NotificationSchedulerKit.requestAuthorizationIfNeeded(
@@ -152,13 +173,22 @@ final class UseSoonScheduler {
             identifier: useSoonReminderID,
             center: center,
         )
-        cancel()
+        // SCA-319: no pre-cancel(). UN.add(_:) replaces same-identifier
+        // requests atomically; an explicit cancel risks erasing the
+        // prior schedule on the pendingRequest()-returned-nil race,
+        // leaving rollback with nothing to restore.
 
-        let displayName = candidate.displayName ?? "an ingredient"
+        // `displayName` is the validated, trimmed value from the
+        // suppression guard above. Used in the user-facing title only.
         let content = UNMutableNotificationContent()
         content.title = "Use \(displayName) before it goes"
         content.body = "Want 3 dinner ideas built around it?"
         content.sound = .default
+        // SCA-320: ADR 0009 — no user content in userInfo (PostHog
+        // pulls userInfo via the deep-link handler if/when we widen
+        // the contract). Deep-link only needs the pantry item ID; the
+        // display name is fetched fresh from CoreData when the user
+        // taps. Dropped: `use_first_display_name`.
         content.userInfo = [
             "stir_notification_kind": "use_soon",
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
@@ -176,7 +206,7 @@ final class UseSoonScheduler {
             trigger: trigger,
         )
 
-        let added = await NotificationSchedulerKit.addWithRollback(
+        let result = await NotificationSchedulerKit.addWithRollback(
             request,
             prior: prior,
             center: center,
@@ -191,14 +221,24 @@ final class UseSoonScheduler {
                 ])
             },
         )
-        if added {
+        switch result {
+        case .added:
             history.recordScheduled(fireAt: fireDate)
+            // SCA-320: dropped `item_display_name` per ADR 0009 — pantry
+            // labels are user content. The hashed OSLog item= breadcrumb
+            // is also dropped because the property it supported is gone;
+            // fire time alone is enough for ops + dashboards.
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
             ])
             Logger.useSoon.info(
-                "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public) item=\(displayName, privacy: .private(mask: .hash))",
+                "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
+        case .rolledBack, .lostBoth:
+            // .rolledBack: prior is intact; user keeps their existing
+            // schedule. .lostBoth: telemetry already fired via
+            // onRollbackFailure. Either way, no `*_scheduled` write.
+            break
         }
     }
 
