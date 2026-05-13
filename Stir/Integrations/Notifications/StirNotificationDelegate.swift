@@ -195,8 +195,17 @@ enum NotificationKind: String, CaseIterable, Sendable {
     case leftoversFollowup = "leftovers_followup"
     case useSoon = "use_soon"
 
+    /// SCA-377: hoist the userInfo key into a single named constant.
+    /// Pre-SCA-377 the literal `"stir_notification_kind"` appeared in
+    /// 6 sites across 3 schedulers + the delegate — a typo in any one
+    /// (or a partial rename) was a silent miss-match (kind → nil →
+    /// telemetry never emits + payload parser never recognizes).
+    /// One constant + `NotificationKind.from(_:)` reader collapse the
+    /// surface to two grep targets.
+    static let userInfoKey = "stir_notification_kind"
+
     static func from(_ userInfo: [AnyHashable: Any]) -> NotificationKind? {
-        guard let raw = userInfo["stir_notification_kind"] as? String else { return nil }
+        guard let raw = userInfo[Self.userInfoKey] as? String else { return nil }
         return NotificationKind(rawValue: raw)
     }
 }

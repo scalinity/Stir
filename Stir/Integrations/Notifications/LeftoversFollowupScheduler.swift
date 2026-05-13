@@ -118,7 +118,7 @@ final class LeftoversFollowupScheduler {
         content.body = "Your leftovers can become tomorrow's dinner in one tap."
         content.sound = .default
         content.userInfo = [
-            "stir_notification_kind": "leftovers_followup",
+            NotificationKind.userInfoKey: NotificationKind.leftoversFollowup.rawValue,
         ]
         content.interruptionLevel = .active
 
@@ -218,7 +218,7 @@ final class LeftoversFollowupScheduler {
 /// handler distinguish source = notification.
 enum LeftoversFollowupNotification {
     static func isFollowup(from userInfo: [AnyHashable: Any]) -> Bool {
-        (userInfo["stir_notification_kind"] as? String) == "leftovers_followup"
+        NotificationKind.from(userInfo) == .leftoversFollowup
     }
 }
 

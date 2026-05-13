@@ -182,7 +182,7 @@ final class UseSoonScheduler {
         // SCA-320: pantry item ID only — see header. Deep-link refetches
         // displayName from CoreData on tap.
         content.userInfo = [
-            "stir_notification_kind": "use_soon",
+            NotificationKind.userInfoKey: NotificationKind.useSoon.rawValue,
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
         ]
         content.interruptionLevel = .active
@@ -292,7 +292,7 @@ final class UseSoonScheduler {
 
 enum UseSoonNotification {
     static func isUseSoon(from userInfo: [AnyHashable: Any]) -> Bool {
-        (userInfo["stir_notification_kind"] as? String) == "use_soon"
+        NotificationKind.from(userInfo) == .useSoon
     }
 
     static func useFirstPantryItemId(from userInfo: [AnyHashable: Any]) -> UUID? {

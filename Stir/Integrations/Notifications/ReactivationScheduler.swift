@@ -77,7 +77,7 @@ final class ReactivationScheduler {
         content.body = "Haven't opened Stir in a week. Point it at your fridge — we'll figure out dinner."
         content.sound = .default
         content.userInfo = [
-            "stir_notification_kind": "reactivation",
+            NotificationKind.userInfoKey: NotificationKind.reactivation.rawValue,
             "trigger_kind": "cook_reminder",
         ]
         content.interruptionLevel = .active
@@ -131,10 +131,7 @@ final class ReactivationScheduler {
 /// `reactivation_notification_opened` with trigger_kind=cook_reminder).
 enum ReactivationNotification {
     static func triggerKind(from userInfo: [AnyHashable: Any]) -> String? {
-        guard
-            let kind = userInfo["stir_notification_kind"] as? String,
-            kind == "reactivation"
-        else { return nil }
+        guard NotificationKind.from(userInfo) == .reactivation else { return nil }
         return userInfo["trigger_kind"] as? String
     }
 }
