@@ -390,21 +390,37 @@ struct PaywallView: View {
                         .frame(height: 1)
                         .accessibilityHidden(true)
                 }
+                // SCA-341: render only non-nil rows. The outer guard
+                // already gates the whole section on "at least one
+                // Premium package present", so a section is only shown
+                // when there's actually something purchasable inside.
+                // Previously both rows rendered unconditionally and a
+                // partial-availability RC config (one SKU rolling out,
+                // A/B variant, dashboard gap) surfaced a dimmed
+                // "Premium annual — unavailable" sibling next to a
+                // working row — looked like a broken UI rather than an
+                // intentional partial offering. `premiumPlanRow`'s nil
+                // fallback (SCA-336) is preserved for defense-in-depth
+                // if a future caller invokes it directly.
                 VStack(spacing: CGFloat.Stir.space2) {
-                    premiumPlanRow(
-                        package: offerings.premiumAnnualPackage,
-                        title: "Premium annual",
-                        priceSuffix: "/yr",
-                        unavailableLabel: "Premium annual — unavailable",
-                        disablePurchaseFor: disablePurchaseFor,
-                    )
-                    premiumPlanRow(
-                        package: offerings.premiumMonthlyPackage,
-                        title: "Premium monthly",
-                        priceSuffix: "/mo",
-                        unavailableLabel: "Premium monthly — unavailable",
-                        disablePurchaseFor: disablePurchaseFor,
-                    )
+                    if let pkg = offerings.premiumAnnualPackage {
+                        premiumPlanRow(
+                            package: pkg,
+                            title: "Premium annual",
+                            priceSuffix: "/yr",
+                            unavailableLabel: "Premium annual — unavailable",
+                            disablePurchaseFor: disablePurchaseFor,
+                        )
+                    }
+                    if let pkg = offerings.premiumMonthlyPackage {
+                        premiumPlanRow(
+                            package: pkg,
+                            title: "Premium monthly",
+                            priceSuffix: "/mo",
+                            unavailableLabel: "Premium monthly — unavailable",
+                            disablePurchaseFor: disablePurchaseFor,
+                        )
+                    }
                 }
             }
         }
