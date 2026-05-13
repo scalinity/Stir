@@ -88,6 +88,11 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         let coord = makeCoordinator()
         // No configure() call.
         coord.handleDeviceToken(Data([0xab, 0xcd, 0x01]))
+        // SCA-387: the unconfigured path has no observable side-effect to
+        // wait on (no recorder), but the Task spawn inside the coordinator
+        // still needs a few yields to actually run. yieldForPostTask is
+        // retained ONLY for this branch — there's no expectation to
+        // fulfill, so a deterministic wait isn't applicable.
         await yieldForPostTask()
         // No way to assert "no post" without a recorder, but we can prove
         // it via the cache: a successful post writes a snapshot to
@@ -96,7 +101,8 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
     }
 
     func test_handleDeviceToken_configured_postsHexToken() async {
-        let recorder = PostRecorder()
+        let expect = expectation(description: "POST recorded")
+        let recorder = PostRecorder(onRecord: { expect.fulfill() })
         let coord = makeCoordinator()
         coord.configure(register: { body in
             await recorder.record(body)
@@ -104,7 +110,7 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         })
 
         coord.handleDeviceToken(Data([0xab, 0xcd, 0x01]))
-        await yieldForPostTask()
+        await fulfillment(of: [expect], timeout: 5.0)
 
         let posts = await recorder.posts
         XCTAssertEqual(posts.count, 1)
@@ -113,7 +119,14 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
     }
 
     func test_handleDeviceToken_sameTuple_skipsSecondPost() async {
-        let recorder = PostRecorder()
+        // SCA-387: only the FIRST POST is expected to land — the second
+        // identical token short-circuits via the lastSnapshot cache and
+        // never fulfills. expect captures the first POST; we then do a
+        // bounded yield window after the second handleDeviceToken to
+        // give a faulty implementation a chance to (incorrectly) POST,
+        // and finally assert count == 1.
+        let expect = expectation(description: "first POST recorded")
+        let recorder = PostRecorder(onRecord: { expect.fulfill() })
         let coord = makeCoordinator()
         coord.configure(register: { body in
             await recorder.record(body)
@@ -121,16 +134,31 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         })
 
         coord.handleDeviceToken(Data([0xab, 0xcd]))
-        await yieldForPostTask()
+        await fulfillment(of: [expect], timeout: 5.0)
         coord.handleDeviceToken(Data([0xab, 0xcd]))
-        await yieldForPostTask()
+        // Bounded yield window so a regression that DOES POST the second
+        // token has time to land before we assert. 20 yields >> 5 used
+        // pre-fix; tight enough to keep the test fast on the green path.
+        for _ in 0 ..< 20 { await Task.yield() }
 
         let count = await recorder.posts.count
         XCTAssertEqual(count, 1, "second identical token should short-circuit via lastSnapshot cache")
     }
 
     func test_flushPrefs_changesPrefs_rePosts() async {
-        let recorder = PostRecorder()
+        let firstExpect = expectation(description: "first POST recorded")
+        let secondExpect = expectation(description: "second POST recorded after prefs change")
+        let bothExpects: [XCTestExpectation] = [firstExpect, secondExpect]
+        var seen = 0
+        let recorder = PostRecorder(onRecord: {
+            // Fulfill in order, ignore extras (any "third" POST would be
+            // caught by the count assertion below). The order matters —
+            // first expect for the token POST, second for the prefs flush.
+            if seen < bothExpects.count {
+                bothExpects[seen].fulfill()
+                seen += 1
+            }
+        })
         let coord = makeCoordinator()
         coord.configure(register: { body in
             await recorder.record(body)
@@ -138,11 +166,11 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         })
 
         coord.handleDeviceToken(Data([0xab, 0xcd]))
-        await yieldForPostTask()
+        await fulfillment(of: [firstExpect], timeout: 5.0)
 
         prefsStore.setReactivation(false)
         coord.flushPrefs()
-        await yieldForPostTask()
+        await fulfillment(of: [secondExpect], timeout: 5.0)
 
         let posts = await recorder.posts
         XCTAssertEqual(posts.count, 2)
@@ -151,6 +179,10 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
     }
 
     func test_flushPrefs_noToken_skipsPost() async {
+        // SCA-387: flushPrefs WITHOUT a prior token must NOT POST.
+        // There's nothing to fulfill — same shape as
+        // test_handleDeviceToken_unconfigured_doesNotPost. yieldForPostTask
+        // gives any (faulty) Task time to run before the negative assertion.
         let recorder = PostRecorder()
         let coord = makeCoordinator()
         coord.configure(register: { body in
@@ -159,7 +191,7 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         })
 
         coord.flushPrefs()
-        await yieldForPostTask()
+        for _ in 0 ..< 20 { await Task.yield() }
 
         let count = await recorder.posts.count
         XCTAssertEqual(count, 0)
@@ -233,8 +265,18 @@ private final class TestSettings: UNNotificationSettings, @unchecked Sendable {
 
 private actor PostRecorder {
     private(set) var posts: [PushRegisterRequest] = []
+    /// SCA-387: fires after each record() call so tests can await a
+    /// deterministic expectation instead of guessing how many
+    /// `Task.yield()` calls are enough. Nil for negative-assertion tests
+    /// that don't expect any record at all.
+    private let onRecord: (@Sendable () -> Void)?
+
+    init(onRecord: (@Sendable () -> Void)? = nil) {
+        self.onRecord = onRecord
+    }
 
     func record(_ body: PushRegisterRequest) {
         posts.append(body)
+        onRecord?()
     }
 }
