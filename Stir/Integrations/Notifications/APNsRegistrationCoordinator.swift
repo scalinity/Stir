@@ -81,9 +81,20 @@ final class APNsRegistrationCoordinator {
     /// Wire the coordinator to a live AIDispatch.pushRegister(...). Called
     /// from `RootCoordinator.init` after AIDispatch is constructed. Until
     /// configured, every code path is a no-op (logged at debug).
+    ///
+    /// SCA-351: if a device token has already arrived (handleDeviceToken
+    /// fired BEFORE configure on the iOS-17+ fast path), replay the post
+    /// now. Three independent reviewers (CR1/CA2/DB1) flagged that the
+    /// prior shape silently dropped first-launch tokens when the
+    /// AppDelegate's didRegister Task ran ahead of StirApp.init's
+    /// configure. The server-side push-register is idempotent so a
+    /// configure-replay is safe to run unconditionally.
     func configure(register: @escaping PushRegisterFn) {
         registerFn = register
         Logger.notifications.info("apns_coordinator_configured")
+        if currentTokenHex != nil {
+            Task { await postIfChanged(reason: "configure_replay") }
+        }
     }
 
     /// AppDelegate forwards `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`.

@@ -129,6 +129,40 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"))
     }
 
+    /// SCA-351: AppDelegate's `didRegisterForRemoteNotificationsWithDeviceToken`
+    /// can fire BEFORE StirApp.init's `configure(register:)` runs (iOS-17+
+    /// fast path returns the cached token in <100ms). Pre-fix: token was
+    /// stashed in `currentTokenHex` but `postIfChanged` short-circuited at
+    /// `not_configured` and there was no replay — token silently dropped
+    /// for the process lifetime. Post-fix: `configure` itself replays
+    /// `postIfChanged` if a token is already cached.
+    func test_configure_afterTokenReceived_replaysPost() async {
+        let recorder = PostRecorder()
+        let coord = makeCoordinator()
+
+        // 1. Token arrives BEFORE configure (the race the SCA-351 fix targets).
+        coord.handleDeviceToken(Data([0xab, 0xcd]))
+        await yieldForPostTask()
+
+        // 2. Pre-replay: cache is empty, no posts recorded.
+        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v2"))
+        let preCount = await recorder.posts.count
+        XCTAssertEqual(preCount, 0, "no post lands while unconfigured")
+
+        // 3. Now configure — fix replays postIfChanged because
+        //    currentTokenHex is non-nil.
+        coord.configure(register: { body in
+            await recorder.record(body)
+            return PushRegisterResponse(installationID: "i-1", environment: "sandbox")
+        })
+        await yieldForPostTask()
+
+        // 4. Replay landed exactly once with the original token bytes.
+        let posts = await recorder.posts
+        XCTAssertEqual(posts.count, 1, "configure-replay POST lands exactly once")
+        XCTAssertEqual(posts.first?.apnsToken, "abcd")
+    }
+
     func test_handleDeviceToken_configured_postsHexToken() async {
         let recorder = PostRecorder()
         let coord = makeCoordinator()
