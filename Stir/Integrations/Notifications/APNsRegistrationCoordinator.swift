@@ -244,12 +244,68 @@ final class APNsRegistrationCoordinator {
                 "apns_post_ok trigger=\(reason, privacy: .public) env=\(Self.environment.rawValue, privacy: .public)",
             )
         } catch {
-            Logger.notifications.warning(
-                // SCA-366: err marked .private (URL/host content); trigger
-                // remains .public (closed-vocabulary string).
-                "apns_post_failed trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .private)",
-            )
+            // SCA-370: severity tiers based on error class —
+            //   * AUTH-01 user_stale → .error (genuine recovery
+            //     signal: server says user row is gone; iOS should
+            //     re-bootstrap to mint a fresh JWT instead of
+            //     looping silently on the same stale JWT).
+            //   * StirError.unknown wrapping RootCoordinatorDeallocated
+            //     (SCA-371) → .fault (invariant violation; RC is
+            //     documented to live for app lifetime).
+            //   * everything else (transient network, etc.) → .warning
+            //     as before.
+            let severity = classifyPostFailure(error)
+            // SCA-366: err marked .private (URL/host content); trigger
+            // remains .public (closed-vocabulary string).
+            switch severity {
+            case .userStale:
+                Logger.notifications.error(
+                    "apns_post_failed_user_stale trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .private) — iOS should re-bootstrap",
+                )
+            case .invariantViolation:
+                Logger.notifications.fault(
+                    "apns_post_failed_invariant trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .private)",
+                )
+            case .transient:
+                Logger.notifications.warning(
+                    "apns_post_failed trigger=\(reason, privacy: .public) err=\(error.localizedDescription, privacy: .private)",
+                )
+            }
         }
+    }
+
+    private enum PostFailureSeverity {
+        case userStale
+        case invariantViolation
+        case transient
+    }
+
+    /// SCA-370: classify a `postIfChanged` catch-block error into the
+    /// right OSLog severity. user_stale is recoverable via re-bootstrap;
+    /// invariant violations should surface in fault logs; everything
+    /// else is treated as transient.
+    private func classifyPostFailure(_ error: Error) -> PostFailureSeverity {
+        if let stirError = error as? StirError {
+            switch stirError {
+            case let .auth(reason, _):
+                if reason == .userStale {
+                    return .userStale
+                }
+                return .transient
+            case let .unknown(underlying):
+                // SCA-371: the configure-closure throws .unknown wrapping
+                // a typed marker when RootCoordinator deallocates. That's
+                // an invariant violation, not a routine error.
+                let typeName = String(describing: type(of: underlying))
+                if typeName.contains("RootCoordinatorDeallocated") {
+                    return .invariantViolation
+                }
+                return .transient
+            default:
+                return .transient
+            }
+        }
+        return .transient
     }
 
     // MARK: - Snapshot persistence
