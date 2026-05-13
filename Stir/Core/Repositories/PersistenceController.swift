@@ -45,7 +45,17 @@ final class PersistenceController {
         }
 
         if inMemory {
-            description.url = URL(fileURLWithPath: "/dev/null")
+            // SCA-388: use NSInMemoryStoreType directly instead of the
+            // `description.url = /dev/null` hack. The /dev/null pattern
+            // still wires up the SQLite store coordinator (which then
+            // tries to read/write a real file and goes through journaling
+            // + WAL recovery paths even for ephemeral state); under
+            // simulator resource pressure that introduced occasional
+            // load-time races that surfaced as `viewContext.hasChanges`
+            // being true on a freshly-constructed container, breaking
+            // PersistenceControllerSaveTests.test_save_noChanges. The
+            // proper NSInMemoryStoreType has no on-disk component at all.
+            description.type = NSInMemoryStoreType
             description.cloudKitContainerOptions = nil
             Logger.coreData.info("initializing in-memory store (tests)")
         } else {
