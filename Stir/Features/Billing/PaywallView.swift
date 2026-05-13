@@ -108,6 +108,14 @@ struct PaywallView: View {
                         await viewModel.load()
                     }
                 }
+                // SCA-339: pattern-match is deliberately productID-agnostic.
+                // `handleSuccess()` only drives the celebration bounce + sheet
+                // dismiss — neither depends on which SKU was purchased. The
+                // productID-bound destructure happens in `contentView` →
+                // `successContent(productID:)`, which renders the tier-aware
+                // welcome copy. If a future `.succeededXxx` variant is added
+                // to PaywallViewModel.State, revisit this handler — `if case
+                // .succeeded` would silently match the new variant too.
                 .onChange(of: viewModel.state) { _, newState in
                     if case .succeeded = newState {
                         handleSuccess()
