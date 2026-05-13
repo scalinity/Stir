@@ -184,11 +184,8 @@ final class UseSoonScheduler {
         content.title = "Use \(displayName) before it goes"
         content.body = "Want 3 dinner ideas built around it?"
         content.sound = .default
-        // SCA-320: ADR 0009 — no user content in userInfo (PostHog
-        // pulls userInfo via the deep-link handler if/when we widen
-        // the contract). Deep-link only needs the pantry item ID; the
-        // display name is fetched fresh from CoreData when the user
-        // taps. Dropped: `use_first_display_name`.
+        // SCA-320: pantry item ID only — see header. Deep-link refetches
+        // displayName from CoreData on tap.
         content.userInfo = [
             "stir_notification_kind": "use_soon",
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
@@ -224,10 +221,9 @@ final class UseSoonScheduler {
         switch result {
         case .added:
             history.recordScheduled(fireAt: fireDate)
-            // SCA-320: dropped `item_display_name` per ADR 0009 — pantry
-            // labels are user content. The hashed OSLog item= breadcrumb
-            // is also dropped because the property it supported is gone;
-            // fire time alone is enough for ops + dashboards.
+            // SCA-320: `fire_at` only — see header. Hashed OSLog
+            // `item=` breadcrumb also dropped (was paired with the
+            // removed property).
             telemetry.capture(.useSoonScheduled, properties: [
                 "fire_at": fireDate.ISO8601Format(),
             ])
