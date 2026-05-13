@@ -23,6 +23,7 @@ final class NotificationHistoryStore {
     private let defaults: UserDefaults
     private let stateKey: String
     private let suppressionKey: String
+    private let telemetry: PostHogClient
     private static let maxEntries = 5
     /// CR2-W2 / CA1-02: surface the 2-per-7d cap as a named constant so the
     /// schedulers can read it instead of duplicating `>= 2` literals at
@@ -40,10 +41,16 @@ final class NotificationHistoryStore {
         var actioned: Bool
     }
 
-    init(defaults: UserDefaults, stateKey: String, suppressionKey: String) {
+    init(
+        defaults: UserDefaults,
+        stateKey: String,
+        suppressionKey: String,
+        telemetry: PostHogClient = .shared,
+    ) {
         self.defaults = defaults
         self.stateKey = stateKey
         self.suppressionKey = suppressionKey
+        self.telemetry = telemetry
     }
 
     var suppressedUntil: Date? {
@@ -126,6 +133,15 @@ final class NotificationHistoryStore {
             Logger.notifications.warning(
                 "NotificationHistoryStore decode failed for key=\(self.stateKey, privacy: .public): \(error.localizedDescription, privacy: .private)",
             )
+            // SCA-374: also surface to PostHog so an Entry-shape
+            // regression (e.g., breaking change to `Entry: Codable`)
+            // shows up in dashboards across the user base, not just
+            // in individual sysdiagnose captures. The blob carries
+            // fire dates + bools — no user content per ADR 0009.
+            telemetry.capture(.notificationHistoryDecodeFailed, properties: [
+                "state_key": stateKey,
+                "error_description": error.localizedDescription,
+            ])
             return []
         }
     }

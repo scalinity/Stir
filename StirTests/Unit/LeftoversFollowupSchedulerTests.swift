@@ -131,6 +131,52 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         XCTAssertNil(store.suppressedUntil, "actioned entry breaks the unactioned streak")
     }
 
+    // MARK: - SCA-374: decode failure telemetry
+
+    func test_historyStore_decodeFailure_emitsTelemetryAndReturnsEmpty() {
+        // Pre-populate the stateKey with garbage so JSONDecoder throws on
+        // load(). Asserts the SCA-374 contract: load() returns [] AND
+        // captures `notification_history_decode_failed` with both the
+        // discriminating state_key AND a non-empty error_description.
+        let stateKey = "stir.leftovers_followup.history.v1"
+        defaults.set(Data([0x00, 0xFF, 0x42, 0x99]), forKey: stateKey)
+        let spy = SpyPostHogForHistory()
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: stateKey,
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+            telemetry: spy,
+        )
+        let recent = store.firesInLastWeek(asOf: Date())
+        XCTAssertEqual(recent.count, 0, "decode failure must reset to []")
+        XCTAssertEqual(spy.captured.count, 1, "decode failure must emit exactly once")
+        XCTAssertEqual(spy.captured.first?.event, .notificationHistoryDecodeFailed)
+        XCTAssertEqual(spy.captured.first?.properties["state_key"] as? String, stateKey)
+        let desc = spy.captured.first?.properties["error_description"] as? String
+        XCTAssertNotNil(desc)
+        XCTAssertFalse(desc?.isEmpty ?? true, "error_description must carry the JSONDecoder throw text")
+    }
+
+    func test_historyStore_validBlob_doesNotEmitDecodeFailure() {
+        // Round-trip a real entry so load() succeeds. Asserts the
+        // negative half of the SCA-374 contract: a healthy decode path
+        // emits ZERO `notification_history_decode_failed` events.
+        let stateKey = "stir.leftovers_followup.history.v1"
+        let spy = SpyPostHogForHistory()
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: stateKey,
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+            telemetry: spy,
+        )
+        store.recordScheduled(fireAt: Date())
+        _ = store.firesInLastWeek(asOf: Date())
+        XCTAssertTrue(
+            spy.captured.allSatisfy { $0.event != .notificationHistoryDecodeFailed },
+            "successful decode must NOT emit decode-failed telemetry",
+        )
+    }
+
     // MARK: - Notification payload
 
     func test_leftoversFollowupNotification_recognizesPayload() {
@@ -153,5 +199,20 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         comps.hour = hour
         comps.minute = minute
         return calendar.date(from: comps)!
+    }
+}
+
+// MARK: - Test spy
+
+/// SCA-374 — minimal PostHog spy that records `capture(_:properties:)`
+/// invocations. Subclasses `PostHogClient` via the DEBUG `init(testingOnly:)`
+/// seam so production code sees a real-looking client (no protocol leakage)
+/// while tests can assert on `captured`.
+private final class SpyPostHogForHistory: PostHogClient, @unchecked Sendable {
+    struct Captured { let event: TelemetryEvent; let properties: [String: Any] }
+    private(set) var captured: [Captured] = []
+    init() { super.init(testingOnly: true) }
+    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
+        captured.append(Captured(event: event, properties: properties))
     }
 }

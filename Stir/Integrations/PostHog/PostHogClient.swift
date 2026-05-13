@@ -273,6 +273,24 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     ///     rollback re-add failure (the inner catch). Counts only —
     ///     no user content per ADR 0009.
     case notificationScheduleRollbackFailed = "notification_schedule_rollback_failed"
+    /// SCA-374 — emitted from `NotificationHistoryStore.load()` when the
+    /// stored `[Entry]` blob fails JSONDecoder. A decode failure silently
+    /// resets the rolling-cap state (returns `[]`), reopening the door
+    /// to over-cap notifications until the next successful save. OSLog
+    /// alone (the SCA-319 / SCA-309 baseline) is invisible to PostHog
+    /// dashboards, so a future Entry-shape regression that breaks
+    /// every install would only surface from individual sysdiagnose
+    /// captures. PostHog event makes the regression observable across
+    /// the user base.
+    /// Properties:
+    ///   - `state_key`: the UserDefaults key whose blob failed to
+    ///     decode (`stir.use_soon.history.v1` /
+    ///     `stir.leftovers_followup.history.v1`). Used to scope the
+    ///     regression to one scheduler vs the cluster.
+    ///   - `error_description`: NSError.localizedDescription. Counts /
+    ///     bounded strings only — no user content per ADR 0009 (the
+    ///     blob carries fire dates + bools, not pantry labels).
+    case notificationHistoryDecodeFailed = "notification_history_decode_failed"
     // SCA-65 — leftovers followup scheduler lifecycle. Spec §15 +
     // CLAUDE.md canonical. _scheduled fires once per successful schedule
     // (post-cap, post-suppression checks); _fired emits at delivery via
