@@ -20,6 +20,7 @@
 // coordinator stays inert until `configure(register:)` is called by
 // `RootCoordinator` after AIDispatch is built.
 
+import CryptoKit
 import Foundation
 import OSLog
 import UIKit
@@ -216,7 +217,14 @@ final class APNsRegistrationCoordinator {
         }
         let prefs = prefsStore.preferences
         let snapshot = Snapshot(
-            token: token,
+            // SCA-372: persist the SHA-256 hex of the token rather than
+            // the raw bytes. Equality semantics intact (compare hashes);
+            // removes the plaintext-at-rest exposure surface in
+            // UserDefaults (NSFileProtectionCompleteUntilFirstUserAuth-
+            // entication, not encrypted at rest). The raw token stays
+            // in `currentTokenHex` (in-memory only) for this process
+            // lifetime.
+            tokenHash: Self.sha256Hex(token),
             environment: Self.environment.rawValue,
             importCompletion: prefs.importCompletion,
             reactivation: prefs.reactivation,
@@ -310,8 +318,15 @@ final class APNsRegistrationCoordinator {
 
     // MARK: - Snapshot persistence
 
+    /// SCA-372: persists the SHA-256 hex of the token, not the raw hex
+    /// bytes — UserDefaults is not encrypted at rest, and a stolen
+    /// device-token + the provider signing key would let an attacker
+    /// push to the device. The hash gives equality-based short-circuit
+    /// without the plaintext exposure. SCA-350's .v2 cache key remains;
+    /// SCA-372 lands on the same key (token contents change shape, but
+    /// Codable JSON keys are unchanged because we renamed the field).
     private struct Snapshot: Codable, Equatable {
-        let token: String
+        let tokenHash: String
         let environment: String
         let importCompletion: Bool
         let reactivation: Bool
@@ -327,5 +342,14 @@ final class APNsRegistrationCoordinator {
     private func writeLastSnapshot(_ snapshot: Snapshot) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.set(data, forKey: Self.lastPushKey)
+    }
+
+    /// SCA-372: SHA-256 hex of an arbitrary input string. Used to
+    /// persist token hashes in the `Snapshot` cache without storing
+    /// raw APNs device tokens in plaintext UserDefaults.
+    private static func sha256Hex(_ input: String) -> String {
+        let data = Data(input.utf8)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
