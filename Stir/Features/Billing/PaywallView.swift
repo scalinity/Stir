@@ -15,6 +15,7 @@
 // tonality). Ember stays on secondary surfaces via the NavigationStack
 // `.tint(Color.Stir.ember600)` at the top.
 
+import OSLog
 import SwiftUI
 
 struct PaywallView: View {
@@ -61,6 +62,28 @@ struct PaywallView: View {
         case .eligible, .unknown: return true
         case .ineligible, .noOffer: return false
         }
+    }
+
+    /// Map a purchased StoreKit productID back to its `Tier` for tier-aware
+    /// success / pending copy.
+    ///
+    /// SCA-294 moved the trial to Pro Annual, so the `.pro` fallback is
+    /// conservative: an unknown SKU defaulting to "Welcome to Pro" matches
+    /// the primary CTA the user just paid for. The warning log surfaces
+    /// SKU drift (future promo, sandbox-only, or RC-renamed productID) in
+    /// observability instead of silent mis-copy.
+    ///
+    /// Pure / `static` so the three branches (Pro SKU, Premium SKU,
+    /// unknown→.pro) can be unit-tested without instantiating SwiftUI
+    /// (SCA-337 + SCA-340). Mirrors `shouldShowTrialCopy`.
+    static func tier(forPurchasedProductID productID: String) -> Tier {
+        guard let sku = StirProduct(rawValue: productID) else {
+            Logger.paywall.warning(
+                "tier-derivation fell back to .pro for unknown productID=\(productID, privacy: .public)",
+            )
+            return .pro
+        }
+        return sku.tier
     }
 
     var body: some View {
@@ -531,7 +554,10 @@ struct PaywallView: View {
         // SKU back through `StirProduct` so the welcome copy names the
         // tier they actually bought — "Welcome to Premium" after a Pro
         // purchase (or vice versa) reads as a billing bug, not chrome.
-        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        // SCA-337: routed through `Self.tier(forPurchasedProductID:)` so
+        // a future unknown SKU surfaces in the paywall logger instead of
+        // silently rendering Pro copy.
+        let tier = Self.tier(forPurchasedProductID: productID)
         let welcomeCopy = tier == .pro ? "Welcome to Stir Pro." : "Welcome to Stir Premium."
         return VStack(spacing: CGFloat.Stir.space4) {
             // Paywall success icon is the single exception to §6 icon.xl
@@ -559,7 +585,9 @@ struct PaywallView: View {
         // age correctly when re-read in a notification or background-fetch
         // toast). Default to "Pro" because the primary CTA buys Pro; any
         // Premium-row tap routes through here too.
-        let tier: Tier = StirProduct(rawValue: productID)?.tier ?? .pro
+        // SCA-337: routed through `Self.tier(forPurchasedProductID:)` so
+        // an unknown SKU surfaces in the paywall logger.
+        let tier = Self.tier(forPurchasedProductID: productID)
         let tierWord = tier == .pro ? "Pro" : "Premium"
         return VStack(spacing: CGFloat.Stir.space4) {
             ProgressView()
