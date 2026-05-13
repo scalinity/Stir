@@ -277,11 +277,11 @@ final class NotificationSchedulerKitTests: XCTestCase {
             logger: logger,
             contextLabel: "test",
             schedulerId: .useSoon,
-            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
+            onRollbackFailure: { schedulerId, identifier, errorReason, priorExisted in
                 recorder.record(
                     schedulerId: schedulerId,
                     identifier: identifier,
-                    errorDescription: errorDescription,
+                    errorReason: errorReason,
                     priorExisted: priorExisted,
                 )
             },
@@ -290,7 +290,11 @@ final class NotificationSchedulerKitTests: XCTestCase {
         XCTAssertEqual(recorder.invocationCount, 1)
         XCTAssertEqual(recorder.lastSchedulerId, .useSoon)
         XCTAssertEqual(recorder.lastIdentifier, "stir.test.failing-id")
-        XCTAssertEqual(recorder.lastErrorDescription, "TestKit: simulated rollback fault")
+        // SCA-367: NSError(domain: "test") classifies to .unknown via the
+        // closed-vocab enum (not UNError nor NSURL). The raw localized
+        // description ("TestKit: simulated rollback fault") only goes to
+        // OSLog now.
+        XCTAssertEqual(recorder.lastErrorReason, .unknown)
         XCTAssertTrue(recorder.lastPriorExisted, "SCA-369: priorExisted=true on the regression branch")
     }
 
@@ -308,11 +312,11 @@ final class NotificationSchedulerKitTests: XCTestCase {
             logger: logger,
             contextLabel: "test",
             schedulerId: .reactivation,
-            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
+            onRollbackFailure: { schedulerId, identifier, errorReason, priorExisted in
                 recorder.record(
                     schedulerId: schedulerId,
                     identifier: identifier,
-                    errorDescription: errorDescription,
+                    errorReason: errorReason,
                     priorExisted: priorExisted,
                 )
             },
@@ -334,11 +338,11 @@ final class NotificationSchedulerKitTests: XCTestCase {
             logger: logger,
             contextLabel: "test",
             schedulerId: .useSoon,
-            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
+            onRollbackFailure: { schedulerId, identifier, errorReason, priorExisted in
                 recorder.record(
                     schedulerId: schedulerId,
                     identifier: identifier,
-                    errorDescription: errorDescription,
+                    errorReason: errorReason,
                     priorExisted: priorExisted,
                 )
             },
@@ -373,7 +377,30 @@ final class NotificationSchedulerKitTests: XCTestCase {
         // telemetry.capture(.notificationScheduleRollbackFailed, ...)
         // shape that schedulers used to hand-roll. Pre-fix: 7-line
         // closure duplicated 3 times. Post-fix: one helper.
-        handler(.leftoversFollowup, "stir.test", "synthetic", true)
+        handler(.leftoversFollowup, "stir.test", .unknown, true)
+    }
+
+    /// SCA-367: RollbackErrorReason.classify maps known UNErrorDomain +
+    /// NSURLErrorDomain codes to specific cases; everything else
+    /// falls to .unknown. Pre-fix the kit forwarded raw OS-supplied
+    /// localizedDescription strings to PostHog (CWE-200-adjacent —
+    /// not user-content but not contractually constrained either).
+    func test_rollbackErrorReason_classify_knownAndUnknown() {
+        // UNErrorDomain code 1 → .invalidContent
+        let unInvalid = NSError(domain: "UNErrorDomain", code: 1)
+        XCTAssertEqual(RollbackErrorReason.classify(unInvalid), .invalidContent)
+        // UNErrorDomain code 4 → .deniedByDevice
+        let unDenied = NSError(domain: "UNErrorDomain", code: 4)
+        XCTAssertEqual(RollbackErrorReason.classify(unDenied), .deniedByDevice)
+        // UNErrorDomain other code → .unknown
+        let unOther = NSError(domain: "UNErrorDomain", code: 99)
+        XCTAssertEqual(RollbackErrorReason.classify(unOther), .unknown)
+        // NSURLErrorDomain → .systemUnavailable
+        let urlErr = NSError(domain: "NSURLErrorDomain", code: -1009)
+        XCTAssertEqual(RollbackErrorReason.classify(urlErr), .systemUnavailable)
+        // arbitrary other → .unknown
+        let other = NSError(domain: "test.synthetic", code: 42)
+        XCTAssertEqual(RollbackErrorReason.classify(other), .unknown)
     }
 
     // MARK: - UseSoonScheduler ADR 0009 contract (SCA-345 / SCA-320 regression pin)
@@ -534,19 +561,19 @@ final class RollbackFailureRecorder {
     private(set) var invocationCount = 0
     private(set) var lastSchedulerId: SchedulerID = .leftoversFollowup
     private(set) var lastIdentifier = ""
-    private(set) var lastErrorDescription = ""
+    private(set) var lastErrorReason: RollbackErrorReason = .unknown
     private(set) var lastPriorExisted = false
 
     func record(
         schedulerId: SchedulerID,
         identifier: String,
-        errorDescription: String,
+        errorReason: RollbackErrorReason,
         priorExisted: Bool,
     ) {
         invocationCount += 1
         lastSchedulerId = schedulerId
         lastIdentifier = identifier
-        lastErrorDescription = errorDescription
+        lastErrorReason = errorReason
         lastPriorExisted = priorExisted
     }
 }

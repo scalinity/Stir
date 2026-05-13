@@ -60,6 +60,51 @@ enum SchedulerID: String, Sendable, Equatable {
     case reactivation
 }
 
+/// SCA-367: closed-vocabulary error code passed to PostHog for the
+/// `notification_schedule_rollback_failed` event. Pre-fix the kit
+/// passed the raw `error.localizedDescription` (OS-supplied, not
+/// contractually constrained by Apple) which would accumulate
+/// device-state breadcrumbs in PostHog at indefinite retention. The
+/// enum keeps the dashboard groupable + bounded; raw descriptions
+/// stay in OSLog (where `.private` already redacts them).
+enum RollbackErrorReason: String, Sendable, Equatable, CaseIterable {
+    /// UNError.Code 1 (badNotificationContent) — payload was malformed
+    /// (title/body too long, invalid trigger, etc.).
+    case invalidContent
+    /// UNError.Code 4 (notificationsNotAuthorized) — user revoked
+    /// permission between the auth-check and the add.
+    case deniedByDevice
+    /// Network / system unavailable — usually transient. Maps any
+    /// `Error` whose `(_ as NSError).domain` is `NSURLErrorDomain`.
+    case systemUnavailable
+    /// Catch-all: enum unknown to this version of the app. Includes
+    /// undocumented UNError codes + any non-UN/NSURL error subclass.
+    case unknown
+
+    /// Map an arbitrary `Error` (the `add(_:)` throw) to a closed-
+    /// vocab reason. Used at the kit's `addWithRollback` callback
+    /// boundary so PostHog never sees raw `localizedDescription`
+    /// strings.
+    static func classify(_ error: Error) -> RollbackErrorReason {
+        let nsError = error as NSError
+        // UNErrorDomain code mapping per Apple docs.
+        if nsError.domain == "UNErrorDomain" {
+            switch nsError.code {
+            case 1:
+                return .invalidContent
+            case 4:
+                return .deniedByDevice
+            default:
+                return .unknown
+            }
+        }
+        if nsError.domain == "NSURLErrorDomain" {
+            return .systemUnavailable
+        }
+        return .unknown
+    }
+}
+
 /// SCA-309: telemetry hook invoked when `addWithRollback` falls into the
 /// "primary add threw AND rollback re-add also threw" branch — the
 /// "user has no pending follow-up" outcome that OSLog alone hides.
@@ -69,10 +114,14 @@ enum SchedulerID: String, Sendable, Equatable {
 /// "user had a schedule, we lost it" (priorExisted=true). Without this,
 /// `notification_schedule_rollback_failed` counts the two cases
 /// identically and the regression-vs-cold-start distinction is invisible.
+///
+/// SCA-367: the third arg is now a closed-vocab `RollbackErrorReason`
+/// enum (was raw `error.localizedDescription`). Raw descriptions stay
+/// in OSLog (where `.private` already redacts).
 typealias NotificationRollbackFailureHandler = @MainActor @Sendable (
     _ schedulerId: SchedulerID,
     _ identifier: String,
-    _ errorDescription: String,
+    _ errorReason: RollbackErrorReason,
     _ priorExisted: Bool,
 ) -> Void
 
@@ -167,16 +216,20 @@ enum NotificationSchedulerKit {
     /// Default `onRollbackFailure` handler that captures
     /// `notificationScheduleRollbackFailed` PostHog telemetry — SCA-361.
     /// Callers can pass this as `onRollbackFailure:` instead of
-    /// hand-rolling identical 7-line closures at every scheduler.
-    /// Returns a closure capturing the supplied telemetry client.
+    /// hand-rolling identical closures at every scheduler.
+    ///
+    /// SCA-367: emits the closed-vocab `error_reason` enum rawValue
+    /// rather than the raw `error.localizedDescription` (OS-supplied,
+    /// not contractually constrained). Raw descriptions stay in OSLog
+    /// only.
     static func defaultRollbackFailureHandler(
         telemetry: PostHogClient,
     ) -> NotificationRollbackFailureHandler {
-        return { schedulerId, identifier, errorDescription, priorExisted in
+        return { schedulerId, identifier, errorReason, priorExisted in
             telemetry.capture(.notificationScheduleRollbackFailed, properties: [
                 "scheduler_id": schedulerId.rawValue,
                 "identifier": identifier,
-                "error_description": errorDescription,
+                "error_reason": errorReason.rawValue,
                 // SCA-369: distinguishes regression (true) from cold-start
                 // first-schedule failure (false).
                 "prior_existed": priorExisted,
@@ -240,10 +293,13 @@ enum NotificationSchedulerKit {
                 logger.error(
                     "no prior to roll back to — user has no pending \(contextLabel, privacy: .public)",
                 )
+                // SCA-367: classify the primary-add error to a closed-
+                // vocab enum BEFORE the PostHog hop. Raw description
+                // stays in OSLog only (.private above).
                 onRollbackFailure?(
                     schedulerId,
                     request.identifier,
-                    error.localizedDescription,
+                    RollbackErrorReason.classify(error),
                     /* priorExisted */ false,
                 )
                 return .noPriorAddFailed
@@ -256,12 +312,12 @@ enum NotificationSchedulerKit {
                     "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending \(contextLabel, privacy: .public)",
                 )
                 // SCA-309 + SCA-369: regression — user HAD a schedule
-                // and we lost it. Description is the OS-supplied error
-                // string — no user content, satisfies ADR 0009.
+                // and we lost it. SCA-367: closed-vocab enum, not raw
+                // description.
                 onRollbackFailure?(
                     schedulerId,
                     request.identifier,
-                    error.localizedDescription,
+                    RollbackErrorReason.classify(error),
                     /* priorExisted */ true,
                 )
                 return .lostBoth
