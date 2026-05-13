@@ -26,6 +26,7 @@ export function testCkRecord(): string {
 export interface BootstrapBody {
   installation_id: string;
   cloudkit_user_record_name?: string;
+  cloudkit_web_auth_token?: string;
   build?: string;
   os_version?: string;
 }
@@ -171,7 +172,15 @@ export async function callBootstrap(
   return { status: response.status, body: parsed };
 }
 
-/** Convenience: bootstrap with sensible defaults filled in. */
+/** Convenience: bootstrap with sensible defaults filled in.
+ *
+ * Pass `cloudkit_user_record_name` to claim a CloudKit identity. If you
+ * ALSO want the canonical_user_key to resolve to `ck:<record>` (rather
+ * than falling back to `install:<uuid>` per the verifier's strip
+ * semantics), pass `cloudkit_web_auth_token` too — see
+ * `STUB_CLOUDKIT_WEB_AUTH_TOKEN` below for the canonical 16+ char stub
+ * value that exploits the `verifier_unconfigured` trust-mode carve-out.
+ */
 export async function quickBootstrap(
   overrides: Partial<BootstrapBody> = {},
 ): Promise<BootstrapResponse> {
@@ -182,6 +191,9 @@ export async function quickBootstrap(
     ...(overrides.cloudkit_user_record_name !== undefined
       ? { cloudkit_user_record_name: overrides.cloudkit_user_record_name }
       : {}),
+    ...(overrides.cloudkit_web_auth_token !== undefined
+      ? { cloudkit_web_auth_token: overrides.cloudkit_web_auth_token }
+      : {}),
   };
   const result = await callBootstrap(body);
   if (result.status !== 200) {
@@ -191,6 +203,33 @@ export async function quickBootstrap(
   }
   return result.body as BootstrapResponse;
 }
+
+/** Canonical 16+ char stub for `cloudkit_web_auth_token` in tests that
+ * want to assert against a verified CK-shaped canonical_user_key
+ * (`ck:<record>`).
+ *
+ * SCA-349: the bootstrap verifier in `_shared/cloudkit_identity.ts`
+ * checks fields in this order:
+ *
+ *   1. record_name absent → `not_requested`
+ *   2. web_auth_token absent → `missing_web_auth_token` (strips both)
+ *   3. CLOUDKIT_API_TOKEN env unset → `verifier_unconfigured` (carves
+ *      out: STRIPS web_auth_token, PRESERVES record_name)
+ *   4. ... live Apple call ...
+ *
+ * Tests run with no `CLOUDKIT_API_TOKEN` in the local `.env`, so any
+ * test that provides BOTH record_name AND a stub web_auth_token lands
+ * in step 3 → canonical_user_key resolves to `ck:<record>`. This is
+ * the only way to exercise the verified-CK shape end-to-end via HTTP
+ * until `session-bootstrap` accepts a `fetchImpl` DI override (already
+ * deferred work — see header comment in `session_bootstrap_test.ts`).
+ *
+ * If `CLOUDKIT_API_TOKEN` ever gets set in the local `.env`, tests
+ * using this stub will hit Apple, fail to authenticate, and the
+ * verifier will strip the claim. Treat that as a signal to plumb
+ * fetchImpl DI instead of patching around it.
+ */
+export const STUB_CLOUDKIT_WEB_AUTH_TOKEN = 'stir-test-stub-cktoken-do-not-trust';
 
 /** GET /v1/config/bootstrap — returns parsed body + status. */
 export async function callConfigBootstrap(
