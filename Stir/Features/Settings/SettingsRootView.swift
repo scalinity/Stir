@@ -199,11 +199,13 @@ struct SettingsRootView: View {
     ///     Suppressed during `.grace` (fix payment first; Apple won't
     ///     allow tier-change with failed billing anyway) and the
     ///     defensive `.none` arm.
-    ///   * Free users on the steady-state `.none` get the existing
-    ///     "Upgrade to Premium" row PLUS a "See Pro features" secondary
-    ///     row, so Pro isn't hidden two taps deep behind PaywallView's
-    ///     "Compare plans" link. Suppressed on `.expired` so the
-    ///     focused Resubscribe recovery copy is the only CTA.
+    ///   * Free users on the steady-state `.none` get a primary
+    ///     "Upgrade to Pro" row (post-SCA-294/332: trial lives on Pro
+    ///     Annual, and `.settingsUpgrade` routes to the Pro-emphasized
+    ///     paywall) PLUS a secondary "Compare plans" row that opens
+    ///     `ProComparisonSheet` for side-by-side Premium/Pro evaluation.
+    ///     Suppressed on `.expired` so the focused Resubscribe recovery
+    ///     copy is the only CTA.
     ///   * Pro users keep the existing single-row admin surface — Apple
     ///     handles tier downgrade via cross-grade in the manage-
     ///     subscriptions sheet.
@@ -240,8 +242,9 @@ struct SettingsRootView: View {
              (.premium, .trial),
              (.premium, .cancelledActive):
             return .above
-        // Free users on the steady-state — Pro discovery is secondary
-        // to the primary "Upgrade to Premium" row.
+        // Free users on the steady-state — the primary row is the
+        // "Upgrade to Pro" CTA (SCA-382); the secondary row hosts the
+        // "Compare plans" comparison-sheet entry-point.
         case (.free, .none),
              (.free, .active),
              (.free, .trial),
@@ -303,12 +306,18 @@ struct SettingsRootView: View {
                 action: { coordinator.presentPaywall(.settingsUpgrade) },
             )
         case (.free, _):
-            // Free user (any non-expired billing_state — `.none` is the
-            // steady-state for free; the others can occur transiently
-            // when an entitlement just downgraded).
+            // SCA-382: post-SCA-294 the 7-day free trial lives on Pro
+            // Annual, and `.settingsUpgrade` already opens a Pro-
+            // emphasized paywall (`PaywallTrigger.swift:125-131,188-193`
+            // — Pro-flavored headline + subhead, primary CTA is "Start
+            // 7-day free trial" → Pro Annual). Settings should match:
+            // lead Free users with "Upgrade to Pro" + trial subtitle,
+            // not the stale "Upgrade to Premium" copy that survived
+            // the paywall flip. Destination unchanged.
             settingsActionRow(
-                icon: Image.Stir.sparkles,
-                title: "Upgrade to Premium",
+                icon: Image.Stir.pro,
+                title: "Upgrade to Pro",
+                subtitle: "7 days free, then Pro pricing. Cancel anytime.",
                 action: { coordinator.presentPaywall(.settingsUpgrade) },
             )
         case (.premium, .none), (.pro, .none):
@@ -376,13 +385,22 @@ struct SettingsRootView: View {
         }
     }
 
-    /// Pro-upgrade / Pro-discovery row — one helper, two placements.
-    /// The Pro CTA is the same destination (`ProComparisonSheet`); the
-    /// only difference is framing — "Upgrade to Pro" for paying users
-    /// who already understand value, "See Pro features" for free users
-    /// where discovery is the goal. Strings stay at the call sites
-    /// (here) so they're greppable; the shared shape avoids the
-    /// 22-line drift the two former row builders had.
+    /// Pro-upgrade / Pro-comparison row — one helper, two placements.
+    /// Both placements open `ProComparisonSheet` so the user gets the
+    /// feature matrix plus inline Pro Annual + Pro Monthly purchase
+    /// buttons (`ProComparisonSheet.swift:217-258`). The framing differs
+    /// because the audience differs:
+    ///
+    ///   * `.above` — Premium subscriber considering cross-tier upgrade.
+    ///     "Upgrade to Pro" reads as the action they're contemplating.
+    ///   * `.below` — Free user who already has a primary "Upgrade to
+    ///     Pro" row above (which routes to PaywallView with all four
+    ///     SKUs). The secondary row reframes as "Compare plans" so it
+    ///     reads as decision-support, not a duplicate CTA.
+    ///
+    /// Strings stay at the call sites (here) so they're greppable; the
+    /// shared shape avoids the 22-line drift the two former row builders
+    /// had.
     private func proRow(placement: ProUpsellPlacement) -> some View {
         let title: String
         let subtitle: String
@@ -391,8 +409,15 @@ struct SettingsRootView: View {
             title = "Upgrade to Pro"
             subtitle = "Voice for every dinner, multi-image scan, \(Tier.pro.displayPantryCap) pantry items."
         case .below:
-            title = "See Pro features"
-            subtitle = "Compare Premium and Pro side by side."
+            // SCA-382: reframed from "See Pro features" / "Compare
+            // Premium and Pro side by side." The previous copy read as
+            // discovery — Daniel's feedback: "no option to upgrade to
+            // pro" — because the primary row above was the Premium CTA
+            // and this one didn't signal action. With the primary row
+            // now leading on Pro, this surface owns the side-by-side
+            // comparison job instead of the upsell job.
+            title = "Compare plans"
+            subtitle = "See Premium and Pro side by side."
         case .none:
             // Should never render — the call sites are gated on
             // `placement != .none`. EmptyView keeps the function total.
