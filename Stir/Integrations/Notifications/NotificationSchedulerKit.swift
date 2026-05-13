@@ -47,17 +47,33 @@ enum NotificationSuppressReason: Sendable, Equatable {
     case weeklyCap
 }
 
+/// SCA-360: typed scheduler identifier. Replaces the prior
+/// stringly-typed `schedulerId: String = ""` parameter on
+/// `addWithRollback` — the empty default would silently produce a
+/// malformed `notification_schedule_rollback_failed` telemetry property
+/// if a future caller forgot it. The raw values match the spec §15
+/// `scheduler_id` enum AND `NotificationKind`'s rawValues, so they're
+/// reused as the same wire-contract literal.
+enum SchedulerID: String, Sendable, Equatable {
+    case leftoversFollowup = "leftovers_followup"
+    case useSoon = "use_soon"
+    case reactivation
+}
+
 /// SCA-309: telemetry hook invoked when `addWithRollback` falls into the
 /// "primary add threw AND rollback re-add also threw" branch — the
 /// "user has no pending follow-up" outcome that OSLog alone hides.
-/// Callers wire this to `PostHogClient.shared.capture(
-/// .notificationScheduleRollbackFailed, ...)` with their scheduler-
-/// specific properties. Sendable so the kit can keep its `@MainActor`
-/// constraint without locking the caller in.
+///
+/// SCA-369: includes `priorExisted` so PostHog dashboards can tell apart
+/// "fresh user, first-schedule failed" (priorExisted=false) from
+/// "user had a schedule, we lost it" (priorExisted=true). Without this,
+/// `notification_schedule_rollback_failed` counts the two cases
+/// identically and the regression-vs-cold-start distinction is invisible.
 typealias NotificationRollbackFailureHandler = @MainActor @Sendable (
-    _ schedulerId: String,
+    _ schedulerId: SchedulerID,
     _ identifier: String,
     _ errorDescription: String,
+    _ priorExisted: Bool,
 ) -> Void
 
 /// Static helpers shared by `LeftoversFollowupScheduler` + `UseSoonScheduler`.
@@ -122,10 +138,11 @@ enum NotificationSchedulerKit {
         return nil
     }
 
-    /// Outcome of `addWithRollback`. SCA-319: the prior `Bool` API
-    /// collapsed `.rolledBack` (prior is intact) and `.lostBoth` (no
-    /// pending follow-up at all) into the same `false`, hiding the
-    /// distinction every caller needs to surface user-recovery copy.
+    /// Outcome of `addWithRollback`. SCA-319 introduced the typed
+    /// enum; SCA-369 split `.lostBoth` into the dashboard-distinct
+    /// `.noPriorAddFailed` and `.lostBoth` so PostHog can tell apart
+    /// "fresh user first-schedule failure" from "user had it, we lost
+    /// it" — counts were conflated under the prior single `.lostBoth`.
     enum RollbackResult: Sendable, Equatable {
         /// The new `request` was added successfully. Caller should
         /// proceed with `*_scheduled` history + telemetry writes.
@@ -136,62 +153,80 @@ enum NotificationSchedulerKit {
         /// `*_scheduled` for the new request; the user is not in a
         /// degraded state.
         case rolledBack
-        /// Primary `add` threw AND either rollback re-add ALSO threw
-        /// OR there was no `prior` to restore — the user has NO
-        /// pending notification of this kind. Caller may surface
-        /// user-recovery copy or escalate; telemetry is already
-        /// emitted via `onRollbackFailure`.
+        /// Primary `add` threw and there was NO prior to restore —
+        /// fresh-user first-schedule failure. User has nothing pending
+        /// but never had anything to lose either.
+        case noPriorAddFailed
+        /// Primary `add` threw AND rollback re-add also threw —
+        /// regression: the user HAD a schedule and we lost it. Caller
+        /// may surface user-recovery copy; telemetry is already emitted
+        /// via `onRollbackFailure` with `priorExisted=true`.
         case lostBoth
     }
 
-    /// Try to add `request`; on throw, attempt to re-add `prior` (if any).
-    /// Logs the initial add failure at `warning`; if the rollback re-add also
-    /// throws, logs at `error` so the user-has-no-pending-followup case is
+    /// Default `onRollbackFailure` handler that captures
+    /// `notificationScheduleRollbackFailed` PostHog telemetry — SCA-361.
+    /// Callers can pass this as `onRollbackFailure:` instead of
+    /// hand-rolling identical 7-line closures at every scheduler.
+    /// Returns a closure capturing the supplied telemetry client.
+    static func defaultRollbackFailureHandler(
+        telemetry: PostHogClient,
+    ) -> NotificationRollbackFailureHandler {
+        return { schedulerId, identifier, errorDescription, priorExisted in
+            telemetry.capture(.notificationScheduleRollbackFailed, properties: [
+                "scheduler_id": schedulerId.rawValue,
+                "identifier": identifier,
+                "error_description": errorDescription,
+                // SCA-369: distinguishes regression (true) from cold-start
+                // first-schedule failure (false).
+                "prior_existed": priorExisted,
+            ])
+        }
+    }
+
+    /// Try to add `request`; on throw, attempt to re-add the previously-
+    /// scheduled request for the same `identifier` (if any). Logs the
+    /// initial add failure at `warning`; if the rollback re-add also
+    /// throws, logs at `error` so the user-has-no-pending case is
     /// observable rather than silently swallowed (CA2-08).
     ///
-    /// SCA-309: the both-failures branch ALSO invokes `onRollbackFailure`
-    /// (when supplied) so the scheduler can fire
-    /// `notification_schedule_rollback_failed` telemetry — turning the
-    /// dashboard-blind OSLog signal into an aggregable one. The callback
-    /// receives the scheduler-supplied `schedulerId` (the same prefix
-    /// used in the scheduler's own telemetry event names, e.g.
-    /// `"leftovers_followup"` or `"use_soon"`), the notification
-    /// `identifier` that failed to add, and the localized description
-    /// of the rollback re-add error. Defaults to `nil` so test callers
-    /// don't have to wire it.
+    /// SCA-363: takes `identifier` rather than a pre-fetched `prior`.
+    /// The kit calls `pendingRequest(identifier:)` internally, so
+    /// callers no longer need to remember the SCA-319 "do not pre-
+    /// cancel" rationale — it lives in this docstring.
     ///
-    /// SCA-319: callers MUST NOT pre-`cancel()` the prior request before
-    /// calling this helper. `UNUserNotificationCenter.add(_:)` replaces
-    /// an existing request with the same identifier atomically, so a
-    /// dedicated cancel step is redundant. Worse, when
-    /// `pendingRequest()` transiently returned `nil` due to a UN race
-    /// (or any caller-side staleness), the pre-cancel would erase a
-    /// still-existing prior schedule, leaving the rollback path with
-    /// `prior=nil` and the user with no pending notification on `add`
-    /// failure. Letting UN's same-identifier replacement handle the
-    /// swap eliminates the race.
+    /// SCA-360: typed `schedulerId: SchedulerID` (was stringly-typed
+    /// `String = ""`). The empty default could silently produce
+    /// malformed telemetry; the typed enum forces the caller to choose.
     ///
-    /// - Returns: a typed `RollbackResult` — `.added` (success),
-    ///   `.rolledBack` (primary failed but prior is intact), or
-    ///   `.lostBoth` (primary failed and no recovery — either no prior
-    ///   to restore, or rollback re-add also threw).
+    /// SCA-309 / SCA-369: the both-failures + no-prior branches invoke
+    /// `onRollbackFailure` (when supplied) with `priorExisted` so the
+    /// telemetry can tell apart regression vs fresh-user first-schedule.
+    /// Use `defaultRollbackFailureHandler(telemetry:)` for the standard
+    /// PostHog wiring (SCA-361).
     ///
-    /// SCA-315 S9: `@discardableResult` intentionally NOT applied. Both
-    /// production callers (`UseSoonScheduler`, `LeftoversFollowupScheduler`)
-    /// gate the post-add history/telemetry writes on this result, so a
-    /// future caller that silently dropped the return value would
-    /// emit stale `*_scheduled` events for an add that never landed.
-    /// Forcing callers to acknowledge the result keeps the contract
-    /// honest.
+    /// SCA-319: `UNUserNotificationCenter.add(_:)` replaces an existing
+    /// request with the same identifier atomically, so a dedicated
+    /// cancel step before this call is redundant — and racy when
+    /// `pendingRequest` transiently returns `nil` even though one is
+    /// pending. Callers MUST NOT pre-`cancel()`.
+    ///
+    /// - Returns: a typed `RollbackResult` — `.added`, `.rolledBack`,
+    ///   `.noPriorAddFailed`, or `.lostBoth`.
+    ///
+    /// SCA-315 S9: `@discardableResult` intentionally NOT applied —
+    /// callers gate post-add writes on the result.
     static func addWithRollback(
         _ request: UNNotificationRequest,
-        prior: UNNotificationRequest?,
+        identifier: String,
         center: any UserNotificationCenterClient,
         logger: Logger,
         contextLabel: String,
-        schedulerId: String = "",
+        schedulerId: SchedulerID,
         onRollbackFailure: NotificationRollbackFailureHandler? = nil,
     ) async -> RollbackResult {
+        // SCA-363: prior fetch is now an internal implementation detail.
+        let prior = await pendingRequest(identifier: identifier, center: center)
         do {
             try await center.add(request)
             return .added
@@ -200,8 +235,8 @@ enum NotificationSchedulerKit {
                 "add failed: \(error.localizedDescription, privacy: .private) — rolling back",
             )
             guard let prior else {
-                // No prior to restore. The primary add failed, so the
-                // user has nothing pending of this kind.
+                // SCA-369: no prior to restore. Fresh-user first-schedule
+                // failure — distinct from the regression case below.
                 logger.error(
                     "no prior to roll back to — user has no pending \(contextLabel, privacy: .public)",
                 )
@@ -209,8 +244,9 @@ enum NotificationSchedulerKit {
                     schedulerId,
                     request.identifier,
                     error.localizedDescription,
+                    /* priorExisted */ false,
                 )
-                return .lostBoth
+                return .noPriorAddFailed
             }
             do {
                 try await center.add(prior)
@@ -219,13 +255,14 @@ enum NotificationSchedulerKit {
                 logger.error(
                     "rollback re-add failed: \(error.localizedDescription, privacy: .private) — user has no pending \(contextLabel, privacy: .public)",
                 )
-                // SCA-309: surface the double-failure to telemetry.
-                // Description is the OS-supplied error string — no
-                // user content, satisfies ADR 0009.
+                // SCA-309 + SCA-369: regression — user HAD a schedule
+                // and we lost it. Description is the OS-supplied error
+                // string — no user content, satisfies ADR 0009.
                 onRollbackFailure?(
                     schedulerId,
                     request.identifier,
                     error.localizedDescription,
+                    /* priorExisted */ true,
                 )
                 return .lostBoth
             }

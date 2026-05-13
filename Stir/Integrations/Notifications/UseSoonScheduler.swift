@@ -173,15 +173,6 @@ final class UseSoonScheduler {
             return
         }
 
-        let prior = await NotificationSchedulerKit.pendingRequest(
-            identifier: useSoonReminderID,
-            center: center,
-        )
-        // SCA-319: no pre-cancel(). UN.add(_:) replaces same-identifier
-        // requests atomically; an explicit cancel risks erasing the
-        // prior schedule on the pendingRequest()-returned-nil race,
-        // leaving rollback with nothing to restore.
-
         // `displayName` is the validated, trimmed value from the
         // suppression guard above. Used in the user-facing title only.
         let content = UNMutableNotificationContent()
@@ -207,20 +198,16 @@ final class UseSoonScheduler {
             trigger: trigger,
         )
 
+        // SCA-360 / SCA-361 / SCA-363: typed schedulerId, kit-level
+        // default rollback handler, identifier-only signature.
         let result = await NotificationSchedulerKit.addWithRollback(
             request,
-            prior: prior,
+            identifier: useSoonReminderID,
             center: center,
             logger: Logger.useSoon,
             contextLabel: "use-soon",
-            schedulerId: "use_soon",
-            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
-                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
-                    "scheduler_id": schedulerId,
-                    "identifier": identifier,
-                    "error_description": errorDescription,
-                ])
-            },
+            schedulerId: .useSoon,
+            onRollbackFailure: NotificationSchedulerKit.defaultRollbackFailureHandler(telemetry: telemetry),
         )
         switch result {
         case .added:
@@ -234,10 +221,10 @@ final class UseSoonScheduler {
             Logger.useSoon.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        case .rolledBack, .lostBoth:
-            // .rolledBack: prior is intact; user keeps their existing
-            // schedule. .lostBoth: telemetry already fired via
-            // onRollbackFailure. Either way, no `*_scheduled` write.
+        case .rolledBack, .noPriorAddFailed, .lostBoth:
+            // .rolledBack: prior intact, user keeps existing schedule.
+            // .noPriorAddFailed / .lostBoth: telemetry already fired
+            // via onRollbackFailure. No `*_scheduled` write in any case.
             break
         }
     }

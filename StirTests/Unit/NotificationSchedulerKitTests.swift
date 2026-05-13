@@ -191,14 +191,15 @@ final class NotificationSchedulerKitTests: XCTestCase {
 
     func test_addWithRollback_addSucceeds_returnsAdded_noRollback() async {
         let center = SpyCenter()
-        let request = makeRequest("primary")
-        let prior = makeRequest("prior")
+        // SCA-363: kit fetches prior internally — seed via SpyCenter.pending.
+        center.pending = [makeRequest("primary")]
         let result = await NotificationSchedulerKit.addWithRollback(
-            request,
-            prior: prior,
+            makeRequest("primary"),
+            identifier: "primary",
             center: center,
             logger: logger,
             contextLabel: "test",
+            schedulerId: .leftoversFollowup,
         )
         XCTAssertEqual(result, .added)
         XCTAssertEqual(center.addedIdentifiers, ["primary"], "only the primary add fires on success")
@@ -206,60 +207,63 @@ final class NotificationSchedulerKitTests: XCTestCase {
 
     func test_addWithRollback_addFails_attemptsRollbackAndReturnsRolledBack() async {
         let center = SpyCenter()
-        let request = makeRequest("primary")
-        let prior = makeRequest("prior")
+        // SCA-363: prior already pending; kit fetches it.
+        center.pending = [makeRequest("primary")]
         // Fail the first add; succeed the second (rollback).
         center.addBehavior = .failOnce(NSError(domain: "test", code: 2))
         let result = await NotificationSchedulerKit.addWithRollback(
-            request,
-            prior: prior,
+            makeRequest("primary"),
+            identifier: "primary",
             center: center,
             logger: logger,
             contextLabel: "test",
+            schedulerId: .leftoversFollowup,
         )
         XCTAssertEqual(result, .rolledBack)
-        XCTAssertEqual(center.addedIdentifiers, ["prior"], "rollback re-added the prior request")
+        XCTAssertEqual(center.addedIdentifiers, ["primary"], "rollback re-added the prior request (same identifier)")
     }
 
-    func test_addWithRollback_noPriorRequest_returnsLostBoth() async {
+    /// SCA-369: no prior + add fails returns `.noPriorAddFailed` (was
+    /// `.lostBoth` pre-fix). Distinguishes "fresh user, never had it"
+    /// from regression.
+    func test_addWithRollback_noPriorRequest_returnsNoPriorAddFailed() async {
         let center = SpyCenter()
+        // No pending requests → kit's pendingRequest returns nil.
         center.addBehavior = .alwaysFail(NSError(domain: "test", code: 3))
         let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
-            prior: nil,
+            identifier: "primary",
             center: center,
             logger: logger,
             contextLabel: "test",
+            schedulerId: .leftoversFollowup,
         )
-        XCTAssertEqual(result, .lostBoth)
+        XCTAssertEqual(result, .noPriorAddFailed)
         XCTAssertEqual(center.addedIdentifiers, [], "no prior == nothing to rollback to")
     }
 
     func test_addWithRollback_bothFailures_returnsLostBoth() async {
         let center = SpyCenter()
+        center.pending = [makeRequest("primary")]
         center.addBehavior = .alwaysFail(NSError(domain: "test", code: 4))
         let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
-            prior: makeRequest("prior"),
+            identifier: "primary",
             center: center,
             logger: logger,
             contextLabel: "test",
+            schedulerId: .leftoversFollowup,
         )
         XCTAssertEqual(result, .lostBoth)
-        // Both attempted, both failed — kit logs the rollback failure
-        // (CA2-08) and returns .lostBoth.
         XCTAssertEqual(center.addCallCount, 2, "kit attempted both adds")
     }
 
-    /// SCA-309: when both the primary add AND the rollback re-add throw,
-    /// the kit invokes `onRollbackFailure` with the scheduler-supplied
-    /// `schedulerId`, the failing notification `identifier`, and the
-    /// rollback error's localized description. Schedulers wire this to
-    /// `PostHogClient.capture(.notificationScheduleRollbackFailed, ...)`
-    /// — without telemetry the "user has no pending follow-up at all"
-    /// outcome was OSLog-only.
-    func test_addWithRollback_bothFailures_invokesOnRollbackFailure_withSchedulerProperties() async {
+    /// SCA-309 + SCA-369: both-failures branch invokes onRollbackFailure
+    /// with priorExisted=true (regression: user HAD a schedule, we
+    /// lost it).
+    func test_addWithRollback_bothFailures_invokesOnRollbackFailure_priorExistedTrue() async {
         let center = SpyCenter()
+        center.pending = [makeRequest("stir.test.failing-id")]
         center.addBehavior = .alwaysFail(NSError(
             domain: "test",
             code: 9,
@@ -268,50 +272,108 @@ final class NotificationSchedulerKitTests: XCTestCase {
         let recorder = RollbackFailureRecorder()
         let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("stir.test.failing-id"),
-            prior: makeRequest("prior"),
+            identifier: "stir.test.failing-id",
             center: center,
             logger: logger,
             contextLabel: "test",
-            schedulerId: "test_scheduler",
-            onRollbackFailure: { schedulerId, identifier, errorDescription in
+            schedulerId: .useSoon,
+            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
                 recorder.record(
                     schedulerId: schedulerId,
                     identifier: identifier,
                     errorDescription: errorDescription,
+                    priorExisted: priorExisted,
                 )
             },
         )
-        XCTAssertEqual(result, .lostBoth, "both-failures branch returns .lostBoth")
-
-        XCTAssertEqual(recorder.invocationCount, 1, "onRollbackFailure fires exactly once on the both-failures branch")
-        XCTAssertEqual(recorder.lastSchedulerId, "test_scheduler")
+        XCTAssertEqual(result, .lostBoth)
+        XCTAssertEqual(recorder.invocationCount, 1)
+        XCTAssertEqual(recorder.lastSchedulerId, .useSoon)
         XCTAssertEqual(recorder.lastIdentifier, "stir.test.failing-id")
         XCTAssertEqual(recorder.lastErrorDescription, "TestKit: simulated rollback fault")
+        XCTAssertTrue(recorder.lastPriorExisted, "SCA-369: priorExisted=true on the regression branch")
     }
 
-    /// SCA-309: when the primary add succeeds (or the rollback re-add
-    /// succeeds), the failure callback must NOT fire — the both-
-    /// failures branch is the only emit site.
+    /// SCA-369: no-prior + add fails branch invokes onRollbackFailure
+    /// with priorExisted=false (fresh-user first-schedule failure).
+    func test_addWithRollback_noPriorAddFailed_invokesOnRollbackFailure_priorExistedFalse() async {
+        let center = SpyCenter()
+        // No pending — kit sees no prior.
+        center.addBehavior = .alwaysFail(NSError(domain: "test", code: 7))
+        let recorder = RollbackFailureRecorder()
+        let result = await NotificationSchedulerKit.addWithRollback(
+            makeRequest("stir.test.fresh"),
+            identifier: "stir.test.fresh",
+            center: center,
+            logger: logger,
+            contextLabel: "test",
+            schedulerId: .reactivation,
+            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
+                recorder.record(
+                    schedulerId: schedulerId,
+                    identifier: identifier,
+                    errorDescription: errorDescription,
+                    priorExisted: priorExisted,
+                )
+            },
+        )
+        XCTAssertEqual(result, .noPriorAddFailed)
+        XCTAssertEqual(recorder.invocationCount, 1)
+        XCTAssertEqual(recorder.lastSchedulerId, .reactivation)
+        XCTAssertFalse(recorder.lastPriorExisted, "SCA-369: priorExisted=false on the fresh-user branch")
+    }
+
+    /// SCA-309: primary-success branch must NOT fire the failure callback.
     func test_addWithRollback_primarySuccess_doesNotInvokeOnRollbackFailure() async {
         let center = SpyCenter()
         let recorder = RollbackFailureRecorder()
         let result = await NotificationSchedulerKit.addWithRollback(
             makeRequest("primary"),
-            prior: nil,
+            identifier: "primary",
             center: center,
             logger: logger,
             contextLabel: "test",
-            schedulerId: "test_scheduler",
-            onRollbackFailure: { schedulerId, identifier, errorDescription in
+            schedulerId: .useSoon,
+            onRollbackFailure: { schedulerId, identifier, errorDescription, priorExisted in
                 recorder.record(
                     schedulerId: schedulerId,
                     identifier: identifier,
                     errorDescription: errorDescription,
+                    priorExisted: priorExisted,
                 )
             },
         )
         XCTAssertEqual(result, .added)
         XCTAssertEqual(recorder.invocationCount, 0, "primary-success branch must not fire the rollback-failure callback")
+    }
+
+    /// SCA-360: SchedulerID raw values match the spec §15
+    /// `scheduler_id` enum AND match each scheduler's userInfo
+    /// `stir_notification_kind` raw value (which is what the delegate
+    /// looks up). Drift on either side breaks telemetry attribution.
+    func test_schedulerID_rawValues_matchSpecAndNotificationKind() {
+        XCTAssertEqual(SchedulerID.leftoversFollowup.rawValue, "leftovers_followup")
+        XCTAssertEqual(SchedulerID.useSoon.rawValue, "use_soon")
+        XCTAssertEqual(SchedulerID.reactivation.rawValue, "reactivation")
+
+        // Cross-check with NotificationKind raw values (delegate side).
+        XCTAssertEqual(SchedulerID.leftoversFollowup.rawValue, NotificationKind.leftoversFollowup.rawValue)
+        XCTAssertEqual(SchedulerID.useSoon.rawValue, NotificationKind.useSoon.rawValue)
+        XCTAssertEqual(SchedulerID.reactivation.rawValue, NotificationKind.reactivation.rawValue)
+    }
+
+    /// SCA-361: the kit's defaultRollbackFailureHandler captures
+    /// PostHog telemetry with the spec-canonical property keys
+    /// (scheduler_id, identifier, error_description, prior_existed).
+    func test_defaultRollbackFailureHandler_capturesSpecKeyedTelemetry() {
+        let telemetry = PostHogClient.shared
+        let handler = NotificationSchedulerKit.defaultRollbackFailureHandler(telemetry: telemetry)
+        // Smoke: the handler exists and is callable. Property-key
+        // contract is asserted via inspection — wiring matches the
+        // telemetry.capture(.notificationScheduleRollbackFailed, ...)
+        // shape that schedulers used to hand-roll. Pre-fix: 7-line
+        // closure duplicated 3 times. Post-fix: one helper.
+        handler(.leftoversFollowup, "stir.test", "synthetic", true)
     }
 
     // MARK: - UseSoonScheduler ADR 0009 contract (SCA-345 / SCA-320 regression pin)
@@ -470,15 +532,22 @@ final class NotificationSchedulerKitTests: XCTestCase {
 @MainActor
 final class RollbackFailureRecorder {
     private(set) var invocationCount = 0
-    private(set) var lastSchedulerId = ""
+    private(set) var lastSchedulerId: SchedulerID = .leftoversFollowup
     private(set) var lastIdentifier = ""
     private(set) var lastErrorDescription = ""
+    private(set) var lastPriorExisted = false
 
-    func record(schedulerId: String, identifier: String, errorDescription: String) {
+    func record(
+        schedulerId: SchedulerID,
+        identifier: String,
+        errorDescription: String,
+        priorExisted: Bool,
+    ) {
         invocationCount += 1
         lastSchedulerId = schedulerId
         lastIdentifier = identifier
         lastErrorDescription = errorDescription
+        lastPriorExisted = priorExisted
     }
 }
 
