@@ -463,6 +463,13 @@ struct PaywallView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, CGFloat.Stir.space3)
+            // SCA-343: -2pt off-scale, shrinking the secondary padding by
+            // a hair so the Premium rows read as visually de-emphasized
+            // compared to the Pro Annual / Pro Monthly CTAs above (which
+            // use the full `controlVerticalPaddingSecondary`). Matches
+            // the off-scale spacing convention this file uses elsewhere
+            // (e.g. featureRow's `space1 / 2`, trialDisclosureView's
+            // `space2 - 2`).
             .padding(.vertical, CGFloat.Stir.controlVerticalPaddingSecondary - 2)
             .background(Color.Stir.backgroundCard)
             .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd))
