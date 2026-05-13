@@ -327,6 +327,36 @@ final class NotificationSchedulerKitTests: XCTestCase {
         XCTAssertFalse(recorder.lastPriorExisted, "SCA-369: priorExisted=false on the fresh-user branch")
     }
 
+    /// SCA-379: `.added × no prior` matrix gap. The
+    /// `addSucceeds_returnsAdded_noRollback` case above seeds a prior;
+    /// the fresh-user happy path (no prior, primary add succeeds) was
+    /// untested. Asserts the kit still returns `.added` and doesn't
+    /// touch the rollback path even when there's nothing to roll back to.
+    func test_addWithRollback_addSucceeds_noPrior_returnsAdded() async {
+        let center = SpyCenter()
+        // No `center.pending` — fresh user, kit's pendingRequest returns nil.
+        let recorder = RollbackFailureRecorder()
+        let result = await NotificationSchedulerKit.addWithRollback(
+            makeRequest("primary"),
+            identifier: "primary",
+            center: center,
+            logger: logger,
+            contextLabel: "test",
+            schedulerId: .useSoon,
+            onRollbackFailure: { schedulerId, identifier, errorReason, priorExisted in
+                recorder.record(
+                    schedulerId: schedulerId,
+                    identifier: identifier,
+                    errorReason: errorReason,
+                    priorExisted: priorExisted,
+                )
+            },
+        )
+        XCTAssertEqual(result, .added, "fresh-user primary success returns .added regardless of prior absence")
+        XCTAssertEqual(center.addedIdentifiers, ["primary"])
+        XCTAssertEqual(recorder.invocationCount, 0, ".added branch never invokes rollback-failure callback (with or without prior)")
+    }
+
     /// SCA-309: primary-success branch must NOT fire the failure callback.
     func test_addWithRollback_primarySuccess_doesNotInvokeOnRollbackFailure() async {
         let center = SpyCenter()

@@ -17,21 +17,37 @@
 
 import UIKit
 
+/// SCA-379: `@MainActor` so the AppDelegate callbacks land synchronously
+/// on the main actor (UIKit documents AppDelegate methods as main-thread
+/// callers anyway). Pre-SCA-379 each callback wrapped its forward in a
+/// `Task { @MainActor in ... }` hop, which (a) added an unnecessary
+/// runloop tick between the OS handing us the token and the coordinator
+/// noticing it, and (b) made test setup harder — the `Task` ran AFTER
+/// the test method returned, so coverage had to poll
+/// `currentTokenHex` instead of asserting synchronously after the
+/// callback. With the class isolated, both forwards are direct
+/// synchronous calls.
+@MainActor
 final class StirAppDelegate: NSObject, UIApplicationDelegate {
-    func application(
+    nonisolated func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data,
     ) {
-        Task { @MainActor in
+        // `nonisolated` so Obj-C dispatch can invoke it from any
+        // actor; `MainActor.assumeIsolated` upgrades to main isolation
+        // synchronously since UIKit guarantees this entry point is
+        // already on the main thread (same pattern SCA-375 applied
+        // to UN delegate callbacks).
+        MainActor.assumeIsolated {
             APNsRegistrationCoordinator.shared.handleDeviceToken(deviceToken)
         }
     }
 
-    func application(
+    nonisolated func application(
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: any Error,
     ) {
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             APNsRegistrationCoordinator.shared.handleRegistrationFailure(error)
         }
     }
