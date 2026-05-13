@@ -109,7 +109,15 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
             // default Tri-tone on top of our chime.
             AudioServicesPlaySystemSound(Self.tinkSoundID)
         }
-        Task { @MainActor in
+        // SCA-375: dedupe write happens BEFORE completionHandler returns,
+        // synchronously on MainActor (Apple documents UN delegate
+        // callbacks as main-thread). The prior `Task { @MainActor in ... }`
+        // pattern queued the dedupe behind any pending main-actor work
+        // — if user tapped the foreground banner faster than that hop,
+        // didReceive's Task could race willPresent's Task on
+        // markEmitted. assumeIsolated keeps the synchronous-then-Task
+        // ordering atomic.
+        MainActor.assumeIsolated {
             Self.shared.emitTelemetryIfNeeded(notification)
         }
         completionHandler(options)
@@ -121,7 +129,8 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void,
     ) {
-        Task { @MainActor in
+        // SCA-375: same atomic dedupe pattern as willPresent.
+        MainActor.assumeIsolated {
             Self.shared.emitTelemetryIfNeeded(response.notification)
         }
         completionHandler()
