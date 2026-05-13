@@ -306,7 +306,14 @@ struct PaywallView: View {
             .foregroundStyle(Color.Stir.paper50)
             .clipShape(RoundedRectangle(cornerRadius: CGFloat.Stir.radiusCard))
         }
-        .disabled(package == nil || disablePurchaseFor == package?.productID)
+        // SCA-338: disable on ANY in-flight purchase, not only when this row
+        // is the in-flight one. `disablePurchaseFor != nil` is true for the
+        // whole `.purchasing(_)` state, so every sibling row (Pro Monthly,
+        // both Premium rows) greys out together while one purchase is in
+        // flight. PaywallViewModel.purchase already no-ops duplicate taps
+        // (line 173-178), so this was previously a dead-tap UX issue rather
+        // than a functional bug.
+        .disabled(package == nil || disablePurchaseFor != nil)
         .overlay(alignment: .center) {
             if case .purchasing(let id) = viewModel.state, id == package?.productID {
                 ProgressView().tint(Color.Stir.paper50)
@@ -323,7 +330,8 @@ struct PaywallView: View {
         // tier, no trial, for users who want monthly cadence. Premium
         // plans live in `premiumPlansSection` below.
         let package = offerings.proMonthlyPackage
-        let isDisabled = package == nil || disablePurchaseFor == package?.productID
+        // SCA-338: see primaryCTA — disabled while any purchase is in flight.
+        let isDisabled = package == nil || disablePurchaseFor != nil
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
@@ -401,7 +409,8 @@ struct PaywallView: View {
         unavailableLabel: String,
         disablePurchaseFor: String?,
     ) -> some View {
-        let isDisabled = package == nil || disablePurchaseFor == package?.productID
+        // SCA-338: see primaryCTA — disabled while any purchase is in flight.
+        let isDisabled = package == nil || disablePurchaseFor != nil
         return Button {
             if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
