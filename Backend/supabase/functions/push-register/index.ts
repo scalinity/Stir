@@ -29,7 +29,7 @@ import { ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
-import { readAppUser } from '../_shared/identity.ts';
+import { followMergedInto, readAppUser } from '../_shared/identity.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { PushRegisterRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import {
@@ -131,6 +131,20 @@ Deno.serve(async (req) => {
     }, requestId);
   }
 
+  // ---- Resolve the post-alias canonical_user_key. SCA-353: bootstrap's
+  // identity-merge transaction (20260419000012_alias_forward_advisory_lock)
+  // rewrites `device_installations.canonical_user_key` from
+  // `install:<uuid>` to `ck:<userRecordName>` when CK identity arrives.
+  // The JWT minted BEFORE that flip still carries the install:* claim;
+  // its `verifySessionJWT` check passes until expiry (~24h). Filtering
+  // the row by the raw claim key would miss the row that's now keyed
+  // on ck:* and emit a misleading VAL-01 "Call bootstrap first" even
+  // though bootstrap already ran. Chase the merge chain (matches the
+  // _shared/auth.ts:191-226 reauth-check pattern); use the terminal
+  // row's key for the AND-filter.
+  const targetUser = await followMergedInto(client, userRow);
+  const resolvedKey = targetUser.canonical_user_key;
+
   // ---- Upsert: target the calling install's device_installation row
   // and attach/update the apns token + prefs. SCA-321: previously this
   // selected by `canonical_user_key + ORDER BY last_seen_at DESC LIMIT
@@ -145,7 +159,7 @@ Deno.serve(async (req) => {
     .from('device_installations')
     .select('installation_id, push_token, notifications_enabled')
     .eq('installation_id', claims.installation_id)
-    .eq('canonical_user_key', claims.canonical_user_key)
+    .eq('canonical_user_key', resolvedKey)
     .maybeSingle<{
       installation_id: string;
       push_token: string | null;

@@ -218,3 +218,70 @@ Deno.test('push_register: multi-install — each install owns its own row', asyn
   assertEquals(rowA?.push_token, tokenA, 'install A keeps its own token');
   assertEquals(rowB?.push_token, tokenB, 'install B keeps its own token');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-353 — alias-forward race
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: alias-forwarded user — pre-alias JWT routes via merged_into', async () => {
+  // Repro the SCA-353 race:
+  //   1. User cold-launches WITHOUT CloudKit. Bootstrap mints a JWT
+  //      bearing canonical_user_key = "install:<uuid>".
+  //   2. Later, CloudKit identity surfaces. A second bootstrap with the
+  //      same install_id + a CK record name triggers the identity-merge
+  //      transaction, which rewrites device_installations.canonical_user_key
+  //      from "install:*" to "ck:*" and sets app_users[install:*].merged_into
+  //      to "ck:*".
+  //   3. iOS still holds the FIRST JWT (claim key still "install:*").
+  //      verifySessionJWT passes — it's a valid token — but a SELECT keyed
+  //      on the raw claim canonical_user_key would miss the row.
+  //   4. push-register must follow merged_into to find the row under its
+  //      new canonical_user_key.
+  const installId = crypto.randomUUID();
+
+  const sessionInstallOnly = await quickBootstrap({ installation_id: installId });
+  // session is keyed on install:<uuid>.
+  const installKey = sessionInstallOnly.canonical_user_key;
+
+  // CK arrives — second bootstrap with the same install_id triggers the
+  // alias-forward transaction.
+  const ckRecordName = `_${crypto.randomUUID()}`;
+  const sessionCK = await quickBootstrap({
+    installation_id: installId,
+    cloudkit_user_record_name: ckRecordName,
+  });
+  // session now keyed on ck:<recordName>; install: row's
+  // canonical_user_key was rewritten + app_users[install:*].merged_into = ck:*.
+  const ckKey = sessionCK.canonical_user_key;
+  // Sanity: the two keys MUST differ — that's the whole point of the
+  // alias-forward.
+  if (installKey === ckKey) {
+    throw new Error(
+      `test setup: install and CK keys should differ; got '${installKey}' twice`,
+    );
+  }
+
+  // Use the OLD JWT (install:*) to POST push-register. The handler must
+  // resolve via followMergedInto and write to the row that's now keyed
+  // on ck:*.
+  const tokenViaOldJwt = 'c'.repeat(64);
+  const res = await callPushRegister(
+    validBody({ apns_token: tokenViaOldJwt }),
+    sessionInstallOnly.session_jwt,
+  );
+  assertEquals(res.status, 200, `pre-alias JWT should succeed; body=${JSON.stringify(res.body)}`);
+
+  const client = serviceClient();
+  const { data: row } = await client
+    .from('device_installations')
+    .select('push_token, canonical_user_key')
+    .eq('installation_id', installId)
+    .single<{ push_token: string | null; canonical_user_key: string }>();
+
+  assertEquals(
+    row?.push_token,
+    tokenViaOldJwt,
+    'pre-alias JWT wrote the new token to the post-alias row',
+  );
+  assertEquals(row?.canonical_user_key, ckKey, 'row is keyed on ck:* after the alias-forward');
+});
