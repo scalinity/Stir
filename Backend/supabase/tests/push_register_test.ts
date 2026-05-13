@@ -5,7 +5,12 @@
 // records apns_environment + notification_prefs_json on the install row.
 
 import { assertEquals } from '@std/assert';
-import { quickBootstrap, testIPHeaders } from './_helpers/factory.ts';
+import {
+  quickBootstrap,
+  STUB_CLOUDKIT_WEB_AUTH_TOKEN,
+  testCkRecord,
+  testIPHeaders,
+} from './_helpers/factory.ts';
 import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
 
 await clearRateLimitBuckets();
@@ -171,17 +176,32 @@ Deno.test('push_register: multi-install — each install owns its own row', asyn
   // two devices). Pre-fix the second POST clobbered whichever row
   // `last_seen_at DESC LIMIT 1` surfaced; post-fix each install
   // updates only its own `installation_id`-keyed row.
-  const ckRecordName = `_${crypto.randomUUID()}`;
+  //
+  // SCA-349: use `testCkRecord()` helper — raw `crypto.randomUUID()`
+  // produces a dashed 36-char string that fails `CK_RECORD_NAME_REGEX`
+  // (`_` + 32 lowercase hex, no dashes).
+  //
+  // SCA-349: also pass `STUB_CLOUDKIT_WEB_AUTH_TOKEN` — without a
+  // token the verifier returns `missing_web_auth_token` and strips
+  // the CK claim, leaving both bootstraps on `install:<uuid>` keys
+  // and the shared-identity assertion below cannot hold. With the
+  // stub token + no `CLOUDKIT_API_TOKEN` in local env, the verifier
+  // returns `verifier_unconfigured` (trust-mode) which preserves
+  // record_name → canonical_user_key resolves to `ck:<record>` for
+  // both installs. See `STUB_CLOUDKIT_WEB_AUTH_TOKEN` docstring.
+  const ckRecordName = testCkRecord();
   const installA = crypto.randomUUID();
   const installB = crypto.randomUUID();
 
   const sessionA = await quickBootstrap({
     installation_id: installA,
     cloudkit_user_record_name: ckRecordName,
+    cloudkit_web_auth_token: STUB_CLOUDKIT_WEB_AUTH_TOKEN,
   });
   const sessionB = await quickBootstrap({
     installation_id: installB,
     cloudkit_user_record_name: ckRecordName,
+    cloudkit_web_auth_token: STUB_CLOUDKIT_WEB_AUTH_TOKEN,
   });
   // Both bootstraps land under the same canonical_user_key
   // (`ck:<recordName>`), so the legacy `canonical_user_key`-only SELECT

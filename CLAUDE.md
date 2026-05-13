@@ -416,6 +416,16 @@ Tracked tech debt + triggered refactors live in `docs/deferred-work.md`. Read be
 
 ---
 
+## Test seams (cheat sheet)
+
+Reach for these BEFORE introducing a protocol abstraction or rewriting production code for testability. Each was discovered the hard way; documenting so the next agent skips the discovery cost.
+
+- **PostHog telemetry capture** — `PostHogClient` exposes a DEBUG-only `init(testingOnly: Bool)` (`Stir/Integrations/PostHog/PostHogClient.swift:141`) that bypasses the production SDK wiring; `capture(_:properties:)` is non-final + internal. Subclass + override `capture` to assert on emitted events; **don't** introduce a `TelemetryProtocol` for this. Pattern in use: `SpyPostHogClient` in `StirTests/Unit/NotificationSchedulerKitTests.swift` (SCA-345). Compile gotcha: don't mark the subclass `@MainActor` — the override must match the parent's nonisolated context; use `@unchecked Sendable` + `NSLock` for the capture buffer instead.
+- **Expiring-pantry-item fixture (UseSoonScheduler + anything reading `PantryItemRepository.fetchExpiringSoon`)** — canonical seed: `PersistenceController(inMemory: true)` viewContext + a `Household` + a `PantryItem` with `id = UUID()`, `typedMemoryState = .ephemeral`, `expiresAt = now + 24h`, `deletedAt = nil`. Predicate filter is `.ephemeral` + `deletedAt == nil` + `expiresAt in (now, now+48h]`. Same shape as `PantryTombstoneReaperTests.seed(...)`. `UseSoonScheduler`'s repo deps are concrete types, not protocols — wire the in-memory PC directly.
+- **CK-verified canonical key over HTTP (`ck:<record>` instead of `install:<uuid>`)** — pass BOTH `cloudkit_user_record_name` AND `cloudkit_web_auth_token: STUB_CLOUDKIT_WEB_AUTH_TOKEN` (`Backend/supabase/tests/_helpers/factory.ts`) to `quickBootstrap`. With no `CLOUDKIT_API_TOKEN` in local `.env` the verifier hits the `verifier_unconfigured` carve-out (trust-mode) → record_name preserved → key resolves `ck:`. This is the only HTTP-level path to a verified-CK shape until the bootstrap accepts a `fetchImpl` DI override (deferred; tracked in `session_bootstrap_test.ts` header). All `ck:` alias-forward tests in `session_bootstrap_test.ts` remain `ignore: true` until that DI lands. SCA-349.
+
+---
+
 ## What NOT to reopen / What NOT to do
 
 **Settled (don't re-argue unless Daniel asks):** Google-only AI (no OpenAI/Anthropic fallback); Supabase backend (not Cloudflare Workers/Firebase/custom Node); Core Data + CloudKit (not SwiftData); iOS 17 minimum; Voice = Premium+; annual trial primary paywall CTA; `thinkingLevel: minimal` for voice (escalate to LOW only if eval fails); RevenueCat (not pure StoreKit 2); no mandatory login (not SIWA-required); English/US-only launch (no i18n v1); no desktop/web companion; Zod for Edge Function validation (not Valibot); `usage_counters.cap_count` snapshot-at-creation; `app_users.status` and `entitlement_snapshots.billing_state` as native Postgres ENUMs with partial indexes. If Daniel asks "should we switch to X?", engage. If independently considering a switch, surface the question first.
