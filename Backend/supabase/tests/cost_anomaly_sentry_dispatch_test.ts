@@ -12,6 +12,15 @@ import { serviceClient } from './_helpers/pg.ts';
 // `dispatched_at` stays NULL even though the function returned `sent >= 1`.
 // Filtering on `hash-dispatch-%` keeps deletes test-scoped per CLAUDE.md
 // integration-test policy.
+//
+// SCA-389: the SCA-362 fix above closed leaks from THIS file but not
+// from `cost_anomalies_schema_test.ts` (which leaks 5 `testhash_*` rows
+// per run with no cleanup). Once those + other unprefixed pollution
+// passed 49 across runs, test 3 starved again under the same LIMIT 50
+// window. SCA-389 closes the residual hole by pinning the test 3 row's
+// `detected_at` to a far-past timestamp — it's now GUARANTEED oldest in
+// the table regardless of unrelated leak accumulation. See the test 3
+// insert payload comment below.
 
 Deno.test('dispatch: NULL SENTRY_DSN → returns 0, no rows marked dispatched', async () => {
   const svc = serviceClient();
@@ -74,6 +83,17 @@ Deno.test('dispatch: valid DSN + unsent rows → enqueues via pg_net + stamps di
       anomaly_type: 'daily_spend_hard_cap',
       severity: 'critical',
       details_json: { spend_24h_usd: 12.5 },
+      // SCA-389: pin `detected_at` to a far-past timestamp so this row
+      // is GUARANTEED to be the oldest `dispatched_at IS NULL` row in
+      // the table. The dispatcher picks 50 OLDEST by `detected_at ASC`;
+      // with this pin, the test row is always #1 regardless of how
+      // much pollution other test files have leaked into local
+      // `cost_anomalies`. Closes the SCA-362 starvation hole that
+      // re-opened once `cost_anomalies_schema_test.ts`'s 5 leaked
+      // `testhash_*` rows per run accumulated past the LIMIT 50 - 1
+      // threshold. The `try/finally` cleanup below still drops this
+      // row at end-of-test, so the pin is invisible across runs.
+      detected_at: new Date('2020-01-01T00:00:00Z').toISOString(),
     });
 
     const { data: sent } = await svc.rpc('stir_ops_cost_anomaly_alert_dispatch');
