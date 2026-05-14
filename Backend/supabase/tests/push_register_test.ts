@@ -264,11 +264,16 @@ Deno.test('push_register: alias-forwarded user — pre-alias JWT routes via merg
   const installKey = sessionInstallOnly.canonical_user_key;
 
   // CK arrives — second bootstrap with the same install_id triggers the
-  // alias-forward transaction.
-  const ckRecordName = `_${crypto.randomUUID()}`;
+  // alias-forward transaction. CK record name must match the SCA-380
+  // tightening (`_` + 32 lowercase hex chars), so strip UUID hyphens.
+  // SCA-349 test seam: also pass `STUB_CLOUDKIT_WEB_AUTH_TOKEN` so the
+  // CloudKit identity verifier exercises the `verifier_unconfigured` carve-out
+  // and the record name resolves to `ck:*` instead of falling back to `install:*`.
+  const ckRecordName = `_${crypto.randomUUID().replace(/-/g, '')}`;
   const sessionCK = await quickBootstrap({
     installation_id: installId,
     cloudkit_user_record_name: ckRecordName,
+    cloudkit_web_auth_token: STUB_CLOUDKIT_WEB_AUTH_TOKEN,
   });
   // session now keyed on ck:<recordName>; install: row's
   // canonical_user_key was rewritten + app_users[install:*].merged_into = ck:*.
