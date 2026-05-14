@@ -66,6 +66,27 @@ Deno.test('auth: malformed token → AuthError.reason=malformed', async () => {
   assertEquals(err.reason, 'malformed');
 });
 
+// SCA-380: belt-and-suspenders re-validation of `installation_id`
+// claim shape after JWT signature passes. Healthy mints (which all
+// flow through `SessionBootstrapRequest`'s UUID v4 regex) never trip
+// this — it's the rogue-mint backstop. Pin so a future refactor that
+// drops the re-check fails loudly.
+Deno.test('auth: rejects JWT whose installation_id claim is not a UUID v4', async () => {
+  const canonicalKey = 'ck:_' + crypto.randomUUID().replaceAll('-', '');
+  // Forge a JWT with a non-UUID installation_id. Signature passes
+  // because we use `issueSessionJWT`'s own minter — only the SCA-380
+  // claim re-validate should reject.
+  // deno-lint-ignore no-explicit-any
+  const jwt = await issueSessionJWT({
+    canonical_user_key: canonicalKey,
+    installation_id: 'rogue-non-uuid-string' as any,
+    tier: 'free',
+  });
+  const err = await assertRejects(() => verifySessionJWT(requestWithAuth(jwt)), AuthError);
+  assertEquals(err.reason, 'malformed');
+  assertEquals(err.message, 'installation_id claim is not a UUID v4');
+});
+
 // -------------------------------------------------------------------------
 // Hashing
 // -------------------------------------------------------------------------

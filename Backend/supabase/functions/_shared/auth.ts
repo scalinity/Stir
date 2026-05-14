@@ -18,6 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createServiceClient } from './db.ts';
 import type { AuthReason } from './errors.ts';
 import { createLogger } from './logger.ts';
+import { UUID_V4_REGEX } from './validation.ts';
 
 // Named STIR_JWT_SECRET (not SUPABASE_JWT_SECRET) because Supabase's Edge
 // Runtime filters SUPABASE_*-prefixed vars from .env to protect reserved
@@ -163,6 +164,18 @@ export async function verifySessionJWT(
   }
   if (typeof installation_id !== 'string' || !installation_id) {
     throw new AuthError('malformed', 'missing installation_id claim');
+  }
+  // SCA-380: re-validate the installation_id claim shape against the
+  // same UUID v4 regex session-bootstrap enforces at mint time. A
+  // healthy system never trips this — it's belt-and-suspenders for
+  // the hypothetical where a rogue / mis-minted JWT survives signature
+  // verification (internal tooling bug, jose key-rotation lag, or a
+  // future mint path that forgets the validator). Without the
+  // re-check, a non-UUID `installation_id` injected via a forged JWT
+  // flows directly into device-installations / push-register lookups
+  // and is treated as a literal string.
+  if (!UUID_V4_REGEX.test(installation_id)) {
+    throw new AuthError('malformed', 'installation_id claim is not a UUID v4');
   }
   if (tier !== 'free' && tier !== 'premium' && tier !== 'pro') {
     throw new AuthError('malformed', 'missing or invalid tier claim');
