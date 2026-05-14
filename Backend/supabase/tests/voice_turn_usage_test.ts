@@ -108,6 +108,81 @@ async function promoteToPremiumWithVoiceQuota(canonicalKey: string): Promise<voi
   if (quotaErr) throw quotaErr;
 }
 
+// SCA-383: `recordAIRequest` is fire-and-forget via `EdgeRuntime.waitUntil`
+// (functions/_shared/ai_observability.ts:163-167). In `deno test` the
+// runtime hook is undefined, so the async IIFE runs unobserved and the
+// 204 response can outrun the INSERT. In isolation the test's first
+// SELECT yields long enough for the IIFE to land; under full-suite load
+// (44+ files hitting `supabase functions serve`), accumulated deferred
+// work pushes the INSERT past the SELECT. Canonical fix: poll the row
+// with bounded backoff. 2s @ 25ms = 80 attempts covers worst-case CI.
+async function awaitAIRequestLogRow(
+  client: ReturnType<typeof serviceClient>,
+  requestId: string,
+  columns: string,
+  options: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<Record<string, unknown>> {
+  const timeoutMs = options.timeoutMs ?? 2000;
+  const intervalMs = options.intervalMs ?? 25;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = null;
+  while (Date.now() < deadline) {
+    const { data, error } = await client
+      .from('ai_request_log')
+      .select(columns)
+      .eq('request_id', requestId)
+      .maybeSingle();
+    if (error) {
+      lastError = error;
+    } else if (data !== null && data !== undefined) {
+      return data as unknown as Record<string, unknown>;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(
+    `awaitAIRequestLogRow(${requestId}) timed out after ${timeoutMs}ms; lastError=${
+      JSON.stringify(lastError)
+    }`,
+  );
+}
+
+// SCA-383: LIKE-pattern sibling of awaitAIRequestLogRow for tests that
+// expect N rows under a single sessionId (idempotency, batch). Polls
+// until `.like('request_id', pattern)` returns >= expectedCount rows.
+// Same fire-and-forget rationale; same bounded backoff.
+async function awaitAIRequestLogRowsLike(
+  client: ReturnType<typeof serviceClient>,
+  likePattern: string,
+  expectedCount: number,
+  options: { columns?: string; timeoutMs?: number; intervalMs?: number } = {},
+): Promise<Record<string, unknown>[]> {
+  const columns = options.columns ?? 'request_id';
+  const timeoutMs = options.timeoutMs ?? 2000;
+  const intervalMs = options.intervalMs ?? 25;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = null;
+  let lastCount = 0;
+  while (Date.now() < deadline) {
+    const { data, error } = await client
+      .from('ai_request_log')
+      .select(columns)
+      .like('request_id', likePattern);
+    if (error) {
+      lastError = error;
+    } else if (data && data.length >= expectedCount) {
+      return data as unknown as Record<string, unknown>[];
+    } else {
+      lastCount = data?.length ?? 0;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(
+    `awaitAIRequestLogRowsLike(${likePattern}) timed out after ${timeoutMs}ms; last count=${lastCount}, expected ${expectedCount}; lastError=${
+      JSON.stringify(lastError)
+    }`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -188,32 +263,31 @@ Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async
   const result = await callVoiceTurnUsage(body, boot.session_jwt);
   assertEquals(result.status, 204);
 
-  // Assert the row landed with the expected request_id shape.
+  // SCA-383: poll with backoff — handler's recordAIRequest is
+  // fire-and-forget (see helper docstring).
   const client = serviceClient();
   const expectedRequestId = `voice:${sessionId}:1`;
-  const { data, error } = await client
-    .from('ai_request_log')
-    .select('request_id, canonical_user_key, feature_key, model, input_tokens, output_tokens, cost_usd, latency_ms, thinking_level, prompt_version')
-    .eq('request_id', expectedRequestId)
-    .maybeSingle();
-  assertEquals(error, null);
-  assertExists(data);
-  assertEquals(data!.request_id, expectedRequestId);
-  assertEquals(data!.canonical_user_key, boot.canonical_user_key);
-  assertEquals(data!.feature_key, 'cook_mode_realtime');
-  assertEquals(data!.model, 'gemini-3.1-flash-live-preview');
+  const data = await awaitAIRequestLogRow(
+    client,
+    expectedRequestId,
+    'request_id, canonical_user_key, feature_key, model, input_tokens, output_tokens, cost_usd, latency_ms, thinking_level, prompt_version',
+  );
+  assertEquals(data.request_id, expectedRequestId);
+  assertEquals(data.canonical_user_key, boot.canonical_user_key);
+  assertEquals(data.feature_key, 'cook_mode_realtime');
+  assertEquals(data.model, 'gemini-3.1-flash-live-preview');
   // 1000 text + 1150 audio in; 0 text + 150 audio out.
-  assertEquals(data!.input_tokens, 2150);
-  assertEquals(data!.output_tokens, 150);
-  assertEquals(data!.thinking_level, 'minimal');
-  assertEquals(data!.prompt_version, '1.0.0');
+  assertEquals(data.input_tokens, 2150);
+  assertEquals(data.output_tokens, 150);
+  assertEquals(data.thinking_level, 'minimal');
+  assertEquals(data.prompt_version, '1.0.0');
   // Cost math (per CLAUDE.md §Cost model, spike-validated):
   //   text in:   1000  * $0.75  / 1_000_000 = $0.000750
   //   audio in:  1150  * $3.00  / 1_000_000 = $0.003450
   //   audio out: 150   * $12.00 / 1_000_000 = $0.001800
   //   total                                 = $0.006000
   // Allow ±$0.000010 for rounding at 6-decimal precision.
-  const cost = Number(data!.cost_usd);
+  const cost = Number(data.cost_usd);
   const expected = 0.006;
   if (Math.abs(cost - expected) > 0.00001) {
     throw new Error(`cost_usd ${cost} differs from baseline ${expected} by more than rounding`);
@@ -234,7 +308,11 @@ Deno.test('voice-turn-usage idempotency: repeat POST with same (session_id, turn
   const r2 = await callVoiceTurnUsage(body, boot.session_jwt);
   assertEquals(r2.status, 204);
 
+  // SCA-383: poll until at least 1 row exists, then re-fetch to confirm
+  // no duplication. ON CONFLICT DO NOTHING on the 2nd IIFE is a no-op,
+  // so once the 1st IIFE lands, the row count is final.
   const client = serviceClient();
+  await awaitAIRequestLogRow(client, `voice:${sessionId}:1`, 'request_id');
   const { data, error } = await client
     .from('ai_request_log')
     .select('request_id')
@@ -266,13 +344,12 @@ Deno.test('voice-turn-usage batch writes N rows', async () => {
   const result = await callVoiceTurnUsage({ session_id: sessionId, turns }, boot.session_jwt);
   assertEquals(result.status, 204);
 
+  // SCA-383: poll until all 3 deferred INSERTs land. Under full-suite
+  // load, only a subset of the 3 fire-and-forget IIFEs may have
+  // committed by the time the SELECT first runs.
   const client = serviceClient();
-  const { data, error } = await client
-    .from('ai_request_log')
-    .select('request_id')
-    .like('request_id', `voice:${sessionId}:%`);
-  assertEquals(error, null);
-  assertEquals((data ?? []).length, 3);
+  const rows = await awaitAIRequestLogRowsLike(client, `voice:${sessionId}:%`, 3);
+  assertEquals(rows.length, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -307,15 +384,14 @@ Deno.test(
     const result = await callVoiceTurnUsage(body, boot.session_jwt);
     assertEquals(result.status, 204);
 
+    // SCA-383: poll for the row to land before reading its cached column.
     const client = serviceClient();
-    const { data, error } = await client
-      .from('ai_request_log')
-      .select('prompt_cached_tokens')
-      .eq('request_id', `voice:${sessionId}:1`)
-      .maybeSingle();
-    assertEquals(error, null);
-    assertExists(data);
-    assertEquals(data!.prompt_cached_tokens, 1800);
+    const data = await awaitAIRequestLogRow(
+      client,
+      `voice:${sessionId}:1`,
+      'prompt_cached_tokens',
+    );
+    assertEquals(data.prompt_cached_tokens, 1800);
   },
 );
 
@@ -334,15 +410,14 @@ Deno.test(
     );
     assertEquals(result.status, 204);
 
+    // SCA-383: poll for the row to land before reading its cached column.
     const client = serviceClient();
-    const { data, error } = await client
-      .from('ai_request_log')
-      .select('prompt_cached_tokens')
-      .eq('request_id', `voice:${sessionId}:1`)
-      .maybeSingle();
-    assertEquals(error, null);
-    assertExists(data);
-    assertEquals(data!.prompt_cached_tokens, null);
+    const data = await awaitAIRequestLogRow(
+      client,
+      `voice:${sessionId}:1`,
+      'prompt_cached_tokens',
+    );
+    assertEquals(data.prompt_cached_tokens, null);
   },
 );
 
@@ -585,28 +660,29 @@ Deno.test(
     const result = await callVoiceTurnUsage(body, boot.session_jwt);
     assertEquals(result.status, 204);
 
+    // SCA-383: poll with backoff — handler's recordAIRequest is
+    // fire-and-forget; under full-suite load the INSERT may not have
+    // landed by the time this SELECT runs. See helper docstring.
     const client = serviceClient();
-    const { data, error } = await client
-      .from('ai_request_log')
-      .select('input_tokens, output_tokens, cost_usd')
-      .eq('request_id', `voice:${sessionId}:1`)
-      .maybeSingle();
-    assertEquals(error, null);
-    assertExists(data);
+    const data = await awaitAIRequestLogRow(
+      client,
+      `voice:${sessionId}:1`,
+      'input_tokens, output_tokens, cost_usd',
+    );
 
     // Pin (1): input_tokens is the raw total (2350), NOT the breakdown
     // sum (2150). The handler clamps to max(total, sum); this payload
     // uses total > sum (the common AUDIO-mode case), so raw-total
     // survives.
     assertEquals(
-      data!.input_tokens,
+      data.input_tokens,
       2350,
       'input_tokens must be the raw Gemini total, not the breakdown sum',
     );
 
     // Pin (2): output_tokens same invariant — raw total, not breakdown.
     assertEquals(
-      data!.output_tokens,
+      data.output_tokens,
       160,
       'output_tokens must be the raw Gemini total',
     );
@@ -618,7 +694,7 @@ Deno.test(
     // pin catches that by asserting the delta is positive.
     const requestBreakdownSum = 1000 + 1150;
     assertEquals(
-      data!.input_tokens > requestBreakdownSum,
+      (data.input_tokens as number) > requestBreakdownSum,
       true,
       'input_tokens must exceed breakdown sum — remainder must survive the integration',
     );
@@ -632,7 +708,7 @@ Deno.test(
     //   total                                   = $0.006720
     // Tolerance 1e-6 matches production's Math.round(× 1e6) / 1e6 rounding
     // in voice-turn-usage/index.ts:410 (ai_request_log.cost_usd NUMERIC(10,6)).
-    const cost = Number(data!.cost_usd);
+    const cost = Number(data.cost_usd);
     const expected = 0.006720;
     if (Math.abs(cost - expected) > 1e-6) {
       throw new Error(
