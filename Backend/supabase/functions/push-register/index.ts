@@ -253,7 +253,16 @@ Deno.serve(async (req) => {
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),
     })
-    .eq('installation_id', installRow.installation_id);
+    // SCA-411: defense-in-depth. The SELECT above filters on
+    // `(installation_id, canonical_user_key=resolvedKey)`; mirror the
+    // `canonical_user_key` predicate on the UPDATE so a concurrent
+    // alias-forward that rewrites the row's canonical_user_key
+    // between SELECT and UPDATE can't let a stale read write into the
+    // now-rewritten row. installation_id is the PK so this is single-
+    // row-targeted today; the AND-clause is belt-and-suspenders if a
+    // future migration ever loosens the PK.
+    .eq('installation_id', installRow.installation_id)
+    .eq('canonical_user_key', resolvedKey);
   if (updErr) {
     userLog.error('install_update_failed', updErr);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
