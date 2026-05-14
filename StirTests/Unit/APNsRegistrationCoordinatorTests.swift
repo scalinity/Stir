@@ -129,9 +129,36 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(posts.count, 1, "first post under .v2 build is the natural reseed")
         XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v2"),
                         ".v2 cache is now seeded")
-        // .v1 payload is left in place (we don't garbage-collect old
-        // keys) but is never read again.
-        XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"))
+        // SCA-393: `init` now scrubs the legacy `.v1` key so upgraders no
+        // longer carry the plaintext APNs token in UserDefaults. Pre-fix
+        // this asserted XCTAssertNotNil(.v1).
+        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"),
+                     "SCA-393: init must scrub the legacy .v1 plaintext token entry")
+    }
+
+    /// SCA-393: explicit pin that `init` removes the `.v1` key even when
+    /// the coordinator never sees a token / never POSTs. Pre-fix the
+    /// scrub didn't exist; this would have failed with the .v1 entry
+    /// still present after `init`. Idempotent — running init a second
+    /// time without re-seeding is a no-op (UserDefaults remove is safe
+    /// against absent keys).
+    func test_init_scrubsLegacyV1Snapshot() async {
+        let legacy = #"""
+            {"token":"abcdef","environment":"production","importCompletion":false,"reactivation":true}
+            """#
+        defaults.set(legacy.data(using: .utf8), forKey: "stir.apns.lastPushSnapshot.v1")
+        XCTAssertNotNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"),
+                        "precondition: .v1 entry seeded")
+
+        // Construct (don't configure / don't fire any callbacks).
+        _ = makeCoordinator()
+
+        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"),
+                     "SCA-393: init must scrub .v1 unconditionally")
+
+        // Idempotency: re-instantiate against the now-empty state; no crash.
+        _ = makeCoordinator()
+        XCTAssertNil(defaults.data(forKey: "stir.apns.lastPushSnapshot.v1"))
     }
 
     /// SCA-351: AppDelegate's `didRegisterForRemoteNotificationsWithDeviceToken`
