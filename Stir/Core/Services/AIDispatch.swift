@@ -349,8 +349,15 @@ actor AIDispatch {
             "push_register_dispatch env=\(body.environment.rawValue, privacy: .public)",
         )
         let response: PushRegisterResponse = try await session.performAuthenticated(request)
+        // SCA-381: installation_id is per-install Keychain UUID — a
+        // stable device identifier that flows into Postgres lookups.
+        // OSLog is not encrypted at rest and aggregated by sysdiagnose;
+        // a leaked sysdiagnose containing the literal id correlates a
+        // user's full device-installation history. Mark `.private` so
+        // local OSLog redacts it (per ADR 0009 + SCA-372 hashing
+        // pattern). `env` stays `.public` — it's a 2-value enum.
         Logger.aiDispatch.info(
-            "push_register_complete installation_id=\(response.installationID, privacy: .public) env=\(response.environment, privacy: .public)",
+            "push_register_complete installation_id=\(response.installationID, privacy: .private) env=\(response.environment, privacy: .public)",
         )
         return response
     }

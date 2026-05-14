@@ -32,9 +32,32 @@ import type { FieldError } from './errors.ts';
 // build: iOS build string, e.g. "1.0.0 (42)". Required for telemetry.
 // os_version: iOS version string, e.g. "17.5.1". Required for telemetry.
 
-const UUID_V4_REGEX =
+// SCA-380: exported so auth.ts can re-validate `installation_id` claim
+// from a verified JWT. Pre-SCA-380 the JWT-extracted value was only
+// type-checked + non-empty-checked, leaving a rogue / mis-minted JWT
+// that survives signature verification (e.g. internal tooling bug,
+// jose key rotation lag) free to inject arbitrary strings into
+// `installation_id`-keyed Postgres lookups. The regex re-check is
+// belt-and-suspenders: the only path that mints these JWTs already
+// validates the claim against this same regex on the way in, so a
+// healthy system never trips the new check.
+export const UUID_V4_REGEX =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 const CK_RECORD_NAME_REGEX = /^_[a-f0-9]{32}$/;
+
+// SCA-380: free-form telemetry strings reject any control character
+// (`\r`, `\n`, `\t`, NUL, escape, etc). `build` and `os_version` are
+// the only validation-time fields that flow untrusted into OSLog
+// breadcrumbs, PostHog properties, and `device_installations`
+// columns. Without this filter, a malicious client could inject CRLF
+// (`"1.0.0\r\nfake_log_line spoofed=true"`) into a structured log
+// stream and trick a downstream parser into seeing a fabricated
+// log entry. The codepoint range covers all C0 + DEL + C1 controls.
+const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f-\x9f]/;
+const noControlChars = z.string().refine(
+  (s) => !CONTROL_CHAR_REGEX.test(s),
+  { message: 'must not contain control characters (CR, LF, NUL, etc.)' },
+);
 
 export const SessionBootstrapRequest = z.object({
   installation_id: z.string().regex(UUID_V4_REGEX, 'must be a UUID v4'),
@@ -42,8 +65,8 @@ export const SessionBootstrapRequest = z.object({
     .regex(CK_RECORD_NAME_REGEX, 'must match `_` + 32 lowercase hex chars')
     .optional(),
   cloudkit_web_auth_token: z.string().min(16).max(4096).optional(),
-  build: z.string().min(1).max(64),
-  os_version: z.string().min(1).max(64),
+  build: noControlChars.pipe(z.string().min(1).max(64)),
+  os_version: noControlChars.pipe(z.string().min(1).max(64)),
 }).strict();
 
 export type SessionBootstrapRequest = z.infer<typeof SessionBootstrapRequest>;

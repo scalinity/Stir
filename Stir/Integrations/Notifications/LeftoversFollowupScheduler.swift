@@ -113,23 +113,12 @@ final class LeftoversFollowupScheduler {
             return
         }
 
-        let prior = await NotificationSchedulerKit.pendingRequest(
-            identifier: leftoversFollowupID,
-            center: center,
-        )
-        // SCA-319: no pre-cancel(). UN.add(_:) replaces an existing
-        // request with the same identifier atomically; an explicit
-        // cancel before add would erase the prior schedule on the
-        // race where pendingRequest() transiently returned nil even
-        // though one was actually pending — leaving rollback with
-        // nothing to restore on add failure.
-
         let content = UNMutableNotificationContent()
         content.title = "Tomorrow's dinner is already in your fridge"
         content.body = "Your leftovers can become tomorrow's dinner in one tap."
         content.sound = .default
         content.userInfo = [
-            "stir_notification_kind": "leftovers_followup",
+            NotificationKind.userInfoKey: NotificationKind.leftoversFollowup.rawValue,
         ]
         content.interruptionLevel = .active
 
@@ -144,20 +133,16 @@ final class LeftoversFollowupScheduler {
             trigger: trigger,
         )
 
+        // SCA-360 / SCA-361 / SCA-363: typed schedulerId, kit-level
+        // default rollback handler, identifier-only signature.
         let result = await NotificationSchedulerKit.addWithRollback(
             request,
-            prior: prior,
+            identifier: leftoversFollowupID,
             center: center,
             logger: Logger.leftoversFollowup,
             contextLabel: "followup",
-            schedulerId: "leftovers_followup",
-            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
-                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
-                    "scheduler_id": schedulerId,
-                    "identifier": identifier,
-                    "error_description": errorDescription,
-                ])
-            },
+            schedulerId: .leftoversFollowup,
+            onRollbackFailure: NotificationSchedulerKit.defaultRollbackFailureHandler(telemetry: telemetry),
         )
         switch result {
         case .added:
@@ -168,10 +153,10 @@ final class LeftoversFollowupScheduler {
             Logger.leftoversFollowup.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        case .rolledBack, .lostBoth:
-            // .rolledBack: prior is intact; user keeps their existing
-            // schedule. .lostBoth: telemetry already fired via
-            // onRollbackFailure. Either way, no `*_scheduled` write.
+        case .rolledBack, .noPriorAddFailed, .lostBoth:
+            // .rolledBack: prior intact, user keeps existing schedule.
+            // .noPriorAddFailed / .lostBoth: telemetry already fired
+            // via onRollbackFailure. No `*_scheduled` write in any case.
             break
         }
     }
@@ -233,7 +218,7 @@ final class LeftoversFollowupScheduler {
 /// handler distinguish source = notification.
 enum LeftoversFollowupNotification {
     static func isFollowup(from userInfo: [AnyHashable: Any]) -> Bool {
-        (userInfo["stir_notification_kind"] as? String) == "leftovers_followup"
+        NotificationKind.from(userInfo) == .leftoversFollowup
     }
 }
 

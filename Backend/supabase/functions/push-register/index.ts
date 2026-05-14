@@ -29,7 +29,7 @@ import { ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
-import { readAppUser } from '../_shared/identity.ts';
+import { followMergedInto, readAppUser } from '../_shared/identity.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { PushRegisterRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import {
@@ -37,6 +37,7 @@ import {
   checkAndIncrement,
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
+import { writeAudit } from '../_shared/audit.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -119,6 +120,25 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
+    // SCA-381: audit a user_stale rejection. JWT verified but the
+    // claim's canonical_user_key no longer resolves to a row — could
+    // be (a) row hard-deleted (shouldn't happen; status='banned' is
+    // the soft-delete path), (b) identity-merge in flight where the
+    // alias-forward landed but the JWT was minted seconds before,
+    // (c) test fixture cleanup raced with a real session. Audit row
+    // exposes whether (a) is happening at scale (prod incident) or
+    // just (b)/(c) noise. `actor_id` is the unresolvable claim
+    // itself so SREs can grep `action='auth_user_stale'` and join
+    // against `app_users` to confirm absence.
+    await writeAudit(client, userLog, {
+      actor_id: claims.canonical_user_key,
+      actor_email: null,
+      action: 'auth_user_stale',
+      target_table: 'app_users',
+      target_id: claims.canonical_user_key,
+      after: { endpoint: '/v1/push/register', reason: 'user_stale' },
+      request_id: requestId,
+    });
     return jsonError(ErrorCode.AUTH_01, 401, {
       message: 'User not found; re-bootstrap.',
       reason: 'user_stale',
@@ -131,6 +151,20 @@ Deno.serve(async (req) => {
     }, requestId);
   }
 
+  // ---- Resolve the post-alias canonical_user_key. SCA-353: bootstrap's
+  // identity-merge transaction (20260419000012_alias_forward_advisory_lock)
+  // rewrites `device_installations.canonical_user_key` from
+  // `install:<uuid>` to `ck:<userRecordName>` when CK identity arrives.
+  // The JWT minted BEFORE that flip still carries the install:* claim;
+  // its `verifySessionJWT` check passes until expiry (~24h). Filtering
+  // the row by the raw claim key would miss the row that's now keyed
+  // on ck:* and emit a misleading VAL-01 "Call bootstrap first" even
+  // though bootstrap already ran. Chase the merge chain (matches the
+  // _shared/auth.ts:191-226 reauth-check pattern); use the terminal
+  // row's key for the AND-filter.
+  const targetUser = await followMergedInto(client, userRow);
+  const resolvedKey = targetUser.canonical_user_key;
+
   // ---- Upsert: target the calling install's device_installation row
   // and attach/update the apns token + prefs. SCA-321: previously this
   // selected by `canonical_user_key + ORDER BY last_seen_at DESC LIMIT
@@ -141,15 +175,22 @@ Deno.serve(async (req) => {
   // already carries the calling install's `installation_id`; key the
   // SELECT (and the UPDATE) on it directly so each install owns its
   // own device_installations row.
+  // SCA-381: also fetch the prior `apns_environment` so an env flip
+  // (sandbox → production or vice versa on the SAME install) writes
+  // an audit_log row. Env flips are unusual — the legitimate path is
+  // a TestFlight install graduating to App Store, but a sustained
+  // rate of unintended flips signals a misconfigured Debug→Release
+  // build path on prod devices.
   const { data: installRow, error: installReadErr } = await client
     .from('device_installations')
-    .select('installation_id, push_token, notifications_enabled')
+    .select('installation_id, push_token, notifications_enabled, apns_environment')
     .eq('installation_id', claims.installation_id)
-    .eq('canonical_user_key', claims.canonical_user_key)
+    .eq('canonical_user_key', resolvedKey)
     .maybeSingle<{
       installation_id: string;
       push_token: string | null;
       notifications_enabled: boolean | null;
+      apns_environment: string | null;
     }>();
   if (installReadErr) {
     userLog.error('install_read_failed', installReadErr);
@@ -190,6 +231,29 @@ Deno.serve(async (req) => {
   if (updErr) {
     userLog.error('install_update_failed', updErr);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+  }
+
+  // SCA-381: env flip on the SAME install is unusual — TestFlight →
+  // App Store graduation is the legitimate case, but a sustained
+  // rate of unintended flips signals a misconfigured Debug→Release
+  // build path on prod devices. Audit row is permanent (counts only
+  // — actor_id hashed, no token/pref content) so SREs can grep
+  // `apns_environment_flipped` and join with `device_installations`
+  // to understand cohort behavior.
+  if (
+    installRow.apns_environment !== null &&
+    installRow.apns_environment !== body.environment
+  ) {
+    await writeAudit(client, userLog, {
+      actor_id: claims.canonical_user_key,
+      actor_email: null,
+      action: 'apns_environment_flipped',
+      target_table: 'device_installations',
+      target_id: installRow.installation_id,
+      before: { apns_environment: installRow.apns_environment },
+      after: { apns_environment: body.environment },
+      request_id: requestId,
+    });
   }
 
   userLog.info('push_registered', {

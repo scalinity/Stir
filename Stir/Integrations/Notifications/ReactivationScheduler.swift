@@ -72,21 +72,12 @@ final class ReactivationScheduler {
             return
         }
 
-        let prior = await NotificationSchedulerKit.pendingRequest(
-            identifier: reactivationReminderID,
-            center: center,
-        )
-        // SCA-319: no pre-cancel(). UN.add(_:) handles same-identifier
-        // replacement atomically. The pre-cancel was racy when
-        // pendingRequest() transiently returned nil — it would erase
-        // the prior schedule the rollback path needed.
-
         let content = UNMutableNotificationContent()
         content.title = "Cook something tonight?"
         content.body = "Haven't opened Stir in a week. Point it at your fridge — we'll figure out dinner."
         content.sound = .default
         content.userInfo = [
-            "stir_notification_kind": "reactivation",
+            NotificationKind.userInfoKey: NotificationKind.reactivation.rawValue,
             "trigger_kind": "cook_reminder",
         ]
         content.interruptionLevel = .active
@@ -102,30 +93,26 @@ final class ReactivationScheduler {
             trigger: trigger,
         )
 
+        // SCA-360 / SCA-361 / SCA-363: typed schedulerId, kit-level
+        // default rollback handler, identifier-only signature.
         let result = await NotificationSchedulerKit.addWithRollback(
             request,
-            prior: prior,
+            identifier: reactivationReminderID,
             center: center,
             logger: .reactivation,
             contextLabel: "reactivation reminder",
-            schedulerId: "reactivation",
-            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
-                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
-                    "scheduler_id": schedulerId,
-                    "identifier": identifier,
-                    "error_description": errorDescription,
-                ])
-            },
+            schedulerId: .reactivation,
+            onRollbackFailure: NotificationSchedulerKit.defaultRollbackFailureHandler(telemetry: telemetry),
         )
         switch result {
         case .added:
             Logger.reactivation.info(
                 "scheduled reactivation reminder fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        case .rolledBack, .lostBoth:
-            // .rolledBack: prior is intact; user keeps their existing
-            // reminder. .lostBoth: telemetry already fired via
-            // onRollbackFailure.
+        case .rolledBack, .noPriorAddFailed, .lostBoth:
+            // .rolledBack: prior intact, user keeps existing reminder.
+            // .noPriorAddFailed / .lostBoth: telemetry already fired
+            // via onRollbackFailure.
             break
         }
     }
@@ -144,10 +131,7 @@ final class ReactivationScheduler {
 /// `reactivation_notification_opened` with trigger_kind=cook_reminder).
 enum ReactivationNotification {
     static func triggerKind(from userInfo: [AnyHashable: Any]) -> String? {
-        guard
-            let kind = userInfo["stir_notification_kind"] as? String,
-            kind == "reactivation"
-        else { return nil }
+        guard NotificationKind.from(userInfo) == .reactivation else { return nil }
         return userInfo["trigger_kind"] as? String
     }
 }

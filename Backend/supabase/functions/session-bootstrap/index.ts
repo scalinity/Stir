@@ -142,9 +142,35 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
-    // Fail open — rate limiter DB glitch shouldn't block a legitimate
-    // first-install from ever reaching the app. Log + continue.
-    log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
+    // SCA-373: fail CLOSED. Pre-SCA-373 behavior was fail-open — if
+    // `stir_rate_limit_check` threw (DB glitch, conn pool exhaustion,
+    // migration mid-deploy), the handler logged and continued, which
+    // turned the rate limiter into a DoS bypass: an attacker who
+    // could induce a transient DB error (or just hit during a brownout)
+    // unlocked unlimited bootstraps for that window. Reverse: emit a
+    // typed NET-01 with a short Retry-After so iOS treats it as a
+    // transient transport failure and the standard offline-banner /
+    // silent-retry path takes over. Burst capacity is preserved by
+    // the 30s hint — legitimate single-shot first-installs that
+    // happen to land during a glitch retry once and proceed; abusers
+    // see the same 30s back-pressure floor regardless of whether the
+    // limiter is healthy.
+    log.error('rate_limiter_failed_fail_closed', { err: sanitizeErrorForLog(err) });
+    return new Response(
+      JSON.stringify({
+        error: ErrorCode.NET_01,
+        message: "Couldn't reach Stir right now. Try again in a moment.",
+        retry_after_seconds: 30,
+      }),
+      {
+        status: 503,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'retry-after': '30',
+          'x-request-id': requestId,
+        },
+      },
+    );
   }
 
   // -----------------------------------------------------------------------

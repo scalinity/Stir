@@ -77,10 +77,18 @@ struct StirApp: App {
             // launch users see the in-app prompt before the OS prompt.
             APNsRegistrationCoordinator.shared.configure { [weak rootCoordinator] body in
                 guard let dispatch = rootCoordinator?.aiDispatch else {
-                    throw StirError.validation(
-                        fieldErrors: [],
-                        message: "RootCoordinator deallocated before push-register fired",
-                    )
+                    // SCA-371: RootCoordinator is documented to live for the
+                    // app's full lifetime (RootCoordinator.swift:1312-1313),
+                    // so this branch should be unreachable. Emit a fault-
+                    // level log so OSLog dashboards surface the invariant
+                    // violation if it ever fires. Throw .unknown (NET-01
+                    // wire shape) — NOT .validation (VAL-01), which would
+                    // pollute Sentry/PostHog dashboards that bucket by
+                    // error code; this is an iOS-internal lifecycle bug,
+                    // not a request-shape error.
+                    struct RootCoordinatorDeallocated: Error {}
+                    Logger.app.fault("apns_register_aborted reason=root_coordinator_deallocated")
+                    throw StirError.unknown(underlying: RootCoordinatorDeallocated())
                 }
                 return try await dispatch.pushRegister(request: body)
             }

@@ -130,7 +130,11 @@ final class UseSoonScheduler {
             candidates = try pantry.fetchExpiringSoon(now: now, for: household)
         } catch {
             Logger.useSoon.warning(
-                "fetchExpiringSoon failed: \(error.localizedDescription, privacy: .public) — skipping",
+                // SCA-366: error.localizedDescription marked .private to
+                // match sibling line at :295 (SCA-313 Core-Data error log).
+                // CoreData NSError.localizedDescription can carry entity
+                // names + predicate fragments in fault descriptions.
+                "fetchExpiringSoon failed: \(error.localizedDescription, privacy: .private) — skipping",
             )
             return
         }
@@ -169,15 +173,6 @@ final class UseSoonScheduler {
             return
         }
 
-        let prior = await NotificationSchedulerKit.pendingRequest(
-            identifier: useSoonReminderID,
-            center: center,
-        )
-        // SCA-319: no pre-cancel(). UN.add(_:) replaces same-identifier
-        // requests atomically; an explicit cancel risks erasing the
-        // prior schedule on the pendingRequest()-returned-nil race,
-        // leaving rollback with nothing to restore.
-
         // `displayName` is the validated, trimmed value from the
         // suppression guard above. Used in the user-facing title only.
         let content = UNMutableNotificationContent()
@@ -187,7 +182,7 @@ final class UseSoonScheduler {
         // SCA-320: pantry item ID only — see header. Deep-link refetches
         // displayName from CoreData on tap.
         content.userInfo = [
-            "stir_notification_kind": "use_soon",
+            NotificationKind.userInfoKey: NotificationKind.useSoon.rawValue,
             "use_first_pantry_item_id": candidate.id?.uuidString ?? "",
         ]
         content.interruptionLevel = .active
@@ -203,20 +198,16 @@ final class UseSoonScheduler {
             trigger: trigger,
         )
 
+        // SCA-360 / SCA-361 / SCA-363: typed schedulerId, kit-level
+        // default rollback handler, identifier-only signature.
         let result = await NotificationSchedulerKit.addWithRollback(
             request,
-            prior: prior,
+            identifier: useSoonReminderID,
             center: center,
             logger: Logger.useSoon,
             contextLabel: "use-soon",
-            schedulerId: "use_soon",
-            onRollbackFailure: { [telemetry] schedulerId, identifier, errorDescription in
-                telemetry.capture(.notificationScheduleRollbackFailed, properties: [
-                    "scheduler_id": schedulerId,
-                    "identifier": identifier,
-                    "error_description": errorDescription,
-                ])
-            },
+            schedulerId: .useSoon,
+            onRollbackFailure: NotificationSchedulerKit.defaultRollbackFailureHandler(telemetry: telemetry),
         )
         switch result {
         case .added:
@@ -230,10 +221,10 @@ final class UseSoonScheduler {
             Logger.useSoon.info(
                 "scheduled fireDate=\(fireDate.ISO8601Format(), privacy: .public)",
             )
-        case .rolledBack, .lostBoth:
-            // .rolledBack: prior is intact; user keeps their existing
-            // schedule. .lostBoth: telemetry already fired via
-            // onRollbackFailure. Either way, no `*_scheduled` write.
+        case .rolledBack, .noPriorAddFailed, .lostBoth:
+            // .rolledBack: prior intact, user keeps existing schedule.
+            // .noPriorAddFailed / .lostBoth: telemetry already fired
+            // via onRollbackFailure. No `*_scheduled` write in any case.
             break
         }
     }
@@ -301,7 +292,7 @@ final class UseSoonScheduler {
 
 enum UseSoonNotification {
     static func isUseSoon(from userInfo: [AnyHashable: Any]) -> Bool {
-        (userInfo["stir_notification_kind"] as? String) == "use_soon"
+        NotificationKind.from(userInfo) == .useSoon
     }
 
     static func useFirstPantryItemId(from userInfo: [AnyHashable: Any]) -> UUID? {

@@ -49,13 +49,6 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
     /// can reference it without an actor hop.
     nonisolated private static let tinkSoundID: SystemSoundID = 1057
 
-    /// Soft cap per-kind to bound memory growth in case a future
-    /// notification kind starts using per-fire identifiers (rather than
-    /// the singleton-identifier pattern every current kind uses). Today
-    /// each kind has at most one entry in its bucket; the cap exists so
-    /// a regression doesn't grow the set unboundedly.
-    private static let dedupeCapPerKind = 32
-
     private let telemetry: PostHogClient
 
     /// Identifiers we've already emitted a `*_fired` (or
@@ -109,7 +102,15 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
             // default Tri-tone on top of our chime.
             AudioServicesPlaySystemSound(Self.tinkSoundID)
         }
-        Task { @MainActor in
+        // SCA-375: dedupe write happens BEFORE completionHandler returns,
+        // synchronously on MainActor (Apple documents UN delegate
+        // callbacks as main-thread). The prior `Task { @MainActor in ... }`
+        // pattern queued the dedupe behind any pending main-actor work
+        // — if user tapped the foreground banner faster than that hop,
+        // didReceive's Task could race willPresent's Task on
+        // markEmitted. assumeIsolated keeps the synchronous-then-Task
+        // ordering atomic.
+        MainActor.assumeIsolated {
             Self.shared.emitTelemetryIfNeeded(notification)
         }
         completionHandler(options)
@@ -121,7 +122,8 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void,
     ) {
-        Task { @MainActor in
+        // SCA-375: same atomic dedupe pattern as willPresent.
+        MainActor.assumeIsolated {
             Self.shared.emitTelemetryIfNeeded(response.notification)
         }
         completionHandler()
@@ -159,17 +161,16 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
 
     /// Insert (kind, identifier) into the dedupe set. Returns `true` on
     /// first sight (caller should emit), `false` when it's already
-    /// present (caller should skip). Evicts an arbitrary prior entry
-    /// when the bucket exceeds `dedupeCapPerKind` so memory stays bounded
-    /// if a future kind adopts per-fire identifiers.
+    /// present (caller should skip). Every current kind uses a static
+    /// singleton identifier (`stir.use_soon.48h`, `stir.reactivation.cook.7d`,
+    /// `stir.leftoversFollowup.<sessionId>`), so each bucket holds at most
+    /// one entry. SCA-378 removed the unreachable per-kind soft cap +
+    /// O(n) evict path that guarded a hypothetical per-fire-identifier
+    /// future. Re-add bounded eviction here when that future actually
+    /// lands.
     private func markEmitted(kind: NotificationKind, identifier: String) -> Bool {
         var bucket = emittedReminderIDs[kind] ?? []
         let inserted = bucket.insert(identifier).inserted
-        if bucket.count > Self.dedupeCapPerKind {
-            // Pop an arbitrary stale entry. Set's removeFirst() is O(n)
-            // worst-case but the bucket is bounded at 32, so it's fine.
-            bucket.removeFirst()
-        }
         emittedReminderIDs[kind] = bucket
         return inserted
     }
@@ -186,8 +187,17 @@ enum NotificationKind: String, CaseIterable, Sendable {
     case leftoversFollowup = "leftovers_followup"
     case useSoon = "use_soon"
 
+    /// SCA-377: hoist the userInfo key into a single named constant.
+    /// Pre-SCA-377 the literal `"stir_notification_kind"` appeared in
+    /// 6 sites across 3 schedulers + the delegate — a typo in any one
+    /// (or a partial rename) was a silent miss-match (kind → nil →
+    /// telemetry never emits + payload parser never recognizes).
+    /// One constant + `NotificationKind.from(_:)` reader collapse the
+    /// surface to two grep targets.
+    static let userInfoKey = "stir_notification_kind"
+
     static func from(_ userInfo: [AnyHashable: Any]) -> NotificationKind? {
-        guard let raw = userInfo["stir_notification_kind"] as? String else { return nil }
+        guard let raw = userInfo[Self.userInfoKey] as? String else { return nil }
         return NotificationKind(rawValue: raw)
     }
 }
