@@ -38,6 +38,7 @@ import {
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
 import { writeAudit } from '../_shared/audit.ts';
+import { hashCanonicalKey } from '../_shared/hashing.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -125,18 +126,28 @@ Deno.serve(async (req) => {
     // be (a) row hard-deleted (shouldn't happen; status='banned' is
     // the soft-delete path), (b) identity-merge in flight where the
     // alias-forward landed but the JWT was minted seconds before,
-    // (c) test fixture cleanup raced with a real session. Audit row
-    // exposes whether (a) is happening at scale (prod incident) or
-    // just (b)/(c) noise. `actor_id` is the unresolvable claim
-    // itself so SREs can grep `action='auth_user_stale'` and join
-    // against `app_users` to confirm absence.
+    // (c) test fixture cleanup raced with a real session. SREs grep
+    // `action='auth_user_stale'` to scope (a) vs (b)/(c) noise.
+    // SCA-392: `audit_log.actor_id` is `UUID REFERENCES auth.users(id)`;
+    // the canonical_user_key shapes (`ck:<recordName>` /
+    // `install:<uuid>`) are NOT UUIDs and Postgres rejected every
+    // prior INSERT with `22P02 invalid input syntax for type uuid`,
+    // silently swallowed by writeAudit's non-fatal posture — every
+    // row dropped from SCA-381 ship to merge. Hash the key into
+    // `after_json` (matches the _shared/hashing.ts log invariant)
+    // and pass null for `actor_id` (matches every other writeAudit
+    // call site in the codebase: real auth.users.id UUID or null).
     await writeAudit(client, userLog, {
-      actor_id: claims.canonical_user_key,
+      actor_id: null,
       actor_email: null,
       action: 'auth_user_stale',
       target_table: 'app_users',
       target_id: claims.canonical_user_key,
-      after: { endpoint: '/v1/push/register', reason: 'user_stale' },
+      after: {
+        endpoint: '/v1/push/register',
+        reason: 'user_stale',
+        canonical_user_key_hash: await hashCanonicalKey(claims.canonical_user_key),
+      },
       request_id: requestId,
     });
     return jsonError(ErrorCode.AUTH_01, 401, {
@@ -237,21 +248,27 @@ Deno.serve(async (req) => {
   // App Store graduation is the legitimate case, but a sustained
   // rate of unintended flips signals a misconfigured Debug→Release
   // build path on prod devices. Audit row is permanent (counts only
-  // — actor_id hashed, no token/pref content) so SREs can grep
-  // `apns_environment_flipped` and join with `device_installations`
-  // to understand cohort behavior.
+  // — canonical_user_key hashed, no token/pref content) so SREs can
+  // grep `apns_environment_flipped` and join with
+  // `device_installations` to understand cohort behavior.
+  // SCA-392: see auth_user_stale call site above for the actor_id
+  // type-mismatch fix. Same shape: null actor_id + hashed key in
+  // `after_json` so the row actually lands.
   if (
     installRow.apns_environment !== null &&
     installRow.apns_environment !== body.environment
   ) {
     await writeAudit(client, userLog, {
-      actor_id: claims.canonical_user_key,
+      actor_id: null,
       actor_email: null,
       action: 'apns_environment_flipped',
       target_table: 'device_installations',
       target_id: installRow.installation_id,
       before: { apns_environment: installRow.apns_environment },
-      after: { apns_environment: body.environment },
+      after: {
+        apns_environment: body.environment,
+        canonical_user_key_hash: await hashCanonicalKey(claims.canonical_user_key),
+      },
       request_id: requestId,
     });
   }

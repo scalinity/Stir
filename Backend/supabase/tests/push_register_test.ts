@@ -379,3 +379,122 @@ Deno.test('push_register: VAL-01 when installation_id row is gone (user-deletion
   const fieldErrors = res.body.field_errors as Array<{ field: string }> | undefined;
   assertEquals(fieldErrors?.[0]?.field, 'session');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-392 — audit_log INSERT actually lands (the SCA-381 ship had every row
+// drop with `22P02 invalid input syntax for type uuid` because actor_id was
+// being passed a non-UUID canonical_user_key into a UUID column. writeAudit's
+// non-fatal posture swallowed the error so SCA-381's entire observability
+// surface emitted zero rows in prod. These tests pin the row landing.)
+// ---------------------------------------------------------------------------
+
+Deno.test('push_register: SCA-392 — auth_user_stale writes audit_log row (actor_id null, hashed key in after)', async () => {
+  // Bootstrap a user, then service-role delete the app_users row so the
+  // JWT verifies (signature + claims OK) but the user row is gone. The
+  // handler hits the user_row_missing branch and writes an
+  // `auth_user_stale` audit row.
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const client = serviceClient();
+  await client.from('app_users').delete().eq('canonical_user_key', canonical_user_key);
+
+  const res = await callPushRegister(validBody(), session_jwt);
+  assertEquals(res.status, 401);
+  assertEquals(res.body.error, 'AUTH-01');
+  assertEquals(res.body.reason, 'user_stale');
+
+  // Audit row MUST exist — pre-SCA-392 this row silently dropped.
+  const { data: rows, error } = await client
+    .from('audit_log')
+    .select('actor_id, target_id, action, after_json')
+    .eq('action', 'auth_user_stale')
+    .eq('target_id', canonical_user_key);
+  if (error) throw new Error(`audit_log read failed: ${error.message}`);
+  assertEquals(rows?.length, 1, 'SCA-392: audit_log row MUST land (pre-fix it dropped silently)');
+  const row = rows![0] as {
+    actor_id: string | null;
+    target_id: string;
+    action: string;
+    after_json: { reason?: string; canonical_user_key_hash?: string };
+  };
+  assertEquals(row.actor_id, null, 'actor_id must be null (column is UUID; canonical_user_key is not)');
+  assertEquals(row.target_id, canonical_user_key, 'target_id is TEXT and carries the unresolved key');
+  assertEquals(row.after_json.reason, 'user_stale');
+  // hashCanonicalKey is 16-char hex (4-byte truncated SHA-256).
+  if (!row.after_json.canonical_user_key_hash || !/^[0-9a-f]{16}$/.test(row.after_json.canonical_user_key_hash)) {
+    throw new Error(
+      `expected 16-hex-char canonical_user_key_hash in after_json, got: ${
+        JSON.stringify(row.after_json)
+      }`,
+    );
+  }
+});
+
+Deno.test('push_register: SCA-392 — apns_environment_flipped writes audit_log row on env flip', async () => {
+  // POST once with sandbox, then again with production. Audit row should
+  // land with before/after env + hashed key; pre-fix this row silently
+  // dropped on the UUID type mismatch.
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const token = hex64();
+  const tokenB = hex64();
+
+  const res1 = await callPushRegister(validBody({ apns_token: token, environment: 'sandbox' }), session_jwt);
+  assertEquals(res1.status, 200);
+
+  const res2 = await callPushRegister(
+    validBody({ apns_token: tokenB, environment: 'production' }),
+    session_jwt,
+  );
+  assertEquals(res2.status, 200);
+
+  const client = serviceClient();
+  // Identify the install_id this test wrote to (filter on the user).
+  const { data: installRows } = await client
+    .from('device_installations')
+    .select('installation_id')
+    .eq('canonical_user_key', canonical_user_key);
+  assertEquals(installRows?.length, 1);
+  const installId = (installRows![0] as { installation_id: string }).installation_id;
+
+  const { data: rows, error } = await client
+    .from('audit_log')
+    .select('actor_id, target_id, action, before_json, after_json')
+    .eq('action', 'apns_environment_flipped')
+    .eq('target_id', installId);
+  if (error) throw new Error(`audit_log read failed: ${error.message}`);
+  assertEquals(rows?.length, 1, 'SCA-392: env-flip audit row MUST land (pre-fix it dropped silently)');
+  const row = rows![0] as {
+    actor_id: string | null;
+    before_json: { apns_environment: string };
+    after_json: { apns_environment: string; canonical_user_key_hash?: string };
+  };
+  assertEquals(row.actor_id, null);
+  assertEquals(row.before_json.apns_environment, 'sandbox');
+  assertEquals(row.after_json.apns_environment, 'production');
+  if (!row.after_json.canonical_user_key_hash || !/^[0-9a-f]{16}$/.test(row.after_json.canonical_user_key_hash)) {
+    throw new Error(`expected 16-hex-char hash in after_json: ${JSON.stringify(row.after_json)}`);
+  }
+});
+
+Deno.test('push_register: SCA-392 — same-environment re-POST does NOT write a flip audit row', async () => {
+  // Negative half: a same-(env) re-POST is the common case. The flip
+  // detector must NOT fire on it.
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const r1 = await callPushRegister(validBody({ environment: 'sandbox' }), session_jwt);
+  assertEquals(r1.status, 200);
+  const r2 = await callPushRegister(validBody({ environment: 'sandbox' }), session_jwt);
+  assertEquals(r2.status, 200);
+
+  const client = serviceClient();
+  const { data: installRows } = await client
+    .from('device_installations')
+    .select('installation_id')
+    .eq('canonical_user_key', canonical_user_key);
+  const installId = (installRows![0] as { installation_id: string }).installation_id;
+
+  const { data: rows } = await client
+    .from('audit_log')
+    .select('id')
+    .eq('action', 'apns_environment_flipped')
+    .eq('target_id', installId);
+  assertEquals(rows?.length, 0, 'same-env re-POST must NOT write a flip row');
+});
