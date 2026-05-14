@@ -278,6 +278,14 @@ Deno.serve(async (req) => {
   // SCA-392: see auth_user_stale call site above for the actor_id
   // type-mismatch fix. Same shape: null actor_id + hashed key in
   // `after_json` so the row actually lands.
+  // SCA-399: detector intentionally fires only on `non-null prior →
+  // different non-null new`. The first push-register POST after a
+  // session-bootstrap-only install lands when prior `apns_environment
+  // IS NULL` and is treated as the first-touch baseline (no audit row).
+  // session-bootstrap already creates the install row with NULL env;
+  // the device's first env signal is implicitly the baseline, not a
+  // "flip." A future maintenance path that resets env to NULL would
+  // re-baseline silently — explicit by design, but worth knowing.
   if (
     installRow.apns_environment !== null &&
     installRow.apns_environment !== body.environment

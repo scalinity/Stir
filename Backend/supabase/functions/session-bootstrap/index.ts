@@ -155,7 +155,17 @@ Deno.serve(async (req) => {
     // happen to land during a glitch retry once and proceed; abusers
     // see the same 30s back-pressure floor regardless of whether the
     // limiter is healthy.
-    log.error('rate_limiter_failed_fail_closed', { err: sanitizeErrorForLog(err) });
+    // SCA-413: include `source_ip_known` so post-incident triage can
+    // tell apart "DB blip" (limiter RPC threw, sourceIP healthy) from
+    // "header propagation broke" (sourceIP coerced to literal 'unknown'
+    // because the edge gateway stripped x-real-ip / x-forwarded-for —
+    // every caller behind that gateway shares the 'unknown' bucket
+    // simultaneously). Without this property, a 503 spike reads as
+    // "real abuse" vs "infra config drift" indistinguishably.
+    log.error('rate_limiter_failed_fail_closed', {
+      err: sanitizeErrorForLog(err),
+      source_ip_known: sourceIP !== 'unknown',
+    });
     return new Response(
       JSON.stringify({
         error: ErrorCode.NET_01,
