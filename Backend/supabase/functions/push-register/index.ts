@@ -176,6 +176,21 @@ Deno.serve(async (req) => {
   const targetUser = await followMergedInto(client, userRow);
   const resolvedKey = targetUser.canonical_user_key;
 
+  // SCA-397: post-merge banned-status re-check (CWE-863). The pre-merge
+  // status check above guards the install row, but if admin bans the
+  // CK target AFTER the install-keyed JWT was minted, the install row
+  // carries `status='merged'` (NOT `banned`); the pre-merge check passes;
+  // `followMergedInto` resolves to the banned target; push registration
+  // would otherwise proceed on a banned account until JWT expiry (~24h).
+  // Mirrors the symmetric defensive double-check session-bootstrap
+  // already runs at session-bootstrap/index.ts:262-273.
+  if (targetUser.status === 'banned') {
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
+  }
+
   // ---- Upsert: target the calling install's device_installation row
   // and attach/update the apns token + prefs. SCA-321: previously this
   // selected by `canonical_user_key + ORDER BY last_seen_at DESC LIMIT

@@ -475,6 +475,49 @@ Deno.test('push_register: SCA-392 — apns_environment_flipped writes audit_log 
   }
 });
 
+Deno.test('push_register: SCA-397 — post-merge banned target rejects with BILL-01', async () => {
+  // Repro: install-keyed JWT minted; user later (a) gets a CK identity
+  // and bootstrap alias-forwards their install row into a CK row, then
+  // (b) admin bans the CK target. The install row carries
+  // status='merged' (NOT banned), so the pre-merge check passes;
+  // pre-SCA-397 push-register would proceed on the banned account until
+  // JWT expiry. Post-fix: followMergedInto resolves to the banned
+  // target → BILL-01.
+  const installId = crypto.randomUUID();
+
+  // Step 1: install-only bootstrap → install:* keyed JWT.
+  const sessionInstallOnly = await quickBootstrap({ installation_id: installId });
+  const installKey = sessionInstallOnly.canonical_user_key;
+
+  // Step 2: CK arrives → second bootstrap triggers alias-forward.
+  // Mirrors the existing 'alias-forwarded user' test setup.
+  const ckRecordName = `_${crypto.randomUUID().replace(/-/g, '')}`;
+  const sessionCK = await quickBootstrap({
+    installation_id: installId,
+    cloudkit_user_record_name: ckRecordName,
+    cloudkit_web_auth_token: STUB_CLOUDKIT_WEB_AUTH_TOKEN,
+  });
+  const ckKey = sessionCK.canonical_user_key;
+  if (installKey === ckKey) {
+    throw new Error(`test setup: alias-forward didn't change canonical key`);
+  }
+
+  // Step 3: admin bans the CK target (post-merge).
+  const client = serviceClient();
+  const { error: banErr } = await client
+    .from('app_users')
+    .update({ status: 'banned' })
+    .eq('canonical_user_key', ckKey);
+  if (banErr) throw new Error(`ban setup failed: ${banErr.message}`);
+
+  // Step 4: POST push-register with the OLD install-keyed JWT.
+  // followMergedInto resolves to the banned target → BILL-01.
+  const res = await callPushRegister(validBody(), sessionInstallOnly.session_jwt);
+  assertEquals(res.status, 403);
+  assertEquals(res.body.error, 'BILL-01');
+  assertEquals(res.body.state, 'banned');
+});
+
 Deno.test('push_register: SCA-392 — same-environment re-POST does NOT write a flip audit row', async () => {
   // Negative half: a same-(env) re-POST is the common case. The flip
   // detector must NOT fire on it.
