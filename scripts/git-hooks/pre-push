@@ -167,6 +167,15 @@ SIM_FLAKE_REASON=""
 if [ "$EXIT" != "0" ]; then
     if grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
         SIM_FLAKE_REASON="SBMainWorkspace preflight"
+    elif grep -qE 'Early unexpected exit, operation never finished bootstrapping|Test crashed with signal kill before establishing connection' "$TMPLOG"; then
+        # SCA-426 follow-up: third flake class. xcodebuild builds
+        # successfully (substantive log, test markers present) but
+        # the test-bundle host crashes before any test runs. Distinct
+        # from SCA-208 preflight and SCA-364 short-silent-log; needs
+        # its own grep because the existing heuristics see the
+        # "Testing started" / "Testing failed" markers and skip
+        # retry. Same recovery — erase + boot.
+        SIM_FLAKE_REASON="test-runner bootstrap crash"
     else
         # SCA-364: silent test-runner death detection. The original
         # SBMainWorkspace substring catches one flake mode; a second
