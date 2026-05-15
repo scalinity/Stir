@@ -148,16 +148,18 @@ struct StepCardView: View {
     /// see SCA-93 ticket; currently a visible affordance with no-op
     /// action so the layout matches mockup pixel-for-pixel without
     /// committing to a destination).
+    ///
+    /// SCA-422: eyebrow visually pushed right of center because the
+    /// eye button is hidden under `if false`. Two equal-flex Spacers
+    /// only center the middle column when both flanking elements have
+    /// equal width — with `[44pt][Spacer][center][Spacer][0pt]` the
+    /// center sits offset by half the close-button width. Switching
+    /// to ZStack-overlay centering anchors the eyebrow against the
+    /// full bar width regardless of what flanks it. When the eye
+    /// button returns the same ZStack accommodates it without
+    /// reintroducing the centering bug.
     private var topBar: some View {
-        HStack(spacing: CGFloat.Stir.space3) {
-            roundIconButton(
-                icon: Image.Stir.close,
-                accessibilityLabel: "Exit Cook Mode",
-                action: { viewModel.requestExitConfirm() },
-            )
-
-            Spacer()
-
+        ZStack {
             VStack(spacing: 4) {
                 Text("Cook mode · Tap")
                     .stirFont(.labelEyebrow)
@@ -169,28 +171,36 @@ struct StepCardView: View {
             }
             .accessibilityElement(children: .combine)
 
-            Spacer()
-
-            // Eye-button affordance — the mockup's recipe-detail peek
-            // surface. Wiring the destination (modal sheet of the full
-            // recipe) is out of scope for SCA-93 per ticket: "Semantics
-            // TBD — recommend recipe-detail peek (modal sheet) since
-            // that's a pattern users will want anyway. Confirm with
-            // Daniel before wiring."
-            //
-            // SCA-311 S4: hidden under `if false` until the peek-sheet
-            // design lands. A `.disabled(true)` no-op reads as broken
-            // to beta testers; the affordance is suppressed entirely
-            // rather than dimmed. Re-enable by flipping `if false` to
-            // `if true` (or gating on a feature flag) when wiring the
-            // destination.
-            if false {
+            HStack(spacing: CGFloat.Stir.space3) {
                 roundIconButton(
-                    icon: Image(systemName: "eye"),
-                    accessibilityLabel: "Recipe overview",
-                    action: {},
+                    icon: Image.Stir.close,
+                    accessibilityLabel: "Exit Cook Mode",
+                    action: { viewModel.requestExitConfirm() },
                 )
-                .disabled(true)
+
+                Spacer()
+
+                // Eye-button affordance — the mockup's recipe-detail peek
+                // surface. Wiring the destination (modal sheet of the full
+                // recipe) is out of scope for SCA-93 per ticket: "Semantics
+                // TBD — recommend recipe-detail peek (modal sheet) since
+                // that's a pattern users will want anyway. Confirm with
+                // Daniel before wiring."
+                //
+                // SCA-311 S4: hidden under `if false` until the peek-sheet
+                // design lands. A `.disabled(true)` no-op reads as broken
+                // to beta testers; the affordance is suppressed entirely
+                // rather than dimmed. Re-enable by flipping `if false` to
+                // `if true` (or gating on a feature flag) when wiring the
+                // destination.
+                if false {
+                    roundIconButton(
+                        icon: Image(systemName: "eye"),
+                        accessibilityLabel: "Recipe overview",
+                        action: {},
+                    )
+                    .disabled(true)
+                }
             }
         }
         .padding(.horizontal, CGFloat.Stir.space4)
@@ -198,16 +208,28 @@ struct StepCardView: View {
     }
 
     /// Recipe strip — sits between the top bar and the scrollable
-    /// instruction body. Mirrors mockup
-    /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:79-85`:
+    /// instruction body. Two-line layout:
     ///
-    ///     <recipe title (semibold)> · Step N of M       ~T min left
+    ///     <recipe title (semibold, up to 2 lines)>
+    ///     Step N of M · ~T min left
     ///
-    /// Right-aligned remaining-time estimate uses
+    /// SCA-422: previously a single-line HStack forced
+    /// `.lineLimit(1).truncationMode(.tail)` on the title, so anything
+    /// longer than ~22 chars ("Grilled Italian Flatbread") rendered as
+    /// "Grilled Italian F...". Splitting title onto its own row gives
+    /// it the full screen width and up to two lines before truncation,
+    /// while the meta line below keeps the step counter and remaining-
+    /// time estimate in the same visual region. Mockup
+    /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:79-85`
+    /// is single-line because the sample title fits; the two-line
+    /// pattern is a strict superset and only adds vertical space when
+    /// the title is long enough to wrap.
+    ///
+    /// Remaining-time estimate uses
     /// `RecipePlan.remainingDurationMinutes(fromStepIndex:)`. Rendered
     /// only when there's a meaningful estimate — a recipe with no
-    /// `timerSeconds` on any step would otherwise show "~0 min left"
-    /// which reads as broken.
+    /// `timerSeconds` AND no `estimatedMinutes` would otherwise show
+    /// "~0 min left" which reads as broken.
     private var recipeStrip: some View {
         let title = viewModel.recipePlan.title ?? "Cook Mode"
         let remainingMin = viewModel.recipePlan.remainingDurationMinutes(
@@ -215,36 +237,28 @@ struct StepCardView: View {
         )
         let stepLabel = "Step \(viewModel.currentStepIndex + 1) of \(viewModel.totalSteps)"
 
-        return HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space2) {
-            // Title + step counter share the leading half. Two separate
-            // Text views in an inner HStack rather than `Text + Text`
-            // concatenation — `stirFont(_:)` returns `some View`, not
-            // `Text`, so the `+` operator can't compose them. Visual
-            // result is identical: same baseline, 4pt gap between
-            // title and "· Step N of M". Title gets `.lineLimit(1)`
-            // with `.truncationMode(.tail)` so long titles ellipsize
-            // here; the full title remains accessible via the eye-
-            // button recipe-detail peek once that surface ships.
-            HStack(alignment: .firstTextBaseline, spacing: CGFloat.Stir.space1) {
-                Text(title)
-                    .stirFont(.labelMd).fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.ink700)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text("· \(stepLabel)")
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .stirFont(.labelLg).fontWeight(.semibold)
+                .foregroundStyle(Color.Stir.ink900)
+                .lineLimit(2)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: CGFloat.Stir.space1) {
+                Text(stepLabel)
                     .stirFont(.labelMd)
                     .foregroundStyle(Color.Stir.ink500)
                     .lineLimit(1)
-                    .layoutPriority(0) // title gets the room first
-            }
 
-            Spacer(minLength: CGFloat.Stir.space2)
+                if remainingMin > 0 {
+                    Text("· ~\(remainingMin) min left")
+                        .stirFont(.labelMd)
+                        .foregroundStyle(Color.Stir.ink500)
+                        .lineLimit(1)
+                }
 
-            if remainingMin > 0 {
-                Text("~\(remainingMin) min left")
-                    .stirFont(.labelMd)
-                    .foregroundStyle(Color.Stir.ink500)
-                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, CGFloat.Stir.space4)
