@@ -22,6 +22,20 @@ class PostHogClient: @unchecked Sendable {
     private let lock = NSLock()
     private var _isInitialized = false
 
+    /// SCA-405: bounded pre-init buffer. Cold-launch from a notification
+    /// tap can deliver `UNUserNotificationCenterDelegate.willPresent`
+    /// (and the SCA-374 `notification_history_decode_failed` from
+    /// `NotificationHistoryStore.load()`) BEFORE `StirApp.init` reaches
+    /// `PostHogClient.shared.initialize(...)` — pre-fix `capture(...)`
+    /// silently dropped on the `guard isInitialized else { return }`
+    /// short-circuit, exactly the regression class SCA-374 was created
+    /// to catch. Bounded ring (32 events) so a misconfigured PostHog
+    /// can't grow unbounded; FIFO eviction keeps the oldest signal
+    /// when the buffer overflows. Drained inside `initialize(...)`
+    /// after `_isInitialized = true` flips.
+    private var pendingEvents: [(event: TelemetryEvent, properties: [String: Any])] = []
+    private static let pendingEventsCap = 32
+
     private var isInitialized: Bool {
         lock.lock(); defer { lock.unlock() }
         return _isInitialized
@@ -36,6 +50,10 @@ class PostHogClient: @unchecked Sendable {
         lock.lock()
         if _isInitialized { lock.unlock(); return }
         _isInitialized = true
+        // SCA-405: drain the pre-init buffer under the lock so a
+        // racing `capture(...)` doesn't see a half-initialized state.
+        let buffered = pendingEvents
+        pendingEvents.removeAll(keepingCapacity: false)
         lock.unlock()
 
         let config = PostHogConfig(apiKey: apiKey, host: host.absoluteString)
@@ -55,7 +73,15 @@ class PostHogClient: @unchecked Sendable {
         config.flushAt = 10
         config.flushIntervalSeconds = 30
         PostHogSDK.shared.setup(config)
-        Logger.telemetry.info("posthog initialized (host=\(host.host ?? "?", privacy: .public))")
+        // SCA-405: flush buffered events. Each ran the same
+        // `capture(...)` validation path; PostHogSDK is the only
+        // call we deferred. ZERO-copy emit, oldest first.
+        for buf in buffered {
+            PostHogSDK.shared.capture(buf.event.rawValue, properties: buf.properties)
+        }
+        Logger.telemetry.info(
+            "posthog initialized (host=\(host.host ?? "?", privacy: .public)) flushed_pending=\(buffered.count, privacy: .public)",
+        )
     }
 
     /// Bind the session to a distinct ID (the canonical_user_key_hash).
@@ -92,8 +118,23 @@ class PostHogClient: @unchecked Sendable {
     }
 
     /// Emit a typed event. Properties are Sendable JSON-compatible values.
+    /// SCA-405: when `isInitialized` is false (cold-launch race where
+    /// a notification-tap delegate fires before `StirApp.init` reaches
+    /// `PostHogClient.shared.initialize(...)`), the event is buffered
+    /// in a bounded ring and flushed on initialize() instead of
+    /// silently dropped. FIFO eviction at the cap so a misconfigured
+    /// PostHog can't grow unbounded.
     func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
-        guard isInitialized else { return }
+        lock.lock()
+        if !_isInitialized {
+            if pendingEvents.count >= Self.pendingEventsCap {
+                pendingEvents.removeFirst()
+            }
+            pendingEvents.append((event, properties))
+            lock.unlock()
+            return
+        }
+        lock.unlock()
         PostHogSDK.shared.capture(event.rawValue, properties: properties)
     }
 
