@@ -109,7 +109,11 @@ struct ScanReviewView: View {
                 },
             ],
         ) {
-            InputField(placeholder: "Ingredient name", text: $editBuffer)
+            InputField(
+                placeholder: "Ingredient name",
+                text: $editBuffer,
+                autoFocusOnAppear: true,
+            )
         }
         .stirDialog(
             isPresented: $showAddAlert,
@@ -124,7 +128,11 @@ struct ScanReviewView: View {
                 },
             ],
         ) {
-            InputField(placeholder: "Ingredient name", text: $addBuffer)
+            InputField(
+                placeholder: "Ingredient name",
+                text: $addBuffer,
+                autoFocusOnAppear: true,
+            )
         }
         // SCA-19 — full-screen scan-review tutorial. Suppressed during
         // the initial parse phase + before any ingredients have
