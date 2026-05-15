@@ -578,10 +578,23 @@ struct TonightHomeView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Text(title)
-                        .stirFont(.labelLg)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(titleColor)
+                    // Hidden 2-line shape anchors the row to the same
+                    // height as the with-subtitle tile so paired tiles
+                    // (Rescan / Solve again) stay visually balanced.
+                    // Visible title centers inside the ZStack; HStack's
+                    // default .center alignment then puts the icon at
+                    // the same vertical midpoint.
+                    ZStack {
+                        VStack(spacing: 2) {
+                            Text(title).stirFont(.labelLg).fontWeight(.semibold)
+                            Text(" ").stirFont(.bodySm)
+                        }
+                        .hidden()
+                        Text(title)
+                            .stirFont(.labelLg)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(titleColor)
+                    }
                 }
             }
             .padding(CGFloat.Stir.space3 + 2)               // 14pt
