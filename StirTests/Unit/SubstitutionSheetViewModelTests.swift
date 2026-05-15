@@ -122,7 +122,139 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
                         "sub_event_id must be populated so the funnel joins to the paired accepted event")
     }
 
+    // MARK: - SCA-424 pantry snapshot filter
+    //
+    // The substitution prompt explicitly tells the model to "prefer
+    // ingredients already present in the pantry_snapshot." Any
+    // soft-deleted or unconfirmed row that leaks into the snapshot
+    // gives the model material to say "from your pantry" about an item
+    // the user can't actually see in their pantry UI. Voice path was
+    // fixed to filter `deletedAt == nil && userConfirmed` via
+    // `voiceContextSnapshot()`; the SHEET substitution path drifted
+    // with only `!name.isEmpty`. This pins the corrected filter.
+
+    func test_buildHouseholdContext_excludesSoftDeletedPantryItems_SCA424() throws {
+        try seedPantry([
+            (name: "olive oil", deletedAt: nil, userConfirmed: true),
+            (name: "ghost baguette", deletedAt: Date(), userConfirmed: true),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildHouseholdContext()
+        let names = ctx.pantrySnapshot.map(\.displayName)
+        XCTAssertEqual(names.sorted(), ["olive oil"],
+                       "soft-deleted rows must not reach the substitution model — that's the SCA-424 hallucination source")
+    }
+
+    func test_buildHouseholdContext_excludesUnconfirmedPantryItems_SCA424() throws {
+        try seedPantry([
+            (name: "olive oil", deletedAt: nil, userConfirmed: true),
+            (name: "scan-junk row", deletedAt: nil, userConfirmed: false),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildHouseholdContext()
+        let names = ctx.pantrySnapshot.map(\.displayName)
+        XCTAssertEqual(names.sorted(), ["olive oil"],
+                       "unconfirmed scan-parse rows must not reach the model — the user never accepted them as actually being in their pantry")
+    }
+
+    func test_buildHouseholdContext_includesConfirmedActivePantryItems_SCA424() throws {
+        try seedPantry([
+            (name: "olive oil", deletedAt: nil, userConfirmed: true),
+            (name: "kosher salt", deletedAt: nil, userConfirmed: true),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildHouseholdContext()
+        let names = Set(ctx.pantrySnapshot.map(\.displayName))
+        XCTAssertEqual(names, ["olive oil", "kosher salt"],
+                       "the filter must not over-exclude: confirmed non-deleted rows MUST reach the model")
+    }
+
+    // MARK: - SCA-425 recipe steps projection
+
+    func test_buildRecipeContext_populatesRecipeSteps_SCA425() throws {
+        try replaceRecipeStepArray([
+            (number: 1, instruction: "Whisk flour, salt, and water; rest 10 min.", timer: 600),
+            (number: 2, instruction: "Roll dough into thin flatbreads.", timer: 0),
+            (number: 3, instruction: "Cook each on a hot skillet 60s/side.", timer: 120),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildRecipeContext()
+        XCTAssertEqual(ctx.recipeSteps.count, 3)
+        XCTAssertEqual(ctx.recipeSteps[0].stepNumber, 1)
+        XCTAssertEqual(ctx.recipeSteps[0].instruction, "Whisk flour, salt, and water; rest 10 min.")
+        XCTAssertEqual(ctx.recipeSteps[0].timerSeconds, 600)
+        // 0-second timer in Core Data → nil on the wire (Zod nullable;
+        // gives the model an explicit "untimed" signal instead of a
+        // misleading 0-second timer reading).
+        XCTAssertNil(ctx.recipeSteps[1].timerSeconds,
+                     "0-second timer must be projected as nil so the model reads 'no timer', not '0-second timer'")
+        XCTAssertEqual(ctx.recipeSteps[2].timerSeconds, 120)
+    }
+
+    func test_buildRecipeContext_skipsStepsWithEmptyInstruction_SCA425() throws {
+        try replaceRecipeStepArray([
+            (number: 1, instruction: "valid step", timer: 0),
+            (number: 2, instruction: "   ", timer: 0),           // whitespace-only
+            (number: 3, instruction: "", timer: 0),              // empty
+            (number: 4, instruction: "another valid step", timer: 0),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildRecipeContext()
+        // 2 valid + 2 empty → 2 wire rows, preserving original step_number.
+        XCTAssertEqual(ctx.recipeSteps.map(\.stepNumber), [1, 4],
+                       "empty/whitespace-only instructions must be dropped — backend Zod enforces min(1) on instruction")
+    }
+
+    func test_buildRecipeContext_clampsLongInstructionToWireBound_SCA425() throws {
+        let huge = String(repeating: "x", count: 2500)
+        try replaceRecipeStepArray([
+            (number: 1, instruction: huge, timer: 0),
+        ])
+        let vm = makeVM()
+        let ctx = vm.buildRecipeContext()
+        XCTAssertEqual(ctx.recipeSteps.count, 1)
+        XCTAssertEqual(ctx.recipeSteps[0].instruction.count, 2000,
+                       "instructions over 2000 chars MUST be clamped client-side or backend Zod trips VAL-01")
+    }
+
     // MARK: - Helpers
+
+    private func seedPantry(_ items: [(name: String, deletedAt: Date?, userConfirmed: Bool)]) throws {
+        let context = controller.viewContext
+        for item in items {
+            let row = PantryItem(context: context)
+            row.id = UUID()
+            row.household = household
+            row.displayName = item.name
+            row.canonicalIngredientSlug = nil
+            row.deletedAt = item.deletedAt
+            row.userConfirmed = item.userConfirmed
+            row.typedMemoryState = .remembered
+            row.createdAt = Date()
+            row.updatedAt = Date()
+        }
+        try controller.save()
+    }
+
+    private func replaceRecipeStepArray(
+        _ steps: [(number: Int, instruction: String, timer: Int)],
+    ) throws {
+        let context = controller.viewContext
+        // Clear any existing steps so the test owns the full set.
+        for existing in recipePlan.stepArray {
+            context.delete(existing)
+        }
+        for (idx, step) in steps.enumerated() {
+            let row = RecipeStep(context: context)
+            row.id = UUID()
+            row.recipePlan = recipePlan
+            row.stepNumber = Int16(step.number)
+            row.sortOrder = Int16(idx)
+            row.instructionText = step.instruction
+            row.timerSeconds = Int32(step.timer)
+        }
+        try controller.save()
+    }
 
     private func makeVM(
         onFinished: @escaping () -> Void = {},

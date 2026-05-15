@@ -652,12 +652,41 @@ struct SubstitutionRequest: Encodable, Sendable {
         let currentStepNumber: Int
         let totalSteps: Int
         let remainingIngredients: [RemainingIngredient]
+        /// SCA-425: full numbered list of every step so the substitution
+        /// model can see the recipe's own sub-recipe instructions and
+        /// avoid proposing a workaround the recipe already contains
+        /// (e.g. recipe says "make flatbread from flour" and the user
+        /// reports "no flatbread" — model should suggest following the
+        /// existing step, not invent a new bread workflow).
+        ///
+        /// Empty array suppresses the wire key entirely so legacy
+        /// servers and the v1.0.0 prompt continue to behave exactly as
+        /// before (the v1.1.0 prompt is the canary that consults it).
+        let recipeSteps: [RecipeStep]
 
         enum CodingKeys: String, CodingKey {
             case title
             case currentStepNumber = "current_step_number"
             case totalSteps = "total_steps"
             case remainingIngredients = "remaining_ingredients"
+            case recipeSteps = "recipe_steps"
+        }
+
+        /// Omit `recipe_steps` from the encoded body when empty so the
+        /// shape stays identical to the pre-SCA-425 wire format for
+        /// recipes that have no step data to send (legacy plans, scan-
+        /// derived plans with empty stepArray). Backend Zod marks the
+        /// field optional; an empty array would still serialize the
+        /// key, which is harmless but pointlessly noisy.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(title, forKey: .title)
+            try c.encode(currentStepNumber, forKey: .currentStepNumber)
+            try c.encode(totalSteps, forKey: .totalSteps)
+            try c.encode(remainingIngredients, forKey: .remainingIngredients)
+            if !recipeSteps.isEmpty {
+                try c.encode(recipeSteps, forKey: .recipeSteps)
+            }
         }
 
         struct RemainingIngredient: Encodable, Sendable {
@@ -678,6 +707,37 @@ struct SubstitutionRequest: Encodable, Sendable {
                 {
                     try c.encode(slug, forKey: .canonicalSlug)
                 }
+            }
+        }
+
+        /// Mirror of backend `SubstitutionRecipeStep` (validation.ts) —
+        /// `timer_seconds` is non-Optional Int because the backend
+        /// schema is `z.number().int().min(0).max(36000).nullable()`,
+        /// meaning the key is REQUIRED but may be `null`. Pre-existing
+        /// `RealtimeRecipeContext.StepDescription` uses Int with 0 =
+        /// "no timer"; we keep the wire null-able here so a step with
+        /// no timer becomes a JSON `null` rather than `0`, matching
+        /// the Zod schema literally and giving the model a cleaner
+        /// signal that the step is untimed.
+        struct RecipeStep: Encodable, Sendable {
+            let stepNumber: Int
+            let instruction: String
+            let timerSeconds: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case stepNumber = "step_number"
+                case instruction
+                case timerSeconds = "timer_seconds"
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(stepNumber, forKey: .stepNumber)
+                try c.encode(instruction, forKey: .instruction)
+                // Zod field is `.nullable()`, NOT `.optional()` — key
+                // must always be present. `encode(nil)` writes JSON
+                // null; skipping the key would trip VAL-01 Required.
+                try c.encode(timerSeconds, forKey: .timerSeconds)
             }
         }
     }

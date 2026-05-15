@@ -357,7 +357,11 @@ final class SubstitutionSheetViewModel {
         recipePlan.ingredientArray.first { $0.id == id }
     }
 
-    private func buildHouseholdContext() -> SubstitutionRequest.HouseholdContext {
+    /// Internal (not `private`) so SubstitutionSheetViewModelTests can
+    /// assert the SCA-424 pantry filter directly. The pantry array is
+    /// the only field worth pinning at this granularity; the dispatch
+    /// path is exercised end-to-end by the Backend deno tests.
+    func buildHouseholdContext() -> SubstitutionRequest.HouseholdContext {
         let rules: [DinnerSolveRequest.DietaryRuleLite] = household.dietaryRuleArray
             .filter { $0.isActive }
             .compactMap { rule in
@@ -370,18 +374,35 @@ final class SubstitutionSheetViewModel {
             }
         let equipment = household.kitchenEquipmentArray.filter { $0.isAvailable }.compactMap { $0.code }
 
-        // Step 4 doesn't hold a structured pantry snapshot for Cook Mode
-        // (not needed for most substitutions). Pass the household's
-        // remembered pantry items as the snapshot so the model can prefer
-        // pantry options.
+        // SCA-424: the substitution prompt tells the model to "Prefer
+        // ingredients already present in the pantry_snapshot," so any
+        // stale row that leaks into this array becomes a "from your
+        // pantry" hallucination in the rendered swap text. Canonical
+        // filter (HouseholdProfile+Extensions.swift:52-56 doc comment)
+        // is `deletedAt == nil && userConfirmed && !displayName.isEmpty`:
+        //   - `deletedAt == nil` excludes soft-deleted rows that have
+        //     already vanished from the user's pantry UI but linger in
+        //     the Core Data relationship until the reaper sweeps them.
+        //   - `userConfirmed` excludes pantry-parse OCR rows the user
+        //     never explicitly accepted (early-onboarding scan junk
+        //     that would otherwise be "in the pantry" from the model's
+        //     perspective).
+        //   - non-empty `displayName` is the existing safety on map.
+        // Voice mint + CookModeViewModel + Realtime substitution all
+        // already filter this way via `voiceContextSnapshot()`. The
+        // SHEET substitution path drifted with only the `!name.isEmpty`
+        // check — the P2-I gap that doc comment explicitly flags as a
+        // latent correctness hole.
         let pantry: [SubstitutionRequest.HouseholdContext.PantrySnapshotItem] =
-            (household.pantryItems as? Set<PantryItem>)?.compactMap { item in
-                guard let name = item.displayName, !name.isEmpty else { return nil }
-                return SubstitutionRequest.HouseholdContext.PantrySnapshotItem(
-                    displayName: name,
-                    canonicalSlug: item.canonicalIngredientSlug,
-                )
-            } ?? []
+            (household.pantryItems as? Set<PantryItem>)?
+                .filter { $0.deletedAt == nil && $0.userConfirmed }
+                .compactMap { item in
+                    guard let name = item.displayName, !name.isEmpty else { return nil }
+                    return SubstitutionRequest.HouseholdContext.PantrySnapshotItem(
+                        displayName: name,
+                        canonicalSlug: item.canonicalIngredientSlug,
+                    )
+                } ?? []
 
         return SubstitutionRequest.HouseholdContext(
             dietaryRules: rules,
@@ -390,7 +411,9 @@ final class SubstitutionSheetViewModel {
         )
     }
 
-    private func buildRecipeContext() -> SubstitutionRequest.RecipeContext {
+    /// Internal so SubstitutionSheetViewModelTests can assert the
+    /// SCA-425 recipe-step projection.
+    func buildRecipeContext() -> SubstitutionRequest.RecipeContext {
         let remaining: [SubstitutionRequest.RecipeContext.RemainingIngredient] =
             recipePlan.ingredientArray.compactMap { ing in
                 guard let name = ing.displayName else { return nil }
@@ -399,11 +422,43 @@ final class SubstitutionSheetViewModel {
                     canonicalSlug: ing.canonicalIngredientSlug,
                 )
             }
+        // SCA-425: ship the full numbered step list so the model can see
+        // when the recipe itself already produces the "missing"
+        // ingredient (sub-recipe inside the dish — e.g. step 2 says
+        // "make flatbread from flour" and the user reports "no
+        // flatbread"). Without this the model proposes a from-scratch
+        // workaround the recipe already contains. Mirrors the voice
+        // path's `RealtimeRecipeContext.all_steps`.
+        //
+        // `timerSeconds`: 0 in Core Data means "no timer"; the wire
+        // schema models that as JSON null, not 0. Translate so the
+        // model gets an explicit "untimed" signal instead of a
+        // misleading 0-second timer.
+        let steps: [SubstitutionRequest.RecipeContext.RecipeStep] =
+            recipePlan.stepArray
+                .sorted { $0.stepNumber < $1.stepNumber }
+                .compactMap { step in
+                    let raw = step.instructionText?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    guard !raw.isEmpty else { return nil }
+                    // Wire bound is `max(2000)`; clamp defensively so a
+                    // long imported recipe step doesn't trip VAL-01.
+                    let instruction = raw.count > 2000
+                        ? String(raw.prefix(2000))
+                        : raw
+                    let timer = Int(step.timerSeconds)
+                    return SubstitutionRequest.RecipeContext.RecipeStep(
+                        stepNumber: Int(step.stepNumber),
+                        instruction: instruction,
+                        timerSeconds: timer > 0 ? timer : nil,
+                    )
+                }
         return SubstitutionRequest.RecipeContext(
             title: recipePlan.title ?? "",
             currentStepNumber: Int(currentStep?.stepNumber ?? 0),
             totalSteps: recipePlan.stepArray.count,
             remainingIngredients: remaining,
+            recipeSteps: steps,
         )
     }
 }

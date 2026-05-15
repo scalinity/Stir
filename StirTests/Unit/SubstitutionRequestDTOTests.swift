@@ -159,6 +159,60 @@ final class SubstitutionRequestDTOTests: XCTestCase {
         XCTAssertTrue(json.contains("\"canonical_slug\":\"tomato\""))
     }
 
+    // MARK: - RecipeContext.recipeSteps (SCA-425)
+    //
+    // The new optional `recipe_steps` field must encode in a way that
+    // stays back-compat with v1.0.0 prompt + legacy iOS clients:
+    //   - Empty Swift array → wire key omitted entirely so the old
+    //     prompt sees the same JSON shape as before.
+    //   - Populated array → wire key present + nested per-step shape
+    //     matches the backend Zod (`step_number`, `instruction`,
+    //     `timer_seconds`).
+    //   - `timerSeconds == nil` → the wire emits JSON `null` for the
+    //     `timer_seconds` key (Zod is `.nullable()`, NOT `.optional()`
+    //     — the key MUST be present even when there's no timer).
+
+    func test_recipeContext_recipeSteps_omittedWhenEmpty_SCA425() throws {
+        let ctx = SubstitutionRequest.RecipeContext(
+            title: "Tomato Cream Pasta",
+            currentStepNumber: 2,
+            totalSteps: 5,
+            remainingIngredients: [],
+            recipeSteps: [],
+        )
+        let json = try encodedJSON(ctx)
+        XCTAssertFalse(
+            json.contains("\"recipe_steps\""),
+            "empty recipe_steps must be omitted so legacy/v1.0.0 prompt sees pre-SCA-425 shape; got: \(json)",
+        )
+    }
+
+    func test_recipeContext_recipeSteps_emittedWhenPopulated_SCA425() throws {
+        let ctx = SubstitutionRequest.RecipeContext(
+            title: "Naan-style flatbread",
+            currentStepNumber: 1,
+            totalSteps: 2,
+            remainingIngredients: [],
+            recipeSteps: [
+                .init(stepNumber: 1, instruction: "Whisk flour and water.", timerSeconds: 600),
+                .init(stepNumber: 2, instruction: "Cook on hot skillet.", timerSeconds: nil),
+            ],
+        )
+        let json = try encodedJSON(ctx)
+        XCTAssertTrue(json.contains("\"recipe_steps\""))
+        XCTAssertTrue(json.contains("\"step_number\":1"))
+        XCTAssertTrue(json.contains("\"step_number\":2"))
+        XCTAssertTrue(json.contains("\"instruction\":\"Whisk flour and water.\""))
+        XCTAssertTrue(json.contains("\"timer_seconds\":600"))
+        // The crucial back-compat pin: nil timer must emit JSON null,
+        // NOT be absent. Skipping the key trips backend VAL-01 because
+        // Zod is `.nullable()`, not `.optional()`.
+        XCTAssertTrue(
+            json.contains("\"timer_seconds\":null"),
+            "nil timer must serialize as `null`; got: \(json)",
+        )
+    }
+
     // MARK: - Helpers
 
     private func encodedJSON<T: Encodable>(_ value: T) throws -> String {

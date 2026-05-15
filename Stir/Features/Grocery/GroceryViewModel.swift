@@ -136,14 +136,23 @@ final class GroceryViewModel {
                     amountText: ing.amountText,
                 )
             }
+        // SCA-424: same drift class as the substitution sheet — Grocery
+        // pantry_snapshot must use the canonical filter
+        // (`deletedAt == nil && userConfirmed`) so soft-deleted rows
+        // and unconfirmed scan junk don't get treated as "already in
+        // your pantry" and dropped from the generated grocery list.
+        // Voice mint + CookModeViewModel use the same filter via
+        // `voiceContextSnapshot()`.
         let pantry = (household.pantryItems as? Set<PantryItem>) ?? []
-        let pantrySnapshot = pantry.compactMap { item -> GroceryGenerateRequest.PantryItemLite? in
-            guard let name = item.displayName, !name.isEmpty else { return nil }
-            return GroceryGenerateRequest.PantryItemLite(
-                displayName: name,
-                canonicalSlug: item.canonicalIngredientSlug,
-            )
-        }
+        let pantrySnapshot = pantry
+            .filter { $0.deletedAt == nil && $0.userConfirmed }
+            .compactMap { item -> GroceryGenerateRequest.PantryItemLite? in
+                guard let name = item.displayName, !name.isEmpty else { return nil }
+                return GroceryGenerateRequest.PantryItemLite(
+                    displayName: name,
+                    canonicalSlug: item.canonicalIngredientSlug,
+                )
+            }
 
         let request = GroceryGenerateRequest(
             sourceID: recipePlanID,
