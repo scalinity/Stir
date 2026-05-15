@@ -294,8 +294,14 @@ PostHog LLM Observability events (`$ai_generation`, `$ai_trace`) are SEPARATE fr
 ## Verification flows
 
 ```bash
-# iOS
-xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+# iOS — prefer the wrapper. It pre-warms the iPhone 17 Pro Max sim,
+# stages Config.xcconfig in fresh worktrees, and on a sim flake
+# (SBMainWorkspace preflight or silent test-runner death) erases the
+# sim and retries ONCE before failing. Bakes in SCA-208 + SCA-364 +
+# SCA-383 + SCA-426 recovery so iterative dev doesn't re-hit them.
+./scripts/run-ios-tests.sh
+# Raw fallback (use only if you need to bypass the wrapper):
+xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'
 swiftformat --lint Stir/ ; swiftlint
 # Backend
 supabase db reset                 # migrations + seed fresh

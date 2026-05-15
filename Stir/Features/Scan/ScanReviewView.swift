@@ -92,29 +92,39 @@ struct ScanReviewView: View {
         .background(Color.Stir.paper50.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Edit ingredient", isPresented: editAlertBinding) {
-            TextField("Ingredient name", text: $editBuffer)
-            Button("Save") {
-                if let target = editTarget {
-                    viewModel.editIngredient(id: target.id, newName: editBuffer)
-                }
-                editTarget = nil
-                editBuffer = ""
-            }
-            Button("Cancel", role: .cancel) {
-                editTarget = nil
-                editBuffer = ""
-            }
+        .stirDialog(
+            isPresented: editAlertBinding,
+            title: "Edit ingredient",
+            buttons: [
+                .primary("Save") {
+                    if let target = editTarget {
+                        viewModel.editIngredient(id: target.id, newName: editBuffer)
+                    }
+                    editTarget = nil
+                    editBuffer = ""
+                },
+                .cancel("Cancel") {
+                    editTarget = nil
+                    editBuffer = ""
+                },
+            ],
+        ) {
+            InputField(placeholder: "Ingredient name", text: $editBuffer)
         }
-        .alert("Add ingredient", isPresented: $showAddAlert) {
-            TextField("Ingredient name", text: $addBuffer)
-            Button("Add") {
-                viewModel.addIngredientManually(addBuffer)
-                addBuffer = ""
-            }
-            Button("Cancel", role: .cancel) {
-                addBuffer = ""
-            }
+        .stirDialog(
+            isPresented: $showAddAlert,
+            title: "Add ingredient",
+            buttons: [
+                .primary("Add") {
+                    viewModel.addIngredientManually(addBuffer)
+                    addBuffer = ""
+                },
+                .cancel("Cancel") {
+                    addBuffer = ""
+                },
+            ],
+        ) {
+            InputField(placeholder: "Ingredient name", text: $addBuffer)
         }
         // SCA-19 — full-screen scan-review tutorial. Suppressed during
         // the initial parse phase + before any ingredients have

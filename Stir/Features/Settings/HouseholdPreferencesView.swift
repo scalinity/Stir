@@ -89,14 +89,15 @@ struct HouseholdPreferencesView: View {
                 )
             }
         }
-        .alert("Couldn't save", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } },
-        )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .stirDialog(
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } },
+            ),
+            title: "Couldn't save",
+            message: errorMessage ?? "",
+            buttons: [.primary("OK") { errorMessage = nil }],
+        )
     }
 
     // MARK: - Main content
