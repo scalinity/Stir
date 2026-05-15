@@ -107,7 +107,21 @@ struct SolveAgainRoot: View {
                         .navigationBarBackButtonHidden(true)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
+                                // `.buttonStyle(.plain)` suppresses iOS
+                                // 26's automatic Liquid Glass capsule
+                                // on toolbar Buttons. Without it the
+                                // ember text rides inside a translucent
+                                // pill that visually competes with the
+                                // warm-paper Stir surface AND widens
+                                // the leading slot enough to truncate
+                                // the principal serif title. See the
+                                // header doc on `StirCircleIconButton`
+                                // (SCA-436) for the documented escape
+                                // hatch; trade-off is no press-feedback
+                                // ring, acceptable for text-only
+                                // toolbar actions.
                                 Button("Cancel") { onDismiss() }
+                                    .buttonStyle(.plain)
                                     .stirFont(.bodyMd)
                                     .foregroundStyle(Color.Stir.ember600)
                             }

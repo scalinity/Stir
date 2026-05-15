@@ -49,7 +49,10 @@ struct DinnerOptionsView: View {
                     .foregroundStyle(Color.Stir.textPrimary)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                // `.buttonStyle(.plain)` — see SolveAgainRoot's Cancel
+                // for the iOS 26 Liquid Glass suppression rationale.
                 Button("Tune", action: onTune)
+                    .buttonStyle(.plain)
                     .stirFont(.bodyMd)
                     .foregroundStyle(Color.Stir.ember600)
             }
