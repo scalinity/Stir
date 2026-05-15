@@ -121,21 +121,13 @@ struct StepCardView: View {
                         .frame(height: 1)
                 }
         }
-        .confirmationDialog(
-            "Leave Cook Mode?",
-            isPresented: $viewModel.exitConfirmRequested,
-            titleVisibility: .visible,
-        ) {
-            Button("Keep cooking", role: .cancel) {}
-            Button("Pause and resume later") {
-                Task { await viewModel.exit(markAbandoned: false) }
-            }
-            Button("Abandon session", role: .destructive) {
-                Task { await viewModel.exit(markAbandoned: true) }
-            }
-        } message: {
-            Text("Your progress is saved. You can resume from Tonight Home.")
-        }
+        // SCA-428: exit confirmation dialog lives on the outer Group in
+        // `body` so it covers both tap-mode and voice-mode branches.
+        // Duplicating it here AND on the outer Group with the same
+        // `$viewModel.exitConfirmRequested` binding caused undefined
+        // SwiftUI presentation arbitration — flipping the bool to true
+        // could be swallowed by one modifier while the other never
+        // presented, so X taps sometimes dismissed Cook Mode silently.
     }
 
     // MARK: - Top bar
