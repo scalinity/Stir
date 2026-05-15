@@ -91,19 +91,29 @@ struct PaywallView: View {
             contentView
                 .tint(Color.Stir.ember600)
                 .background(Color.Stir.backgroundPrimary)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        // SCA-437 (follow-up to SCA-436): bare Image-inside-
-                        // Button inside a toolbar gets the iOS 26 Liquid
-                        // Glass pill. StirCircleIconButton renders the same
-                        // close glyph in the Stir round-icon grammar instead.
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    // SCA-455 follow-up: putting `StirCircleIconButton`
+                    // inside a `ToolbarItem` wasn't enough — iOS 26 wraps
+                    // every toolbar child in Liquid Glass at the toolbar
+                    // layer, regardless of the child's own styling. The
+                    // only reliable opt-out is to render outside the
+                    // system toolbar entirely (same fix as SCA-436 for
+                    // DishPreview). A trailing-aligned HStack keeps the
+                    // close in the top-left without forcing the rest of
+                    // the screen to know about it.
+                    HStack {
                         StirCircleIconButton(
                             icon: Image.Stir.close,
                             accessibilityLabel: "Close",
                             foreground: Color.Stir.textTertiary,
                             action: { dismiss() },
                         )
+                        Spacer()
                     }
+                    .padding(.horizontal, CGFloat.Stir.space3)
+                    .padding(.vertical, CGFloat.Stir.space2)
+                    .background(Color.Stir.backgroundPrimary)
                 }
                 .stirToast($restoreToast)
                 .task {
