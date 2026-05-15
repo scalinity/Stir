@@ -66,20 +66,12 @@ struct VoiceActiveStepView: View {
             .padding(.bottom, CGFloat.Stir.space3)
             .padding(.top, CGFloat.Stir.space2)
         }
-        .stirDialog(
-            isPresented: $viewModel.exitConfirmRequested,
-            title: "Leave Cook Mode?",
-            message: "Your progress is saved. You can resume from Tonight Home.",
-            buttons: [
-                .secondary("Pause and resume later") {
-                    Task { await viewModel.exit(markAbandoned: false) }
-                },
-                .destructive("Abandon session") {
-                    Task { await viewModel.exit(markAbandoned: true) }
-                },
-                .cancel("Keep cooking"),
-            ],
-        )
+        // SCA-428: exit confirmation dialog is owned by the parent
+        // StepCardView's outer Group, not this view. Co-locating it
+        // here with the same `$viewModel.exitConfirmRequested` binding
+        // raced the parent's modifier — flipping the bool to true could
+        // be swallowed, so X taps sometimes dismissed Cook Mode without
+        // prompting for Pause-vs-Abandon.
     }
 
     // MARK: - Active timer pill (model-driven start_timer surface)
