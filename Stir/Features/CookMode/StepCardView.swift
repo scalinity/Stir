@@ -107,12 +107,22 @@ struct StepCardView: View {
                 }
                 .padding(.horizontal, CGFloat.Stir.screenMarginHero)
                 .padding(.top, CGFloat.Stir.space5)
-                // justification: 140pt bottom clearance was the
-                // original safe-area reserve for the voice/ask/nav
-                // stack; bumped to 220pt to clear the SCA-433 up-next
-                // card that now sits above the voice row.
-                .padding(.bottom, 220)
+                // SCA-454: no manual bottom padding. The
+                // `safeAreaInset(edge: .bottom)` below already
+                // extends the ScrollView's safe area by the
+                // (upNextCard + bottomBar) height, and SwiftUI uses
+                // that inset natively to position scroll content.
+                // The pre-fix 140pt → 220pt manual padding stacked
+                // on top of the auto-inset and let users drag-scroll
+                // ~200pt into pure empty space below the last
+                // content row. A small breather here keeps the very
+                // last text line from kissing the up-next card.
+                .padding(.bottom, CGFloat.Stir.space2)
             }
+            // SCA-454: short-content steps (e.g. just a timer card)
+            // no longer bounce-scroll. Honored on iOS 17+ (our
+            // deployment minimum).
+            .scrollBounceBehavior(.basedOnSize)
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
