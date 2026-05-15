@@ -17,19 +17,6 @@ import CoreData
 import Foundation
 
 extension RecipePlan {
-    /// Sum of `timerSeconds` across steps at indices `>= fromStepIndex`.
-    /// Returns 0 when out of bounds, when every remaining step is
-    /// timer-less, or when the plan has no steps. Clamps `fromStepIndex`
-    /// to valid range so callers don't have to.
-    func remainingDurationSec(fromStepIndex index: Int) -> Int {
-        let steps = stepArray
-        guard !steps.isEmpty else { return 0 }
-        let clamped = max(0, min(index, steps.count))
-        return steps[clamped...]
-            .map { Int($0.timerSeconds) }
-            .reduce(0, +)
-    }
-
     /// Convenience: minutes (rounded up via ceil-division) for the
     /// recipe strip label. Returns 0 only when the plan has no
     /// duration data at all. When `estimatedMinutes` exceeds the sum

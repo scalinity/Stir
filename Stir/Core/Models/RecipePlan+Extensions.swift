@@ -91,10 +91,17 @@ extension RecipeIngredient {
 extension RecipeStep {
     /// Caution tags are persisted as a comma-separated string
     /// (CloudKit-compatible, no custom transformers).
+    /// SCA-440: post-trim empties dropped and the trim character set
+    /// widened to `.whitespacesAndNewlines` so the helper is safe to
+    /// use as the single source of truth for caution-tag display
+    /// (CookMode `cautionRow` was re-parsing inline before this).
     var cautionTagsArray: [String] {
         get {
             guard let csv = cautionTagsCSV, !csv.isEmpty else { return [] }
-            return csv.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            return csv
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         }
         set {
             cautionTagsCSV = newValue.joined(separator: ",")

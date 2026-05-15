@@ -279,31 +279,44 @@ struct StepCardView: View {
     }
 
     /// SCA-433: amber caution chips for the active step. Surfaces
-    /// `RecipeStep.cautionTagsCSV` (a comma-separated string the
-    /// backend prompt populates with values like "hot_surface",
+    /// `RecipeStep.cautionTagsArray` (parsed from the backend
+    /// comma-separated `cautionTagsCSV` — values like "hot_surface",
     /// "sharp_knife"). Well-known tokens map to SF Symbols; unknown
     /// tokens render as text-only chips so a future prompt addition
     /// doesn't silently disappear from the UI. No-op when the CSV
     /// is empty / nil / all-whitespace.
+    ///
+    /// SCA-440 (W3): consolidated to a single parser — uses the
+    /// canonical `cautionTagsArray` helper on `RecipeStep` instead
+    /// of re-implementing the split + trim inline (the helper itself
+    /// was widened to `.whitespacesAndNewlines` to match the prior
+    /// inline behavior).
+    ///
+    /// SCA-446 (S5): `.accessibilityElement(children: .combine)` +
+    /// the combined label moved off the outer `ScrollView` and onto
+    /// the inner `HStack`. `.combine` on a scrolling container can
+    /// race scroll-bar exposure semantics under future SwiftUI
+    /// runtime tweaks; binding the merge to the row content is the
+    /// stable form.
+    ///
+    /// SCA-447 (S6): `ForEach(tags, id: \.self)` instead of
+    /// `ForEach(Array(tags.enumerated()), id: \.offset)` — caution
+    /// tags are a de-facto set, no expected duplicates.
     @ViewBuilder
     private var cautionRow: some View {
-        let raw = viewModel.currentStep?.cautionTagsCSV ?? ""
-        let tags: [String] = raw
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let tags = viewModel.currentStep?.cautionTagsArray ?? []
         if !tags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: CGFloat.Stir.space2) {
-                    ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+                    ForEach(tags, id: \.self) { tag in
                         cautionChip(tag)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(
+                    "Caution: " + tags.map { humanCautionLabel($0) }.joined(separator: ", "),
+                )
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                "Caution: " + tags.map { humanCautionLabel($0) }.joined(separator: ", "),
-            )
         }
     }
 
@@ -345,10 +358,18 @@ struct StepCardView: View {
     private func humanCautionLabel(_ tag: String) -> String {
         // Convert snake_case backend tokens to Title Case for display.
         // No-op when the token already reads naturally.
+        //
+        // SCA-445 (S4): when the split produces zero words (a
+        // pathological input like a single underscore), return a
+        // static placeholder rather than echoing the raw `tag`. This
+        // is unreachable through the AI's known-token prompt today,
+        // but a malformed future prompt output would otherwise
+        // render a `_` chip on the cooking surface.
         let words = tag
             .split(separator: "_")
             .map { String($0).capitalized }
-        return words.isEmpty ? tag : words.joined(separator: " ")
+        guard !words.isEmpty else { return "Caution" }
+        return words.joined(separator: " ")
     }
 
     // MARK: - Content
@@ -555,9 +576,18 @@ struct StepCardView: View {
     private var upNextCard: some View {
         let total = viewModel.totalSteps
         let current = viewModel.currentStepIndex
-        let isFinal = current >= total - 1
 
         if total > 0 {
+            // SCA-442 (S1): `isFinal` lives inside the `total > 0`
+            // guard so a 0-step recipe (defensively impossible today,
+            // but the safeAreaInset still renders) can't read
+            // `current >= -1` and render the "LAST STEP" celebration.
+            //
+            // SCA-444 (S3): `preview` hoisted into a single `let` so
+            // body + accessibilityLabel share one evaluation rather
+            // than recomputing the string-split twice per render.
+            let isFinal = current >= total - 1
+            let preview = isFinal ? "" : nextStepPreview()
             HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
                 if isFinal {
                     Image(systemName: "sparkles")
@@ -578,7 +608,7 @@ struct StepCardView: View {
                         Text("UP NEXT")
                             .stirFont(.labelEyebrow)
                             .foregroundStyle(Color.Stir.ink500)
-                        Text(nextStepPreview())
+                        Text(preview)
                             .stirFont(.labelMd).fontWeight(.medium)
                             .foregroundStyle(Color.Stir.ink900)
                             .lineLimit(2)
@@ -599,7 +629,7 @@ struct StepCardView: View {
             )
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
-                isFinal ? "Last step. You're almost done." : "Up next: \(nextStepPreview())",
+                isFinal ? "Last step. You're almost done." : "Up next: \(preview)",
             )
         }
     }
@@ -612,7 +642,11 @@ struct StepCardView: View {
     private func nextStepPreview() -> String {
         let steps = viewModel.recipePlan.stepArray
         let nextIndex = viewModel.currentStepIndex + 1
-        guard nextIndex >= 0, nextIndex < steps.count else { return "Coming up." }
+        // SCA-443 (S2): dropped the vacuous `nextIndex >= 0` clause.
+        // `currentStepIndex` is initialised from `Int(session.currentStepIndex)`
+        // and only mutated through `jumpToStep`, which clamps to
+        // `[0, totalSteps-1]`. The `>= 0` guard was unreachable.
+        guard nextIndex < steps.count else { return "Coming up." }
         let nextStep = steps[nextIndex]
 
         if let title = nextStep.title?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -625,8 +659,12 @@ struct StepCardView: View {
         guard !raw.isEmpty else { return "Coming up." }
         // Trim to first sentence (`.` `!` `?` boundary) so a long
         // multi-sentence step doesn't fill the card with prose. The
-        // 120-char hard cap is a belt-and-suspenders guard for the
+        // ~120-char hard cap is a belt-and-suspenders guard for the
         // case where the model wrote no terminal punctuation at all.
+        //
+        // SCA-441 (W4): cap aligned with the doc-comment — 119 + the
+        // single-glyph ellipsis = 120 chars total. Pre-fix `prefix(117)`
+        // produced 118-char output and drifted from the comment.
         let firstSentence: String = {
             if let endIdx = raw.firstIndex(where: { ".!?".contains($0) }) {
                 return String(raw[raw.startIndex ... endIdx])
@@ -634,8 +672,7 @@ struct StepCardView: View {
             return raw
         }()
         if firstSentence.count > 120 {
-            let cut = firstSentence.prefix(117)
-            return cut + "…"
+            return firstSentence.prefix(119) + "…"
         }
         return firstSentence
     }

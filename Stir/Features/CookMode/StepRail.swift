@@ -45,10 +45,12 @@ struct StepRail: View {
     /// 1-indexed conversion.
     let onJump: (Int) -> Void
 
+    // SCA-448 (S7): `@ViewBuilder` lets the `if` fall through cleanly
+    // without an explicit `EmptyView()` arm — SwiftUI handles the
+    // "no view in this branch" shape implicitly.
+    @ViewBuilder
     var body: some View {
-        if totalSteps <= 0 {
-            EmptyView()
-        } else {
+        if totalSteps > 0 {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
