@@ -52,6 +52,7 @@ import {
   checkAndIncrement,
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
+import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 
 const FEATURE_KEY = 'cook_turn';
 const MODEL = GeminiModel.Flash;
@@ -287,7 +288,10 @@ Deno.serve(async (req) => {
     remaining_ingredients_json: body.recipe_context.remaining_ingredients,
     pantry_snapshot_json: body.household_context.pantry_snapshot,
     dietary_rules_json: body.household_context.dietary_rules,
-    available_equipment_json: body.household_context.available_equipment,
+    // SCA-423: render display names to keep slugs out of model prose.
+    available_equipment_json: equipmentDisplayNames(
+      body.household_context.available_equipment,
+    ),
     transcript_json: body.transcript,
   }, {
     untrusted: new Set(['transcript_json']),

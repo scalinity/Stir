@@ -48,6 +48,7 @@ import {
   summarizeViolations,
   validateSubstitution,
 } from '../_shared/hard_rules.ts';
+import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 
 const FEATURE_KEY = 'substitution';
 const MODEL = GeminiModel.Flash;
@@ -500,7 +501,10 @@ function renderPromptForAttempt(
   // in a way that would enable syntactic injection beyond JSON.stringify.
   const base = renderPrompt(template, {
     dietary_rules_json: body.household_context.dietary_rules,
-    available_equipment_json: body.household_context.available_equipment,
+    // SCA-423: render display names; validator above stays on slugs.
+    available_equipment_json: equipmentDisplayNames(
+      body.household_context.available_equipment,
+    ),
     pantry_snapshot_json: body.household_context.pantry_snapshot,
     recipe_context_json: body.recipe_context,
     missing_ingredient_json: body.missing_ingredient,
