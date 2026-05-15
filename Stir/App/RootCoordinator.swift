@@ -77,6 +77,13 @@ final class RootCoordinator {
     /// the coordinator's instance and tests can swap the
     /// PantryItemRepository / UserDefaults / PostHogClient seams.
     let pantryTombstoneReaper: PantryTombstoneReaper
+    /// SCA-430 — one-shot per-install migration that scrubs legacy
+    /// `KitchenEquipment.CommonCode` rawValue slugs (e.g.
+    /// `food_processor`) out of `RecipeStep.instructionText` rows.
+    /// RootView dispatches `runIfNeeded()` from the same scenePhase
+    /// hook as the tombstone reaper; the migration's UserDefaults
+    /// flag short-circuits subsequent calls.
+    let stepTextSlugCleanupMigration: StepTextSlugCleanupMigration
     /// HouseholdProfile accessor — owns existence checks at fast-path init
     /// and creation in the full-bootstrap path. Injected so tests can stub
     /// the on-disk profile state without touching Core Data directly.
@@ -352,6 +359,7 @@ final class RootCoordinator {
         householdRepo: HouseholdProfileRepository? = nil,
         widgetNudgeService: WidgetNudgeService? = nil,
         pantryTombstoneReaper: PantryTombstoneReaper? = nil,
+        stepTextSlugCleanupMigration: StepTextSlugCleanupMigration? = nil,
         sharedStorage: SharedStorage = SharedStorage(),
         revenueCat: (any RevenueCatPurchasing)? = nil,
         fastPathMinLoadingDuration: Duration = .milliseconds(500),
@@ -384,6 +392,13 @@ final class RootCoordinator {
         // controller's repo) so swapping the repo in tests propagates.
         self.pantryTombstoneReaper = pantryTombstoneReaper ?? PantryTombstoneReaper(
             repository: self.pantryItemRepository,
+        )
+        // SCA-430: legacy slug cleanup. Owned by the coordinator so
+        // RootView dispatches via `coordinator.stepTextSlugCleanupMigration`
+        // and tests can swap the PersistenceController / UserDefaults
+        // / telemetry seams the same way they swap the reaper.
+        self.stepTextSlugCleanupMigration = stepTextSlugCleanupMigration ?? StepTextSlugCleanupMigration(
+            controller: persistenceController,
         )
         self.sharedStorage = sharedStorage
         self.revenueCat = revenueCat ?? RevenueCatService.shared

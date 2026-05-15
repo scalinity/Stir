@@ -198,6 +198,8 @@
 		A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000014 /* WidgetNudgeServiceTests.swift */; };
 		A65A001000000021 /* PantryTombstoneReaper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000020 /* PantryTombstoneReaper.swift */; };
 		A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000022 /* PantryTombstoneReaperTests.swift */; };
+		A65A001000000071 /* StepTextSlugCleanupMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000070 /* StepTextSlugCleanupMigration.swift */; };
+		A65A001000000073 /* StepTextSlugCleanupMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */; };
 		A65A001000000031 /* OnboardingRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000030 /* OnboardingRouter.swift */; };
 		A65A001000000033 /* OnboardingRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000032 /* OnboardingRouterTests.swift */; };
 		8F2B8B2F76773A77D352A2F4 /* RecipeImportRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BF5057383A80C6F621CA46 /* RecipeImportRepositoryTests.swift */; };
@@ -518,6 +520,8 @@
 		A65A001000000014 /* WidgetNudgeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeServiceTests.swift; sourceTree = "<group>"; };
 		A65A001000000020 /* PantryTombstoneReaper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaper.swift; sourceTree = "<group>"; };
 		A65A001000000022 /* PantryTombstoneReaperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaperTests.swift; sourceTree = "<group>"; };
+		A65A001000000070 /* StepTextSlugCleanupMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepTextSlugCleanupMigration.swift; sourceTree = "<group>"; };
+		A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepTextSlugCleanupMigrationTests.swift; sourceTree = "<group>"; };
 		A65A001000000030 /* OnboardingRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRouter.swift; sourceTree = "<group>"; };
 		A65A001000000032 /* OnboardingRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRouterTests.swift; sourceTree = "<group>"; };
 		56546586BCB70F4F89CB109C /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
@@ -802,6 +806,7 @@
 				ADBA47A23EA00017E673F484 /* TonightSnapshotService.swift */,
 				A65A001000000012 /* WidgetNudgeService.swift */,
 				A65A001000000020 /* PantryTombstoneReaper.swift */,
+				A65A001000000070 /* StepTextSlugCleanupMigration.swift */,
 				6DE4A6746B60DA63C17DB13D /* WidgetReloadCoordinator.swift */,
 			);
 			path = Services;
@@ -854,6 +859,7 @@
 				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				A65A001000000022 /* PantryTombstoneReaperTests.swift */,
+				A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */,
 				A65A001000000032 /* OnboardingRouterTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
 				A6F81D1F454D4DCE504208AC /* OutcomeFeedbackRepositoryTests.swift */,
@@ -1757,6 +1763,7 @@
 				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */,
+				A65A001000000073 /* StepTextSlugCleanupMigrationTests.swift in Sources */,
 				A65A001000000033 /* OnboardingRouterTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
 				AF4E4302378037A836E8F993 /* OutcomeFeedbackRepositoryTests.swift in Sources */,
@@ -2017,6 +2024,7 @@
 				5E8F656515AC048F68C62633 /* WidgetReloadCoordinator.swift in Sources */,
 				A65A001000000011 /* WidgetNudgeService.swift in Sources */,
 				A65A001000000021 /* PantryTombstoneReaper.swift in Sources */,
+				A65A001000000071 /* StepTextSlugCleanupMigration.swift in Sources */,
 				A65A001000000031 /* OnboardingRouter.swift in Sources */,
 				245373B5D373BEE21454EACD /* TutorialFlowContainer.swift in Sources */,
 				A34FCF1DDFCF240B1B2357A3 /* TutorialStepView.swift in Sources */,
