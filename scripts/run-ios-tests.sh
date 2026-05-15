@@ -20,14 +20,22 @@
 #   3. Run `xcodebuild test -scheme Stir -destination ... -quiet` and
 #      capture stdout to a tempfile so the flake heuristics have
 #      something to grep.
-#   4. On non-zero exit, detect the two flake signatures the pre-push
-#      hook already enumerates:
+#   4. On non-zero exit, detect three flake signatures (mirrored in
+#      the pre-push hook):
 #        - SBMainWorkspace preflight failure (sim wedged before runner
 #          installed) — SCA-208.
+#        - Test-runner SIGKILL — bundle-launch crash ("Early unexpected
+#          exit, operation never finished bootstrapping... Test crashed
+#          with signal kill before establishing connection") OR per-test
+#          SIGKILL mid-suite. Per-test only appears in TMPLOG when it
+#          arrives alongside the bundle-launch preamble; pure per-test
+#          crashes (e.g. SubstitutionSheetViewModelTests, obs 4468)
+#          only land in the xcresult bundle and slip past this grep —
+#          tracked as Linear follow-up on SCA-426.
 #        - Silent test-runner death: log < 20 lines AND no test markers
 #          (xcodebuild died between consecutive invocations without
 #          producing any test output at all) — SCA-364.
-#      On either match: shutdown + ERASE + boot the sim, sleep 5s, retry
+#      On any match: shutdown + ERASE + boot the sim, sleep 5s, retry
 #      ONCE. The erase is the SCA-383 upgrade — shutdown+boot wasn't
 #      enough for the wedged sim observed in observation 4472.
 #   5. Real test failures (substantive log w/ test markers) bypass
