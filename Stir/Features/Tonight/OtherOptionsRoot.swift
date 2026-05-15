@@ -97,13 +97,10 @@ struct OtherOptionsRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             content
-                // Keep `navigationTitle` for the back-chevron label that
-                // pushed destinations (DishPreviewView) read; the
-                // visual title comes from the .principal toolbar item
-                // below in the Stir display serif (matches Settings /
-                // Saved / Substitution sheet so cross-screen rhythm
-                // holds). Default `navigationTitle` chrome would fall
-                // back to SF Pro Bold and read as off-brand.
+                // Keep `.navigationTitle` for the implicit back-chevron
+                // label deeper pushed screens (DishPreviewView) read,
+                // plus VoiceOver — visible chrome is `.stirTopBar`
+                // below.
                 .navigationTitle("Other options")
                 .navigationBarTitleDisplayMode(.inline)
                 // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
@@ -113,8 +110,6 @@ struct OtherOptionsRoot: View {
                         StirTopBarTextButton("Cancel", action: onDismiss)
                     },
                 )
-                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case let .preview(dish):
