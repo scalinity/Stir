@@ -48,21 +48,13 @@ struct ImportEntryView: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Import recipe")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: onDismiss)
-                        .foregroundStyle(Color.Stir.ink700)
-                        .accessibilityLabel("Close")
-                        .accessibilityHint("Cancels the import and closes this screen")
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Import recipe")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Import recipe",
+                leading: {
+                    StirTopBarTextButton("Close", action: onDismiss)
+                },
+            )
             .onChange(of: pickerItem) { _, newItem in
                 if let newItem { Task { await handlePicked(newItem) } }
             }
@@ -295,24 +287,21 @@ private struct PasteSheet: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Paste recipe")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(Color.Stir.ink700)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Paste recipe")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Import", action: onSubmit)
-                        .foregroundStyle(text.isEmpty ? Color.Stir.ink300 : Color.Stir.ember600)
-                        .disabled(text.isEmpty)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Paste recipe",
+                leading: {
+                    StirTopBarTextButton("Cancel") { dismiss() }
+                },
+                trailing: {
+                    StirTopBarTextButton(
+                        "Import",
+                        emphasis: .prominent,
+                        isEnabled: !text.isEmpty,
+                        action: onSubmit,
+                    )
+                },
+            )
         }
     }
 }

@@ -66,18 +66,13 @@ struct ConstraintsSheet: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Tonight's constraints")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Tonight's constraints")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Tonight's constraints",
+                leading: {
+                    StirTopBarTextButton("Cancel") { dismiss() }
+                },
+            )
         }
     }
 

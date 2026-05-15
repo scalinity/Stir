@@ -44,22 +44,16 @@ struct ImportReviewView: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Review import")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Review import",
+                leading: {
+                    StirTopBarTextButton("Cancel") {
                         viewModel.cancelImport()
                         onDismiss()
                     }
-                    .foregroundStyle(Color.Stir.ink700)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Review import")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+                },
+            )
         }
     }
 
