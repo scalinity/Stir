@@ -36,8 +36,9 @@
 #      installed), or (b) SCA-364: the log is < 20 lines AND contains
 #      no test markers (silent test-runner death — observed twice in
 #      the SCA-334 session between consecutive xcodebuild invocations).
-#      Retry flow: `simctl shutdown all` + boot iPhone 17 Pro Max +
-#      5 s sleep + re-run of `xcodebuild test` exactly ONCE. Retry
+#      Retry flow: `simctl shutdown all` + `simctl erase` (SCA-426) +
+#      boot iPhone 17 Pro Max + 5 s sleep + re-run of `xcodebuild test`
+#      exactly ONCE. Retry
 #      success emits a distinct `[pre-push] ✅ retried after sim flake`
 #      summary so the audit trail captures the event.
 #
@@ -183,8 +184,14 @@ if [ "$EXIT" != "0" ]; then
 fi
 
 if [ -n "$SIM_FLAKE_REASON" ]; then
-    echo "[pre-push] ⚠️  simulator flake detected ($SIM_FLAKE_REASON) — resetting sim and retrying once"
+    # SCA-426: upgrade shutdown+boot to shutdown+ERASE+boot. SCA-383
+    # (observation 4472) needed a full sim erase to recover from a
+    # wedged state that shutdown+boot couldn't clear. The erase costs
+    # ~2s on top of the retry and is only on the failure branch, so
+    # the latency hit is acceptable for the reliability win.
+    echo "[pre-push] ⚠️  simulator flake detected ($SIM_FLAKE_REASON) — erasing sim and retrying once"
     xcrun simctl shutdown all >/dev/null 2>&1 || true
+    xcrun simctl erase "iPhone 17 Pro Max" >/dev/null 2>&1 || true
     xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
     sleep 5
 
