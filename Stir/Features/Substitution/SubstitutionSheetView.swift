@@ -76,11 +76,9 @@ struct SubstitutionSheetView: View {
     var body: some View {
         NavigationStack {
             content(vm: viewModel)
-                // Keep `navigationTitle` for the back-chevron label +
-                // VoiceOver; the visible title comes from the .principal
-                // toolbar item below in the Stir display serif. Default
-                // chrome would render in SF Pro Bold and break the
-                // cross-screen rhythm (matches Settings / Saved / Pantry).
+                // Keep `.navigationTitle` for the implicit back-chevron
+                // label any deeper pushed screen reads, plus VoiceOver —
+                // visible chrome is `.stirTopBar` below.
                 .navigationTitle("Substitute")
                 .navigationBarTitleDisplayMode(.inline)
                 // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
