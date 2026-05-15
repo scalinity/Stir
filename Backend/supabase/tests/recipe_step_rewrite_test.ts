@@ -5,9 +5,9 @@
 // idempotency cache. Happy-path Gemini round-trips live in the eval
 // harness, not CI.
 
-import { assertEquals } from '@std/assert';
+import { assertEquals, assertNotEquals } from '@std/assert';
 import { quickBootstrap, testInstallId, testIPHeaders } from './_helpers/factory.ts';
-import { clearRateLimitBuckets } from './_helpers/pg.ts';
+import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
 
 await clearRateLimitBuckets();
 
@@ -195,3 +195,67 @@ Deno.test('recipe-step-rewrite: VAL-01 on malformed JSON body', async () => {
   assertEquals(res.status, 400);
   assertEquals(res.body.error, 'VAL-01');
 });
+
+// ---------------------------------------------------------------------------
+// SCA-432 review-fix regression: cache-namespacing
+// ---------------------------------------------------------------------------
+//
+// The accept flow calls /v1/ai/substitution then /v1/ai/recipe-step-rewrite
+// with the SAME sub_event_id. `ai_response_cache`'s PK is (canonical_user_key,
+// request_id) — feature_key is NOT part of the key (migration
+// 20260418000024). Without namespacing, rewrite's readCache would hit
+// substitution's body and iOS would decode it as a RecipeStepRewriteResponse
+// (missing `rewritten_text`) and the rewrite would never land.
+//
+// This test seeds the cache with a fake substitution-shaped body under the
+// bare sub_event_id, then calls recipe-step-rewrite with that sub_event_id.
+// If the handler is correctly namespaced, the readCache miss falls through
+// to the Gemini call (which we don't mock — but the response shape, not the
+// content, is what we assert: rewritten_text vs substitution_text).
+Deno.test(
+  "recipe-step-rewrite: does NOT replay substitution's cache body under shared sub_event_id",
+  async () => {
+    const boot = await quickBootstrap({ installation_id: testInstallId() });
+    const subEventId = crypto.randomUUID();
+    // Seed the cache with a substitution-shaped body under the BARE
+    // sub_event_id (mimicking what /v1/ai/substitution would write).
+    const sb = serviceClient();
+    const { error: seedErr } = await sb.from('ai_response_cache').insert({
+      canonical_user_key: boot.canonical_user_key,
+      request_id: subEventId,
+      response_body: {
+        sub_event_id: subEventId,
+        substitution_text: 'POISON: should not surface as rewritten_text',
+        amount_conversion: null,
+        constraint_safe: true,
+        constraint_violation_reason: null,
+        reasoning: 'cache-poison test',
+        confidence: 'high',
+        prompt_version: 'test-1.0.0',
+        latency_ms: 1,
+        retry_count: 0,
+      },
+      status_code: 200,
+      feature_key: 'substitution',
+    });
+    if (seedErr) throw seedErr;
+
+    const res = await callRewrite(validBody({ sub_event_id: subEventId }), boot.session_jwt);
+    // The substitution-shaped body would carry `substitution_text`. The
+    // rewrite path either returns `rewritten_text` (happy path) or a
+    // 502/AI-02 (Gemini failure / no_active_prompt) — either way, the
+    // poison string must NOT appear on the wire.
+    assertNotEquals(res.body.substitution_text, 'POISON: should not surface as rewritten_text');
+    // And we should never see substitution-only keys leak through.
+    assertEquals(
+      res.body.substitution_text,
+      undefined,
+      'substitution_text on the rewrite wire body means the cache namespacing is broken',
+    );
+    assertEquals(
+      res.body.constraint_safe,
+      undefined,
+      'constraint_safe on the rewrite wire body means the cache namespacing is broken',
+    );
+  },
+);
