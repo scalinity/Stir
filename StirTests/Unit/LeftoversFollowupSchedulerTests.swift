@@ -116,6 +116,36 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         XCTAssertNil(store.suppressedUntil, "user engaged — clear suppression")
     }
 
+    /// SCA-376 + SCA-418: `markMostRecentActioned` clears the
+    /// suppression key UNCONDITIONALLY, even when history is empty.
+    /// Pre-SCA-376 the unconditional clear sat behind the
+    /// `guard let last = entries.indices.last else { return }` so an
+    /// empty-history call (e.g. SCA-317 use-soon card-tap routing
+    /// after a defaults reset) silently left the suppression armed.
+    /// SCA-418 pins the contract so a future "optimization" that
+    /// reverts the order surfaces in tests immediately.
+    func test_historyStore_markMostRecentActioned_emptyHistory_clearsSuppression() {
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
+        // Arm suppression manually (no history entries).
+        defaults.set(
+            Date().addingTimeInterval(7 * 86_400),
+            forKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
+        XCTAssertNotNil(store.suppressedUntil, "precondition: suppression manually armed")
+        XCTAssertEqual(store.firesInLastWeek(asOf: Date()).count, 0, "precondition: history empty")
+
+        // SCA-376 contract: clears suppression even though entries.last is nil.
+        store.markMostRecentActioned(at: Date())
+        XCTAssertNil(
+            store.suppressedUntil,
+            "SCA-376/SCA-418: markMostRecentActioned must clear suppression UNCONDITIONALLY (empty-history path).",
+        )
+    }
+
     func test_historyStore_actionedRunResetsStreak() {
         let store = NotificationHistoryStore(
             defaults: defaults,

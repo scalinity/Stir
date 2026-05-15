@@ -81,24 +81,19 @@ final class LeftoversFollowupScheduler {
         // Suppression preflight via shared kit — both schedulers share the
         // suppressedUntil + weekly-cap policy; the kit returns the reason
         // and we emit the leftovers-specific telemetry event.
+        // SCA-402: emit via the shared kit helper instead of an inlined
+        // switch. Single source of truth for the reason → telemetry-property
+        // + OSLog-breadcrumb mapping; sibling schedulers stay in lockstep.
         if let reason = NotificationSchedulerKit.evaluateSuppression(
             history: history,
             now: policyNow,
         ) {
-            switch reason {
-            case let .unactionedStreak(until):
-                telemetry.capture(.leftoversFollowupSuppressed, properties: [
-                    "reason": "unactioned_streak",
-                ])
-                Logger.leftoversFollowup.info(
-                    "suppressed until \(until.ISO8601Format(), privacy: .public) — skipping schedule",
-                )
-            case .weeklyCap:
-                telemetry.capture(.leftoversFollowupSuppressed, properties: [
-                    "reason": "weekly_cap",
-                ])
-                Logger.leftoversFollowup.info("weekly cap (2/7d) reached — skipping schedule")
-            }
+            NotificationSchedulerKit.emitSuppressed(
+                reason,
+                event: .leftoversFollowupSuppressed,
+                telemetry: telemetry,
+                logger: Logger.leftoversFollowup,
+            )
             return
         }
 
