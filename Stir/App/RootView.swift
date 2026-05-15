@@ -162,6 +162,15 @@ struct RootView: View {
                     // 24h cadence release).
                     Task { await coordinator.pantryTombstoneReaper.runIfDue(for: household) }
                 }
+                // SCA-430: one-shot legacy slug cleanup. Idempotent
+                // by UserDefaults flag — repeat foregrounds after the
+                // initial pass are free no-ops. Household-agnostic
+                // (scans the entire local store, not scoped to one
+                // profile), so this fires regardless of the
+                // `coordinator.phase == .ready` gate; the migration
+                // only writes to RecipeStep, which Core Data sets up
+                // unconditionally on launch.
+                Task { await coordinator.stepTextSlugCleanupMigration.runIfNeeded() }
             }
         }
         .onOpenURL { url in

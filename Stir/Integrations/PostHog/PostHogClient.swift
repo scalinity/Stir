@@ -193,6 +193,28 @@ enum TelemetryEvent: String, Sendable, CaseIterable {
     /// only after success, so failures don't poison the schedule.
     /// Counts only; no item names per ADR 0009's privacy invariant.
     case pantryTombstoneReaperRan = "pantry_tombstone_reaper_ran"
+    /// SCA-430: emitted by `StepTextSlugCleanupMigration.runIfNeeded()`
+    /// once per install after a successful scan over
+    /// `RecipeStep.instructionText`, replacing the 10 multi-token
+    /// `KitchenEquipment.CommonCode` slugs (e.g. `food_processor`)
+    /// with their lowercased displayName (`food processor`). One-shot
+    /// per install — the UserDefaults flag
+    /// `com.scalinity.stir.migrations.stepTextSlugCleanup.v1` gates
+    /// subsequent runs.
+    ///
+    /// Properties:
+    ///   - `steps_scanned`: integer ≥ 0 — RecipeStep rows visited
+    ///     (every step in the local Core Data store, no filter).
+    ///   - `steps_updated`: integer ≥ 0 — rows whose `instructionText`
+    ///     actually changed. `steps_updated == 0` is valid (new
+    ///     install with no legacy prose; install that already
+    ///     completed the migration before this telemetry case
+    ///     existed would never re-emit since the flag would be set).
+    ///
+    /// Failed runs (Core Data fault during fetch/save) emit nothing
+    /// and retry on the next foreground; the flag moves only after
+    /// success. Counts only; no instruction prose per ADR 0009.
+    case stepTextSlugCleanupCompleted = "step_text_slug_cleanup_completed"
     /// SCA-99 / ADR 0035: emitted by `EntitlementService.applyTierChange`
     /// after `PantryItemRepository.reconcileForTierChange` completes a
     /// soft-archive pass on a tier-downgrade hydrate (Premium/Pro → Free
