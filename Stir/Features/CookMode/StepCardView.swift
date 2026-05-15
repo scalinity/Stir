@@ -65,21 +65,20 @@ struct StepCardView: View {
             content: { VoiceModeTutorial() },
             shouldPresent: viewModel.isVoiceActive,
         )
-        .confirmationDialog(
-            "Leave Cook Mode?",
+        .stirDialog(
             isPresented: $viewModel.exitConfirmRequested,
-            titleVisibility: .visible,
-        ) {
-            Button("Keep cooking", role: .cancel) {}
-            Button("Pause and resume later") {
-                Task { await viewModel.exit(markAbandoned: false) }
-            }
-            Button("Abandon session", role: .destructive) {
-                Task { await viewModel.exit(markAbandoned: true) }
-            }
-        } message: {
-            Text("Your progress is saved. You can resume from Tonight Home.")
-        }
+            title: "Leave Cook Mode?",
+            message: "Your progress is saved. You can resume from Tonight Home.",
+            buttons: [
+                .secondary("Pause and resume later") {
+                    Task { await viewModel.exit(markAbandoned: false) }
+                },
+                .destructive("Abandon session") {
+                    Task { await viewModel.exit(markAbandoned: true) }
+                },
+                .cancel("Keep cooking"),
+            ],
+        )
     }
 
     /// The original Cook Mode body — full chrome with topBar, instruction
@@ -121,21 +120,20 @@ struct StepCardView: View {
                         .frame(height: 1)
                 }
         }
-        .confirmationDialog(
-            "Leave Cook Mode?",
+        .stirDialog(
             isPresented: $viewModel.exitConfirmRequested,
-            titleVisibility: .visible,
-        ) {
-            Button("Keep cooking", role: .cancel) {}
-            Button("Pause and resume later") {
-                Task { await viewModel.exit(markAbandoned: false) }
-            }
-            Button("Abandon session", role: .destructive) {
-                Task { await viewModel.exit(markAbandoned: true) }
-            }
-        } message: {
-            Text("Your progress is saved. You can resume from Tonight Home.")
-        }
+            title: "Leave Cook Mode?",
+            message: "Your progress is saved. You can resume from Tonight Home.",
+            buttons: [
+                .secondary("Pause and resume later") {
+                    Task { await viewModel.exit(markAbandoned: false) }
+                },
+                .destructive("Abandon session") {
+                    Task { await viewModel.exit(markAbandoned: true) }
+                },
+                .cancel("Keep cooking"),
+            ],
+        )
     }
 
     // MARK: - Top bar
