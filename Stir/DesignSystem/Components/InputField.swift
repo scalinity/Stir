@@ -33,6 +33,20 @@ struct InputField: View {
     let autocapitalization: TextInputAutocapitalization
     let submitLabel: SubmitLabel
     let onSubmit: (() -> Void)?
+    /// When `true`, the underlying `TextField` becomes first responder
+    /// the first time the view appears — bringing the keyboard up
+    /// immediately. Defaults `false` so existing call sites that drive
+    /// focus externally (or don't want auto-focus) are unaffected.
+    ///
+    /// SCA-427: when an `InputField` lives inside a `StirDialog` slot,
+    /// the native `.alert + TextField` behaviour (keyboard pops with
+    /// the dialog) was lost because nothing called `becomeFirstResponder`
+    /// on the wrapped `TextField`. This flag plus the internal
+    /// `@FocusState` restores it without forcing every other caller to
+    /// thread a focus binding.
+    let autoFocusOnAppear: Bool
+
+    @FocusState private var internalFocused: Bool
 
     init(
         placeholder: String,
@@ -42,6 +56,7 @@ struct InputField: View {
         keyboardType: UIKeyboardType = .default,
         autocapitalization: TextInputAutocapitalization = .sentences,
         submitLabel: SubmitLabel = .done,
+        autoFocusOnAppear: Bool = false,
         onSubmit: (() -> Void)? = nil,
     ) {
         self.placeholder = placeholder
@@ -51,6 +66,7 @@ struct InputField: View {
         self.keyboardType = keyboardType
         self.autocapitalization = autocapitalization
         self.submitLabel = submitLabel
+        self.autoFocusOnAppear = autoFocusOnAppear
         self.onSubmit = onSubmit
     }
 
@@ -62,6 +78,7 @@ struct InputField: View {
                 .keyboardType(keyboardType)
                 .textInputAutocapitalization(autocapitalization)
                 .submitLabel(submitLabel)
+                .focused($internalFocused)
                 .onSubmit { onSubmit?() }
                 .padding(.horizontal, CGFloat.Stir.space4)
                 .frame(height: 48)
@@ -79,6 +96,15 @@ struct InputField: View {
                 // Text below. Falls back to `text` (default behavior)
                 // when there's no error. Review finding W-F W27 (FD1).
                 .accessibilityValue(errorMessage.map { "Error: \($0)" } ?? text)
+                .onAppear {
+                    if autoFocusOnAppear {
+                        // Defer one runloop so the wrapping presentation
+                        // (e.g. StirDialog overlay transition) has time
+                        // to settle — UIKit ignores becomeFirstResponder
+                        // calls issued mid-transition.
+                        DispatchQueue.main.async { internalFocused = true }
+                    }
+                }
 
             if let errorMessage {
                 Text(errorMessage)

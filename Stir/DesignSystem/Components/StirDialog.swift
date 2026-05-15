@@ -175,6 +175,8 @@ private struct StirDialogOverlay<Slot: View>: View {
     let buttons: [StirDialogButton]
     let onDismiss: () -> Void
 
+    @AccessibilityFocusState private var titleFocused: Bool
+
     var body: some View {
         ZStack {
             // 40% black scrim — same dim as native UIAlertController so
@@ -192,6 +194,7 @@ private struct StirDialogOverlay<Slot: View>: View {
                         .foregroundStyle(Color.Stir.ink900)
                         .multilineTextAlignment(.center)
                         .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($titleFocused)
                     if let message {
                         Text(message)
                             .stirFont(.bodyMd)
@@ -200,9 +203,11 @@ private struct StirDialogOverlay<Slot: View>: View {
                     }
                 }
 
-                if Slot.self != EmptyView.self {
-                    slot
-                }
+                // EmptyView is a no-op in a VStack (zero size, no
+                // spacing contribution), so the previous
+                // `Slot.self != EmptyView.self` runtime metatype check
+                // added a per-body branch without changing behaviour.
+                slot
 
                 VStack(spacing: CGFloat.Stir.space2) {
                     ForEach(buttons) { button in
@@ -215,16 +220,29 @@ private struct StirDialogOverlay<Slot: View>: View {
             }
             .padding(CGFloat.Stir.space5)
             .frame(maxWidth: 320)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusXl, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusXl, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            // Card surface: .stirCard collapses the previous
+            // background-RoundedRect + overlay-stroke pair (W-C W15)
+            // so the fill and stroke radii can't drift apart.
+            .stirCard(
+                fill: Color.Stir.paper100,
+                radius: CGFloat.Stir.radiusXl,
             )
             .stirShadow(.modal)
             .padding(.horizontal, CGFloat.Stir.screenMargin)
+            // VoiceOver: treat the card as a modal so VO doesn't read
+            // the underlying screen, give it an .escape action mapped
+            // to dismiss (two-finger Z gesture), and force focus onto
+            // the title when the overlay first appears so a blind user
+            // hears the dialog announce itself the way native .alert
+            // does. The .onAppear flips titleFocused after one runloop
+            // because @AccessibilityFocusState changes issued during
+            // the same body pass as the view appears are coalesced.
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape, onDismiss)
+            .onAppear {
+                DispatchQueue.main.async { titleFocused = true }
+            }
         }
     }
 
@@ -265,7 +283,10 @@ private struct StirDialogButtonView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(button.title)
-        .accessibilityAddTraits(button.role == .destructive ? .isButton : .isButton)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(button.role == .destructive
+            ? "Discards your progress"
+            : "")
     }
 
     private var foreground: Color {
