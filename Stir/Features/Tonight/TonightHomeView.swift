@@ -82,10 +82,8 @@ struct TonightHomeView: View {
         // SCA-269 (S3 from /review-5): day-boundary computation now uses
         // `Calendar.dateComponents([.day], from: now, to: expiresAt)`
         // to avoid the DST off-by-one that `Int(remaining / 86_400)`
-        // produces across daylight-savings transitions. Mirrors the
-        // pattern in `lastScanSubtitle` (the only other caller in this
-        // file that bins time into days). Hour-bucket math stays on
-        // raw seconds — sub-day, no DST surface.
+        // produces across daylight-savings transitions. Hour-bucket
+        // math stays on raw seconds — sub-day, no DST surface.
         func subtitle(now: Date = Date()) -> String {
             let remaining = expiresAt.timeIntervalSince(now)
             guard remaining > 0 else { return "Expires soon" }
@@ -108,7 +106,7 @@ struct TonightHomeView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space2)
-            // Generous bottom padding so the last row (Re-scan / Solve
+            // Generous bottom padding so the last row (Rescan / Solve
             // again secondary tiles) clears the floating tab bar with
             // headroom even at max scroll. Earlier 24pt was just barely
             // sufficient when the bar used a positive bottom inset, but
@@ -526,23 +524,20 @@ struct TonightHomeView: View {
         }
     }
 
-    /// Re-scan + Solve again secondary tile row beneath the hero card
-    /// (mockup-03 §Default state). Re-scan opens `ScanFlowRoot`; Solve
+    /// Rescan + Solve again secondary tile row beneath the hero card
+    /// (mockup-03 §Default state). Rescan opens `ScanFlowRoot`; Solve
     /// again opens `SolveAgainRoot` — the constraints-sheet →
     /// DinnerOptionsView → DishPreviewView flow seeded with the latest
-    /// pantry snapshot, bypassing the camera. Re-scan's subtitle
-    /// reflects how long ago the latest solve happened (proxy for
-    /// last-scan time since pantry parse and solve fire in the same
-    /// transaction). Re-scan honors `disable_scan_parse` with a
-    /// disabled visual + unavailable copy.
+    /// pantry snapshot, bypassing the camera. Rescan renders icon +
+    /// label only (centered) so its tile is visually quieter than
+    /// Solve again. Rescan honors `disable_scan_parse` with a disabled
+    /// visual + unavailable copy (subtitle returns in that state).
     private func secondaryTiles(for pick: SolveRepository.TonightPick) -> some View {
         HStack(spacing: CGFloat.Stir.space2 + 2) {           // 10pt
             secondaryTile(
                 icon: Image.Stir.camera,
-                title: scanIsKillSwitched ? "Scan unavailable" : "Re-scan",
-                subtitle: scanIsKillSwitched
-                    ? "Temporarily paused"
-                    : lastScanSubtitle(for: pick),
+                title: scanIsKillSwitched ? "Scan unavailable" : "Rescan",
+                subtitle: scanIsKillSwitched ? "Temporarily paused" : nil,
                 isEnabled: !scanIsKillSwitched,
                 action: handleScanTap,
             )
@@ -559,7 +554,7 @@ struct TonightHomeView: View {
     private func secondaryTile(
         icon: Image,
         title: String,
-        subtitle: String,
+        subtitle: String?,
         isEnabled: Bool,
         action: @escaping () -> Void,
     ) -> some View {
@@ -570,17 +565,24 @@ struct TonightHomeView: View {
                 icon
                     .font(.system(size: CGFloat.Stir.iconMd, weight: .regular))
                     .foregroundStyle(iconTint)
-                VStack(alignment: .leading, spacing: 2) {
+                if let subtitle {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .stirFont(.labelLg)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(titleColor)
+                        Text(subtitle)
+                            .stirFont(.bodySm)
+                            .foregroundStyle(Color.Stir.ink500)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
                     Text(title)
                         .stirFont(.labelLg)
                         .fontWeight(.semibold)
                         .foregroundStyle(titleColor)
-                    Text(subtitle)
-                        .stirFont(.bodySm)
-                        .foregroundStyle(Color.Stir.ink500)
-                        .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(CGFloat.Stir.space3 + 2)               // 14pt
             .frame(maxWidth: .infinity)
@@ -589,7 +591,7 @@ struct TonightHomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
-        .accessibilityHint(subtitle)
+        .accessibilityHint(subtitle ?? "")
     }
 
     /// Re-solve from the latest pantry snapshot, no camera. Reads the
@@ -723,40 +725,6 @@ struct TonightHomeView: View {
               let displayName = item.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
               !displayName.isEmpty else { return nil }
         return UseSoonCandidate(id: id, displayName: displayName, expiresAt: expiresAt)
-    }
-
-    /// "Last: 2 days ago" / "Last: today" — bucket time since the
-    /// latest solve into mockup-03's coarse copy. Solve and pantry
-    /// parse fire in the same ScanFlowRoot transaction, so the solve
-    /// timestamp is a faithful proxy for last-scan-time without a
-    /// separate scan-history field.
-    ///
-    /// Today/yesterday branches are calendar-anchored, NOT just
-    /// elapsed-seconds: a solve at 11pm last night viewed at 1am
-    /// today (2h elapsed) was technically yesterday on the calendar.
-    /// `Calendar.current.isDateInToday/isDateInYesterday` matches
-    /// the user's mental model.
-    private func lastScanSubtitle(for pick: SolveRepository.TonightPick) -> String {
-        let calendar = Calendar.current
-        let now = Date()
-        let elapsed = max(0, now.timeIntervalSince(pick.solvedAt))
-        if elapsed < 3600 {
-            return "Last: just now"
-        }
-        if calendar.isDateInToday(pick.solvedAt) {
-            return "Last: today"
-        }
-        if calendar.isDateInYesterday(pick.solvedAt) {
-            return "Last: yesterday"
-        }
-        // Beyond yesterday: count whole days using calendar, not
-        // 86_400-second buckets, so DST transitions don't off-by-one.
-        let days = calendar.dateComponents(
-            [.day],
-            from: calendar.startOfDay(for: pick.solvedAt),
-            to: calendar.startOfDay(for: now),
-        ).day ?? Int(elapsed / 86_400)
-        return "Last: \(max(2, days)) days ago"
     }
 
     /// Present the alts from the same MealSolveRequest as the current
