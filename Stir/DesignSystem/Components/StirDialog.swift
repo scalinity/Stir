@@ -222,9 +222,14 @@ private struct StirDialogOverlay<Slot: View>: View {
             .frame(maxWidth: 320)
             // Card surface: .stirCard collapses the previous
             // background-RoundedRect + overlay-stroke pair (W-C W15)
-            // so the fill and stroke radii can't drift apart.
+            // so the fill and stroke radii can't drift apart. SCA-434:
+            // fill is paper.50 (the screen background) rather than the
+            // usual paper.100 card surface so the in-card buttons
+            // (paper.100) read as a brighter step-up layer on top —
+            // matches the elevation grammar elsewhere in the app
+            // (screens = paper.50, cards-on-screens = paper.100).
             .stirCard(
-                fill: Color.Stir.paper100,
+                fill: Color.Stir.paper50,
                 radius: CGFloat.Stir.radiusXl,
             )
             .stirShadow(.modal)
