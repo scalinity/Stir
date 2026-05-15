@@ -91,7 +91,7 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertTrue(vm.substitutionPresentationRequested)
     }
 
-    // MARK: - Voice substitution apply + acceptedSwaps projection
+    // MARK: - Voice substitution apply
 
     func test_applyVoiceSubstitution_exactMatch_mutatesIngredient() throws {
         let pasta = try addIngredient(named: "dried pasta", amount: "12 oz")
@@ -233,57 +233,6 @@ final class CookModeViewModelTests: XCTestCase {
         XCTAssertEqual(events.count, 1)
         XCTAssertNil(events.first?.recipeIngredient)
         XCTAssertEqual(events.first?.missingIngredientDisplayName, "cilantro")
-    }
-
-    func test_acceptedSwaps_projectsFromSession() throws {
-        try addIngredient(named: "dried pasta", amount: "12 oz")
-        try addIngredient(named: "heavy cream", amount: "1 cup")
-        let session = try freshSession()
-        let vm = makeVM(session: session)
-
-        vm.applyVoiceSubstitution(
-            subEventID: UUID(),
-            missingIngredient: "dried pasta",
-            substitutionText: "rice noodles",
-            amountConversion: nil,
-        )
-        vm.applyVoiceSubstitution(
-            subEventID: UUID(),
-            missingIngredient: "heavy cream",
-            substitutionText: "coconut cream",
-            amountConversion: nil,
-        )
-
-        let swaps = vm.acceptedSwaps
-        XCTAssertEqual(swaps.count, 2)
-        // Order is by event createdAt ascending — first applied first.
-        XCTAssertEqual(swaps[0].original, "dried pasta")
-        XCTAssertEqual(swaps[0].swap, "rice noodles")
-        XCTAssertEqual(swaps[1].original, "heavy cream")
-        XCTAssertEqual(swaps[1].swap, "coconut cream")
-    }
-
-    func test_acceptedSwaps_originalNameSurvivesIngredientMutation() throws {
-        // Regression: missingLabel must read the snapshot, not the FK's
-        // post-mutation displayName. Without the snapshot rule (added
-        // alongside applyAcceptedSwap), the badge would render
-        // "rice noodles (was: rice noodles)" — both halves drift to
-        // the swap text.
-        try addIngredient(named: "dried pasta", amount: "12 oz")
-        let session = try freshSession()
-        let vm = makeVM(session: session)
-
-        vm.applyVoiceSubstitution(
-            subEventID: UUID(),
-            missingIngredient: "dried pasta",
-            substitutionText: "rice noodles",
-            amountConversion: nil,
-        )
-
-        let swap = try XCTUnwrap(vm.acceptedSwaps.first)
-        XCTAssertEqual(swap.original, "dried pasta",
-                       "original must be the snapshot taken before applyAcceptedSwap mutated displayName")
-        XCTAssertEqual(swap.swap, "rice noodles")
     }
 
     // MARK: - Exit + finish flags

@@ -165,6 +165,46 @@ actor AIDispatch {
         )
     }
 
+    // MARK: - Recipe step rewrite (SCA-432)
+
+    /// Non-streaming single-shot prose rewrite of one cooking step. Called
+    /// from SubstitutionSheetViewModel.accept() right after the user taps
+    /// Accept on a safe swap, so the step's instructionText references
+    /// the substitute instead of the original ingredient. Replaces the
+    /// pre-SCA-432 swap-badge banner.
+    ///
+    /// Server idempotency: sub_event_id is reused from the upstream
+    /// substitution call, so a fast double-tap collapses to one Gemini
+    /// call (cache scoped by feature_key so this doesn't replay the
+    /// substitution payload). 20s timeout matches substitution().
+    func recipeStepRewrite(
+        request body: RecipeStepRewriteRequest,
+    ) async throws -> RecipeStepRewriteResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/recipe-step-rewrite")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "content-type")
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 20
+        do {
+            request.httpBody = try JSONEncoder.stir.encode(body)
+        } catch {
+            throw StirError.validation(
+                fieldErrors: [],
+                message: "failed to encode recipe-step-rewrite body: \(error.localizedDescription)",
+            )
+        }
+
+        Logger.aiDispatch.info(
+            "recipe_step_rewrite_dispatch sub_event_id=\(body.subEventID.uuidString, privacy: .public)",
+        )
+        let response: RecipeStepRewriteResponse = try await session.performAuthenticated(request)
+        Logger.aiDispatch.info(
+            "recipe_step_rewrite_complete retry=\(response.retryCount, privacy: .public) latency_ms=\(response.latencyMS, privacy: .public)",
+        )
+        return response
+    }
+
     // MARK: - Realtime Session mint (step 6 C.2 — Gemini Live)
 
     /// POST /v1/ai/realtime-session. Mints a single-use Gemini Live

@@ -797,6 +797,72 @@ enum SubstitutionResult: Sendable {
     )
 }
 
+// MARK: - Recipe step rewrite (SCA-432)
+
+/// Body for `/v1/ai/recipe-step-rewrite`. Sent right after the user
+/// taps Accept on a safe substitution. The server returns a single
+/// rewritten step prose blob that iOS persists onto
+/// `RecipeStep.instructionText`, replacing the original.
+///
+/// `subEventID` is the SAME UUID used for the upstream substitution
+/// call so the server's 10-min idempotency cache collapses a fast
+/// double-tap to one Gemini call. The feature_key on the cache row
+/// keeps this lookup distinct from the substitution call.
+struct RecipeStepRewriteRequest: Encodable, Sendable {
+    let subEventID: UUID
+    let stepInstructionText: String
+    let originalIngredient: String
+    let substituteIngredient: String
+    let amountConversion: String?
+    let recipeTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case subEventID = "sub_event_id"
+        case stepInstructionText = "step_instruction_text"
+        case originalIngredient = "original_ingredient"
+        case substituteIngredient = "substitute_ingredient"
+        case amountConversion = "amount_conversion"
+        case recipeTitle = "recipe_title"
+    }
+
+    /// Skip encoding optional fields when blank. Backend Zod is
+    /// `.min(1).max(N).optional()` so an empty pass-through trips VAL-01.
+    /// Same pattern as `SubstitutionRequest.MissingIngredient`.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(subEventID, forKey: .subEventID)
+        try c.encode(stepInstructionText, forKey: .stepInstructionText)
+        try c.encode(originalIngredient, forKey: .originalIngredient)
+        try c.encode(substituteIngredient, forKey: .substituteIngredient)
+        if let amount = amountConversion?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !amount.isEmpty
+        {
+            try c.encode(amount, forKey: .amountConversion)
+        }
+        if let title = recipeTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty
+        {
+            try c.encode(title, forKey: .recipeTitle)
+        }
+    }
+}
+
+struct RecipeStepRewriteResponse: Decodable, Sendable {
+    let subEventID: UUID
+    let rewrittenText: String
+    let promptVersion: String
+    let latencyMS: Int
+    let retryCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case subEventID = "sub_event_id"
+        case rewrittenText = "rewritten_text"
+        case promptVersion = "prompt_version"
+        case latencyMS = "latency_ms"
+        case retryCount = "retry_count"
+    }
+}
+
 // MARK: - Cook Turn (step 6 — Live API text fallback)
 //
 // Wire-format for /v1/ai/cook-turn. Sent by SpeechFallbackService after

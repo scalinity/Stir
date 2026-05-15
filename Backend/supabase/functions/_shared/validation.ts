@@ -374,6 +374,47 @@ export const SubstitutionRequest = z.object({
 export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
 
 // ---------------------------------------------------------------------------
+// /v1/ai/recipe-step-rewrite (SCA-432)
+// ---------------------------------------------------------------------------
+//
+// Called from SubstitutionSheetViewModel.accept() right after the user
+// taps Accept on a safe swap. Rewrites the CURRENT step's instructionText
+// so the prose references the substitute ingredient instead of the
+// original (e.g. "Mix flour, a pinch of salt..." → "Combine 1 cup of
+// finely crushed tortilla chips with a pinch of salt..."). Replaces the
+// pre-SCA-432 swap-badge banner UX which left the original prose intact
+// and showed a scrollable orange chip above the step.
+//
+// Idempotency: caller passes the same sub_event_id used for the
+// substitution request; cached for 10 min via ai_response_cache so an
+// accidental double-tap doesn't double-bill. Feature_key is distinct
+// (`recipe_step_rewrite`) so the cache lookups don't collide.
+//
+// step_instruction_text: the literal RecipeStep.instructionText to
+//   rewrite. Capped at 2000 chars (matches RealtimeRecipeContext bound).
+// original_ingredient: display name BEFORE the swap (e.g. "all-purpose
+//   flour"). The model uses this to locate references to swap out.
+// substitute_ingredient: display name AFTER the swap (e.g. "finely
+//   crushed tortilla chips"). What the rewritten prose should reference.
+// amount_conversion: optional. When the substitution endpoint produced
+//   a conversion ("1 cup → 1 cup", or "3 Tbsp butter → 2 Tbsp olive
+//   oil + 1 tsp lemon juice"), pass it through so the rewritten step
+//   carries the right quantity. Null when the swap is amountless.
+// recipe_title: passed for context only — helps the model preserve dish
+//   integrity in the rewrite ("the dough" stays a dough, not a batter).
+
+export const RecipeStepRewriteRequest = z.object({
+  sub_event_id: z.string().uuid(),
+  step_instruction_text: z.string().min(1).max(2000),
+  original_ingredient: z.string().min(1).max(128),
+  substitute_ingredient: z.string().min(1).max(400),
+  amount_conversion: z.string().min(1).max(400).optional(),
+  recipe_title: z.string().min(1).max(256).optional(),
+}).strict();
+
+export type RecipeStepRewriteRequest = z.infer<typeof RecipeStepRewriteRequest>;
+
+// ---------------------------------------------------------------------------
 // /v1/ai/realtime-session (step 6)
 // ---------------------------------------------------------------------------
 //

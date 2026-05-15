@@ -91,6 +91,45 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
         await fulfillment(of: [expect], timeout: 1.0)
     }
 
+    // MARK: - SCA-432: accept() rewrite graceful-degrade
+
+    /// When the rewrite dispatch fails (here: test.invalid AIDispatch),
+    /// accept() must still finish — applyAcceptedSwap on the ingredient
+    /// list runs first, telemetry fires, onFinished is invoked. Only the
+    /// step prose update is dropped. The step's instructionText stays
+    /// unchanged (no half-written state).
+    func test_accept_dispatchFailure_leavesStepTextUntouched() async throws {
+        // Wire a step with original prose. accept() will fire the rewrite
+        // call which will fail against test.invalid — the step text must
+        // remain identical to the original after the call returns.
+        let step = try makeStep(on: recipePlan, number: 1, instructionText: "Mix flour and water.")
+        // Persist a safe SubstitutionEvent so accept's guard passes.
+        let pasta = try XCTUnwrap(recipePlan.ingredientArray.first)
+        let repo = SubstitutionRepository(controller: controller)
+        let event = try repo.persist(SubstitutionRepository.PersistInput(
+            subEventId: UUID(),
+            session: session,
+            ingredient: pasta,
+            freeTextName: nil,
+            step: step,
+            userProblemText: "out of flour",
+            modelSuggestionText: "tortilla chips",
+            hardConstraintCheckPassed: true,
+        ))
+        let expect = expectation(description: "onFinished called")
+        let vm = makeVM(currentStep: step, onFinished: { expect.fulfill() })
+        // Drive the view-model into .safe state with the persisted event
+        // so accept() takes the full rewrite path. Uses the test-only
+        // seeder to bypass AIDispatch.submit().
+        vm._testingSeedSafeState(event: event, text: "tortilla chips", amountConversion: nil)
+        await vm.accept()
+        await fulfillment(of: [expect], timeout: 5.0)
+        XCTAssertEqual(step.instructionText, "Mix flour and water.",
+                       "dispatch failure must not corrupt the step prose")
+        XCTAssertEqual(event.acceptedBool, true,
+                       "accept telemetry must still record acceptance on rewrite failure")
+    }
+
     // MARK: - Analytics emission (pre-dispatch)
 
     func test_submit_emitsSubstitutionRequestedBeforeDispatch() async {
@@ -257,6 +296,7 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
     }
 
     private func makeVM(
+        currentStep: RecipeStep? = nil,
         onFinished: @escaping () -> Void = {},
         analytics: PostHogClient? = nil,
     ) -> SubstitutionSheetViewModel {
@@ -264,13 +304,29 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
             recipePlan: recipePlan,
             household: household,
             session: session,
-            currentStep: nil,
+            currentStep: currentStep,
             aiDispatch: aiDispatch,
             repository: SubstitutionRepository(controller: controller),
             pantryRepository: PantryItemRepository(controller: controller),
             analytics: analytics ?? .shared,
             onFinished: onFinished,
         )
+    }
+
+    private func makeStep(
+        on plan: RecipePlan,
+        number: Int,
+        instructionText: String,
+    ) throws -> RecipeStep {
+        let context = controller.viewContext
+        let step = RecipeStep(context: context)
+        step.id = UUID()
+        step.recipePlan = plan
+        step.stepNumber = Int16(number)
+        step.sortOrder = Int16(number)
+        step.instructionText = instructionText
+        try controller.save()
+        return step
     }
 
     private func makeAIDispatch() -> AIDispatch {

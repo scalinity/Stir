@@ -24,6 +24,13 @@ final class SubstitutionSheetViewModel {
         case safe(text: String, amountConversion: String?, reasoning: String, confidence: String, promptVersion: String)
         case unsafe(message: String, reason: String, promptVersion: String)
         case error(message: String)
+        /// SCA-432: brief in-sheet state shown after Accept while the
+        /// recipe-step-rewrite call is in flight (~1s). Distinct from
+        /// `.requesting` so the copy reads "Rewriting step…" instead
+        /// of "Checking for a safe swap…". On both success and failure
+        /// the sheet dismisses; the step card carries the rewrite (or
+        /// the original prose if dispatch failed).
+        case rewriting
     }
 
     private(set) var state: ViewState = .idle
@@ -99,6 +106,13 @@ final class SubstitutionSheetViewModel {
             onFinished()
             return
         }
+        // Snapshot the original ingredient label BEFORE applyAcceptedSwap
+        // mutates the linked RecipeIngredient.displayName — the rewrite
+        // call needs the pre-swap name to locate references in the prose.
+        // `missingLabel` reads `missingIngredientDisplayName` (snapshotted
+        // at persist time) so this is safe to read before OR after the
+        // swap, but we capture it here to keep the data-flow obvious.
+        let originalIngredient = event.missingLabel
         // Order matters: record the decision BEFORE mutating the recipe so
         // an applyAcceptedSwap failure (Core Data save) leaves a recorded
         // accept=true with acceptedAlternativeText for telemetry/audit even
@@ -122,6 +136,22 @@ final class SubstitutionSheetViewModel {
                 "applyAcceptedSwap failed: \(error.localizedDescription, privacy: .public)",
             )
         }
+        // SCA-432: rewrite the current step's prose so it references the
+        // substitute instead of the original ingredient. Replaces the
+        // pre-SCA-432 swap-badge banner. Failure modes are non-fatal:
+        // - no currentStep: nothing to rewrite (free-text substitution
+        //   on a step-less surface — shouldn't happen from Cook Mode
+        //   but the sheet is callable from other invocation paths)
+        // - empty step prose: nothing to rewrite
+        // - empty originalIngredient: rewrite would have no anchor
+        // - dispatch throws: log + continue; step stays as-is. The user
+        //   has already accepted; the swap is recorded; the ingredient
+        //   list is mutated. Only the prose update is lost.
+        await rewriteCurrentStep(
+            originalIngredient: originalIngredient,
+            substituteText: text,
+            amountConversion: amountConversion,
+        )
         // SCA-24: signal pantry that the swap-in ingredient was just
         // used. Recency improves voice-prompt prioritization. Failure-
         // tolerant: substitution acceptance is the user's primary
@@ -423,6 +453,57 @@ final class SubstitutionSheetViewModel {
             recipeSteps: recipePlan.substitutionRecipeSteps(),
         )
     }
+
+    // MARK: - Step rewrite (SCA-432)
+
+    /// Calls `/v1/ai/recipe-step-rewrite` with the current step's prose and
+    /// persists the rewrite on success. Non-fatal: any failure (missing
+    /// step / empty prose / dispatch throw) is logged and the method
+    /// returns without changing state. Caller is responsible for the
+    /// rest of the accept flow (pantry bump, telemetry, dismiss).
+    ///
+    /// Reuses the upstream `subEventID` so the server-side idempotency
+    /// cache collapses a fast double-tap into one Gemini call.
+    private func rewriteCurrentStep(
+        originalIngredient: String,
+        substituteText: String,
+        amountConversion: String?,
+    ) async {
+        guard let step = currentStep else { return }
+        let stepText = (step.instructionText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOriginal = originalIngredient.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSubstitute = substituteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stepText.isEmpty, !trimmedOriginal.isEmpty, !trimmedSubstitute.isEmpty else {
+            return
+        }
+        // Transition to the rewriting state so the sheet shows the
+        // "Rewriting step…" indicator. The sheet dismisses after this
+        // method returns, regardless of outcome.
+        state = .rewriting
+
+        let request = RecipeStepRewriteRequest(
+            subEventID: subEventID,
+            stepInstructionText: stepText,
+            originalIngredient: trimmedOriginal,
+            substituteIngredient: trimmedSubstitute,
+            amountConversion: amountConversion,
+            recipeTitle: recipePlan.title,
+        )
+        do {
+            let response = try await aiDispatch.recipeStepRewrite(request: request)
+            do {
+                try repository.applyStepRewrite(step: step, rewrittenText: response.rewrittenText)
+            } catch {
+                Logger.coreData.error(
+                    "applyStepRewrite failed: \(error.localizedDescription, privacy: .public)",
+                )
+            }
+        } catch {
+            Logger.aiDispatch.error(
+                "recipe_step_rewrite dispatch failed: \(error.localizedDescription, privacy: .public)",
+            )
+        }
+    }
 }
 
 extension SubstitutionSheetViewModel.ViewState {
@@ -431,3 +512,31 @@ extension SubstitutionSheetViewModel.ViewState {
         return false
     }
 }
+
+#if DEBUG
+extension SubstitutionSheetViewModel {
+    /// Test seam (SCA-432): seed the view model into `.safe` state with
+    /// an already-persisted SubstitutionEvent so unit tests can exercise
+    /// `accept()` without driving a full AIDispatch round-trip. Mirrors
+    /// the protected `PostHogClient(testingOnly:)` pattern — DEBUG-only
+    /// surface, production builds can't reach it. Underscore prefix
+    /// marks it as not-for-production.
+    func _testingSeedSafeState(
+        event: SubstitutionEvent,
+        text: String,
+        amountConversion: String?,
+        reasoning: String = "",
+        confidence: String = "high",
+        promptVersion: String = "test-1.0.0",
+    ) {
+        persistedEvent = event
+        state = .safe(
+            text: text,
+            amountConversion: amountConversion,
+            reasoning: reasoning,
+            confidence: confidence,
+            promptVersion: promptVersion,
+        )
+    }
+}
+#endif

@@ -1834,24 +1834,6 @@ final class CookModeViewModel {
         return .tie(winners.map { $0.0 })
     }
 
-    /// Read-only projection of accepted substitution swaps for the
-    /// current cooking session, ready for StepCardView's badge row to
-    /// render. Sourced from `session.substitutionArray` (already sorted
-    /// by createdAt). Each tuple is the original missing-ingredient
-    /// name (snapshot from persist time, not the post-mutation FK
-    /// displayName) and the accepted swap text. Free-text events with
-    /// no acceptedAlternativeText are filtered out — they don't carry
-    /// a coherent swap pair.
-    var acceptedSwaps: [(original: String, swap: String)] {
-        session.substitutionArray.compactMap { event in
-            guard event.typedAcceptance == .accepted else { return nil }
-            guard let swap = event.acceptedAlternativeText, !swap.isEmpty else { return nil }
-            let original = event.missingLabel
-            guard !original.isEmpty else { return nil }
-            return (original: original, swap: swap)
-        }
-    }
-
     /// SCA-80 forwarder for the close-summary $ai_trace (ADR 0009).
     /// endedReason: "user_exit" | "user_stop" | "user_pause" |
     /// "session_finish" | "error".

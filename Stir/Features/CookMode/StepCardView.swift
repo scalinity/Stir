@@ -101,7 +101,6 @@ struct StepCardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepHeader
-                    swapBadgeRow
                     cautionRow
                     instructionBody
                     timerSection
@@ -393,47 +392,6 @@ struct StepCardView: View {
                 .foregroundStyle(Color.Stir.ink700)
                 .lineLimit(1)
         }
-    }
-
-    /// Compact horizontal row of accepted-substitution badges for the
-    /// current cooking session. Rendered between stepHeader and
-    /// instructionBody so the user reads the swap context BEFORE the
-    /// step prose — instruction text still references the original
-    /// ingredient (e.g. "Add the dried pasta") and the badge tells the
-    /// user what they're actually using ("rice noodles (was: dried
-    /// pasta)"). No-op when the session has no accepted swaps.
-    @ViewBuilder
-    private var swapBadgeRow: some View {
-        let swaps = viewModel.acceptedSwaps
-        if !swaps.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: CGFloat.Stir.space2) {
-                    ForEach(Array(swaps.enumerated()), id: \.offset) { _, pair in
-                        swapBadge(swap: pair.swap, original: pair.original)
-                    }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Substitutions in this session: " + swaps
-                .map { "\($0.swap) instead of \($0.original)" }
-                .joined(separator: ", "))
-        }
-    }
-
-    private func swapBadge(swap: String, original: String) -> some View {
-        HStack(spacing: CGFloat.Stir.space1) {
-            Text(swap)
-                .stirFont(.labelMd).fontWeight(.semibold)
-                .foregroundStyle(Color.Stir.ember600)
-            Text("(was: \(original))")
-                .stirFont(.bodySm)
-                .foregroundStyle(Color.Stir.ink500)
-        }
-        .padding(.horizontal, CGFloat.Stir.space3)
-        .padding(.vertical, CGFloat.Stir.space1 + 2)
-        .background(
-            Capsule().fill(Color.Stir.ember100),
-        )
     }
 
     private var instructionBody: some View {

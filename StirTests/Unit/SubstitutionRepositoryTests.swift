@@ -178,7 +178,70 @@ final class SubstitutionRepositoryTests: XCTestCase {
                            "FK must still resolve to the (now-swapped) ingredient row")
     }
 
+    // MARK: - applyStepRewrite (SCA-432)
+
+    func test_applyStepRewrite_replacesInstructionText() throws {
+        let step = try makeStep(
+            on: recipePlan,
+            number: 1,
+            instructionText: "Mix flour, a pinch of salt, and water to form a soft dough.",
+        )
+        let rewritten = "Combine 1 cup of finely crushed tortilla chips with a pinch of salt and water to form a soft dough."
+        try repo.applyStepRewrite(step: step, rewrittenText: rewritten)
+        XCTAssertEqual(step.instructionText, rewritten)
+    }
+
+    func test_applyStepRewrite_trimsWhitespace() throws {
+        let step = try makeStep(
+            on: recipePlan,
+            number: 1,
+            instructionText: "Original.",
+        )
+        try repo.applyStepRewrite(step: step, rewrittenText: "  rewritten step.  \n")
+        XCTAssertEqual(step.instructionText, "rewritten step.",
+                       "leading/trailing whitespace must not bleed into the card render")
+    }
+
+    func test_applyStepRewrite_emptyRewrittenText_isNoOp() throws {
+        // Defense-in-depth: a degenerate model response (empty string) must
+        // never blank out the step. The model call already logs its outcome;
+        // this is the persist-boundary guard.
+        let step = try makeStep(
+            on: recipePlan,
+            number: 1,
+            instructionText: "Original prose.",
+        )
+        try repo.applyStepRewrite(step: step, rewrittenText: "")
+        XCTAssertEqual(step.instructionText, "Original prose.")
+    }
+
+    func test_applyStepRewrite_whitespaceOnlyRewrittenText_isNoOp() throws {
+        let step = try makeStep(
+            on: recipePlan,
+            number: 1,
+            instructionText: "Original prose.",
+        )
+        try repo.applyStepRewrite(step: step, rewrittenText: "   \n\t  ")
+        XCTAssertEqual(step.instructionText, "Original prose.")
+    }
+
     // MARK: - Helpers
+
+    private func makeStep(
+        on plan: RecipePlan,
+        number: Int,
+        instructionText: String,
+    ) throws -> RecipeStep {
+        let context = controller.viewContext
+        let step = RecipeStep(context: context)
+        step.id = UUID()
+        step.recipePlan = plan
+        step.stepNumber = Int16(number)
+        step.sortOrder = Int16(number)
+        step.instructionText = instructionText
+        try controller.save()
+        return step
+    }
 
     private func persistPickerEvent(on ingredient: RecipeIngredient) throws -> SubstitutionEvent {
         try repo.persist(SubstitutionRepository.PersistInput(

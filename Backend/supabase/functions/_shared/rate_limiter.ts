@@ -24,6 +24,7 @@ export type RateLimitPolicyKey =
   | 'ip:dinner_solve_daily'
   | 'ip:pantry_parse_daily'
   | 'ip:substitution_daily'
+  | 'ip:recipe_step_rewrite_daily'
   | 'ip:cook_turn_daily'
   | 'ip:bootstrap_hourly'
   | 'ip:recipe_import_daily'
@@ -58,6 +59,11 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<RateLimitPolicyKey, RateLimitP
   'ip:dinner_solve_daily': { windowSeconds: 86400, maxCount: 30 },
   'ip:pantry_parse_daily': { windowSeconds: 86400, maxCount: 100 },
   'ip:substitution_daily': { windowSeconds: 86400, maxCount: 50 },
+  // SCA-432: one rewrite per substitution-accept. A user can accept up
+  // to ~50 substitutions/day via the upstream IP cap, but might double-
+  // tap or re-cook the same step; 100/day/IP covers 2x the substitution
+  // cap with headroom and stays well within the per-call cost budget.
+  'ip:recipe_step_rewrite_daily': { windowSeconds: 86400, maxCount: 100 },
   'ip:cook_turn_daily': { windowSeconds: 86400, maxCount: 300 },
   'ip:bootstrap_hourly': { windowSeconds: 3600, maxCount: 20 },
   // Step 7 additions:
