@@ -10,15 +10,14 @@
 // skeleton + error surfaces stay inline — they're one-off during-stream
 // states, not reusable components.
 //
-// Custom `.safeAreaInset(.top)` header replaces the system toolbar
-// (SCA-456). iOS 26 paints toolbar Buttons with Liquid Glass material
-// — capsules + circles that read as off-theme against the warm-paper
-// Stir surface and squeeze the principal serif title. Dropping the
-// toolbar entirely is the only reliable opt-out, matching SCA-436's
-// DishPreview pattern. `onCancel` is optional: SolveAgainRoot passes
-// a dismiss closure (cover-level exit since back-nav leads to a hidden
-// placeholder), ScanFlowRoot passes nil and the leading slot renders
-// a Stir back-chevron that calls `dismiss()` to pop to .review.
+// Uses the shared `.stirTopBar(...)` extension (SCA-457) to replace
+// the system navigation bar. iOS 26 paints toolbar Buttons with Liquid
+// Glass; the only reliable opt-out is rendering chrome in
+// `.safeAreaInset(.top)` outside the system toolbar — exactly what
+// `StirTopBar` does, app-wide. `onCancel` is optional: SolveAgainRoot
+// passes a dismiss closure (cover-level exit since back-nav leads to
+// a hidden placeholder), ScanFlowRoot passes nil and the leading slot
+// renders a Stir back-chevron that calls `dismiss()` to pop to .review.
 
 import SwiftUI
 
@@ -62,19 +61,21 @@ struct DinnerOptionsView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // Keep `navigationTitle` for VoiceOver and for any caller that
-        // pushes a deeper screen on top of this one (the implicit back-
-        // chevron label reads from here). The visible chrome is the
-        // custom `.safeAreaInset(.top)` header below — the system
-        // toolbar route paints iOS 26 Liquid Glass on every Button
-        // inside it, and there's no per-button opt-out.
+        // `navigationTitle` retained for VoiceOver + the implicit
+        // back-chevron label any deeper push reads. Visible chrome
+        // comes from `.stirTopBar(...)` — the system toolbar route
+        // paints iOS 26 Liquid Glass on every Button inside it, no
+        // per-button opt-out (SCA-457 escape hatch, app-wide).
         .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            stirTopBar
-        }
+        .stirTopBar(
+            title: "Dinner options",
+            leading: { leadingControl },
+            trailing: {
+                StirTopBarTextButton("Tune", action: onTune)
+            },
+        )
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()
@@ -90,59 +91,22 @@ struct DinnerOptionsView: View {
         )
     }
 
-    // MARK: - Custom top bar (SCA-456)
+    // MARK: - Top bar leading slot
 
-    /// `.safeAreaInset(.top)` replacement for the system toolbar.
-    /// Leading slot = Cancel text (cover entry) or back-chevron round-
-    /// icon (scan-flow entry). Center = full-width serif title. Trailing
-    /// = Tune text button. All buttons render outside the system
-    /// toolbar so iOS 26's automatic Liquid Glass material is bypassed.
-    private var stirTopBar: some View {
-        HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
-            leadingControl
-            Text("Dinner options")
-                .stirFont(.displaySm)
-                .foregroundStyle(Color.Stir.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .accessibilityAddTraits(.isHeader)
-            trailingControl
-        }
-        .padding(.horizontal, CGFloat.Stir.space3)
-        .padding(.vertical, CGFloat.Stir.space2)
-        .background(Color.Stir.paper50)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.Stir.divider)
-                .frame(height: 1)
-        }
-    }
-
+    /// Either a Cancel text button (cover-level exit when SolveAgainRoot
+    /// passed `onCancel`) or a Stir back-chevron that pops the nav
+    /// stack one level (default for ScanFlowRoot, which pops to .review).
     @ViewBuilder
     private var leadingControl: some View {
         if let onCancel {
-            Button("Cancel", action: onCancel)
-                .stirFont(.bodyMd)
-                .foregroundStyle(Color.Stir.ember600)
-                .frame(minHeight: 44)
-                .frame(width: 88, alignment: .leading)
+            StirTopBarTextButton("Cancel", action: onCancel)
         } else {
             StirCircleIconButton(
                 icon: Image(systemName: "chevron.left"),
                 accessibilityLabel: "Back",
                 action: { dismiss() },
             )
-            .frame(width: 88, alignment: .leading)
         }
-    }
-
-    private var trailingControl: some View {
-        Button("Tune", action: onTune)
-            .stirFont(.bodyMd)
-            .foregroundStyle(Color.Stir.ember600)
-            .frame(minHeight: 44)
-            .frame(width: 88, alignment: .trailing)
     }
 
     // MARK: - Sections
