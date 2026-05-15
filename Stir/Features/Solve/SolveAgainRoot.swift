@@ -96,9 +96,20 @@ struct SolveAgainRoot: View {
                         // toolbar action is `Tune` and the user has
                         // no way to leave the cover except swipe-down
                         // (which `.fullScreenCover` doesn't honor).
+                        //
+                        // Hide the system back chevron: the parent
+                        // route in this NavigationStack is the hidden
+                        // `Color.Stir.paper50` placeholder, so a back
+                        // pop dumps the user on a blank screen. Cancel
+                        // is the meaningful exit. Leaving the chevron
+                        // visible also crowded the nav bar enough to
+                        // truncate the serif title to "Dinn…" (SCA-435).
+                        .navigationBarBackButtonHidden(true)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
                                 Button("Cancel") { onDismiss() }
+                                    .stirFont(.bodyMd)
+                                    .foregroundStyle(Color.Stir.ember600)
                             }
                         }
                     case let .preview(dish):

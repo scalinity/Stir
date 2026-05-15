@@ -12,7 +12,9 @@
 //   - Plate column hosts a SwiftUI port of the mockup's Plate
 //     illustration; the tint cycles by rank (salmon / sage / amber)
 //   - Content column carries an optional "TONIGHT'S PICK" eyebrow
-//     (rank 1 only), the New York title (displayMd), and a single
+//     (rank 1 only), the New York title (displaySm — was displayMd
+//     pre-SCA-435; 22pt swallowed long Gemini titles like "Dutch Oven
+//     Chicken & Vegetables" at the 2-line limit), and a single
 //     muted sentence subtitle composed from `whyItFits` + total time
 //   - Press feedback: 98% scale + ember border ring (DishOptionCardStyle)
 //
@@ -138,7 +140,7 @@ struct DishOptionCard: View {
                     .foregroundStyle(Color.Stir.ember600)
             }
             Text(title)
-                .stirFont(.displayMd)
+                .stirFont(.displaySm)
                 .foregroundStyle(Color.Stir.ink900)
                 .multilineTextAlignment(.leading)
                 .lineLimit(titleLineLimit)
