@@ -89,36 +89,56 @@ struct StepCardView: View {
     private var tapModeBody: some View {
         VStack(spacing: 0) {
             topBar
+            // SCA-433: step rail replaces the in-topBar `StepDots`. The
+            // dots gave a progress signal but no journey context — the
+            // rail keeps the at-a-glance progress read AND lets the
+            // user peek at upcoming steps + jump back to a step they
+            // want to re-check. Sits between the topBar and recipeStrip
+            // so it shares the top-chrome region rather than competing
+            // with the instruction body.
+            railRow
             recipeStrip
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepHeader
                     swapBadgeRow
+                    cautionRow
                     instructionBody
                     timerSection
                 }
                 .padding(.horizontal, CGFloat.Stir.screenMarginHero)
                 .padding(.top, CGFloat.Stir.space5)
-                // justification: 140pt bottom clearance reserves room
-                // for the safeAreaInset bottom bar (voice row + ask row
-                // + prev/next row). One-off screen chrome spacing — not
-                // a generic token case.
-                .padding(.bottom, 140)
+                // justification: 140pt bottom clearance was the
+                // original safe-area reserve for the voice/ask/nav
+                // stack; bumped to 220pt to clear the SCA-433 up-next
+                // card that now sits above the voice row.
+                .padding(.bottom, 220)
             }
         }
         .safeAreaInset(edge: .bottom) {
-            bottomBar
-                // FD1-1 fix: paper50 + 1pt hairline divider matches the
-                // app-wide bottom-bar grammar (Settings, Saved, Tonight,
-                // RootView's StirCustomTabBar). Replaces `.background(.bar)`
-                // translucent material that left Cook Mode visually
-                // distinct from every other surface.
-                .background(Color.Stir.paper50)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(Color.Stir.divider)
-                        .frame(height: 1)
-                }
+            VStack(spacing: 0) {
+                // SCA-433: up-next preview sits above the voice / ask /
+                // nav stack. Last step swaps the preview for a celebration
+                // line so the dead zone fills with positive momentum at
+                // the moment users most need it. paper50 background
+                // matches the bottom bar so the card and the nav stack
+                // share a single surface visually.
+                upNextCard
+                    .padding(.horizontal, CGFloat.Stir.space4)
+                    .padding(.top, CGFloat.Stir.space3 - 2) // 10pt
+                bottomBar
+            }
+            // FD1-1 fix: paper50 + 1pt hairline divider matches the
+            // app-wide bottom-bar grammar (Settings, Saved, Tonight,
+            // RootView's StirCustomTabBar). Replaces `.background(.bar)`
+            // translucent material that left Cook Mode visually
+            // distinct from every other surface.
+            .background(Color.Stir.paper50)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.Stir.divider)
+                    .frame(height: 1)
+            }
         }
         // SCA-428: exit-confirm `.stirDialog` lives on `body`'s outer
         // Group, not here. Two modifiers sharing
@@ -129,34 +149,23 @@ struct StepCardView: View {
 
     /// Cook Mode top bar — three-column layout per
     /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:70-77`.
-    /// LEFT: 36pt rounded close button. CENTER: stacked column with
-    /// uppercase "Cook mode · Tap" eyebrow over `StepDots`. RIGHT: 36pt
-    /// rounded eye button (recipe-detail peek — semantics deferred,
-    /// see SCA-93 ticket; currently a visible affordance with no-op
-    /// action so the layout matches mockup pixel-for-pixel without
-    /// committing to a destination).
+    /// LEFT: 36pt rounded close button. CENTER: uppercase "Cook mode ·
+    /// Tap" eyebrow. RIGHT: 36pt rounded eye button (recipe-detail
+    /// peek — semantics deferred, see SCA-93 ticket).
     ///
-    /// SCA-422: eyebrow visually pushed right of center because the
-    /// eye button is hidden under `if false`. Two equal-flex Spacers
-    /// only center the middle column when both flanking elements have
-    /// equal width — with `[44pt][Spacer][center][Spacer][0pt]` the
-    /// center sits offset by half the close-button width. Switching
-    /// to ZStack-overlay centering anchors the eyebrow against the
-    /// full bar width regardless of what flanks it. When the eye
-    /// button returns the same ZStack accommodates it without
-    /// reintroducing the centering bug.
+    /// SCA-422: ZStack-overlay centering anchors the eyebrow against
+    /// the full bar width regardless of what flanks it, so the hidden
+    /// eye button doesn't shift the centerline.
+    ///
+    /// SCA-433: `StepDots` no longer lives here — the new `StepRail`
+    /// (rendered between topBar and recipeStrip) carries the progress
+    /// signal and adds journey context the dots couldn't.
     private var topBar: some View {
         ZStack {
-            VStack(spacing: 4) {
-                Text("Cook mode · Tap")
-                    .stirFont(.labelEyebrow)
-                    .foregroundStyle(Color.Stir.ink500)
-                StepDots(
-                    step: viewModel.currentStepIndex + 1,
-                    total: max(viewModel.totalSteps, 1),
-                )
-            }
-            .accessibilityElement(children: .combine)
+            Text("Cook mode · Tap")
+                .stirFont(.labelEyebrow)
+                .foregroundStyle(Color.Stir.ink500)
+                .accessibilityElement(children: .combine)
 
             HStack(spacing: CGFloat.Stir.space3) {
                 // SCA-428: confirm dialog is owned by `body`'s outer
@@ -253,6 +262,96 @@ struct StepCardView: View {
         .padding(.horizontal, CGFloat.Stir.space4)
         .padding(.bottom, CGFloat.Stir.space1)
         .accessibilityElement(children: .combine)
+    }
+
+    /// SCA-433: step rail. Replaces `StepDots` as the progress
+    /// indicator and adds journey context — tap any chip to jump.
+    /// The rail's titles come from per-step `title` (e.g. "Searing"),
+    /// not `instructionText`. Steps without a title render a numbered
+    /// chip with no caption rather than truncating instruction prose
+    /// — keeps the rail visually tight on recipes whose AI output
+    /// didn't include step titles.
+    private var railRow: some View {
+        StepRail(
+            currentIndex: viewModel.currentStepIndex,
+            totalSteps: viewModel.totalSteps,
+            stepTitles: viewModel.recipePlan.stepArray.map { $0.title },
+            onJump: { idx in viewModel.jumpToStep(idx, advancedBy: "rail") },
+        )
+        .padding(.bottom, CGFloat.Stir.space2)
+    }
+
+    /// SCA-433: amber caution chips for the active step. Surfaces
+    /// `RecipeStep.cautionTagsCSV` (a comma-separated string the
+    /// backend prompt populates with values like "hot_surface",
+    /// "sharp_knife"). Well-known tokens map to SF Symbols; unknown
+    /// tokens render as text-only chips so a future prompt addition
+    /// doesn't silently disappear from the UI. No-op when the CSV
+    /// is empty / nil / all-whitespace.
+    @ViewBuilder
+    private var cautionRow: some View {
+        let raw = viewModel.currentStep?.cautionTagsCSV ?? ""
+        let tags: [String] = raw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !tags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: CGFloat.Stir.space2) {
+                    ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+                        cautionChip(tag)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "Caution: " + tags.map { humanCautionLabel($0) }.joined(separator: ", "),
+            )
+        }
+    }
+
+    private func cautionChip(_ tag: String) -> some View {
+        HStack(spacing: CGFloat.Stir.space1) {
+            if let symbol = cautionSymbol(for: tag) {
+                Image(systemName: symbol)
+                    .stirFont(.bodySm).fontWeight(.semibold)
+                    .accessibilityHidden(true)
+            }
+            Text(humanCautionLabel(tag))
+                .stirFont(.labelMd).fontWeight(.medium)
+        }
+        .foregroundStyle(Color.Stir.amber600)
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space1 + 2)
+        .background(
+            Capsule().fill(Color.Stir.amber100),
+        )
+    }
+
+    private func cautionSymbol(for tag: String) -> String? {
+        // Token alphabet kept narrow on purpose — the AI prompt picks
+        // from a known list, so an unknown tag is a prompt-version
+        // drift signal. Fall back to text-only chip in that case so
+        // the UI still surfaces the warning instead of silently
+        // hiding it.
+        switch tag {
+        case "hot_surface", "hot", "fire":          return "flame.fill"
+        case "sharp_knife", "sharp", "knife":       return "scissors"
+        case "splatter", "oil_splatter":            return "drop.fill"
+        case "allergen", "allergens":               return "exclamationmark.shield.fill"
+        case "raw_meat", "raw":                     return "fork.knife"
+        case "steam":                               return "cloud.fill"
+        default:                                    return nil
+        }
+    }
+
+    private func humanCautionLabel(_ tag: String) -> String {
+        // Convert snake_case backend tokens to Title Case for display.
+        // No-op when the token already reads naturally.
+        let words = tag
+            .split(separator: "_")
+            .map { String($0).capitalized }
+        return words.isEmpty ? tag : words.joined(separator: " ")
     }
 
     /// 36pt rounded icon button with `paper200` fill. Mirrors the
@@ -508,6 +607,105 @@ struct StepCardView: View {
         case .emberFilled:  return Color.Stir.ember600
         case .destructive:  return Color.Stir.crimson600.opacity(0.4)
         }
+    }
+
+    // MARK: - Up-next card (SCA-433)
+
+    /// Small preview card sitting between the scrollable instruction
+    /// body and the bottom bar. Fills the empty mid-screen dead zone
+    /// with the next step's title (or trimmed `instructionText` if no
+    /// title was set by the AI). On the last step the preview is
+    /// swapped for a celebration line so the user reads "you're almost
+    /// done" exactly when their motivation is wavering. Hidden when
+    /// `totalSteps == 0` (defensive — Cook Mode shouldn't open on an
+    /// empty recipe but the safe-area inset still renders).
+    @ViewBuilder
+    private var upNextCard: some View {
+        let total = viewModel.totalSteps
+        let current = viewModel.currentStepIndex
+        let isFinal = current >= total - 1
+
+        if total > 0 {
+            HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
+                if isFinal {
+                    Image(systemName: "sparkles")
+                        .stirFont(.labelLg).fontWeight(.semibold)
+                        .foregroundStyle(Color.Stir.ember600)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("LAST STEP")
+                            .stirFont(.labelEyebrow)
+                            .foregroundStyle(Color.Stir.ember600)
+                        Text("You're almost done.")
+                            .stirFont(.labelMd).fontWeight(.medium)
+                            .foregroundStyle(Color.Stir.ink900)
+                            .lineLimit(1)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("UP NEXT")
+                            .stirFont(.labelEyebrow)
+                            .foregroundStyle(Color.Stir.ink500)
+                        Text(nextStepPreview())
+                            .stirFont(.labelMd).fontWeight(.medium)
+                            .foregroundStyle(Color.Stir.ink900)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(CGFloat.Stir.space3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .fill(Color.Stir.paper100),
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
+                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                isFinal ? "Last step. You're almost done." : "Up next: \(nextStepPreview())",
+            )
+        }
+    }
+
+    /// Title-or-first-sentence preview of the step immediately after
+    /// the current one. Falls back to a generic "Coming up." if both
+    /// the title and instruction text are empty so the card never
+    /// renders an empty line. Trimmed to ~120 chars before the 2-line
+    /// tail truncation does its own visual cap.
+    private func nextStepPreview() -> String {
+        let steps = viewModel.recipePlan.stepArray
+        let nextIndex = viewModel.currentStepIndex + 1
+        guard nextIndex >= 0, nextIndex < steps.count else { return "Coming up." }
+        let nextStep = steps[nextIndex]
+
+        if let title = nextStep.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty
+        {
+            return title
+        }
+        let raw = (nextStep.instructionText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return "Coming up." }
+        // Trim to first sentence (`.` `!` `?` boundary) so a long
+        // multi-sentence step doesn't fill the card with prose. The
+        // 120-char hard cap is a belt-and-suspenders guard for the
+        // case where the model wrote no terminal punctuation at all.
+        let firstSentence: String = {
+            if let endIdx = raw.firstIndex(where: { ".!?".contains($0) }) {
+                return String(raw[raw.startIndex ... endIdx])
+            }
+            return raw
+        }()
+        if firstSentence.count > 120 {
+            let cut = firstSentence.prefix(117)
+            return cut + "…"
+        }
+        return firstSentence
     }
 
     // MARK: - Bottom bar

@@ -101,6 +101,7 @@
 		49C51EEBB4AA6C51B4E4CB34 /* LiveAudioPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151133441B87DA5FA6CC975E /* LiveAudioPipeline.swift */; };
 		4A1FAB853D85EE8116CAB750 /* OutcomeFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */; };
 		A65A001000000009 /* RepeatCandidateCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A00100000000A /* RepeatCandidateCard.swift */; };
+		A65A001000000040 /* StepRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000041 /* StepRail.swift */; };
 		A65A00100000000B /* RepeatCandidateSuppressionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A00100000000C /* RepeatCandidateSuppressionStore.swift */; };
 		A65A00100000000D /* SampleShowcaseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A00100000000E /* SampleShowcaseView.swift */; };
 		4A86932858851EEAC428A086 /* TimerActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D519B0E1862B21DBAE343ECC /* TimerActivityAttributes.swift */; };
@@ -466,6 +467,7 @@
 		2EDAE0E9803C2BAAD4590059 /* PaywallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallViewModel.swift; sourceTree = "<group>"; };
 		31EF4DB9D47FECD9955B4809 /* OutcomeFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeFeedbackView.swift; sourceTree = "<group>"; };
 		A65A00100000000A /* RepeatCandidateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepeatCandidateCard.swift; sourceTree = "<group>"; };
+		A65A001000000041 /* StepRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepRail.swift; sourceTree = "<group>"; };
 		A65A00100000000C /* RepeatCandidateSuppressionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepeatCandidateSuppressionStore.swift; sourceTree = "<group>"; };
 		A65A00100000000E /* SampleShowcaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleShowcaseView.swift; sourceTree = "<group>"; };
 		34CB787B7AC60304704C39E1 /* VoiceSessionDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionDriver.swift; sourceTree = "<group>"; };
@@ -1207,6 +1209,7 @@
 				A65A00100000000A /* RepeatCandidateCard.swift */,
 				A65A00100000000C /* RepeatCandidateSuppressionStore.swift */,
 				CE134A139A7012C16D913543 /* StepCardView.swift */,
+				A65A001000000041 /* StepRail.swift */,
 				6A66A56A43AFBAC2E42363C7 /* TimerCountdownView.swift */,
 				8CB530DD2814DD0EFB375613 /* VoiceActiveStepView.swift */,
 				A65A001000000016 /* VoiceSessionTelemetry.swift */,
@@ -1916,6 +1919,7 @@
 				4A1FAB853D85EE8116CAB750 /* OutcomeFeedbackView.swift in Sources */,
 				A65A001000000009 /* RepeatCandidateCard.swift in Sources */,
 				A65A00100000000B /* RepeatCandidateSuppressionStore.swift in Sources */,
+				A65A001000000040 /* StepRail.swift in Sources */,
 				3AD32ADEBDCC71B2996F70D1 /* PantryItem+Extensions.swift in Sources */,
 				1C08283B4BF633B6A069CC47 /* PantryMatching.swift in Sources */,
 				59F7447C13EF0C7D5B9F704C /* PantryItemRepository.swift in Sources */,
