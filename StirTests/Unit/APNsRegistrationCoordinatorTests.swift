@@ -336,48 +336,114 @@ final class APNsRegistrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(posts[1].apnsToken, "deadbeef")
     }
 
-    /// SCA-354: rapid burst of flushPrefs() calls (user fat-fingers
+    /// SCA-354 / SCA-416: rapid burst of flushPrefs() calls (user fat-fingers
     /// toggles in quick succession) should COALESCE to a single in-flight
     /// POST instead of N concurrent ones. The cancel-and-replace pattern
     /// in `schedulePost` cancels each prior Task before spawning the
-    /// next; only the final POST lands. Prior shape: 4 toggles → 4
-    /// concurrent Tasks all reading the same stale snapshot → 4 actual
-    /// POSTs against the `ip:push_register_hourly = 20` rate budget.
+    /// next; only the final POST lands.
+    ///
+    /// SCA-416 strengthens the prior assertion. Pre-fix the burst toggled
+    /// prefs back to baseline so the snapshot-equality short-circuit
+    /// fired and produced `totalPosts == 1` — but a buggy coordinator
+    /// that fired 4 concurrent POSTs all reading the stale baseline
+    /// snapshot would ALSO produce `totalPosts == 1` after dedup. The
+    /// SCA-354 cancel-and-replace contract was not actually pinned.
+    ///
+    /// Post-SCA-416: burst ends in a state DIFFERENT from baseline so
+    /// the snapshot guard does NOT short-circuit. Expected:
+    ///   * `totalPosts == 2` (baseline + final coalesced).
+    ///   * The recorded POSTs' prefs reflect ONLY the baseline state
+    ///     and the FINAL state — no intermediate snapshot landed.
+    /// A regression that races would push >2 POSTs OR an intermediate
+    /// snapshot into the recorder, both visibly failing.
     func test_flushPrefs_rapidBurst_coalescesToSinglePost() async {
         let recorder = PostRecorder()
         let coord = makeCoordinator()
+        // SCA-416: registerFn intentionally sleeps so cancellation has a
+        // suspension point to bite at. Pre-fix the registerFn returned
+        // synchronously (just an actor-local array append) which left
+        // no window for `Task.cancel()` to take effect — the prior test
+        // relied on the snapshot-equality short-circuit (final == baseline)
+        // to mask non-cancellation, producing a false-positive
+        // `totalPosts == 1`. Real-world push-register POSTs are ~100ms+
+        // so this 50ms sleep is a faithful synthetic.
         coord.configure(register: { body in
+            // Sleep WITH `try` so a cancellation throw aborts the
+            // registerFn before `recorder.record` lands. Pre-fix this
+            // used `try?` which swallowed the CancellationError →
+            // intermediate POSTs all landed → "5 posts not 2" failure
+            // mode. Real-world URLSession honors cancellation the
+            // same way (URLError.cancelled propagates).
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
             await recorder.record(body)
             return PushRegisterResponse(installationID: "i-1", environment: "sandbox")
         })
 
-        // Seed a token so postIfChanged is allowed to fire.
+        // Seed a token so postIfChanged is allowed to fire. Bound the
+        // wait so the slow registerFn has time to land the baseline POST
+        // before the burst.
         coord.handleDeviceToken(Data([0xab, 0xcd]))
-        await yieldForPostTask()
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms — registerFn (50ms) + scheduling jitter
         let baselinePosts = await recorder.posts.count
         XCTAssertEqual(baselinePosts, 1, "token receipt seeds the cache with the first POST")
+        let baseline = (await recorder.posts).first
+        XCTAssertEqual(
+            baseline?.notificationPrefs.reactivation,
+            true,
+            "baseline reactivation default is true",
+        )
+        XCTAssertEqual(
+            baseline?.notificationPrefs.importCompletion,
+            true,
+            "baseline import_completion default is true",
+        )
 
         // Burst: mutate prefs + flush 4 times in quick succession with
         // NO yield between calls. Each schedulePost cancels its
         // predecessor; only the final one survives to the await on
-        // registerFn.
+        // registerFn. Final state DIFFERS from baseline (reactivation
+        // flipped to FALSE while importCompletion stays true), so the
+        // snapshot-equality short-circuit does NOT fire — the test
+        // exercises the actual cancel-and-replace path.
         let store = NotificationPreferencesStore(defaults: prefsDefaults)
         store.setReactivation(false)
-        coord.flushPrefs()
-        store.setReactivation(true)
         coord.flushPrefs()
         store.setImportCompletion(false)
         coord.flushPrefs()
         store.setImportCompletion(true)
         coord.flushPrefs()
+        // FINAL state: reactivation=false, importCompletion=true (NOT baseline).
+        coord.flushPrefs()
 
-        await yieldForPostTask()
+        try? await Task.sleep(nanoseconds: 250_000_000) // 250ms — final registerFn + jitter
 
-        // Token + final-state-of-prefs matches baseline → idempotency
-        // guard short-circuits, no extra POST. If burst had raced, we'd
-        // see >0 additional POSTs.
-        let totalPosts = await recorder.posts.count
-        XCTAssertEqual(totalPosts, 1, "burst coalesces to zero additional POSTs (prefs round-tripped to original)")
+        let posts = await recorder.posts
+        XCTAssertEqual(
+            posts.count,
+            2,
+            "SCA-416: burst MUST coalesce to exactly 1 additional POST (baseline + final = 2). 3+ posts means cancel-and-replace failed.",
+        )
+
+        // The two recorded POSTs must be (a) baseline and (b) the FINAL
+        // state. No intermediate snapshot (e.g. importCompletion=false)
+        // should appear — that would mean a mid-burst POST raced through.
+        guard posts.count == 2 else { return }
+        let final = posts[1]
+        XCTAssertEqual(
+            final.notificationPrefs.reactivation,
+            false,
+            "SCA-416: final POST reflects the LAST burst toggle's state",
+        )
+        XCTAssertEqual(
+            final.notificationPrefs.importCompletion,
+            true,
+            "SCA-416: final POST reflects the LAST burst toggle's state",
+        )
+        // Belt: assert no intermediate `importCompletion=false` POST landed.
+        XCTAssertFalse(
+            posts.contains(where: { $0.notificationPrefs.importCompletion == false }),
+            "SCA-416: intermediate snapshot (importCompletion=false) must NOT land — would mean cancel-and-replace failed",
+        )
     }
 
     // MARK: - Failure handling

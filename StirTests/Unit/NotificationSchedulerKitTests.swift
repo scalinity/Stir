@@ -702,42 +702,7 @@ private final class TestSettings: UNNotificationSettings, @unchecked Sendable {
 
 // MARK: - SpyPostHogClient (SCA-345)
 
-/// Test double for `PostHogClient` that records every `capture(_:properties:)`
-/// invocation in-memory instead of dispatching to the real PostHog SDK.
-/// Used by the SCA-320 / ADR 0009 regression tests above to assert the
-/// `use_soon_scheduled` property contract is preserved.
-///
-/// Uses `PostHogClient`'s DEBUG-only `init(testingOnly: Bool)` seam so the
-/// production singleton stays isolated. Concurrency model mirrors the
-/// parent class (`@unchecked Sendable`, nonisolated `capture`) so the
-/// override is signature-compatible; in practice every call site we
-/// exercise here runs on `@MainActor` (UseSoonScheduler is @MainActor),
-/// so the underlying array access is sequential.
-final class SpyPostHogClient: PostHogClient, @unchecked Sendable {
-    struct Capture {
-        let event: TelemetryEvent
-        let properties: [String: Any]
-    }
-
-    /// Append-only log of every `capture(...)` invocation, in order.
-    /// Guarded by `lock` so a future test that introduces a non-main-
-    /// actor caller doesn't silently race.
-    private let lock = NSLock()
-    private var _captures: [Capture] = []
-
-    var captures: [Capture] {
-        lock.lock()
-        defer { lock.unlock() }
-        return _captures
-    }
-
-    init() {
-        super.init(testingOnly: true)
-    }
-
-    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
-        lock.lock()
-        defer { lock.unlock() }
-        _captures.append(Capture(event: event, properties: properties))
-    }
-}
+// SCA-417: SpyPostHogClient hoisted to StirTests/Unit/Helpers/SpyPostHogClient.swift.
+// Same shape (captures: [Capture] + NSLock); shared with
+// LeftoversFollowupSchedulerTests so future test files that need a
+// PostHog spy import from one place.

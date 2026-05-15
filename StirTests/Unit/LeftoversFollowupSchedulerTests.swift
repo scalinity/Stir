@@ -172,7 +172,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // rawValue) not raw `error_description`.
         let stateKey = "stir.leftovers_followup.history.v1"
         defaults.set(Data([0x00, 0xFF, 0x42, 0x99]), forKey: stateKey)
-        let spy = SpyPostHogForHistory()
+        let spy = SpyPostHogClient()
         let store = NotificationHistoryStore(
             defaults: defaults,
             stateKey: stateKey,
@@ -181,11 +181,11 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         )
         let recent = store.firesInLastWeek(asOf: Date())
         XCTAssertEqual(recent.count, 0, "decode failure must reset to []")
-        XCTAssertEqual(spy.captured.count, 1, "decode failure must emit exactly once")
-        XCTAssertEqual(spy.captured.first?.event, .notificationHistoryDecodeFailed)
-        XCTAssertEqual(spy.captured.first?.properties["state_key"] as? String, stateKey)
+        XCTAssertEqual(spy.captures.count, 1, "decode failure must emit exactly once")
+        XCTAssertEqual(spy.captures.first?.event, .notificationHistoryDecodeFailed)
+        XCTAssertEqual(spy.captures.first?.properties["state_key"] as? String, stateKey)
         // SCA-398: must be a closed-vocab rawValue, not a raw description.
-        let reason = spy.captured.first?.properties["error_reason"] as? String
+        let reason = spy.captures.first?.properties["error_reason"] as? String
         XCTAssertNotNil(reason)
         if let reason {
             XCTAssertTrue(
@@ -197,7 +197,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // closed-vocab rename is a wire-contract change; the old key should
         // never appear post-SCA-398.
         XCTAssertNil(
-            spy.captured.first?.properties["error_description"],
+            spy.captures.first?.properties["error_description"],
             "SCA-398: error_description property removed in favor of error_reason",
         )
     }
@@ -235,7 +235,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // negative half of the SCA-374 contract: a healthy decode path
         // emits ZERO `notification_history_decode_failed` events.
         let stateKey = "stir.leftovers_followup.history.v1"
-        let spy = SpyPostHogForHistory()
+        let spy = SpyPostHogClient()
         let store = NotificationHistoryStore(
             defaults: defaults,
             stateKey: stateKey,
@@ -245,7 +245,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         store.recordScheduled(fireAt: Date())
         _ = store.firesInLastWeek(asOf: Date())
         XCTAssertTrue(
-            spy.captured.allSatisfy { $0.event != .notificationHistoryDecodeFailed },
+            spy.captures.allSatisfy { $0.event != .notificationHistoryDecodeFailed },
             "successful decode must NOT emit decode-failed telemetry",
         )
     }
@@ -275,20 +275,10 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     }
 }
 
-// MARK: - Test spy
-
-/// SCA-374 — minimal PostHog spy that records `capture(_:properties:)`
-/// invocations. Subclasses `PostHogClient` via the DEBUG `init(testingOnly:)`
-/// seam so production code sees a real-looking client (no protocol leakage)
-/// while tests can assert on `captured`.
-private final class SpyPostHogForHistory: PostHogClient, @unchecked Sendable {
-    struct Captured { let event: TelemetryEvent; let properties: [String: Any] }
-    private(set) var captured: [Captured] = []
-    init() { super.init(testingOnly: true) }
-    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
-        captured.append(Captured(event: event, properties: properties))
-    }
-}
+// SCA-417: `SpyPostHogForHistory` removed in favor of the shared
+// `SpyPostHogClient` (StirTests/Unit/Helpers/SpyPostHogClient.swift).
+// Property name `captures` (was `captured`); `Capture` element type
+// (was `Captured`).
 
 /// SCA-398 — test-only `CodingKey` so we can build a
 /// `DecodingError.keyNotFound` without dragging in a real Codable

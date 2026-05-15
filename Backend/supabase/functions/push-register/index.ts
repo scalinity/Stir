@@ -37,8 +37,10 @@ import {
   checkAndIncrement,
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
-import { writeAudit } from '../_shared/audit.ts';
-import { hashCanonicalKey } from '../_shared/hashing.ts';
+// SCA-406: writeAudit + hashCanonicalKey now flow through the typed
+// `_shared/identity_audit.ts` wrappers so the handler reads as one-line
+// helper invocations and the SCA-392 plumbing lives next to the helper.
+import { auditApnsEnvironmentFlip, auditUserStale } from '../_shared/identity_audit.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -124,35 +126,9 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    // SCA-381: audit a user_stale rejection. JWT verified but the
-    // claim's canonical_user_key no longer resolves to a row — could
-    // be (a) row hard-deleted (shouldn't happen; status='banned' is
-    // the soft-delete path), (b) identity-merge in flight where the
-    // alias-forward landed but the JWT was minted seconds before,
-    // (c) test fixture cleanup raced with a real session. SREs grep
-    // `action='auth_user_stale'` to scope (a) vs (b)/(c) noise.
-    // SCA-392: `audit_log.actor_id` is `UUID REFERENCES auth.users(id)`;
-    // the canonical_user_key shapes (`ck:<recordName>` /
-    // `install:<uuid>`) are NOT UUIDs and Postgres rejected every
-    // prior INSERT with `22P02 invalid input syntax for type uuid`,
-    // silently swallowed by writeAudit's non-fatal posture — every
-    // row dropped from SCA-381 ship to merge. Hash the key into
-    // `after_json` (matches the _shared/hashing.ts log invariant)
-    // and pass null for `actor_id` (matches every other writeAudit
-    // call site in the codebase: real auth.users.id UUID or null).
-    await writeAudit(client, userLog, {
-      actor_id: null,
-      actor_email: null,
-      action: 'auth_user_stale',
-      target_table: 'app_users',
-      target_id: claims.canonical_user_key,
-      after: {
-        endpoint: '/v1/push/register',
-        reason: 'user_stale',
-        canonical_user_key_hash: await hashCanonicalKey(claims.canonical_user_key),
-      },
-      request_id: requestId,
-    });
+    // SCA-381 audit_user_stale via SCA-406 helper (handles SCA-392
+    // actor_id type-mismatch fix internally).
+    await auditUserStale(client, userLog, claims, '/v1/push/register', requestId);
     return jsonError(ErrorCode.AUTH_01, 401, {
       message: 'User not found; re-bootstrap.',
       reason: 'user_stale',
@@ -274,38 +250,26 @@ Deno.serve(async (req) => {
   // SCA-381: env flip on the SAME install is unusual — TestFlight →
   // App Store graduation is the legitimate case, but a sustained
   // rate of unintended flips signals a misconfigured Debug→Release
-  // build path on prod devices. Audit row is permanent (counts only
-  // — canonical_user_key hashed, no token/pref content) so SREs can
-  // grep `apns_environment_flipped` and join with
-  // `device_installations` to understand cohort behavior.
-  // SCA-392: see auth_user_stale call site above for the actor_id
-  // type-mismatch fix. Same shape: null actor_id + hashed key in
-  // `after_json` so the row actually lands.
+  // build path on prod devices.
   // SCA-399: detector intentionally fires only on `non-null prior →
-  // different non-null new`. The first push-register POST after a
-  // session-bootstrap-only install lands when prior `apns_environment
-  // IS NULL` and is treated as the first-touch baseline (no audit row).
-  // session-bootstrap already creates the install row with NULL env;
-  // the device's first env signal is implicitly the baseline, not a
-  // "flip." A future maintenance path that resets env to NULL would
-  // re-baseline silently — explicit by design, but worth knowing.
+  // different non-null new`. session-bootstrap creates the install
+  // row with NULL env; the first push-register POST is the implicit
+  // baseline, not a "flip." A future maintenance path that resets
+  // env to NULL would re-baseline silently — explicit by design.
+  // SCA-406: SCA-392 type-mismatch fix + hashing live in the helper.
   if (
     installRow.apns_environment !== null &&
     installRow.apns_environment !== body.environment
   ) {
-    await writeAudit(client, userLog, {
-      actor_id: null,
-      actor_email: null,
-      action: 'apns_environment_flipped',
-      target_table: 'device_installations',
-      target_id: installRow.installation_id,
-      before: { apns_environment: installRow.apns_environment },
-      after: {
-        apns_environment: body.environment,
-        canonical_user_key_hash: await hashCanonicalKey(claims.canonical_user_key),
-      },
-      request_id: requestId,
-    });
+    await auditApnsEnvironmentFlip(
+      client,
+      userLog,
+      claims,
+      installRow.installation_id,
+      installRow.apns_environment,
+      body.environment,
+      requestId,
+    );
   }
 
   userLog.info('push_registered', {
