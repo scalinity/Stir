@@ -48,52 +48,21 @@ struct DishPreviewView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // Keep `navigationTitle` for the back-chevron label that
-        // any caller pushed onto can read, plus VoiceOver. The
-        // visible title comes from the .principal toolbar item
-        // below in the Stir display serif (matches Settings /
-        // Saved / OtherOptionsRoot grammar). Default chrome would
-        // render in SF Pro Bold and break cross-screen rhythm.
-        // `minimumScaleFactor` keeps long Gemini-generated names
-        // readable when the bar is squeezed by trailing buttons —
-        // mid-word "Quick Flatbrea…" truncation is the failure
-        // mode we're avoiding.
+        // SCA-436: the system toolbar route was the only place
+        // DishPreview rendered iOS 26 Liquid Glass material (back
+        // chevron + cart + star). Drop it entirely and render a custom
+        // header in `.safeAreaInset(.top)` below. We keep
+        // `.navigationTitle` for the implicit back-chevron label that
+        // ANY caller pushing onto a deeper screen reads, plus
+        // VoiceOver. The system back button is hidden — our custom
+        // back round-icon calls `dismiss()` directly.
         .navigationTitle(dish.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(dish.title)
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 14) {
-                    Button {
-                        presentGrocery()
-                    } label: {
-                        Image(systemName: "cart")
-                            .foregroundStyle(Color.Stir.ink700)
-                    }
-                    .accessibilityLabel("Add to grocery")
-
-                    Button {
-                        handleFavoriteTap()
-                    } label: {
-                        // Favorite star uses `ember600` on active, `ink300` on
-                        // inactive — the warm-palette counterpart to SwiftUI's
-                        // default yellow. Stays on-brand across the paywall-
-                        // trigger surfaces (DishPreview, Saved, Cook).
-                        Image(systemName: localFavorite ? "star.fill" : "star")
-                            .foregroundStyle(localFavorite ? Color.Stir.ember600 : Color.Stir.ink300)
-                    }
-                    .accessibilityLabel(localFavorite ? "Remove from favorites" : "Save to favorites")
-                }
-            }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            stirTopBar
         }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .fullScreenCover(isPresented: $showGrocery) {
             if let plan = viewModel.persistedRecipePlan(for: dish),
                let household = viewModel.currentHousehold {
@@ -138,6 +107,56 @@ struct DishPreviewView: View {
             viewModel.selectDish(dish)
             // Initial favorite state reflects the persisted RecipePlan if any.
             localFavorite = viewModel.persistedRecipePlan(for: dish)?.isFavorite ?? false
+        }
+    }
+
+    // MARK: - Custom top bar (SCA-436)
+
+    /// `.safeAreaInset(.top)` replacement for the previous system
+    /// toolbar. Renders the back chevron, full-width serif title, and
+    /// cart + favorite icon-buttons in Stir's round-icon grammar
+    /// (`StirCircleIconButton`). The title gets the entire row's
+    /// remaining width plus two-line wrap before scale-down, which is
+    /// why "Grilled Salmon with Pesto Penne" no longer mid-word
+    /// truncates — the previous one-line + competing-trailing-items
+    /// layout left only ~150pt for the title text.
+    private var stirTopBar: some View {
+        HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
+            StirCircleIconButton(
+                icon: Image(systemName: "chevron.left"),
+                accessibilityLabel: "Back",
+                action: { dismiss() },
+            )
+
+            Text(dish.title)
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+
+            HStack(spacing: CGFloat.Stir.space1) {
+                StirCircleIconButton(
+                    icon: Image.Stir.cart,
+                    accessibilityLabel: "Add to grocery",
+                    action: { presentGrocery() },
+                )
+                StirCircleIconButton(
+                    icon: Image(systemName: localFavorite ? "star.fill" : "star"),
+                    accessibilityLabel: localFavorite ? "Remove from favorites" : "Save to favorites",
+                    foreground: localFavorite ? Color.Stir.ember600 : Color.Stir.ink700,
+                    action: { handleFavoriteTap() },
+                )
+            }
+        }
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space2)
+        .background(Color.Stir.paper50)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.Stir.divider)
+                .frame(height: 1)
         }
     }
 

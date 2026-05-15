@@ -168,9 +168,7 @@ struct StepCardView: View {
                 .accessibilityElement(children: .combine)
 
             HStack(spacing: CGFloat.Stir.space3) {
-                // SCA-428: confirm dialog is owned by `body`'s outer
-                // Group (line ~68). Do not co-locate a duplicate here.
-                roundIconButton(
+                StirCircleIconButton(
                     icon: Image.Stir.close,
                     accessibilityLabel: "Exit Cook Mode",
                     action: { viewModel.requestExitConfirm() },
@@ -192,7 +190,7 @@ struct StepCardView: View {
                 // `if true` (or gating on a feature flag) when wiring the
                 // destination.
                 if false {
-                    roundIconButton(
+                    StirCircleIconButton(
                         icon: Image(systemName: "eye"),
                         accessibilityLabel: "Recipe overview",
                         action: {},
@@ -352,30 +350,6 @@ struct StepCardView: View {
             .split(separator: "_")
             .map { String($0).capitalized }
         return words.isEmpty ? tag : words.joined(separator: " ")
-    }
-
-    /// 36pt rounded icon button with `paper200` fill. Mirrors the
-    /// mockup's circular top-bar action style (`width:36, height:36,
-    /// borderRadius:999, background:c.paper200`). Hit area kept at
-    /// 44pt via `contentShape` so the button stays accessibility-
-    /// compliant despite the smaller visual footprint.
-    private func roundIconButton(
-        icon: Image,
-        accessibilityLabel: String,
-        action: @escaping () -> Void,
-    ) -> some View {
-        Button(action: action) {
-            icon
-                .stirFont(.labelMd).fontWeight(.semibold)
-                .foregroundStyle(Color.Stir.ink700)
-                .frame(width: 36, height: 36)
-                .background(
-                    Circle().fill(Color.Stir.paper200),
-                )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Content

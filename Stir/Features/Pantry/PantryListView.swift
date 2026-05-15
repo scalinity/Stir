@@ -97,19 +97,18 @@ struct PantryListView: View {
                     .foregroundStyle(Color.Stir.textPrimary)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Image.Stir.plus
-                        .foregroundStyle(Color.Stir.ember600)
-                        // HIG floor: SF Symbol intrinsic ~22×22pt; toolbar
-                        // hit area is borderline without an explicit minimum
-                        // (review W14).
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
+                // SCA-436: round-icon grammar matches DishPreview + Cook
+                // Mode's top-bar buttons and avoids iOS 26's Liquid
+                // Glass material picking up on the bare Image inside a
+                // toolbar Button. Ember-tinted glyph keeps the "+" as
+                // the strongest action on the screen.
+                StirCircleIconButton(
+                    icon: Image.Stir.plus,
+                    accessibilityLabel: "Add item",
+                    foreground: Color.Stir.ember600,
+                    action: { showingAddSheet = true },
+                )
                 .disabled(viewModel == nil)
-                .accessibilityLabel("Add item")
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
