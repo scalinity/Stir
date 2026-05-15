@@ -39,6 +39,7 @@ import {
   USER_DATA_START,
 } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
+import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
@@ -51,8 +52,8 @@ import {
   ALLERGEN_BOTANICAL_SAFE_NOTES,
   type CandidateDish,
   type DishContext,
-  type ValidationIssue,
   validateDish,
+  type ValidationIssue,
 } from '../_shared/hard_rules.ts';
 import { effectiveTier, readEntitlement } from '../_shared/entitlements.ts';
 
@@ -462,7 +463,10 @@ Deno.serve(async (req) => {
     household_json: body.household_context,
     pantry_json: { ingredients: body.ingredients },
     constraints_json: body.constraints ?? {},
-    equipment_json: body.household_context.available_equipment,
+    // SCA-423: render display names ("food processor"), not raw slugs
+    // ("food_processor"), so the model doesn't copy the underscore form
+    // into instruction prose. Validator path below stays on slugs.
+    equipment_json: equipmentDisplayNames(body.household_context.available_equipment),
     // SCA-44: render the on-device digest into the {{feedback_json}}
     // slot. Server-side kill switch (preference_memory_enabled flag)
     // forces null even when iOS sent a populated body.feedback_summary
