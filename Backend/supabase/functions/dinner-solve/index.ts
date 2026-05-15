@@ -583,13 +583,25 @@ Deno.serve(async (req) => {
     } catch (err) {
       lastErr = err;
       if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+        userLog.warn('gemini_upstream_error', {
+          attempt: attempt + 1,
+          status: err.status,
+          upstream_status: err.upstreamStatus,
+        });
         if (attempt === 0) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        // SCA-429: include the structured upstream status enum
+        // (`INVALID_ARGUMENT`, `RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`,
+        // `FAILED_PRECONDITION`, etc.) so the failure class is visible
+        // in logs without exposing Google's error body (which can echo
+        // rendered prompt content — see GeminiError.upstreamStatus doc).
+        userLog.error('gemini_call_failed', err, {
+          upstream_status: err instanceof GeminiError ? err.upstreamStatus : undefined,
+          http_status: err instanceof GeminiError ? err.status : undefined,
+        });
         break;
       }
     }
