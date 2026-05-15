@@ -167,7 +167,9 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // Pre-populate the stateKey with garbage so JSONDecoder throws on
         // load(). Asserts the SCA-374 contract: load() returns [] AND
         // captures `notification_history_decode_failed` with both the
-        // discriminating state_key AND a non-empty error_description.
+        // discriminating state_key AND a closed-vocab error_reason.
+        // SCA-398: property is `error_reason` (HistoryDecodeErrorReason
+        // rawValue) not raw `error_description`.
         let stateKey = "stir.leftovers_followup.history.v1"
         defaults.set(Data([0x00, 0xFF, 0x42, 0x99]), forKey: stateKey)
         let spy = SpyPostHogForHistory()
@@ -182,9 +184,50 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         XCTAssertEqual(spy.captured.count, 1, "decode failure must emit exactly once")
         XCTAssertEqual(spy.captured.first?.event, .notificationHistoryDecodeFailed)
         XCTAssertEqual(spy.captured.first?.properties["state_key"] as? String, stateKey)
-        let desc = spy.captured.first?.properties["error_description"] as? String
-        XCTAssertNotNil(desc)
-        XCTAssertFalse(desc?.isEmpty ?? true, "error_description must carry the JSONDecoder throw text")
+        // SCA-398: must be a closed-vocab rawValue, not a raw description.
+        let reason = spy.captured.first?.properties["error_reason"] as? String
+        XCTAssertNotNil(reason)
+        if let reason {
+            XCTAssertTrue(
+                HistoryDecodeErrorReason.allCases.map(\.rawValue).contains(reason),
+                "SCA-398: error_reason must be a HistoryDecodeErrorReason rawValue (closed-vocab); got \(reason)",
+            )
+        }
+        // Negative half: pre-fix this property was `error_description`. The
+        // closed-vocab rename is a wire-contract change; the old key should
+        // never appear post-SCA-398.
+        XCTAssertNil(
+            spy.captured.first?.properties["error_description"],
+            "SCA-398: error_description property removed in favor of error_reason",
+        )
+    }
+
+    /// SCA-398: HistoryDecodeErrorReason.classify maps each
+    /// DecodingError case to its corresponding closed-vocab rawValue.
+    /// Anything non-DecodingError → `.unknown`.
+    func test_historyDecodeErrorReason_classify_knownAndUnknown() {
+        let ctx = DecodingError.Context(codingPath: [], debugDescription: "test")
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.dataCorrupted(ctx)),
+            .dataCorrupted,
+        )
+        let key = TestCodingKey(stringValue: "fireAt")!
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.keyNotFound(key, ctx)),
+            .keyNotFound,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.typeMismatch(Date.self, ctx)),
+            .typeMismatch,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.valueNotFound(Bool.self, ctx)),
+            .valueNotFound,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(NSError(domain: "test.synthetic", code: 1)),
+            .unknown,
+        )
     }
 
     func test_historyStore_validBlob_doesNotEmitDecodeFailure() {
@@ -245,4 +288,14 @@ private final class SpyPostHogForHistory: PostHogClient, @unchecked Sendable {
     override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
         captured.append(Captured(event: event, properties: properties))
     }
+}
+
+/// SCA-398 — test-only `CodingKey` so we can build a
+/// `DecodingError.keyNotFound` without dragging in a real Codable
+/// value type.
+private struct TestCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue _: Int) { nil }
 }

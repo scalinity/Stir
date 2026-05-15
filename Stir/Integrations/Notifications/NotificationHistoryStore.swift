@@ -133,14 +133,18 @@ final class NotificationHistoryStore {
             Logger.notifications.warning(
                 "NotificationHistoryStore decode failed for key=\(self.stateKey, privacy: .public): \(error.localizedDescription, privacy: .private)",
             )
-            // SCA-374: also surface to PostHog so an Entry-shape
-            // regression (e.g., breaking change to `Entry: Codable`)
-            // shows up in dashboards across the user base, not just
-            // in individual sysdiagnose captures. The blob carries
-            // fire dates + bools — no user content per ADR 0009.
+            // SCA-374 + SCA-398: surface to PostHog so an Entry-shape
+            // regression (breaking change to `Entry: Codable`) shows up
+            // in dashboards across the user base, not just in individual
+            // sysdiagnose captures.
+            // SCA-398 retired the prior `error_description: error
+            // .localizedDescription` raw OS-string property in favor of
+            // the closed-vocab `error_reason: HistoryDecodeErrorReason
+            // .classify(error).rawValue`. Same SCA-367 pattern that
+            // bounded the rollback-failure event surface.
             telemetry.capture(.notificationHistoryDecodeFailed, properties: [
                 "state_key": stateKey,
-                "error_description": error.localizedDescription,
+                "error_reason": HistoryDecodeErrorReason.classify(error).rawValue,
             ])
             return []
         }
@@ -158,6 +162,53 @@ final class NotificationHistoryStore {
             Logger.notifications.warning(
                 "NotificationHistoryStore encode failed for key=\(self.stateKey, privacy: .public): \(error.localizedDescription, privacy: .private)",
             )
+        }
+    }
+}
+
+// MARK: - SCA-398: closed-vocab decode-failure reason
+
+/// Closed-vocabulary error reason for the `notification_history_decode_failed`
+/// PostHog event. Bounds the dashboard-property surface so a future
+/// Foundation `JSONDecoder.localizedDescription` widening can't leak
+/// implementation-defined OS strings into PostHog at indefinite retention.
+/// Mirrors the SCA-367 `RollbackErrorReason` pattern for the rollback-
+/// failure event.
+///
+/// Per ADR 0009, the underlying `Entry` blob carries `fireAt: Date +
+/// actioned: Bool` only — no user content. The OS-supplied
+/// `localizedDescription` was permitted on those grounds, but the
+/// review (CR3-W4 / SA3-W3 in the SCA-355 cluster review) flagged the
+/// inconsistency with SCA-367; SCA-398 closes the loop.
+enum HistoryDecodeErrorReason: String, Sendable, CaseIterable, Equatable {
+    /// `DecodingError.dataCorrupted` — the bytes parsed but failed an
+    /// invariant the decoder enforced (e.g. invalid date format).
+    case dataCorrupted
+    /// `DecodingError.keyNotFound` — required `Entry` key missing from
+    /// the encoded payload (most common Entry-shape regression).
+    case keyNotFound
+    /// `DecodingError.typeMismatch` — encoded value's type doesn't
+    /// match the `Entry` field (Bool became String, etc.).
+    case typeMismatch
+    /// `DecodingError.valueNotFound` — the key was present but the
+    /// value was null where a non-optional was expected.
+    case valueNotFound
+    /// Anything else (corrupt bytes pre-parse, future DecodingError
+    /// case Apple adds, non-DecodingError throw).
+    case unknown
+
+    /// Map an arbitrary `Error` (the JSONDecoder throw) to a closed-
+    /// vocab reason. Used at the SCA-374 telemetry capture site so
+    /// PostHog never sees raw OS-supplied `localizedDescription`
+    /// strings. Same shape as `RollbackErrorReason.classify(_:)`.
+    static func classify(_ error: Error) -> HistoryDecodeErrorReason {
+        guard let decoding = error as? DecodingError else { return .unknown }
+        switch decoding {
+        case .dataCorrupted: return .dataCorrupted
+        case .keyNotFound: return .keyNotFound
+        case .typeMismatch: return .typeMismatch
+        case .valueNotFound: return .valueNotFound
+        @unknown default: return .unknown
         }
     }
 }
