@@ -44,6 +44,29 @@
 --     leaves the row alone.
 --   - UPDATEs are gated on the current value so re-runs are no-ops and
 --     don't snap state back after a manual ops console flip.
+--
+-- Immutable-migration exception (class b correctness-blocks-fresh-init):
+-- the ORIGINAL version of this migration INSERTed v1.1.0 with
+-- is_default=TRUE BEFORE demoting v1.0.0. That tripped the partial
+-- unique index `uq_prompt_versions_one_default_per_feature`
+-- (UNIQUE (feature_key) WHERE is_default = true) every time the
+-- migration ran against any DB that had v1.0.0 set as default —
+-- i.e. every prod and every fresh `supabase db reset` after migration
+-- 20260418000023 seeded v1.0.0. The migration never successfully
+-- applied (rolled back via 23505 on local stack-start, blocked
+-- `supabase db push` on prod), so per CLAUDE.md the body is editable
+-- in place: same final-state semantics (v1.1.0 default + enabled,
+-- v1.0.0 demoted), the only change is statement order. No prior
+-- semantic intent is lost. The fix is to demote v1.0.0 BEFORE
+-- inserting v1.1.0, in the migration's implicit transaction. Postgres
+-- checks the partial unique index at statement-end (not deferred), so
+-- demote-then-insert is sufficient.
+
+UPDATE prompt_versions
+   SET is_default = FALSE
+ WHERE feature_key = 'substitution'
+   AND version = '1.0.0'
+   AND is_default = TRUE;
 
 INSERT INTO prompt_versions (
   feature_key, version, provider_model, template_blob, schema_hash,
@@ -95,16 +118,16 @@ $TEMPLATE$,
 )
 ON CONFLICT (feature_key, version) DO NOTHING;
 
--- Promote v1.1.0 / demote v1.0.0 so `readActivePrompt` picks v1.1.0
--- (it filters `is_default=true && is_enabled=true` and orders by
--- version DESC; only one row should be the default per feature_key
--- by the seed invariant called out in 20260418000023).
-UPDATE prompt_versions
-   SET is_default = FALSE
- WHERE feature_key = 'substitution'
-   AND version = '1.0.0'
-   AND is_default = TRUE;
-
+-- The INSERT above sets v1.1.0 is_default=TRUE; the leading UPDATE
+-- demoted v1.0.0. `readActivePrompt` filters
+-- `is_default=true && is_enabled=true` and orders by version DESC, so
+-- v1.1.0 is now the sole active row per the seed invariant called out
+-- in 20260418000023.
+--
+-- One re-run guard: if the INSERT no-ops (row already exists with
+-- is_default=FALSE from a prior partial run that demoted v1.0.0 but
+-- somehow left v1.1.0 un-default), force v1.1.0 to default. The
+-- partial-unique index is satisfied because v1.0.0 is already demoted.
 UPDATE prompt_versions
    SET is_default = TRUE
  WHERE feature_key = 'substitution'
