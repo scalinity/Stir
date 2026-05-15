@@ -75,7 +75,16 @@ export type ValidationIssue =
   | { kind: 'dislike_hard'; value: string; ingredient: string }
   | { kind: 'time_over_budget'; actual: number; max: number }
   | { kind: 'unavailable_equipment_implied'; keyword: string }
-  | { kind: 'claims_pass_falsely' };
+  | { kind: 'claims_pass_falsely' }
+  // SCA-431: model claimed an ingredient is "from your pantry" /
+  // "in your pantry" / "you already have" but the named item is not
+  // referenced anywhere in the user's actual pantry_snapshot. The
+  // v1.1.0 substitution prompt forbids this phrasing for ungrounded
+  // claims; this check is the server-side belt that catches when
+  // prompt obedience slips. `phrasing` is the forbidden substring
+  // the model used (telemetry / amplified-retry summary only — never
+  // user-facing).
+  | { kind: 'ungrounded_pantry_claim'; phrasing: string };
 
 export interface ValidationResult {
   valid: boolean;
@@ -527,6 +536,16 @@ export interface SubstitutionContext {
   /** Equipment the model should additionally avoid (e.g. derived from
    *  user_problem "blender broke"). Union'd with unavailable. */
   avoidEquipment?: string[];
+  /** SCA-431: user's actual confirmed-active pantry, used by the
+   *  pantry-grounded check. When the model writes "from your pantry"
+   *  / "you already have", at least one of these display_names must
+   *  appear in `substitution_text` or the validator fires
+   *  `ungrounded_pantry_claim`. Empty array (no pantry) means any
+   *  pantry claim is automatically ungrounded. Optional for back-
+   *  compat with callers that don't yet thread the snapshot through
+   *  — when omitted, the pantry-grounded check is skipped (legacy
+   *  behaviour, no false negatives elsewhere). */
+  pantrySnapshot?: { display_name: string }[];
 }
 
 export function validateSubstitution(
@@ -599,13 +618,72 @@ export function validateSubstitution(
     if (hit) issues.push({ kind: 'unavailable_equipment_implied', keyword: hit });
   }
 
-  // 3. Model claimed constraint_safe=true but we found real issues.
+  // 3. Pantry-grounded check (SCA-431). The v1.1.0 substitution prompt
+  // forbids "from your pantry" / "in your pantry" / "you already have"
+  // unless the named ingredient is actually in pantry_snapshot. This is
+  // the server-side belt for that copy rule — if the model ignores the
+  // prompt and writes an ungrounded pantry claim, we treat it as a hard-
+  // rule violation and the retry loop kicks in. Without this check, the
+  // bad copy ships to the user (the original SCA-424 failure mode after
+  // the iOS filter fix would otherwise rely solely on prompt obedience).
+  //
+  // Why scope to `substitution_text` only: that's the one-line
+  // instruction the user actually reads. `reasoning` can legitimately
+  // mention pantry in a context the user doesn't see ("preferred over
+  // pantry-absent options" etc.), and false-positives there would
+  // burn the retry budget on benign output. Same precedent as the
+  // text-only equipment check above.
+  //
+  // Why skipped when `pantrySnapshot` is omitted: older callers (any
+  // backend code that called `validateSubstitution` before this PR)
+  // didn't thread the snapshot through. Treating "no snapshot" as
+  // "empty pantry" would retro-break those paths. The substitution
+  // endpoint (the only production caller as of SCA-425) always
+  // provides it after this PR.
+  if (sub.constraint_safe && ctx.pantrySnapshot !== undefined) {
+    const subText = sub.substitution_text.toLowerCase();
+    let phrasing: string | null = null;
+    for (const needle of PANTRY_CLAIM_NEEDLES) {
+      if (subText.includes(needle)) {
+        phrasing = needle;
+        break;
+      }
+    }
+    if (phrasing) {
+      const pantryNames = ctx.pantrySnapshot
+        .map((p) => p.display_name.toLowerCase().trim())
+        .filter((n) => n.length > 0);
+      const grounded = pantryNames.some((name) => subText.includes(name));
+      if (!grounded) {
+        issues.push({ kind: 'ungrounded_pantry_claim', phrasing });
+      }
+    }
+  }
+
+  // 4. Model claimed constraint_safe=true but we found real issues.
   if (sub.constraint_safe && issues.length > 0) {
     issues.push({ kind: 'claims_pass_falsely' });
   }
 
   return { valid: issues.length === 0, issues };
 }
+
+// SCA-431: phrasings the model uses when claiming an ingredient is
+// already in the user's pantry. Mirrors the prompt's "NEVER write
+// 'from your pantry'..." clause — keep this list and the prompt
+// language in lockstep. All lowercase; matched against
+// `substitution_text.toLowerCase()` (plain substring, not word-
+// boundary — these are multi-word phrases with low false-positive
+// risk).
+const PANTRY_CLAIM_NEEDLES: readonly string[] = [
+  'from your pantry',
+  'from the pantry',
+  'in your pantry',
+  'in the pantry',
+  'you already have',
+  'already in your pantry',
+  'already in the pantry',
+];
 
 /**
  * Compose a compact human-readable violation summary to amplify the retry
@@ -619,16 +697,23 @@ export function summarizeViolations(result: ValidationResult): string {
   const allergens = new Set<string>();
   const diets = new Set<string>();
   const equipment = new Set<string>();
+  // SCA-431: collect the forbidden phrasings the model used so the
+  // retry prompt knows specifically what to avoid in the next attempt.
+  const ungroundedPhrasings = new Set<string>();
   for (const issue of result.issues) {
     kinds.add(issue.kind);
     if (issue.kind === 'allergen') allergens.add(issue.value);
     if (issue.kind === 'diet_violation') diets.add(issue.diet);
     if (issue.kind === 'unavailable_equipment_implied') equipment.add(issue.keyword);
+    if (issue.kind === 'ungrounded_pantry_claim') ungroundedPhrasings.add(issue.phrasing);
   }
   const parts: string[] = [];
   if (allergens.size) parts.push(`allergens=${[...allergens].join('|')}`);
   if (diets.size) parts.push(`diets=${[...diets].join('|')}`);
   if (equipment.size) parts.push(`unavailable_equipment=${[...equipment].join('|')}`);
+  if (ungroundedPhrasings.size) {
+    parts.push(`ungrounded_pantry_claim=${[...ungroundedPhrasings].join('|')}`);
+  }
   if (!parts.length) parts.push(`kinds=${[...kinds].join('|')}`);
   return parts.join('; ');
 }

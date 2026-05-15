@@ -57,6 +57,13 @@ extension HouseholdProfile {
     ///
     /// The returned value is a small value-type seam; DTOs map from
     /// it rather than reading Core Data directly.
+    ///
+    /// SCA-431: the pantry-filter half of this projection is now
+    /// shared with the sheet substitution + grocery generate paths
+    /// via `confirmedActivePantry()`. All three AI-invocation sites
+    /// now consume the same predicate; any future code that re-
+    /// inlines `.filter { $0.deletedAt == nil && $0.userConfirmed }`
+    /// is reintroducing the same drift class SCA-424 caught.
     func voiceContextSnapshot() -> VoiceContextSnapshot {
         let rules: [VoiceContextSnapshot.DietaryRule] = dietaryRuleArray.map {
             VoiceContextSnapshot.DietaryRule(
@@ -68,9 +75,7 @@ extension HouseholdProfile {
         let equipment: [String] = kitchenEquipmentArray
             .filter { $0.isAvailable }
             .compactMap { $0.code }
-        let pantrySet = pantryItems as? Set<PantryItem> ?? []
-        let pantry: [VoiceContextSnapshot.PantryItem] = pantrySet
-            .filter { $0.deletedAt == nil && $0.userConfirmed }
+        let pantry: [VoiceContextSnapshot.PantryItem] = confirmedActivePantry()
             .compactMap { item in
                 guard let display = item.displayName, !display.isEmpty else { return nil }
                 return VoiceContextSnapshot.PantryItem(
@@ -84,6 +89,25 @@ extension HouseholdProfile {
             availableEquipment: equipment,
             pantry: pantry,
         )
+    }
+
+    /// Canonical pantry filter — SCA-424 + SCA-431. Returns only
+    /// `PantryItem` rows that pass `deletedAt == nil && userConfirmed`.
+    /// All three AI prompt sites (voice mint via `voiceContextSnapshot`,
+    /// substitution sheet, grocery generate) consume this helper so the
+    /// filter never drifts again. Inline `.filter` predicates at any of
+    /// those call sites is a regression of SCA-424 — pre-2026-05-15 each
+    /// site had its own predicate and the substitution sheet's "only
+    /// non-empty name" check shipped soft-deleted + unconfirmed pantry
+    /// rows to the model, producing "Use the baguette slices from your
+    /// pantry" hallucinations against an empty pantry.
+    ///
+    /// Sort order is unspecified — callers that need deterministic order
+    /// (e.g. voice transcript priming) should `.sorted` themselves;
+    /// callers that don't (substitution + grocery prompts) save the work.
+    func confirmedActivePantry() -> [PantryItem] {
+        let set = pantryItems as? Set<PantryItem> ?? []
+        return set.filter { $0.deletedAt == nil && $0.userConfirmed }
     }
 }
 
