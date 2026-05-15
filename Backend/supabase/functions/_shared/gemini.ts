@@ -104,11 +104,36 @@ export interface GeminiGenerateResult {
 export class GeminiError extends Error {
   readonly status: number;
   readonly body: string;
+  /** Structured upstream status enum from Google's error envelope
+   * (e.g. "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED", "PERMISSION_DENIED",
+   * "FAILED_PRECONDITION"). Extracted from `body.error.status` when the
+   * body parses as the canonical Google error shape; `undefined` for
+   * synthetic errors (timeout, non-JSON, no-candidates) or when the
+   * upstream returned a non-canonical body. PII-safe — the status enum
+   * never echoes prompt content, unlike `body` or `error.message`.
+   * SCA-429: lets `gemini_call_failed` log lines name the failure class
+   * without leaking the full upstream body. */
+  readonly upstreamStatus: string | undefined;
   constructor(status: number, body: string, message?: string) {
     super(message ?? `Gemini error: ${status}`);
     this.name = 'GeminiError';
     this.status = status;
     this.body = body;
+    this.upstreamStatus = extractUpstreamStatus(body);
+  }
+}
+
+/** Parse Google's canonical error envelope and return the structured
+ * `error.status` enum string. Returns undefined on parse failure or
+ * non-canonical shape so callers fall back to bare HTTP status. */
+function extractUpstreamStatus(body: string): string | undefined {
+  if (!body) return undefined;
+  try {
+    const parsed = JSON.parse(body) as { error?: { status?: unknown } };
+    const status = parsed.error?.status;
+    return typeof status === 'string' ? status : undefined;
+  } catch {
+    return undefined;
   }
 }
 
