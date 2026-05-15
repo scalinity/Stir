@@ -201,7 +201,14 @@ actor AIDispatch {
         )
         let response: RealtimeSessionResponse = try await session.performAuthenticated(request)
         Logger.aiDispatch.info(
-            "realtime_session_minted session_id=\(response.sessionID, privacy: .public) expires_at=\(response.expiresAt, privacy: .public)",
+            // SCA-400: session_id flipped .public→.private. Per-voice-
+            // session UUID joins iOS OSLog ↔ backend ai_request_log;
+            // same correlation risk as installation_id (which SCA-381
+            // flipped to .private at L360 of this same file). A leaked
+            // sysdiagnose with the literal session_id correlates the
+            // user's full voice-session history. ISO8601 expires_at
+            // stays .public.
+            "realtime_session_minted session_id=\(response.sessionID, privacy: .private) expires_at=\(response.expiresAt, privacy: .public)",
         )
         return response
     }
@@ -523,8 +530,12 @@ actor AIDispatch {
                     }
                     continuation.finish()
                 } catch {
+                    // SCA-400: error.localizedDescription on URLSession errors
+                    // can carry the request URL + host. Same SCA-366 reasoning;
+                    // .private redacts in OSLog so a leaked sysdiagnose can't
+                    // disclose the upstream Gemini route.
                     Logger.aiDispatch.error(
-                        "dinner_solve_stream_failed: \(error.localizedDescription, privacy: .public)",
+                        "dinner_solve_stream_failed: \(error.localizedDescription, privacy: .private)",
                     )
                     continuation.finish(throwing: error)
                 }
@@ -599,20 +610,26 @@ private func handleEvent(
         let preview = dataJSON.count > 2000
             ? String(dataJSON.prefix(2000)) + "…(truncated)"
             : dataJSON
+        // SCA-400: raw_data is up to 2000 chars of SSE DishCard JSON
+        // (user-controlled pantry ingredient names). DecodingError detail
+        // can include coding-path values from the payload. localizedDescription
+        // can carry similar payload-derived strings. Mark .private so a
+        // leaked sysdiagnose can't disclose the user's pantry. Closed-vocab
+        // event name stays .public.
         if let decodingError = error as? DecodingError {
             Logger.aiDispatch.error(
                 """
                 sse_decode_failed event=\(event, privacy: .public) \
-                detail=\(String(describing: decodingError), privacy: .public)
-                raw_data=\(preview, privacy: .public)
+                detail=\(String(describing: decodingError), privacy: .private)
+                raw_data=\(preview, privacy: .private)
                 """,
             )
         } else {
             Logger.aiDispatch.error(
                 """
                 sse_decode_failed event=\(event, privacy: .public) \
-                error=\(error.localizedDescription, privacy: .public)
-                raw_data=\(preview, privacy: .public)
+                error=\(error.localizedDescription, privacy: .private)
+                raw_data=\(preview, privacy: .private)
                 """,
             )
         }

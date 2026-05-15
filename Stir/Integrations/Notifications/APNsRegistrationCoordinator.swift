@@ -26,6 +26,16 @@ import OSLog
 import UIKit
 import UserNotifications
 
+/// SCA-371 marker — thrown by `StirApp`'s configure-closure when the
+/// RootCoordinator weak ref deallocates mid-flight. The
+/// classifier (`classifyPostFailure` below) `is`-checks this type to
+/// route the error to a fault-level OSLog. SCA-409: hoisted to file
+/// scope so both StirApp + APNsRegistrationCoordinator share one
+/// definition (pre-fix the marker was defined inline in StirApp and
+/// the classifier matched on `String(describing:).contains(...)`,
+/// which silently misroutes typos / sibling type names).
+struct RootCoordinatorDeallocatedMarker: Error {}
+
 @MainActor
 final class APNsRegistrationCoordinator {
     static let shared = APNsRegistrationCoordinator()
@@ -216,8 +226,14 @@ final class APNsRegistrationCoordinator {
     /// snapshot so cancel-and-replace pays no extra round-trip cost.
     private func schedulePost(reason: String) {
         inFlightPost?.cancel()
-        inFlightPost = Task { [weak self] in
-            await self?.postIfChanged(reason: reason)
+        // SCA-415: dropped `[weak self]` — `APNsRegistrationCoordinator.shared`
+        // is `@MainActor` singleton with app-lifetime (`StirApp` holds the
+        // reference until process exit), so the weak capture is dead code
+        // costing a retain-release pair per schedule. Strong capture is
+        // safe for as long as the singleton convention holds; if a future
+        // refactor introduces non-singleton instantiation, restore [weak self].
+        inFlightPost = Task {
+            await self.postIfChanged(reason: reason)
         }
     }
 
@@ -319,8 +335,15 @@ final class APNsRegistrationCoordinator {
                 // SCA-371: the configure-closure throws .unknown wrapping
                 // a typed marker when RootCoordinator deallocates. That's
                 // an invariant violation, not a routine error.
-                let typeName = String(describing: type(of: underlying))
-                if typeName.contains("RootCoordinatorDeallocated") {
+                // SCA-409: typed `is` check against the shared marker
+                // type. Pre-fix matched on `String(describing: type(of:
+                // underlying)).contains("RootCoordinatorDeallocated")`
+                // — a sibling type whose name happened to contain the
+                // substring (e.g. future `RootCoordinatorDeallocatedTwice`)
+                // would silently route to .invariantViolation; a typo
+                // at the marker site would silently downgrade to
+                // .transient. The typed check is refactor-safe.
+                if underlying is RootCoordinatorDeallocatedMarker {
                     return .invariantViolation
                 }
                 return .transient
