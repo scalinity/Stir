@@ -50,7 +50,8 @@ struct DinnerOptionsView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Tune", action: onTune)
-                    .tint(Color.Stir.ember600)
+                    .stirFont(.bodyMd)
+                    .foregroundStyle(Color.Stir.ember600)
             }
         }
         .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
@@ -118,7 +119,7 @@ struct DinnerOptionsView: View {
             .frame(maxHeight: .infinity)
 
             Text("Option \(rank)")
-                .stirFont(.displayMd)
+                .stirFont(.displaySm)
                 .foregroundStyle(Color.Stir.ink300)
                 .padding(.horizontal, CGFloat.Stir.space4)
                 .padding(.vertical, CGFloat.Stir.space3Half)

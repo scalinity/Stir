@@ -96,9 +96,20 @@ struct SolveAgainRoot: View {
                         // toolbar action is `Tune` and the user has
                         // no way to leave the cover except swipe-down
                         // (which `.fullScreenCover` doesn't honor).
+                        //
+                        // Hide the system back chevron: the parent
+                        // route in this NavigationStack is the hidden
+                        // `Color.Stir.paper50` placeholder, so a back
+                        // pop dumps the user on a blank screen. Cancel
+                        // is the meaningful exit. Leaving the chevron
+                        // visible also crowded the nav bar enough to
+                        // truncate the serif title to an ellipsis.
+                        .navigationBarBackButtonHidden(true)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
                                 Button("Cancel") { onDismiss() }
+                                    .stirFont(.bodyMd)
+                                    .foregroundStyle(Color.Stir.ember600)
                             }
                         }
                     case let .preview(dish):
@@ -132,6 +143,20 @@ struct SolveAgainRoot: View {
         // Mode launch is requested.
         .onChange(of: coordinator.activeCookLaunch) { _, new in
             if new != nil {
+                onDismiss()
+            }
+        }
+        // Swipe-back catcher. We hide the system back chevron on the
+        // `.options` destination because its destination is the hidden
+        // `paper50` placeholder root — but `navigationBarBackButtonHidden`
+        // does NOT disable the edge-swipe gesture. Without this guard,
+        // a user who swipes back lands on the invisible placeholder.
+        // When `path` transitions from non-empty to empty (any depth
+        // popped to root), close the cover so they return to Tonight.
+        // `handleSheetDismiss`'s empty-path branch handles the disjoint
+        // "user backed out of constraints sheet before solving" case.
+        .onChange(of: path) { old, new in
+            if !old.isEmpty && new.isEmpty {
                 onDismiss()
             }
         }

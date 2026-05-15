@@ -167,7 +167,6 @@ struct OtherOptionsRoot: View {
                                     whyItFits: option.whyItFits,
                                     missingIngredientCount: option.missingIngredientCount,
                                     tonightPick: false,
-                                    titleLineLimit: 3,
                                 )
                             }
                             .buttonStyle(DishOptionCardStyle())
