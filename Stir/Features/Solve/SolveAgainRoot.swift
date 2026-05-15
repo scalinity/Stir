@@ -103,7 +103,7 @@ struct SolveAgainRoot: View {
                         // pop dumps the user on a blank screen. Cancel
                         // is the meaningful exit. Leaving the chevron
                         // visible also crowded the nav bar enough to
-                        // truncate the serif title to "Dinn…" (SCA-435).
+                        // truncate the serif title to an ellipsis.
                         .navigationBarBackButtonHidden(true)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
@@ -143,6 +143,20 @@ struct SolveAgainRoot: View {
         // Mode launch is requested.
         .onChange(of: coordinator.activeCookLaunch) { _, new in
             if new != nil {
+                onDismiss()
+            }
+        }
+        // Swipe-back catcher. We hide the system back chevron on the
+        // `.options` destination because its destination is the hidden
+        // `paper50` placeholder root — but `navigationBarBackButtonHidden`
+        // does NOT disable the edge-swipe gesture. Without this guard,
+        // a user who swipes back lands on the invisible placeholder.
+        // When `path` transitions from non-empty to empty (any depth
+        // popped to root), close the cover so they return to Tonight.
+        // `handleSheetDismiss`'s empty-path branch handles the disjoint
+        // "user backed out of constraints sheet before solving" case.
+        .onChange(of: path) { old, new in
+            if !old.isEmpty && new.isEmpty {
                 onDismiss()
             }
         }

@@ -12,10 +12,10 @@
 //   - Plate column hosts a SwiftUI port of the mockup's Plate
 //     illustration; the tint cycles by rank (salmon / sage / amber)
 //   - Content column carries an optional "TONIGHT'S PICK" eyebrow
-//     (rank 1 only), the New York title (displaySm — was displayMd
-//     pre-SCA-435; 22pt swallowed long Gemini titles like "Dutch Oven
-//     Chicken & Vegetables" at the 2-line limit), and a single
-//     muted sentence subtitle composed from `whyItFits` + total time
+//     (rank 1 only), the New York title (displaySm — 22pt swallowed
+//     long AI-generated titles like "Dutch Oven Chicken & Vegetables"
+//     at a 2-line limit), and a single muted sentence subtitle composed
+//     from `whyItFits` + total time
 //   - Press feedback: 98% scale + ember border ring (DishOptionCardStyle)
 //
 // Refactor history: pre-step-9 the card carried a rank numeral, a
@@ -41,11 +41,12 @@ struct DishOptionCard: View {
     /// DinnerOptionsView passes `rank == 1`; defaulted to false so
     /// previews and other callers can opt in explicitly.
     let tonightPick: Bool
-    /// Max line count for the recipe title. Defaults to 2 to preserve
-    /// the post-solve grid's compact silhouette; OtherOptionsRoot
-    /// passes 3 because its long Gemini-generated titles ("Quick
-    /// Flatbread with Tomato & Mozzarella") otherwise truncate
-    /// mid-word with the ellipsis swallowing the meaningful tail.
+    /// Max line count for the recipe title. Defaults to 3 because
+    /// AI-generated titles ("Quick Flatbread with Tomato & Mozzarella",
+    /// "Dutch Oven Chicken & Vegetables") otherwise truncate mid-word
+    /// at the 2-line floor with the ellipsis swallowing the meaningful
+    /// tail. Callers may pass a lower value when the card sits in a
+    /// width-constrained layout that needs the compact silhouette.
     let titleLineLimit: Int
 
     init(
@@ -55,7 +56,7 @@ struct DishOptionCard: View {
         whyItFits: String,
         missingIngredientCount: Int,
         tonightPick: Bool = false,
-        titleLineLimit: Int = 2,
+        titleLineLimit: Int = 3,
     ) {
         self.rank = rank
         self.title = title
