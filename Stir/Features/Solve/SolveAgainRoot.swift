@@ -83,49 +83,20 @@ struct SolveAgainRoot: View {
                 .navigationDestination(for: ScanFlowRoot.Route.self) { route in
                     switch route {
                     case .options:
+                        // Cancel handling moved into DinnerOptionsView's
+                        // custom `.safeAreaInset(.top)` header (SCA-456)
+                        // because iOS 26 paints toolbar Buttons with
+                        // Liquid Glass material we can't suppress per-
+                        // button. Passing `onCancel` here tells the
+                        // header to render a "Cancel" text button in
+                        // the leading slot; without it, the header
+                        // shows a Stir back-chevron instead (the
+                        // ScanFlowRoot case).
                         DinnerOptionsView(
                             viewModel: solveViewModel,
                             onTune: { showConstraintsSheet = true },
+                            onCancel: onDismiss,
                         )
-                        // Cancel lives at the .options level — that's
-                        // the only reachable surface where the user
-                        // might want to back out of the cover entirely
-                        // (the constraints sheet has its own Cancel;
-                        // DishPreviewView has system back-chevron).
-                        // Without this, DinnerOptionsView's only
-                        // toolbar action is `Tune` and the user has
-                        // no way to leave the cover except swipe-down
-                        // (which `.fullScreenCover` doesn't honor).
-                        //
-                        // Hide the system back chevron: the parent
-                        // route in this NavigationStack is the hidden
-                        // `Color.Stir.paper50` placeholder, so a back
-                        // pop dumps the user on a blank screen. Cancel
-                        // is the meaningful exit. Leaving the chevron
-                        // visible also crowded the nav bar enough to
-                        // truncate the serif title to an ellipsis.
-                        .navigationBarBackButtonHidden(true)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                // `.buttonStyle(.plain)` suppresses iOS
-                                // 26's automatic Liquid Glass capsule
-                                // on toolbar Buttons. Without it the
-                                // ember text rides inside a translucent
-                                // pill that visually competes with the
-                                // warm-paper Stir surface AND widens
-                                // the leading slot enough to truncate
-                                // the principal serif title. See the
-                                // header doc on `StirCircleIconButton`
-                                // (SCA-436) for the documented escape
-                                // hatch; trade-off is no press-feedback
-                                // ring, acceptable for text-only
-                                // toolbar actions.
-                                Button("Cancel") { onDismiss() }
-                                    .buttonStyle(.plain)
-                                    .stirFont(.bodyMd)
-                                    .foregroundStyle(Color.Stir.ember600)
-                            }
-                        }
                     case let .preview(dish):
                         DishPreviewView(viewModel: solveViewModel, dish: dish)
                     case .capture, .review:

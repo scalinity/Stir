@@ -3,12 +3,22 @@
 // Renders 3 dish cards as they stream in (mockup 05 §Dinner Options).
 // Skeleton placeholders before each arrives; progressive fill as the
 // SSE events land. Tapping a card pushes DishPreviewView. The trailing
-// "Tune" toolbar button re-presents the constraints sheet so the user
+// "Tune" header button re-presents the constraints sheet so the user
 // can adjust their constraints and re-solve in place.
 //
 // Uses Phase 2 DishOptionCard for the populated slot. Slot-specific
 // skeleton + error surfaces stay inline — they're one-off during-stream
 // states, not reusable components.
+//
+// Custom `.safeAreaInset(.top)` header replaces the system toolbar
+// (SCA-456). iOS 26 paints toolbar Buttons with Liquid Glass material
+// — capsules + circles that read as off-theme against the warm-paper
+// Stir surface and squeeze the principal serif title. Dropping the
+// toolbar entirely is the only reliable opt-out, matching SCA-436's
+// DishPreview pattern. `onCancel` is optional: SolveAgainRoot passes
+// a dismiss closure (cover-level exit since back-nav leads to a hidden
+// placeholder), ScanFlowRoot passes nil and the leading slot renders
+// a Stir back-chevron that calls `dismiss()` to pop to .review.
 
 import SwiftUI
 
@@ -19,7 +29,24 @@ struct DinnerOptionsView: View {
     /// constraints and re-solve in place. ScanFlowRoot owns the sheet
     /// presentation state; we just signal it.
     let onTune: () -> Void
+    /// When non-nil, the leading header slot renders a "Cancel" text
+    /// button that invokes this closure. SolveAgainRoot passes
+    /// `onDismiss` (drops the cover); ScanFlowRoot passes nil so the
+    /// leading slot renders a back-chevron StirCircleIconButton that
+    /// calls `dismiss()` to pop to .review.
+    let onCancel: (() -> Void)?
 
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        viewModel: SolveViewModel,
+        onTune: @escaping () -> Void,
+        onCancel: (() -> Void)? = nil,
+    ) {
+        self._viewModel = Bindable(viewModel)
+        self.onTune = onTune
+        self.onCancel = onCancel
+    }
 
     var body: some View {
         ScrollView {
@@ -35,30 +62,19 @@ struct DinnerOptionsView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // Keep `navigationTitle` for the back-chevron label +
-        // VoiceOver; the visible title comes from the .principal
-        // toolbar item below in the Stir display serif. Default
-        // chrome would render in SF Pro Bold and break the
-        // cross-screen rhythm (matches Settings / Saved / Pantry).
+        // Keep `navigationTitle` for VoiceOver and for any caller that
+        // pushes a deeper screen on top of this one (the implicit back-
+        // chevron label reads from here). The visible chrome is the
+        // custom `.safeAreaInset(.top)` header below — the system
+        // toolbar route paints iOS 26 Liquid Glass on every Button
+        // inside it, and there's no per-button opt-out.
         .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Dinner options")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                // `.buttonStyle(.plain)` — see SolveAgainRoot's Cancel
-                // for the iOS 26 Liquid Glass suppression rationale.
-                Button("Tune", action: onTune)
-                    .buttonStyle(.plain)
-                    .stirFont(.bodyMd)
-                    .foregroundStyle(Color.Stir.ember600)
-            }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            stirTopBar
         }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()
@@ -72,6 +88,61 @@ struct DinnerOptionsView: View {
             content: { DinnerOptionsTutorial() },
             shouldPresent: viewModel.slots.contains { $0.dish != nil },
         )
+    }
+
+    // MARK: - Custom top bar (SCA-456)
+
+    /// `.safeAreaInset(.top)` replacement for the system toolbar.
+    /// Leading slot = Cancel text (cover entry) or back-chevron round-
+    /// icon (scan-flow entry). Center = full-width serif title. Trailing
+    /// = Tune text button. All buttons render outside the system
+    /// toolbar so iOS 26's automatic Liquid Glass material is bypassed.
+    private var stirTopBar: some View {
+        HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
+            leadingControl
+            Text("Dinner options")
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .accessibilityAddTraits(.isHeader)
+            trailingControl
+        }
+        .padding(.horizontal, CGFloat.Stir.space3)
+        .padding(.vertical, CGFloat.Stir.space2)
+        .background(Color.Stir.paper50)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.Stir.divider)
+                .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var leadingControl: some View {
+        if let onCancel {
+            Button("Cancel", action: onCancel)
+                .stirFont(.bodyMd)
+                .foregroundStyle(Color.Stir.ember600)
+                .frame(minHeight: 44)
+                .frame(width: 88, alignment: .leading)
+        } else {
+            StirCircleIconButton(
+                icon: Image(systemName: "chevron.left"),
+                accessibilityLabel: "Back",
+                action: { dismiss() },
+            )
+            .frame(width: 88, alignment: .leading)
+        }
+    }
+
+    private var trailingControl: some View {
+        Button("Tune", action: onTune)
+            .stirFont(.bodyMd)
+            .foregroundStyle(Color.Stir.ember600)
+            .frame(minHeight: 44)
+            .frame(width: 88, alignment: .trailing)
     }
 
     // MARK: - Sections
