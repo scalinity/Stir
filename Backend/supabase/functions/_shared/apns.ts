@@ -226,6 +226,48 @@ export function _resetApnsCacheForTests(): void {
   mintingPromise = null;
 }
 
+/**
+ * SCA-403 — read-only test seam exposing the cached provider JWT.
+ * Lets tests assert SCA-352 cache-invalidation by checking the cache
+ * directly (`cachedProviderJwt === null`) instead of inferring it from
+ * different-bytes-after-different-iat side effects (which required a
+ * 1.1s setTimeout per assertion). Tighter contract pin + shaves ~1s
+ * off the suite per assertion.
+ *
+ * Same `STIR_TEST_MODE=1` tripwire as `_setApnsFetchOverrideForTests`
+ * so a future production caller throws synchronously instead of
+ * silently exposing the cache. Underscore-prefixed by convention.
+ */
+export function _cachedJwtForTests(): string | null {
+  if (Deno.env.get("STIR_TEST_MODE") !== "1") {
+    throw new Error(
+      "_cachedJwtForTests called outside test mode (STIR_TEST_MODE != '1')",
+    );
+  }
+  return cachedProviderJwt;
+}
+
+/**
+ * SCA-412 — test seam: roll the cache's "minted at" time backwards by
+ * `secondsAgo` so the SCA-412 just-minted guard treats it as aged.
+ * Used by SCA-352 cache-invalidation tests that need to exercise the
+ * "expired JWT got 401 → invalidate" path; pre-SCA-412 they could
+ * just trigger 401 immediately, but the just-minted guard now skips
+ * invalidation on fresh mints (correct behavior; protects against
+ * mint thrash on key/config bugs).
+ *
+ * STIR_TEST_MODE=1 tripwire identical to other seams.
+ */
+export function _ageProviderJwtCacheForTests(secondsAgo: number): void {
+  if (Deno.env.get("STIR_TEST_MODE") !== "1") {
+    throw new Error(
+      "_ageProviderJwtCacheForTests called outside test mode (STIR_TEST_MODE != '1')",
+    );
+  }
+  // Decrement expiresAt so `cacheAge = now - (expiresAt - TTL)` > secondsAgo.
+  cachedProviderJwtExpiresAt -= secondsAgo;
+}
+
 function base64Decode(b64: string): Uint8Array {
   const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
   const out = new Uint8Array(bin.length);
@@ -322,10 +364,25 @@ export async function sendAPNsPush(
   // (whether retry or fresh) mints fresh. Pre-fix: the cache stayed valid
   // and attempts 2 + 3 burned against the same bad JWT, dead-lettering a
   // legitimate push every NTP-skew or key-rotation race window.
+  // SCA-412: bound the invalidation with a "just-minted" guard. Under
+  // sustained 401 (wrong APNS_AUTH_KEY_P8 post-deploy, or APNs key
+  // rotated and prod env wasn't updated), every pgmq-dispatch worker
+  // would otherwise re-mint ES256 → 401 → invalidate → re-mint forever,
+  // burning CPU + APNs request budget. If the cache is fresher than 5s,
+  // the JWT we just minted got rejected — that's a key/config bug, not
+  // a stale-cache bug. Don't thrash; let the existing dead-letter +
+  // pgmq-dispatch backoff control the retry rate. Recovery on key
+  // rotation: after 5s the cache effectively unblocks itself for a
+  // fresh mint attempt. Mint coalescing (mintingPromise) is preserved.
   if (res.status === 401) {
-    cachedProviderJwt = null;
-    cachedProviderJwtExpiresAt = 0;
-    mintingPromise = null;
+    const cacheAgeSeconds = (Date.now() / 1000) -
+      (cachedProviderJwtExpiresAt - PROVIDER_JWT_TTL_SECONDS);
+    const justMinted = cacheAgeSeconds < 5;
+    if (!justMinted) {
+      cachedProviderJwt = null;
+      cachedProviderJwtExpiresAt = 0;
+      mintingPromise = null;
+    }
   }
 
   // Classify by BOTH status and apnsReason. Apple documents 400 as covering
