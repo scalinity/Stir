@@ -200,6 +200,7 @@
 		A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000014 /* WidgetNudgeServiceTests.swift */; };
 		A65A001000000021 /* PantryTombstoneReaper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000020 /* PantryTombstoneReaper.swift */; };
 		A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000022 /* PantryTombstoneReaperTests.swift */; };
+		A65A001000000081 /* RecipePlanDurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000082 /* RecipePlanDurationTests.swift */; };
 		A65A001000000071 /* StepTextSlugCleanupMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000070 /* StepTextSlugCleanupMigration.swift */; };
 		A65A001000000073 /* StepTextSlugCleanupMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */; };
 		A65A001000000031 /* OnboardingRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65A001000000030 /* OnboardingRouter.swift */; };
@@ -524,6 +525,7 @@
 		A65A001000000014 /* WidgetNudgeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetNudgeServiceTests.swift; sourceTree = "<group>"; };
 		A65A001000000020 /* PantryTombstoneReaper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaper.swift; sourceTree = "<group>"; };
 		A65A001000000022 /* PantryTombstoneReaperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryTombstoneReaperTests.swift; sourceTree = "<group>"; };
+		A65A001000000082 /* RecipePlanDurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePlanDurationTests.swift; sourceTree = "<group>"; };
 		A65A001000000070 /* StepTextSlugCleanupMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepTextSlugCleanupMigration.swift; sourceTree = "<group>"; };
 		A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepTextSlugCleanupMigrationTests.swift; sourceTree = "<group>"; };
 		A65A001000000030 /* OnboardingRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingRouter.swift; sourceTree = "<group>"; };
@@ -863,6 +865,7 @@
 				B17317300173FFAACC170004 /* NotificationSchedulerKitTests.swift */,
 				A65A001000000014 /* WidgetNudgeServiceTests.swift */,
 				A65A001000000022 /* PantryTombstoneReaperTests.swift */,
+				A65A001000000082 /* RecipePlanDurationTests.swift */,
 				A65A001000000072 /* StepTextSlugCleanupMigrationTests.swift */,
 				A65A001000000032 /* OnboardingRouterTests.swift */,
 				7F54545C82C83250EF7F3070 /* OnboardingViewModelTests.swift */,
@@ -1769,6 +1772,7 @@
 				B17317300173FFAACC170003 /* NotificationSchedulerKitTests.swift in Sources */,
 				A65A001000000013 /* WidgetNudgeServiceTests.swift in Sources */,
 				A65A001000000023 /* PantryTombstoneReaperTests.swift in Sources */,
+				A65A001000000081 /* RecipePlanDurationTests.swift in Sources */,
 				A65A001000000073 /* StepTextSlugCleanupMigrationTests.swift in Sources */,
 				A65A001000000033 /* OnboardingRouterTests.swift in Sources */,
 				226422CFEDC714A65B5AF80D /* OnboardingViewModelTests.swift in Sources */,
