@@ -44,11 +44,12 @@ struct WidgetSetupGuideView: View {
             .background(Color.Stir.paper50)
             .navigationTitle("Widget setup")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done", action: onDone)
-                }
-            }
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                trailing: {
+                    StirTopBarTextButton("Done", action: onDone)
+                },
+            )
         }
     }
 

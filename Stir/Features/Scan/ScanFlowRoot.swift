@@ -236,18 +236,13 @@ private struct ScanPrimerBody: View {
         // cross-screen rhythm (matches Settings / Saved / Pantry).
         .navigationTitle("Scan kitchen")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Cancel", action: onCancel)
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Scan kitchen")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+        .stirTopBar(
+            title: "Scan kitchen",
+            leading: {
+                StirTopBarTextButton("Cancel", action: onCancel)
+            },
+        )
     }
 
     @ViewBuilder

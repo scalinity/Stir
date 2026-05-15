@@ -42,23 +42,15 @@ struct DinnerOptionsView: View {
         // cross-screen rhythm (matches Settings / Saved / Pantry).
         .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Dinner options")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                // `.buttonStyle(.plain)` — see SolveAgainRoot's Cancel
-                // for the iOS 26 Liquid Glass suppression rationale.
-                Button("Tune", action: onTune)
-                    .buttonStyle(.plain)
-                    .stirFont(.bodyMd)
-                    .foregroundStyle(Color.Stir.ember600)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        // SCA-457: drop the system toolbar — .buttonStyle(.plain) was
+        // documented to suppress iOS 26 Liquid Glass but the SCA-455
+        // paywall regression proved otherwise. Custom top bar escapes.
+        .stirTopBar(
+            title: "Dinner options",
+            trailing: {
+                StirTopBarTextButton("Tune", action: onTune)
+            },
+        )
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()

@@ -66,21 +66,13 @@ struct GroceryListView: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Grocery")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: onDismiss)
-                        .foregroundStyle(Color.Stir.ink700)
-                        .accessibilityLabel("Close")
-                        .accessibilityHint("Dismisses the grocery list")
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Grocery")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Grocery",
+                leading: {
+                    StirTopBarTextButton("Close", action: onDismiss)
+                },
+            )
             .task {
                 if viewModel.stage == .generating {
                     await viewModel.generate()

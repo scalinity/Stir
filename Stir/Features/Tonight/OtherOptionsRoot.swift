@@ -106,16 +106,13 @@ struct OtherOptionsRoot: View {
                 // back to SF Pro Bold and read as off-brand.
                 .navigationTitle("Other options")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Cancel", action: onDismiss)
-                    }
-                    ToolbarItem(placement: .principal) {
-                        Text("Other options")
-                            .stirFont(.displaySm)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                    }
-                }
+                // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+                .stirTopBar(
+                    title: "Other options",
+                    leading: {
+                        StirTopBarTextButton("Cancel", action: onDismiss)
+                    },
+                )
                 .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in

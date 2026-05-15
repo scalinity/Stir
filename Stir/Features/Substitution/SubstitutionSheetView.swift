@@ -83,18 +83,13 @@ struct SubstitutionSheetView: View {
                 // cross-screen rhythm (matches Settings / Saved / Pantry).
                 .navigationTitle("Substitute")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close", action: onDismiss)
-                    }
-                    ToolbarItem(placement: .principal) {
-                        Text("Substitute")
-                            .stirFont(.displaySm)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                    }
-                }
-                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
+                // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+                .stirTopBar(
+                    title: "Substitute",
+                    leading: {
+                        StirTopBarTextButton("Close", action: onDismiss)
+                    },
+                )
         }
     }
 

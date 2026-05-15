@@ -28,26 +28,23 @@ struct ProComparisonSheet: View {
             }
             .background(Color.Stir.backgroundPrimary)
             .tint(Color.Stir.ember600)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Compare plans")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .stirFont(.labelMd)
-                }
-            }
-            // Keep `navigationTitle` for the back-chevron label +
-            // VoiceOver; the visible title comes from the .principal
-            // toolbar item above in the Stir display serif. Default
-            // chrome would render in SF Pro Bold and break the
-            // cross-screen rhythm (matches Settings / Saved / Pantry).
+            .stirTopBar(
+                title: "Compare plans",
+                trailing: {
+                    StirTopBarTextButton("Done") { dismiss() }
+                },
+            )
+            // Keep `navigationTitle` for the implicit back-chevron
+            // label any deeper pushed screen reads, plus VoiceOver.
             .navigationTitle("Compare plans")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.Stir.backgroundPrimary, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Compare plans",
+                trailing: {
+                    StirTopBarTextButton("Done") { dismiss() }
+                },
+            )
         }
     }
 

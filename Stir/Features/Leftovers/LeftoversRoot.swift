@@ -42,19 +42,13 @@ struct LeftoversRoot: View {
                 // cross-screen rhythm (matches Settings / Saved / Pantry).
                 .navigationTitle("Use what's left")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close", action: onDismiss)
-                            .foregroundStyle(Color.Stir.ink700)
-                    }
-                    ToolbarItem(placement: .principal) {
-                        Text("Use what's left")
-                            .stirFont(.displaySm)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                    }
-                }
-                .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
+                // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+                .stirTopBar(
+                    title: "Use what's left",
+                    leading: {
+                        StirTopBarTextButton("Close", action: onDismiss)
+                    },
+                )
             }
         }
     }

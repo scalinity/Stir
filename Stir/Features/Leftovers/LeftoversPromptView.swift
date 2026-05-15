@@ -61,21 +61,13 @@ struct LeftoversPromptView: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Leftovers")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: onDismiss)
-                        .foregroundStyle(Color.Stir.ink700)
-                        .accessibilityLabel("Close")
-                        .accessibilityHint("Dismisses the leftovers prompt")
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Leftovers")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Leftovers",
+                leading: {
+                    StirTopBarTextButton("Close", action: onDismiss)
+                },
+            )
         }
     }
 

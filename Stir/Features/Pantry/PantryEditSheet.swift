@@ -92,31 +92,22 @@ struct PantryEditSheet: View {
             .padding(.top, CGFloat.Stir.space4)
             .padding(.bottom, CGFloat.Stir.space4)
             .background(Color.Stir.paper50)
-            .navigationTitle("Edit item")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { onCancel() }
-                        .stirFont(.bodyMd)
-                        .foregroundStyle(Color.Stir.ember600)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Edit item")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") {
-                        commit()
-                    }
-                    .stirFont(.labelLg)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.ember600)
-                    .disabled(name.pantryTrimmed.isEmpty)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: drop the system toolbar — iOS 26 wraps every
+            // ToolbarItem child in Liquid Glass; custom top bar avoids it.
+            .stirTopBar(
+                title: "Edit item",
+                leading: {
+                    StirTopBarTextButton("Cancel") { onCancel() }
+                },
+                trailing: {
+                    StirTopBarTextButton(
+                        "Save",
+                        emphasis: .prominent,
+                        isEnabled: !name.pantryTrimmed.isEmpty,
+                    ) { commit() }
+                },
+            )
             // Length caps applied at the input layer for immediate
             // user feedback — repository validation guards repeat the
             // check defense-in-depth (review W10).

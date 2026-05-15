@@ -105,27 +105,18 @@ struct SolveAgainRoot: View {
                         // visible also crowded the nav bar enough to
                         // truncate the serif title to an ellipsis.
                         .navigationBarBackButtonHidden(true)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                // `.buttonStyle(.plain)` suppresses iOS
-                                // 26's automatic Liquid Glass capsule
-                                // on toolbar Buttons. Without it the
-                                // ember text rides inside a translucent
-                                // pill that visually competes with the
-                                // warm-paper Stir surface AND widens
-                                // the leading slot enough to truncate
-                                // the principal serif title. See the
-                                // header doc on `StirCircleIconButton`
-                                // (SCA-436) for the documented escape
-                                // hatch; trade-off is no press-feedback
-                                // ring, acceptable for text-only
-                                // toolbar actions.
-                                Button("Cancel") { onDismiss() }
-                                    .buttonStyle(.plain)
-                                    .stirFont(.bodyMd)
-                                    .foregroundStyle(Color.Stir.ember600)
-                            }
-                        }
+                        // SCA-457: .buttonStyle(.plain) was documented
+                        // to suppress iOS 26 Liquid Glass on toolbar
+                        // buttons but SCA-455 proved otherwise — the
+                        // glass material is applied at the ToolbarItem
+                        // layer, not the button content. .stirTopBar
+                        // hides the system bar and renders the Cancel
+                        // outside the toolbar context.
+                        .stirTopBar(
+                            leading: {
+                                StirTopBarTextButton("Cancel") { onDismiss() }
+                            },
+                        )
                     case let .preview(dish):
                         DishPreviewView(viewModel: solveViewModel, dish: dish)
                     case .capture, .review:

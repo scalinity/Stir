@@ -92,25 +92,23 @@ struct FlagOutputSheet: View {
             // cross-screen rhythm (matches Settings / Saved / Pantry).
             .navigationTitle("Report issue")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSubmitting)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Report issue")
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.textPrimary)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Submit") {
-                        Task { await submit() }
-                    }
-                    .disabled(!canSubmit)
-                }
-            }
-            .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
+            .stirTopBar(
+                title: "Report issue",
+                leading: {
+                    StirTopBarTextButton(
+                        "Cancel",
+                        isEnabled: !isSubmitting,
+                    ) { dismiss() }
+                },
+                trailing: {
+                    StirTopBarTextButton(
+                        "Submit",
+                        emphasis: .prominent,
+                        isEnabled: canSubmit,
+                    ) { Task { await submit() } }
+                },
+            )
         }
     }
 

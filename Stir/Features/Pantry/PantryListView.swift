@@ -90,18 +90,13 @@ struct PantryListView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Pantry")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                // SCA-436: round-icon grammar matches DishPreview + Cook
-                // Mode's top-bar buttons and avoids iOS 26's Liquid
-                // Glass material picking up on the bare Image inside a
-                // toolbar Button. Ember-tinted glyph keeps the "+" as
-                // the strongest action on the screen.
+        // SCA-457: the SCA-436 toolbar swap to StirCircleIconButton kept
+        // the iOS 26 Liquid Glass pill (applied at the ToolbarItem
+        // layer, not the button content). Move the "+" outside the
+        // system toolbar via .stirTopBar.
+        .stirTopBar(
+            title: "Pantry",
+            trailing: {
                 StirCircleIconButton(
                     icon: Image.Stir.plus,
                     accessibilityLabel: "Add item",
@@ -109,10 +104,8 @@ struct PantryListView: View {
                     action: { showingAddSheet = true },
                 )
                 .disabled(viewModel == nil)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+            },
+        )
         // SCA-54: searchable lives at the screen-level Group (not the
         // inner List inside `populatedList`) so iOS owns the transition
         // between the pinned navigation-bar drawer and the scrolling
