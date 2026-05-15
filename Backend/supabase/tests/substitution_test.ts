@@ -148,6 +148,146 @@ Deno.test('substitution: VAL-01 on non-UUID live_session_id', async () => {
   assertEquals(res.body.error, 'VAL-01');
 });
 
+// ---------------------------------------------------------------------------
+// SCA-425: recipe_context.recipe_steps
+// ---------------------------------------------------------------------------
+//
+// Optional in the wire schema so legacy iOS clients that ship before this
+// rollout keep working with the v1.1.0 prompt (model falls back to
+// ingredient-only reasoning). New clients populate it from
+// `recipePlan.stepArray` so the model can see when the recipe itself
+// already produces the "missing" ingredient (sub-recipe steps) and avoid
+// proposing a redundant from-scratch workaround.
+
+Deno.test('substitution: recipe_steps optional — body without the field passes validation (back-compat)', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  // validBody() already omits recipe_steps; this test pins that intentionally.
+  const body = validBody();
+  // deno-lint-ignore no-explicit-any
+  const recipeCtx = (body.recipe_context as any);
+  if (recipeCtx.recipe_steps !== undefined) {
+    throw new Error('test setup drift: validBody() should not include recipe_steps');
+  }
+  const res = await callSubstitution(body, boot.session_jwt);
+  // 400/VAL-01 would mean Zod rejected the back-compat shape — the bug
+  // we're guarding against. Any other status (200/429/502/500) means the
+  // request cleared schema validation. We don't pin the downstream
+  // outcome because Gemini state varies across local/CI environments.
+  if (res.status === 400) {
+    throw new Error(
+      `recipe_steps omission should not trip VAL-01; got ${res.status} ${JSON.stringify(res.body)}`,
+    );
+  }
+});
+
+Deno.test('substitution: recipe_steps populated — body with full step list passes validation', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callSubstitution(
+    validBody({
+      recipe_context: {
+        title: 'Naan-style flatbread chicken',
+        current_step_number: 2,
+        total_steps: 4,
+        remaining_ingredients: [{ display_name: 'chicken thigh' }, { display_name: 'flour' }],
+        recipe_steps: [
+          {
+            step_number: 1,
+            instruction: 'Whisk flour, salt, and water into a soft dough; rest 10 minutes.',
+            timer_seconds: 600,
+          },
+          {
+            step_number: 2,
+            instruction: 'Roll the dough into 4 thin flatbreads.',
+            timer_seconds: null,
+          },
+          {
+            step_number: 3,
+            instruction: 'Cook each flatbread on a hot dry skillet, 60 seconds per side.',
+            timer_seconds: 120,
+          },
+          {
+            step_number: 4,
+            instruction: 'Top with cooked chicken and serve.',
+            timer_seconds: null,
+          },
+        ],
+      },
+    }),
+    boot.session_jwt,
+  );
+  if (res.status === 400) {
+    throw new Error(
+      `well-formed recipe_steps should not trip VAL-01; got ${res.status} ${JSON.stringify(res.body)}`,
+    );
+  }
+});
+
+Deno.test('substitution: VAL-01 when recipe_steps.instruction exceeds 2000 chars', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callSubstitution(
+    validBody({
+      recipe_context: {
+        title: 'Tomato Cream Pasta',
+        current_step_number: 1,
+        total_steps: 1,
+        remaining_ingredients: [{ display_name: 'pasta' }],
+        recipe_steps: [
+          { step_number: 1, instruction: 'a'.repeat(2001), timer_seconds: null },
+        ],
+      },
+    }),
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('substitution: VAL-01 when recipe_steps.step_number is out of bounds', async () => {
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callSubstitution(
+    validBody({
+      recipe_context: {
+        title: 'Tomato Cream Pasta',
+        current_step_number: 1,
+        total_steps: 1,
+        remaining_ingredients: [{ display_name: 'pasta' }],
+        // step_number must be int 1..100 — 0 trips `.min(1)`.
+        recipe_steps: [
+          { step_number: 0, instruction: 'invalid', timer_seconds: null },
+        ],
+      },
+    }),
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
+Deno.test('substitution: VAL-01 when recipe_steps.timer_seconds key is missing', async () => {
+  // timer_seconds is `.nullable()`, NOT `.optional()` — the key MUST be
+  // present even when the step has no timer (mirrors RealtimeRecipeContext
+  // semantics). Pre-SCA-425 the wire format had no recipe_steps at all,
+  // but once iOS sends it the per-step shape is contract.
+  const boot = await quickBootstrap({ installation_id: testInstallId() });
+  const res = await callSubstitution(
+    validBody({
+      recipe_context: {
+        title: 'Tomato Cream Pasta',
+        current_step_number: 1,
+        total_steps: 1,
+        remaining_ingredients: [{ display_name: 'pasta' }],
+        recipe_steps: [
+          // Intentionally omit `timer_seconds` — Zod strict() rejects.
+          { step_number: 1, instruction: 'boil pasta' },
+        ],
+      },
+    }),
+    boot.session_jwt,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
+});
+
 Deno.test('substitution: VAL-01 on invalid JSON body', async () => {
   const boot = await quickBootstrap({ installation_id: testInstallId() });
   const res = await fetch(`${FUNCTIONS_URL}/substitution`, {

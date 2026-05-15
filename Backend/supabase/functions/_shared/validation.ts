@@ -317,6 +317,28 @@ const RemainingIngredient = z.object({
   canonical_slug: z.string().min(1).max(128).optional(),
 }).strict();
 
+// SCA-425: numbered list of every recipe step so the substitution model
+// can SEE the recipe's own instructions. Without this, the model has only
+// `remaining_ingredients` + `current_step_number` and cannot tell when
+// the recipe already produces the missing ingredient via a sub-recipe
+// step (e.g. recipe says "make flatbread from flour" and the user says
+// "I have no flatbread" — pre-SCA-425 the model proposed "make your own
+// bread from flour", duplicating a step the recipe already has).
+//
+// Bounds mirror `RealtimeRecipeContext.all_steps` (the voice-path schema
+// that closed the same blindness for cook-turn): step_number 1..100,
+// instruction <= 2000 chars, timer_seconds nullable 0..36000.
+//
+// Optional for back-compat: legacy iOS clients that ship before this
+// rollout will not send the field, and the v1.0.0 prompt does not
+// reference it. v1.1.0 prompt (rollout-gated) consults it; the model
+// gracefully degrades to ingredient-only behaviour when absent.
+const SubstitutionRecipeStep = z.object({
+  step_number: z.number().int().min(1).max(100),
+  instruction: z.string().min(1).max(2000),
+  timer_seconds: z.number().int().min(0).max(36000).nullable(),
+}).strict();
+
 export const SubstitutionRequest = z.object({
   sub_event_id: z.string().uuid(),
   cooking_session_id: z.string().uuid(),
@@ -344,6 +366,8 @@ export const SubstitutionRequest = z.object({
     current_step_number: z.number().int().min(0).max(100),
     total_steps: z.number().int().min(1).max(100),
     remaining_ingredients: z.array(RemainingIngredient).max(100),
+    // SCA-425. See SubstitutionRecipeStep comment above for the why.
+    recipe_steps: z.array(SubstitutionRecipeStep).max(100).optional(),
   }).strict(),
 }).strict();
 
