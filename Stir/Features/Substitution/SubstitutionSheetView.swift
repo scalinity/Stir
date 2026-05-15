@@ -116,6 +116,8 @@ struct SubstitutionSheetView: View {
             unsafeResultCard(vm: vm, message: message, reason: reason)
         case let .error(message):
             errorCard(vm: vm, message: message)
+        case .rewriting:
+            rewritingIndicator
         }
     }
 
@@ -213,6 +215,25 @@ struct SubstitutionSheetView: View {
                 autocapitalization: .sentences,
             )
         }
+    }
+
+    private var rewritingIndicator: some View {
+        VStack(spacing: CGFloat.Stir.space4) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(Color.Stir.ember600)
+            Text("Rewriting step…")
+                .stirFont(.displaySm)
+                .foregroundStyle(Color.Stir.ink900)
+            Text("Updating the instructions to use your substitute.")
+                .stirFont(.bodySm)
+                .foregroundStyle(Color.Stir.ink500)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, CGFloat.Stir.space7 - 8) // 40pt
+        }
+        .padding(CGFloat.Stir.space7 - 8) // 40pt
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Stir.paper50)
     }
 
     private var requestingIndicator: some View {

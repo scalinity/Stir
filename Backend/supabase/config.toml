@@ -399,6 +399,10 @@ verify_jwt = false
 [functions.substitution]
 verify_jwt = false
 
+# SCA-432: prose rewrite of the current step on substitution accept.
+[functions.recipe-step-rewrite]
+verify_jwt = false
+
 [functions.realtime-session]
 verify_jwt = false
 

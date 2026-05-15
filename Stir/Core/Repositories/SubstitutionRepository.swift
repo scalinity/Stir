@@ -105,9 +105,9 @@ final class SubstitutionRepository {
     /// are no-ops — there's nothing to mutate. The SubstitutionEvent itself
     /// captures the swap for those.
     ///
-    /// Step instruction text is intentionally untouched: it's frozen prose
-    /// referencing the original ingredient. Auto-rewriting would require an
-    /// extra AI call per accept and is out of scope.
+    /// Step instruction text is rewritten separately via `applyStepRewrite`
+    /// after the AIDispatch.recipeStepRewrite round-trip (SCA-432). This
+    /// method only mutates the ingredient-list projection.
     func applyAcceptedSwap(
         _ event: SubstitutionEvent,
         substitutionText: String,
@@ -121,6 +121,26 @@ final class SubstitutionRepository {
             ingredient.amountText = amount
         }
         ingredient.canonicalIngredientSlug = nil
+        try controller.save()
+    }
+
+    /// Replace a RecipeStep's instruction prose with the AI-rewritten
+    /// version returned from `/v1/ai/recipe-step-rewrite` (SCA-432). The
+    /// rewrite call is fired right after `applyAcceptedSwap` so the user
+    /// sees the swapped-in ingredient referenced inside the step text
+    /// instead of as a separate badge above it.
+    ///
+    /// Empty/whitespace `rewrittenText` is rejected (no-op + return) so a
+    /// degenerate model response can't blank out the step. The caller
+    /// already logs the call's outcome — this is a defense-in-depth
+    /// check at the persist boundary.
+    func applyStepRewrite(
+        step: RecipeStep,
+        rewrittenText: String,
+    ) throws {
+        let trimmed = rewrittenText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        step.instructionText = trimmed
         try controller.save()
     }
 }
