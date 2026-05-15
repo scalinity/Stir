@@ -591,32 +591,15 @@ extension RealtimeSession {
                 canonicalSlug: ing.canonicalIngredientSlug,
             )
         }
-        // SCA-425: ship the full recipe step list on the voice-path
-        // substitution dispatch too. Without this the model can't see
-        // when a step inside the recipe already produces the "missing"
-        // ingredient (sub-recipe). Same projection as the sheet path
-        // in SubstitutionSheetViewModel.buildRecipeContext.
-        let recipeSteps: [SubstitutionRequest.RecipeContext.RecipeStep] = steps
-            .compactMap { step in
-                let raw = step.instructionText?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                guard !raw.isEmpty else { return nil }
-                let instruction = raw.count > 2000
-                    ? String(raw.prefix(2000))
-                    : raw
-                let timer = Int(step.timerSeconds)
-                return SubstitutionRequest.RecipeContext.RecipeStep(
-                    stepNumber: Int(step.stepNumber),
-                    instruction: instruction,
-                    timerSeconds: timer > 0 ? timer : nil,
-                )
-            }
+        // SCA-425 / SCA-431: consume the shared projection on
+        // `RecipePlan.substitutionRecipeSteps()` so this voice-path
+        // dispatch stays in lockstep with the sheet path.
         let recipeContext = SubstitutionRequest.RecipeContext(
             title: recipePlan.title ?? "",
             currentStepNumber: max(1, currentIdx + 1),
             totalSteps: max(1, steps.count),
             remainingIngredients: remaining,
-            recipeSteps: recipeSteps,
+            recipeSteps: recipePlan.substitutionRecipeSteps(),
         )
 
         // Household context: pantry + dietary rules + equipment.

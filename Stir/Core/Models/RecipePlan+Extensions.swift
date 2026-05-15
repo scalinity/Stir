@@ -31,6 +31,48 @@ extension RecipePlan {
             return a.sortOrder < b.sortOrder
         }
     }
+
+    /// SCA-425 / SCA-431: canonical projection of recipe steps into
+    /// the substitution endpoint's `recipe_steps` wire shape. Consumed
+    /// by BOTH the sheet path
+    /// (`SubstitutionSheetViewModel.buildRecipeContext`) and the
+    /// voice-path function-call dispatch
+    /// (`RealtimeSessionTransport.dispatchSubstitution`). Pre-SCA-431
+    /// each call site re-implemented this 15-line projection — the
+    /// same drift class that produced SCA-424. Centralising keeps the
+    /// two AI invocation paths in lockstep.
+    ///
+    /// Per-step rules:
+    ///   - Empty / whitespace-only `instructionText` is dropped
+    ///     (backend Zod enforces `instruction.min(1)`).
+    ///   - `instructionText` over 2000 chars is clamped to 2000
+    ///     (backend Zod is `.max(2000)`). Imported recipes routinely
+    ///     have long steps; client-side clamping is friendlier than a
+    ///     VAL-01.
+    ///   - `timerSeconds == 0` (Core Data default for untimed steps)
+    ///     becomes JSON `null` so the model gets an explicit
+    ///     "untimed" signal rather than reading 0 as a 0-second timer.
+    ///   - Negative `timerSeconds` (data-corruption case) is mapped to
+    ///     nil; should never appear in practice.
+    ///
+    /// `stepArray` is already sorted by stepNumber, so callers don't
+    /// need to re-sort the returned array.
+    func substitutionRecipeSteps() -> [SubstitutionRequest.RecipeContext.RecipeStep] {
+        stepArray.compactMap { step in
+            let raw = step.instructionText?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !raw.isEmpty else { return nil }
+            let instruction = raw.count > 2000
+                ? String(raw.prefix(2000))
+                : raw
+            let timer = Int(step.timerSeconds)
+            return SubstitutionRequest.RecipeContext.RecipeStep(
+                stepNumber: Int(step.stepNumber),
+                instruction: instruction,
+                timerSeconds: timer > 0 ? timer : nil,
+            )
+        }
+    }
 }
 
 extension RecipeIngredient {

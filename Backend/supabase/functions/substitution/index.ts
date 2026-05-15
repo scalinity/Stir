@@ -292,6 +292,10 @@ Deno.serve(async (req) => {
       // because Zod's .optional() yields `string | null | undefined` but
       // the validator's Candidate type narrows to `string | null` under
       // exactOptionalPropertyTypes.
+      //
+      // SCA-431: thread pantry_snapshot to the validator so the
+      // pantry-grounded check can block ungrounded "from your pantry"
+      // claims server-side instead of relying solely on prompt obedience.
       const validation = validateSubstitution(
         {
           substitution_text: candidate.substitution_text,
@@ -302,6 +306,7 @@ Deno.serve(async (req) => {
         {
           dietaryRules: body.household_context.dietary_rules as DietaryRule[],
           availableEquipment: body.household_context.available_equipment,
+          pantrySnapshot: body.household_context.pantry_snapshot,
         },
       );
 

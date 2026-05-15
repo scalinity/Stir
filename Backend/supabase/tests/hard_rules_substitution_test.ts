@@ -234,3 +234,178 @@ Deno.test('validateSubstitution: unknown diet value passes silently (no keywords
   );
   assertEquals(result.valid, true);
 });
+
+// ---------------------------------------------------------------------------
+// SCA-431 — pantry-grounded check
+// ---------------------------------------------------------------------------
+//
+// The v1.1.0 substitution prompt forbids "from your pantry" /
+// "in your pantry" / "you already have" unless the named ingredient
+// actually appears in pantry_snapshot. This is the server-side belt
+// for that copy rule — if the model ignores the prompt, the validator
+// fires `ungrounded_pantry_claim` and the retry loop kicks in.
+//
+// Original SCA-424 production bug: model said "Use the baguette slices
+// from your pantry" against a user whose pantry had zero baguettes
+// (iOS was sending soft-deleted pantry rows). The iOS-side filter fix
+// prevents the stale data; this hard-rule check is the independent
+// server-side belt for the model-obedience failure mode.
+
+Deno.test('validateSubstitution: SCA-431 — "from your pantry" with empty pantry fires ungrounded_pantry_claim', () => {
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use the baguette slices from your pantry instead of flatbread.',
+      reasoning: 'Toasted baguette provides a similar crunchy base for the pesto.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet', 'oven'],
+      pantrySnapshot: [], // user has nothing in their pantry
+    },
+  );
+  assertEquals(result.valid, false);
+  assertEquals(
+    result.issues.some((i) => i.kind === 'ungrounded_pantry_claim'),
+    true,
+    'empty pantry + pantry claim should fire ungrounded_pantry_claim',
+  );
+});
+
+Deno.test('validateSubstitution: SCA-431 — pantry claim grounded in snapshot passes', () => {
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use the olive oil from your pantry instead of butter.',
+      reasoning: 'Olive oil has similar fat content for sautéing.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet'],
+      pantrySnapshot: [{ display_name: 'olive oil' }, { display_name: 'kosher salt' }],
+    },
+  );
+  assertEquals(
+    result.valid,
+    true,
+    'pantry claim that names an actual pantry item must pass — that is the legitimate use case',
+  );
+});
+
+Deno.test('validateSubstitution: SCA-431 — pantry claim naming non-pantry item fires ungrounded', () => {
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use the baguette slices from your pantry instead of flatbread.',
+      reasoning: 'Toasted baguette provides crunch.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet'],
+      // User has olive oil + salt, but model claimed baguettes.
+      pantrySnapshot: [{ display_name: 'olive oil' }, { display_name: 'kosher salt' }],
+    },
+  );
+  assertEquals(result.valid, false);
+  assertEquals(
+    result.issues.some((i) => i.kind === 'ungrounded_pantry_claim'),
+    true,
+    'pantry claim for an item that is NOT in pantry_snapshot must fire ungrounded_pantry_claim',
+  );
+});
+
+Deno.test('validateSubstitution: SCA-431 — "in your pantry" + "you already have" also catch', () => {
+  // Alternate phrasings the prompt forbids; all must fire on empty pantry.
+  const phrasings = [
+    'Use the saffron in your pantry to season the rice.',
+    'You already have the right cheese — swap mozzarella for the parmesan.',
+    'Use the leftover sourdough already in your pantry as a base.',
+  ];
+  for (const text of phrasings) {
+    const result = validateSubstitution(
+      {
+        substitution_text: text,
+        reasoning: 'Pantry-grounded suggestion.',
+        constraint_safe: true,
+      },
+      {
+        dietaryRules: [],
+        availableEquipment: ['skillet'],
+        pantrySnapshot: [], // ungrounded — no pantry to match
+      },
+    );
+    assertEquals(
+      result.valid,
+      false,
+      `phrasing "${text}" against empty pantry should fire ungrounded_pantry_claim`,
+    );
+  }
+});
+
+Deno.test('validateSubstitution: SCA-431 — pantry-grounded check is SKIPPED when pantrySnapshot is omitted', () => {
+  // Back-compat: callers that don't thread pantrySnapshot through (any
+  // legacy code path that calls validateSubstitution without it) keep
+  // working — we don't suddenly retro-fail their output. The substitution
+  // endpoint always provides the snapshot post-SCA-431.
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use the baguette slices from your pantry instead of flatbread.',
+      reasoning: 'Toasted baguette.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet'],
+      // pantrySnapshot intentionally OMITTED
+    },
+  );
+  assertEquals(
+    result.valid,
+    true,
+    'omitted pantrySnapshot must skip the check (legacy back-compat)',
+  );
+});
+
+Deno.test('validateSubstitution: SCA-431 — summarizeViolations includes the offending phrasing', () => {
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use the baguette slices from your pantry.',
+      reasoning: 'x',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet'],
+      pantrySnapshot: [],
+    },
+  );
+  const summary = summarizeViolations(result);
+  assertEquals(
+    summary.includes('ungrounded_pantry_claim=from your pantry'),
+    true,
+    `summary should call out the forbidden phrasing for the retry prompt; got: ${summary}`,
+  );
+});
+
+Deno.test('validateSubstitution: SCA-431 — model not making a pantry claim passes through', () => {
+  // No "from your pantry" / "in your pantry" / "you already have" —
+  // the check is gated on the phrasing being present, so absent
+  // phrasing should never fire even with empty pantry.
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use 2 Tbsp olive oil + 1 tsp lemon juice instead of 3 Tbsp butter.',
+      reasoning: 'Matches the fat content and adds acidity.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [],
+      availableEquipment: ['skillet'],
+      pantrySnapshot: [],
+    },
+  );
+  assertEquals(
+    result.valid,
+    true,
+    'suggestion that does not claim "from your pantry" passes regardless of pantry contents',
+  );
+});
