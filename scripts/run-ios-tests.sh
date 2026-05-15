@@ -96,13 +96,25 @@ if [ "$EXIT" != "0" ]; then
     SIM_FLAKE_REASON=""
     if grep -qE 'Application failed preflight checks|Simulator device failed to launch' "$TMPLOG"; then
         SIM_FLAKE_REASON="SBMainWorkspace preflight"
-    elif grep -qE 'Early unexpected exit, operation never finished bootstrapping|Test crashed with signal kill before establishing connection' "$TMPLOG"; then
+    elif grep -qE 'Early unexpected exit, operation never finished bootstrapping|Test crashed with signal kill' "$TMPLOG"; then
         # Third flake class observed on 2026-05-15 (SCA-426 in-session
-        # repro): xcodebuild builds successfully (substantive log,
-        # test markers present) but the test-bundle host crashes
-        # before any test runs. Distinct from SCA-208 (preflight) and
-        # SCA-364 (short silent log). Same recovery — erase + boot.
-        SIM_FLAKE_REASON="test-runner bootstrap crash"
+        # repro): the test bundle host receives SIGKILL from the OS.
+        # Two flavors:
+        #   (a) Bundle-wide crash on launch — "Early unexpected exit,
+        #       operation never finished bootstrapping... Test crashed
+        #       with signal kill before establishing connection."
+        #       No tests run.
+        #   (b) Per-test SIGKILL mid-suite — one or more
+        #       "test_*: Test crashed with signal kill." entries while
+        #       the rest of the suite ran. Historically the
+        #       SubstitutionSheetViewModelTests-class flake (obs 4468).
+        # Both are sim-state issues, not test-logic failures. The grep
+        # matches only the literal "Test crashed with signal kill"
+        # phrase (a normal failed assertion never produces this), so
+        # the false-positive risk is acceptable. Distinct from SCA-208
+        # (preflight) and SCA-364 (short silent log). Same recovery —
+        # erase + boot.
+        SIM_FLAKE_REASON="test-runner SIGKILL"
     else
         TMPLOG_LINES="$(wc -l < "$TMPLOG" 2>/dev/null | tr -d ' ' || echo 0)"
         if [ "${TMPLOG_LINES:-0}" -lt 20 ] \
