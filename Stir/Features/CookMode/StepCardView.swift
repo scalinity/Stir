@@ -107,16 +107,16 @@ struct StepCardView: View {
                 }
                 .padding(.horizontal, CGFloat.Stir.screenMarginHero)
                 .padding(.top, CGFloat.Stir.space5)
-                // SCA-454: no manual bottom padding. The
-                // `safeAreaInset(edge: .bottom)` below already
-                // extends the ScrollView's safe area by the
-                // (upNextCard + bottomBar) height, and SwiftUI uses
-                // that inset natively to position scroll content.
-                // The pre-fix 140pt → 220pt manual padding stacked
-                // on top of the auto-inset and let users drag-scroll
-                // ~200pt into pure empty space below the last
-                // content row. A small breather here keeps the very
-                // last text line from kissing the up-next card.
+                // SCA-454 / SCA-460: no manual bottom padding. The
+                // `safeAreaInset(edge: .bottom)` below extends the
+                // ScrollView's safe area by the bottomBar height,
+                // and SwiftUI uses that inset natively to position
+                // scroll content. The pre-fix 140pt → 220pt manual
+                // padding stacked on top of the auto-inset and let
+                // users drag-scroll ~200pt into pure empty space
+                // below the last content row. A small breather here
+                // keeps the very last text line from kissing the
+                // bottom bar's divider.
                 .padding(.bottom, CGFloat.Stir.space2)
             }
             // SCA-454: short-content steps (e.g. just a timer card)
@@ -125,18 +125,14 @@ struct StepCardView: View {
             .scrollBounceBehavior(.basedOnSize)
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                // SCA-433: up-next preview sits above the voice / ask /
-                // nav stack. Last step swaps the preview for a celebration
-                // line so the dead zone fills with positive momentum at
-                // the moment users most need it. paper50 background
-                // matches the bottom bar so the card and the nav stack
-                // share a single surface visually.
-                upNextCard
-                    .padding(.horizontal, CGFloat.Stir.space4)
-                    .padding(.top, CGFloat.Stir.space3 - 2) // 10pt
-                bottomBar
-            }
+            // SCA-460: the SCA-433 up-next preview card was pulled
+            // after device review (it didn't earn its real estate;
+            // the step rail already conveys the journey). Only the
+            // voice / ask / prev-next stack lives in the bottom
+            // inset now. If a future iteration brings back a
+            // "what's coming" affordance, prefer a peek sheet over
+            // a permanent card so users opt-in.
+            bottomBar
             // FD1-1 fix: paper50 + 1pt hairline divider matches the
             // app-wide bottom-bar grammar (Settings, Saved, Tonight,
             // RootView's StirCustomTabBar). Replaces `.background(.bar)`
@@ -570,121 +566,6 @@ struct StepCardView: View {
         case .emberFilled:  return Color.Stir.ember600
         case .destructive:  return Color.Stir.crimson600.opacity(0.4)
         }
-    }
-
-    // MARK: - Up-next card (SCA-433)
-
-    /// Small preview card sitting between the scrollable instruction
-    /// body and the bottom bar. Fills the empty mid-screen dead zone
-    /// with the next step's title (or trimmed `instructionText` if no
-    /// title was set by the AI). On the last step the preview is
-    /// swapped for a celebration line so the user reads "you're almost
-    /// done" exactly when their motivation is wavering. Hidden when
-    /// `totalSteps == 0` (defensive — Cook Mode shouldn't open on an
-    /// empty recipe but the safe-area inset still renders).
-    @ViewBuilder
-    private var upNextCard: some View {
-        let total = viewModel.totalSteps
-        let current = viewModel.currentStepIndex
-
-        if total > 0 {
-            // SCA-442 (S1): `isFinal` lives inside the `total > 0`
-            // guard so a 0-step recipe (defensively impossible today,
-            // but the safeAreaInset still renders) can't read
-            // `current >= -1` and render the "LAST STEP" celebration.
-            //
-            // SCA-444 (S3): `preview` hoisted into a single `let` so
-            // body + accessibilityLabel share one evaluation rather
-            // than recomputing the string-split twice per render.
-            let isFinal = current >= total - 1
-            let preview = isFinal ? "" : nextStepPreview()
-            HStack(alignment: .top, spacing: CGFloat.Stir.space3) {
-                if isFinal {
-                    Image(systemName: "sparkles")
-                        .stirFont(.labelLg).fontWeight(.semibold)
-                        .foregroundStyle(Color.Stir.ember600)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("LAST STEP")
-                            .stirFont(.labelEyebrow)
-                            .foregroundStyle(Color.Stir.ember600)
-                        Text("You're almost done.")
-                            .stirFont(.labelMd).fontWeight(.medium)
-                            .foregroundStyle(Color.Stir.ink900)
-                            .lineLimit(1)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("UP NEXT")
-                            .stirFont(.labelEyebrow)
-                            .foregroundStyle(Color.Stir.ink500)
-                        Text(preview)
-                            .stirFont(.labelMd).fontWeight(.medium)
-                            .foregroundStyle(Color.Stir.ink900)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(CGFloat.Stir.space3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .fill(Color.Stir.paper100),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                    .strokeBorder(Color.Stir.divider, lineWidth: 1),
-            )
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                isFinal ? "Last step. You're almost done." : "Up next: \(preview)",
-            )
-        }
-    }
-
-    /// Title-or-first-sentence preview of the step immediately after
-    /// the current one. Falls back to a generic "Coming up." if both
-    /// the title and instruction text are empty so the card never
-    /// renders an empty line. Trimmed to ~120 chars before the 2-line
-    /// tail truncation does its own visual cap.
-    private func nextStepPreview() -> String {
-        let steps = viewModel.recipePlan.stepArray
-        let nextIndex = viewModel.currentStepIndex + 1
-        // SCA-443 (S2): dropped the vacuous `nextIndex >= 0` clause.
-        // `currentStepIndex` is initialised from `Int(session.currentStepIndex)`
-        // and only mutated through `jumpToStep`, which clamps to
-        // `[0, totalSteps-1]`. The `>= 0` guard was unreachable.
-        guard nextIndex < steps.count else { return "Coming up." }
-        let nextStep = steps[nextIndex]
-
-        if let title = nextStep.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !title.isEmpty
-        {
-            return title
-        }
-        let raw = (nextStep.instructionText ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return "Coming up." }
-        // Trim to first sentence (`.` `!` `?` boundary) so a long
-        // multi-sentence step doesn't fill the card with prose. The
-        // ~120-char hard cap is a belt-and-suspenders guard for the
-        // case where the model wrote no terminal punctuation at all.
-        //
-        // SCA-441 (W4): cap aligned with the doc-comment — 119 + the
-        // single-glyph ellipsis = 120 chars total. Pre-fix `prefix(117)`
-        // produced 118-char output and drifted from the comment.
-        let firstSentence: String = {
-            if let endIdx = raw.firstIndex(where: { ".!?".contains($0) }) {
-                return String(raw[raw.startIndex ... endIdx])
-            }
-            return raw
-        }()
-        if firstSentence.count > 120 {
-            return firstSentence.prefix(119) + "…"
-        }
-        return firstSentence
     }
 
     // MARK: - Bottom bar
