@@ -202,7 +202,8 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — limiter glitch shouldn't block mid-cook rescue.
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Mid-cook rescue path; failure denies the user a working substitute.
   }
 
   // ---------------------------------------------------------------------

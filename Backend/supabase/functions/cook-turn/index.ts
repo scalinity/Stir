@@ -185,7 +185,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — limiter glitch shouldn't block an in-session voice user.
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Mid-cook voice fallback path; lock-out during an active Cook
+    // Mode session is the worst possible UX.
   }
   try {
     const rlUser = await checkAndIncrement(
@@ -204,7 +206,7 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — see above.
+    // SCA-396: fail-open is intentional — see ADR 0036 (and IP gate above).
   }
 
   // 4. User row

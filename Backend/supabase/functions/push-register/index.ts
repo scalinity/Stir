@@ -114,6 +114,9 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Post-auth endpoint; locking active users out of push-prefs
+    // updates during a DB blip is worse than letting through extras.
     userLog.error('rate_limiter_failed', err);
   }
 

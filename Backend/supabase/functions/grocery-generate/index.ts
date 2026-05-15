@@ -196,6 +196,8 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Post-auth, low spend per call; lock-out friction outweighs bypass risk.
   }
 
   // ---- User status (banned guard; no quota — unmetered feature)

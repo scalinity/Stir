@@ -144,6 +144,7 @@ Deno.serve(async (req) => {
     }
     // Fail-open per the comment block above. Log at error so the
     // dashboard surfaces RPC-level rate-limiter failures.
+    // SCA-396: fail-open posture cross-referenced in ADR 0036.
     userLog.error('rate_limiter_failed', err);
   }
 

@@ -265,7 +265,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — rate limiter error shouldn't block legitimate requests.
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // User-initiated camera shutter; failing during a brownout asks them
+    // to re-shoot. Per-IP daily cap absorbs the abuse case.
   }
 
   // ---------------------------------------------------------------------
