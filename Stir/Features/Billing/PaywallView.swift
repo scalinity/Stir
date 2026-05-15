@@ -93,13 +93,16 @@ struct PaywallView: View {
                 .background(Color.Stir.backgroundPrimary)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Image.Stir.close
-                                .foregroundStyle(Color.Stir.textTertiary)
-                        }
-                        .accessibilityLabel("Close")
+                        // SCA-437 (follow-up to SCA-436): bare Image-inside-
+                        // Button inside a toolbar gets the iOS 26 Liquid
+                        // Glass pill. StirCircleIconButton renders the same
+                        // close glyph in the Stir round-icon grammar instead.
+                        StirCircleIconButton(
+                            icon: Image.Stir.close,
+                            accessibilityLabel: "Close",
+                            foreground: Color.Stir.textTertiary,
+                            action: { dismiss() },
+                        )
                     }
                 }
                 .stirToast($restoreToast)
