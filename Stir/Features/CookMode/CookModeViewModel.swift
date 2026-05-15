@@ -60,7 +60,10 @@ final class CookModeViewModel {
     /// Present-finish flag — observed by the view to push OutcomeFeedback.
     var finishPresentationRequested: Bool = false
 
-    /// Exit confirm flag.
+    /// Exit confirm flag. Rendered by the single `.stirDialog` on
+    /// `StepCardView.body`'s outer Group (SCA-428 — duplicating the
+    /// modifier inside `tapModeBody` or `VoiceActiveStepView` races
+    /// the parent and silently swallows the presentation).
     var exitConfirmRequested: Bool = false
 
     /// Set to true by `exit(markAbandoned:)` when the user chose either

@@ -66,12 +66,9 @@ struct VoiceActiveStepView: View {
             .padding(.bottom, CGFloat.Stir.space3)
             .padding(.top, CGFloat.Stir.space2)
         }
-        // SCA-428: exit confirmation dialog is owned by the parent
-        // StepCardView's outer Group, not this view. Co-locating it
-        // here with the same `$viewModel.exitConfirmRequested` binding
-        // raced the parent's modifier — flipping the bool to true could
-        // be swallowed, so X taps sometimes dismissed Cook Mode without
-        // prompting for Pause-vs-Abandon.
+        // SCA-428: exit-confirm `.stirDialog` lives on the parent
+        // StepCardView's outer Group, not here. Two modifiers sharing
+        // `$viewModel.exitConfirmRequested` raced each other.
     }
 
     // MARK: - Active timer pill (model-driven start_timer surface)
@@ -124,6 +121,8 @@ struct VoiceActiveStepView: View {
 
     private var topBar: some View {
         HStack(spacing: CGFloat.Stir.space2) {
+            // SCA-428: confirm dialog is owned by the parent
+            // StepCardView's outer Group. Do not co-locate one here.
             Button {
                 viewModel.requestExitConfirm()
             } label: {
