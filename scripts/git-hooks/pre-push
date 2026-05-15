@@ -29,18 +29,24 @@
 #      test-results summary` for the `result` / `passedTests` /
 #      `failedTests` / `totalTestCount` fields. Source of truth is
 #      the xcresult bundle, not the -quiet stdout log.
-#   2. A one-shot retry fires when xcodebuild exits non-zero AND
-#      either (a) the log carries the SBMainWorkspace
-#      "Application failed preflight checks" / "Simulator device
-#      failed to launch" substring (wedged sim before test runner
-#      installed), or (b) SCA-364: the log is < 20 lines AND contains
-#      no test markers (silent test-runner death — observed twice in
-#      the SCA-334 session between consecutive xcodebuild invocations).
+#   2. A one-shot retry fires when xcodebuild exits non-zero AND any
+#      of three flake signatures match the log:
+#        (a) SCA-208 — SBMainWorkspace "Application failed preflight
+#            checks" / "Simulator device failed to launch" substring
+#            (wedged sim before test runner installed).
+#        (b) SCA-426 — test-runner SIGKILL: "Early unexpected exit,
+#            operation never finished bootstrapping" OR the broader
+#            "Test crashed with signal kill" phrase (bundle-launch
+#            crash; pure per-test SIGKILL only lands in xcresult and
+#            slips past this grep — Linear follow-up).
+#        (c) SCA-364 — log is < 20 lines AND contains no test markers
+#            (silent test-runner death — observed twice in the SCA-334
+#            session between consecutive xcodebuild invocations).
 #      Retry flow: `simctl shutdown all` + `simctl erase` (SCA-426) +
 #      boot iPhone 17 Pro Max + 5 s sleep + re-run of `xcodebuild test`
-#      exactly ONCE. Retry
-#      success emits a distinct `[pre-push] ✅ retried after sim flake`
-#      summary so the audit trail captures the event.
+#      exactly ONCE. Retry success emits a distinct
+#      `[pre-push] ✅ retried after sim flake` summary so the audit
+#      trail captures the event.
 #
 # Real test failures (xcresult.failedTests > 0) bypass retry. Real
 # compile errors (no xcresult bundle produced) also bypass retry —
