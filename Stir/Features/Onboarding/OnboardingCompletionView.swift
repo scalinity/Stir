@@ -77,14 +77,15 @@ struct OnboardingCompletionView: View {
             guard !Task.isCancelled else { return }
             onFinished()
         }
-        .alert("Something went wrong", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } },
-        )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .stirDialog(
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } },
+            ),
+            title: "Something went wrong",
+            message: errorMessage ?? "",
+            buttons: [.primary("OK") { errorMessage = nil }],
+        )
     }
 
     // MARK: - Sections
