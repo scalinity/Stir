@@ -54,7 +54,11 @@ struct DeleteMyDataView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            .padding(.bottom, CGFloat.Stir.space7)
+            // SCA-421: match every other pushed Settings sub-view —
+            // the floating StirCustomTabBar's measured frame is
+            // shorter than its visual extent, so the system-reserved
+            // bottom inset alone clips the fallback card.
+            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
