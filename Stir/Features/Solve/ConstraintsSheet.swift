@@ -68,7 +68,7 @@ struct ConstraintsSheet: View {
             .stirTopBar(
                 title: "Tonight's constraints",
                 leading: {
-                    StirTopBarTextButton("Cancel") { dismiss() }
+                    StirTopBarCloseButton { dismiss() }
                 },
             )
         }

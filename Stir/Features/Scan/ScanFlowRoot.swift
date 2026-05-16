@@ -238,7 +238,7 @@ private struct ScanPrimerBody: View {
         .stirTopBar(
             title: "Scan kitchen",
             leading: {
-                StirTopBarTextButton("Cancel", action: onCancel)
+                StirTopBarCloseButton(action: onCancel)
             },
         )
     }

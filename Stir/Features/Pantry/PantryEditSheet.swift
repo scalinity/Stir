@@ -98,7 +98,7 @@ struct PantryEditSheet: View {
             .stirTopBar(
                 title: "Edit item",
                 leading: {
-                    StirTopBarTextButton("Cancel") { onCancel() }
+                    StirTopBarCloseButton { onCancel() }
                 },
                 trailing: {
                     StirTopBarTextButton(

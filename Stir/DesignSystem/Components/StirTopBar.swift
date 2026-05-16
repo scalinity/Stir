@@ -114,11 +114,39 @@ extension View {
 
 // MARK: - Button helper
 
-/// Text-style toolbar action. Standard Stir styling for "Cancel" / "Done" /
-/// "Save" / "Close" buttons that previously sat inside `.topBarLeading` /
-/// `.topBarTrailing` toolbar items. The bold weight + ember tint signals
-/// the button is interactive without relying on the system's Liquid Glass
-/// pill background.
+/// Icon-only close action matching PaywallView's dismiss affordance.
+/// Use for modal top-bar cancel / close actions so dismiss chrome stays
+/// consistent across Stir surfaces.
+struct StirTopBarCloseButton: View {
+    let accessibilityLabel: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    init(
+        accessibilityLabel: String = "Close",
+        isEnabled: Bool = true,
+        action: @escaping () -> Void,
+    ) {
+        self.accessibilityLabel = accessibilityLabel
+        self.isEnabled = isEnabled
+        self.action = action
+    }
+
+    var body: some View {
+        StirCircleIconButton(
+            icon: Image.Stir.close,
+            accessibilityLabel: accessibilityLabel,
+            foreground: isEnabled ? Color.Stir.textTertiary : Color.Stir.ink300,
+            action: action,
+        )
+        .disabled(!isEnabled)
+    }
+}
+
+/// Text-style toolbar action. Standard Stir styling for "Done" / "Save" /
+/// trailing confirm actions that previously sat inside `.topBarTrailing`
+/// toolbar items. The bold weight + ember tint signals the button is
+/// interactive without relying on the system's Liquid Glass pill background.
 ///
 /// Use the `prominent` variant for the primary confirm-action ("Save",
 /// "Add", "Import") on the trailing edge — semibold + labelLg matches
@@ -167,10 +195,10 @@ struct StirTopBarTextButton: View {
         .background(Color.Stir.paper50)
 }
 
-#Preview("StirTopBar — Cancel + title + Save") {
+#Preview("StirTopBar — close + title + save") {
     StirTopBar(
         title: "Edit item",
-        leading: { StirTopBarTextButton("Cancel") {} },
+        leading: { StirTopBarCloseButton {} },
         trailing: { StirTopBarTextButton("Save", emphasis: .prominent) {} },
     )
     .background(Color.Stir.paper50)

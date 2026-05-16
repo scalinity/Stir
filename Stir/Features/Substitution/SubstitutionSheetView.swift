@@ -85,7 +85,7 @@ struct SubstitutionSheetView: View {
                 .stirTopBar(
                     title: "Substitute",
                     leading: {
-                        StirTopBarTextButton("Close", action: onDismiss)
+                        StirTopBarCloseButton(action: onDismiss)
                     },
                 )
         }

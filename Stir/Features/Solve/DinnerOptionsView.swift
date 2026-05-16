@@ -93,13 +93,13 @@ struct DinnerOptionsView: View {
 
     // MARK: - Top bar leading slot
 
-    /// Either a Cancel text button (cover-level exit when SolveAgainRoot
+    /// Either a close icon button (cover-level exit when SolveAgainRoot
     /// passed `onCancel`) or a Stir back-chevron that pops the nav
     /// stack one level (default for ScanFlowRoot, which pops to .review).
     @ViewBuilder
     private var leadingControl: some View {
         if let onCancel {
-            StirTopBarTextButton("Cancel", action: onCancel)
+            StirTopBarCloseButton(action: onCancel)
         } else {
             StirCircleIconButton(
                 icon: Image(systemName: "chevron.left"),

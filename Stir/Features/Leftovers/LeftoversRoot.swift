@@ -44,7 +44,7 @@ struct LeftoversRoot: View {
                 .stirTopBar(
                     title: "Use what's left",
                     leading: {
-                        StirTopBarTextButton("Close", action: onDismiss)
+                        StirTopBarCloseButton(action: onDismiss)
                     },
                 )
             }

@@ -50,7 +50,7 @@ struct ImportEntryView: View {
             .stirTopBar(
                 title: "Import recipe",
                 leading: {
-                    StirTopBarTextButton("Close", action: onDismiss)
+                    StirTopBarCloseButton(action: onDismiss)
                 },
             )
             .onChange(of: pickerItem) { _, newItem in
@@ -287,7 +287,7 @@ private struct PasteSheet: View {
             .stirTopBar(
                 title: "Paste recipe",
                 leading: {
-                    StirTopBarTextButton("Cancel") { dismiss() }
+                    StirTopBarCloseButton { dismiss() }
                 },
                 trailing: {
                     StirTopBarTextButton(

@@ -107,7 +107,7 @@ struct OtherOptionsRoot: View {
                 .stirTopBar(
                     title: "Other options",
                     leading: {
-                        StirTopBarTextButton("Cancel", action: onDismiss)
+                        StirTopBarCloseButton(action: onDismiss)
                     },
                 )
                 .navigationDestination(for: Route.self) { route in

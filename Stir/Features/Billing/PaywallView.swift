@@ -103,12 +103,7 @@ struct PaywallView: View {
                     // close in the top-left without forcing the rest of
                     // the screen to know about it.
                     HStack {
-                        StirCircleIconButton(
-                            icon: Image.Stir.close,
-                            accessibilityLabel: "Close",
-                            foreground: Color.Stir.textTertiary,
-                            action: { dismiss() },
-                        )
+                        StirTopBarCloseButton { dismiss() }
                         Spacer()
                     }
                     .padding(.horizontal, CGFloat.Stir.space3)

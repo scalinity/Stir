@@ -68,7 +68,7 @@ struct GroceryListView: View {
             .stirTopBar(
                 title: "Grocery",
                 leading: {
-                    StirTopBarTextButton("Close", action: onDismiss)
+                    StirTopBarCloseButton(action: onDismiss)
                 },
             )
             .task {

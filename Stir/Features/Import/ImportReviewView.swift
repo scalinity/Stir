@@ -46,7 +46,7 @@ struct ImportReviewView: View {
             .stirTopBar(
                 title: "Review import",
                 leading: {
-                    StirTopBarTextButton("Cancel") {
+                    StirTopBarCloseButton {
                         viewModel.cancelImport()
                         onDismiss()
                     }

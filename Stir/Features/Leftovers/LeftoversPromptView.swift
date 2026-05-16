@@ -63,7 +63,7 @@ struct LeftoversPromptView: View {
             .stirTopBar(
                 title: "Leftovers",
                 leading: {
-                    StirTopBarTextButton("Close", action: onDismiss)
+                    StirTopBarCloseButton(action: onDismiss)
                 },
             )
         }

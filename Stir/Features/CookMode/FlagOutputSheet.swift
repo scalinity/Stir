@@ -94,10 +94,7 @@ struct FlagOutputSheet: View {
             .stirTopBar(
                 title: "Report issue",
                 leading: {
-                    StirTopBarTextButton(
-                        "Cancel",
-                        isEnabled: !isSubmitting,
-                    ) { dismiss() }
+                    StirTopBarCloseButton(isEnabled: !isSubmitting) { dismiss() }
                 },
                 trailing: {
                     StirTopBarTextButton(
