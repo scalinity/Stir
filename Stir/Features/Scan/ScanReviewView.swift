@@ -74,6 +74,9 @@ struct ScanReviewView: View {
                     let bk = buckets
                     VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                         header
+                        if let message = viewModel.reviewValidationMessage {
+                            errorCard(message: message)
+                        }
                         if viewModel.ingredients.isEmpty {
                             emptyStateCard
                         } else {

@@ -302,19 +302,37 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertTrue(saved.allSatisfy { $0.typedSource == .scan })
     }
 
-    func test_confirmFromReview_withNoIngredientsShowsRecoverableValidationError() async throws {
+    func test_confirmFromReview_withNoIngredientsStaysInReviewWithValidationMessage() async throws {
         let vm = makeVM()
         vm.__injectForTests(ingredients: [])
 
         let result = await vm.confirmFromReview()
 
         XCTAssertTrue(result.ingredients.isEmpty)
-        if case .error(let message, let recoverable) = vm.phase {
-            XCTAssertEqual(message, "Add at least one ingredient to keep going.")
-            XCTAssertTrue(recoverable)
-        } else {
-            XCTFail("empty review confirmation should stay recoverable; got \(vm.phase)")
-        }
+        XCTAssertEqual(vm.phase, .review)
+        XCTAssertEqual(vm.reviewValidationMessage, "Add at least one ingredient to keep going.")
+
+        vm.addIngredientManually("olive oil")
+
+        XCTAssertNil(vm.reviewValidationMessage)
+        XCTAssertEqual(vm.ingredients.count, 1)
+    }
+
+    func test_scanFlowHandoff_emptyIngredientsDoesNotOpenConstraints() {
+        let result = ScanViewModel.ConfirmedScanResult(ingredients: [], parseID: UUID())
+
+        XCTAssertFalse(ScanFlowHandoff.shouldOpenConstraints(for: result))
+    }
+
+    func test_scanFlowHandoff_nonEmptyIngredientsOpensConstraints() {
+        let result = ScanViewModel.ConfirmedScanResult(
+            ingredients: [
+                DinnerSolveRequest.IngredientLite(displayName: "onion", canonicalSlug: nil, amountText: nil),
+            ],
+            parseID: UUID(),
+        )
+
+        XCTAssertTrue(ScanFlowHandoff.shouldOpenConstraints(for: result))
     }
 }
 
