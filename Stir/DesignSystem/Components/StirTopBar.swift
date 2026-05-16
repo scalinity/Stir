@@ -25,17 +25,16 @@
 //     the bottom edge — same hairline grammar as the bottom action bar
 //     used in OutcomeFeedbackView / Cook Mode / DishPreview's Start
 //     Cooking bar
-//   - serif `displaySm` title, centered when both flanks are present,
-//     leading-aligned otherwise (matches what `stirNavigationTitle`
-//     does for principal-only screens, but without the toolbar)
+//   - serif `displaySm` title centered over the full bar, independent of
+//     leading / trailing control widths. A fixed side reserve keeps long
+//     titles from running under icon clusters while preserving the visual
+//     centerline when dismiss controls change shape.
 //   - Leading / trailing slots are ViewBuilder so callers can drop in
 //     `StirCircleIconButton`, plain text buttons, or stacks of either
 //
 // Title centering rules:
-//   - centered (default) when both leading AND trailing are provided
-//   - leading-aligned when only one side has content (matches iOS
-//     navigation bar behaviour when the title can't fit between
-//     unbalanced flanks)
+//   - centered over the full bar whenever a title is provided
+//   - controls render in a separate overlay row and must not move the title
 //
 // Not used by:
 //   - `SavedMealsView` — uses its own `.safeAreaInset(.top)` header
@@ -45,6 +44,8 @@
 //     migrate to `.stirTopBar` in a follow-up cleanup
 
 import SwiftUI
+
+private let stirTopBarTitleSideReserveWidth: CGFloat = 104
 
 struct StirTopBar<Leading: View, Trailing: View>: View {
     let title: String?
@@ -61,12 +62,13 @@ struct StirTopBar<Leading: View, Trailing: View>: View {
         self.trailing = trailing()
     }
 
-    private var hasLeading: Bool { Leading.self != EmptyView.self }
-    private var hasTrailing: Bool { Trailing.self != EmptyView.self }
-
     var body: some View {
-        HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
-            leading
+        ZStack(alignment: .center) {
+            HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
+                leading
+                Spacer(minLength: 0)
+                trailing
+            }
 
             if let title {
                 Text(title)
@@ -74,13 +76,11 @@ struct StirTopBar<Leading: View, Trailing: View>: View {
                     .foregroundStyle(Color.Stir.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: hasLeading && hasTrailing ? .center : .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, stirTopBarTitleSideReserveWidth)
+                    .allowsHitTesting(false)
                     .accessibilityAddTraits(.isHeader)
-            } else {
-                Spacer(minLength: 0)
             }
-
-            trailing
         }
         .padding(.horizontal, CGFloat.Stir.space3)
         .padding(.vertical, CGFloat.Stir.space2)
