@@ -136,6 +136,7 @@ struct ScanFlowRoot: View {
 
     private func onReviewConfirmed() async {
         let result = await scanViewModel.confirmFromReview()
+        guard !result.ingredients.isEmpty else { return }
         solveViewModel.prepare(with: result.ingredients, parseID: result.parseID)
         showConstraintsSheet = true
     }

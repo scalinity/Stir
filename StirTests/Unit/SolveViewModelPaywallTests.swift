@@ -121,6 +121,59 @@ final class SolveViewModelPaywallTests: XCTestCase {
         }
     }
 
+    // MARK: - Validation failures
+
+    func test_startSolveWithNoIngredientsFailsValidationBeforeStream() async throws {
+        MockURLProtocol.handler = { request in
+            XCTFail("empty solve input should fail before opening a dinner-solve stream: \(request.url?.absoluteString ?? "nil")")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"],
+            )!
+            return (response, Data(#"{"error":"AI-01","message":"unexpected"}"#.utf8))
+        }
+
+        let vm = makeViewModel()
+        vm.prepare(with: [])
+        vm.startSolve()
+
+        if case .error(let message, let code) = vm.phase {
+            XCTAssertEqual(code, "VAL-01")
+            XCTAssertEqual(message, "Add at least one ingredient to get dinner options.")
+        } else {
+            XCTFail("empty solve input should synchronously set .error; got \(vm.phase)")
+        }
+    }
+
+    func test_validationErrorFromDinnerSolveSurfacesVAL01() async throws {
+        MockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 400,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"],
+            )!
+            let body = #"{"error":"VAL-01","message":"Dinner solve request is invalid.","field_errors":[{"field":"ingredients","issue":"Expected at least one ingredient."}]}"#
+            return (response, Data(body.utf8))
+        }
+
+        let vm = makeViewModel()
+        vm.prepare(with: [
+            DinnerSolveRequest.IngredientLite(displayName: "onion", canonicalSlug: nil, amountText: nil),
+        ])
+        vm.startSolve()
+        await waitForErrorPhase(vm: vm, timeoutSec: 3.0)
+
+        if case .error(let message, let code) = vm.phase {
+            XCTAssertEqual(code, "VAL-01")
+            XCTAssertEqual(message, "Dinner solve request is invalid.")
+        } else {
+            XCTFail("VAL-01 stream response should transition to .error; got \(vm.phase)")
+        }
+    }
+
     // MARK: - Constraints use-first parsing
 
     func test_constraintsSheet_parseUseFirstDraft_trimsCommaAndLineSeparatedValues() {

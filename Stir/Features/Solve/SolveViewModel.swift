@@ -188,6 +188,12 @@ final class SolveViewModel {
 
     /// Spawn the AIDispatch stream. ConstraintsSheet calls this on "Solve".
     func startSolve() {
+        guard !ingredientsForSolve.isEmpty else {
+            phase = .error(message: "Add at least one ingredient to get dinner options.", code: "VAL-01")
+            Self.emitSolveFailed(code: "VAL-01")
+            return
+        }
+
         guard let household = householdStore.profile else {
             phase = .error(message: "Household profile missing.", code: "VAL-01")
             return
@@ -242,6 +248,10 @@ final class SolveViewModel {
             } catch StirError.entitlementRequired(let code, let message) {
                 self.phase = .error(message: message, code: code.rawValue)
                 Self.emitSolveFailed(code: code.rawValue)
+            } catch StirError.validation(_, let message) {
+                self.phase = .error(message: message, code: "VAL-01")
+                Logger.solveFeature.error("VAL-01 on dinner-solve: \(message, privacy: .public)")
+                Self.emitSolveFailed(code: "VAL-01")
             } catch StirError.server(let code, let message, _) {
                 self.phase = .error(message: message, code: code.rawValue)
                 Self.emitSolveFailed(code: code.rawValue)

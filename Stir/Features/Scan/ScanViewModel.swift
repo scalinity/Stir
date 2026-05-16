@@ -399,6 +399,12 @@ final class ScanViewModel {
     /// cost analysis can trace scan → solve funnels.
     @discardableResult
     func confirmFromReview() async -> ConfirmedScanResult {
+        guard !ingredients.isEmpty else {
+            Logger.scanFeature.warning("confirm called with no ingredients - staying in review")
+            phase = .error(message: "Add at least one ingredient to keep going.", recoverable: true)
+            return ConfirmedScanResult(ingredients: [], parseID: parseID)
+        }
+
         guard let household = householdStore.profile else {
             Logger.scanFeature.warning("confirm called without household — dropping")
             phase = .error(message: "Household profile missing. Please restart the app.", recoverable: false)
