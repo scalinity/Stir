@@ -301,6 +301,39 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertTrue(saved.allSatisfy { $0.userConfirmed })
         XCTAssertTrue(saved.allSatisfy { $0.typedSource == .scan })
     }
+
+    func test_confirmFromReview_withNoIngredientsStaysInReviewWithValidationMessage() async throws {
+        let vm = makeVM()
+        vm.__injectForTests(ingredients: [])
+
+        let result = await vm.confirmFromReview()
+
+        XCTAssertTrue(result.ingredients.isEmpty)
+        XCTAssertEqual(vm.phase, .review)
+        XCTAssertEqual(vm.reviewValidationMessage, "Add at least one ingredient to keep going.")
+
+        vm.addIngredientManually("olive oil")
+
+        XCTAssertNil(vm.reviewValidationMessage)
+        XCTAssertEqual(vm.ingredients.count, 1)
+    }
+
+    func test_scanFlowHandoff_emptyIngredientsDoesNotOpenConstraints() {
+        let result = ScanViewModel.ConfirmedScanResult(ingredients: [], parseID: UUID())
+
+        XCTAssertFalse(ScanFlowHandoff.shouldOpenConstraints(for: result))
+    }
+
+    func test_scanFlowHandoff_nonEmptyIngredientsOpensConstraints() {
+        let result = ScanViewModel.ConfirmedScanResult(
+            ingredients: [
+                DinnerSolveRequest.IngredientLite(displayName: "onion", canonicalSlug: nil, amountText: nil),
+            ],
+            parseID: UUID(),
+        )
+
+        XCTAssertTrue(ScanFlowHandoff.shouldOpenConstraints(for: result))
+    }
 }
 
 // MARK: - Test-only injection hook on ScanViewModel

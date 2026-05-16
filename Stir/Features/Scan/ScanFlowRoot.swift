@@ -136,8 +136,15 @@ struct ScanFlowRoot: View {
 
     private func onReviewConfirmed() async {
         let result = await scanViewModel.confirmFromReview()
+        guard ScanFlowHandoff.shouldOpenConstraints(for: result) else { return }
         solveViewModel.prepare(with: result.ingredients, parseID: result.parseID)
         showConstraintsSheet = true
+    }
+}
+
+enum ScanFlowHandoff {
+    static func shouldOpenConstraints(for result: ScanViewModel.ConfirmedScanResult) -> Bool {
+        !result.ingredients.isEmpty
     }
 }
 

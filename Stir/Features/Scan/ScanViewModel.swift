@@ -90,6 +90,7 @@ final class ScanViewModel {
     static let maxImagesPerScan = PantryParseRequest.multiImageMax
 
     private(set) var phase: Phase = .idle
+    private(set) var reviewValidationMessage: String?
     private(set) var ingredients: [Ingredient] = []
     private(set) var parseID: UUID?
     private(set) var lastLatencyMS: Int?
@@ -129,6 +130,7 @@ final class ScanViewModel {
     // MARK: - Phase transitions
 
     func enterCapturing() {
+        reviewValidationMessage = nil
         phase = .capturing
     }
 
@@ -264,6 +266,7 @@ final class ScanViewModel {
             let latency = Int(Date().timeIntervalSince(started) * 1000)
 
             self.ingredients = response.ingredients.map(Ingredient.init(from:))
+            self.reviewValidationMessage = nil
             self.parseID = response.parseID
             self.lastLatencyMS = response.latencyMS
             self.overallConfidence = response.overallConfidence
@@ -362,6 +365,7 @@ final class ScanViewModel {
         }
         ingredients[idx].displayName = bounded
         ingredients[idx].confidence = .confirmed // user typed it → confident
+        reviewValidationMessage = nil
         PostHogClient.shared.capture(.ingredientCorrected, properties: [
             "action": "edit",
             "final_name_length": bounded.count,
@@ -370,6 +374,9 @@ final class ScanViewModel {
 
     func deleteIngredient(id: UUID) {
         ingredients.removeAll { $0.id == id }
+        if !ingredients.isEmpty {
+            reviewValidationMessage = nil
+        }
         PostHogClient.shared.capture(.ingredientCorrected, properties: ["action": "delete"])
     }
 
@@ -380,6 +387,7 @@ final class ScanViewModel {
             displayName: bounded,
             confidence: .confirmed,
         ))
+        reviewValidationMessage = nil
         PostHogClient.shared.capture(.ingredientCorrected, properties: [
             "action": "add",
             "name_length": bounded.count,
@@ -399,6 +407,15 @@ final class ScanViewModel {
     /// cost analysis can trace scan → solve funnels.
     @discardableResult
     func confirmFromReview() async -> ConfirmedScanResult {
+        guard !ingredients.isEmpty else {
+            Logger.scanFeature.warning("confirm called with no ingredients - staying in review")
+            reviewValidationMessage = "Add at least one ingredient to keep going."
+            phase = .review
+            return ConfirmedScanResult(ingredients: [], parseID: parseID)
+        }
+
+        reviewValidationMessage = nil
+
         guard let household = householdStore.profile else {
             Logger.scanFeature.warning("confirm called without household — dropping")
             phase = .error(message: "Household profile missing. Please restart the app.", recoverable: false)
@@ -448,6 +465,7 @@ final class ScanViewModel {
 
     func resetToPrimer() {
         phase = .idle
+        reviewValidationMessage = nil
         ingredients = []
         parseID = nil
         lastLatencyMS = nil
@@ -460,6 +478,7 @@ final class ScanViewModel {
     /// without a live Gemini call. Compiled out of Release builds.
     func __setIngredientsForTests(_ seeded: [Ingredient]) {
         self.ingredients = seeded
+        self.reviewValidationMessage = nil
         self.phase = .review
     }
     #endif
