@@ -26,8 +26,8 @@
 //     used in OutcomeFeedbackView / Cook Mode / DishPreview's Start
 //     Cooking bar
 //   - serif `displaySm` title centered over the full bar, independent of
-//     leading / trailing control widths. A fixed side reserve keeps long
-//     titles from running under icon clusters while preserving the visual
+//     leading / trailing control widths. A compact side reserve keeps titles
+//     from running under standard icon controls while preserving the visual
 //     centerline when dismiss controls change shape.
 //   - Leading / trailing slots are ViewBuilder so callers can drop in
 //     `StirCircleIconButton`, plain text buttons, or stacks of either
@@ -45,7 +45,7 @@
 
 import SwiftUI
 
-private let stirTopBarTitleSideReserveWidth: CGFloat = 104
+private let stirTopBarTitleSideReserveWidth: CGFloat = 56
 
 struct StirTopBar<Leading: View, Trailing: View>: View {
     let title: String?
