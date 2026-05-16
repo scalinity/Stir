@@ -3,7 +3,7 @@
 // Renders 3 dish cards as they stream in (mockup 05 §Dinner Options).
 // Skeleton placeholders before each arrives; progressive fill as the
 // SSE events land. Tapping a card pushes DishPreviewView. The trailing
-// "Tune" header button re-presents the constraints sheet so the user
+// tune header button re-presents the constraints sheet so the user
 // can adjust their constraints and re-solve in place.
 //
 // Uses Phase 2 DishOptionCard for the populated slot. Slot-specific
@@ -73,7 +73,12 @@ struct DinnerOptionsView: View {
             title: "Dinner options",
             leading: { leadingControl },
             trailing: {
-                StirTopBarTextButton("Tune", action: onTune)
+                StirCircleIconButton(
+                    icon: Image.Stir.filter,
+                    accessibilityLabel: "Tune dinner options",
+                    foreground: Color.Stir.ember600,
+                    action: onTune,
+                )
             },
         )
         .task(id: "solve-once") {
