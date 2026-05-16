@@ -54,6 +54,26 @@ final class CookModeViewModel {
     /// render every time regardless.
     private(set) var timerStateVersion: Int = 0
 
+    /// Monotonic counter bumped every time a SubstitutionEvent accept
+    /// rewrites the current step's `RecipeStep.instructionText` via
+    /// `/v1/ai/recipe-step-rewrite` (SCA-432). Same pattern as
+    /// `timerStateVersion` — `Text(viewModel.currentStep?.instructionText)`
+    /// reads the live NSManagedObject attribute, but @Observable doesn't
+    /// track NSManagedObject KVO, so a Core Data save mid-session won't
+    /// re-render the step card. Step navigation works (currentStepIndex
+    /// changes → re-render → fresh read), but a rewrite that lands
+    /// while the user stays on the same step would render stale prose
+    /// until the user moved on. The view references this counter to
+    /// force re-evaluation on every rewrite. Bumped via `didRewriteStep`.
+    private(set) var stepInstructionVersion: Int = 0
+
+    /// Called from the substitution sheet's accept flow after a
+    /// successful step-prose rewrite. Pure observable bump — the actual
+    /// Core Data mutation is owned by `SubstitutionRepository.applyStepRewrite`.
+    func didRewriteStep() {
+        stepInstructionVersion += 1
+    }
+
     /// Present-substitution flag — observed by the view to push the sheet.
     var substitutionPresentationRequested: Bool = false
 

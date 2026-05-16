@@ -127,6 +127,11 @@ struct CookModeRoot: View {
                             substitutionRepository: coordinator.substitutionRepository,
                             pantryRepository: coordinator.pantryItemRepository,
                             onDismiss: { viewModel.substitutionPresentationRequested = false },
+                            // SCA-432 follow-up: bump the VM's observable
+                            // version counter when the rewrite lands so
+                            // StepCardView re-reads `instructionText` from
+                            // the just-updated NSManagedObject.
+                            onStepRewritten: { viewModel.didRewriteStep() },
                         )
                     }
                     .fullScreenCover(isPresented: Binding(

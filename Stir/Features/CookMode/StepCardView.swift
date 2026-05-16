@@ -396,7 +396,15 @@ struct StepCardView: View {
     }
 
     private var instructionBody: some View {
-        Text(viewModel.currentStep?.instructionText ?? "")
+        // Register as a dependent of `stepInstructionVersion` so
+        // @Observable invalidation fires after a SubstitutionEvent
+        // accept rewrites `RecipeStep.instructionText` (SCA-432).
+        // NSManagedObject property changes don't propagate through
+        // @Observable on their own; same dependency pattern as
+        // `timerStateVersion` in `timerSection`. The read itself is
+        // what Observation tracks.
+        let _ = viewModel.stepInstructionVersion
+        return Text(viewModel.currentStep?.instructionText ?? "")
             .stirFont(.displayMd)
             .foregroundStyle(Color.Stir.ink900)
             .lineSpacing(6)

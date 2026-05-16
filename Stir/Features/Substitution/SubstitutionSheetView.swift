@@ -44,6 +44,7 @@ struct SubstitutionSheetView: View {
         substitutionRepository: SubstitutionRepository,
         pantryRepository: PantryItemRepository,
         onDismiss: @escaping () -> Void,
+        onStepRewritten: @escaping () -> Void = {},
     ) {
         self.recipePlan = recipePlan
         self.household = household
@@ -70,6 +71,7 @@ struct SubstitutionSheetView: View {
             repository: substitutionRepository,
             pantryRepository: pantryRepository,
             onFinished: onDismiss,
+            onStepRewritten: onStepRewritten,
         ))
     }
 

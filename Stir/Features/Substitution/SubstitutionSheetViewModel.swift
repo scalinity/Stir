@@ -54,6 +54,15 @@ final class SubstitutionSheetViewModel {
     private let pantryRepository: PantryItemRepository
     private let analytics: PostHogClient
     private let onFinished: () -> Void
+    /// SCA-432 follow-up: fired after `applyStepRewrite` successfully
+    /// persists the rewritten step prose. The host (CookModeRoot) wires
+    /// this to bump `CookModeViewModel.stepInstructionVersion` so the
+    /// StepCardView re-renders the (now updated) Core Data attribute.
+    /// Without this signal, `Text(viewModel.currentStep?.instructionText)`
+    /// keeps showing the pre-swap prose until the user moves to another
+    /// step — Swift @Observable doesn't propagate NSManagedObject
+    /// attribute changes on its own.
+    private let onStepRewritten: () -> Void
 
     private var subEventID: UUID = UUID()
     private var persistedEvent: SubstitutionEvent?
@@ -68,6 +77,7 @@ final class SubstitutionSheetViewModel {
         pantryRepository: PantryItemRepository,
         analytics: PostHogClient = .shared,
         onFinished: @escaping () -> Void,
+        onStepRewritten: @escaping () -> Void = {},
     ) {
         self.recipePlan = recipePlan
         self.household = household
@@ -81,6 +91,7 @@ final class SubstitutionSheetViewModel {
         self.pantryRepository = pantryRepository
         self.analytics = analytics
         self.onFinished = onFinished
+        self.onStepRewritten = onStepRewritten
     }
 
     var canSubmit: Bool {
@@ -493,6 +504,13 @@ final class SubstitutionSheetViewModel {
             let response = try await aiDispatch.recipeStepRewrite(request: request)
             do {
                 try repository.applyStepRewrite(step: step, rewrittenText: response.rewrittenText)
+                // Signal the host (CookModeViewModel.didRewriteStep) that
+                // the NSManagedObject's instructionText just changed. The
+                // step card's Text view reads this attribute live, but
+                // @Observable doesn't track Core Data mutations on its
+                // own — without this signal the rewritten prose stays
+                // hidden until the user navigates to another step.
+                onStepRewritten()
             } catch {
                 Logger.coreData.error(
                     "applyStepRewrite failed: \(error.localizedDescription, privacy: .public)",
