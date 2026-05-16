@@ -410,25 +410,31 @@ final class NotificationSchedulerKitTests: XCTestCase {
         handler(.leftoversFollowup, "stir.test", .unknown, true)
     }
 
-    /// SCA-367: RollbackErrorReason.classify maps known UNErrorDomain +
-    /// NSURLErrorDomain codes to specific cases; everything else
-    /// falls to .unknown. Pre-fix the kit forwarded raw OS-supplied
-    /// localizedDescription strings to PostHog (CWE-200-adjacent —
-    /// not user-content but not contractually constrained either).
+    /// SCA-367 / SCA-408: RollbackErrorReason.classify maps real
+    /// `UNError.Code` cases (typed) + NSURLErrorDomain to specific
+    /// reasons; everything else falls to .unknown. SCA-408 corrected
+    /// SCA-367's wrong integer mapping (raw 1 was labelled
+    /// "badNotificationContent" but is actually `notificationsNotAllowed`
+    /// → `.deniedByDevice`; raw 4 had no UNError.Code case at all,
+    /// so its `.deniedByDevice` mapping was dead).
     func test_rollbackErrorReason_classify_knownAndUnknown() {
-        // UNErrorDomain code 1 → .invalidContent
-        let unInvalid = NSError(domain: "UNErrorDomain", code: 1)
-        XCTAssertEqual(RollbackErrorReason.classify(unInvalid), .invalidContent)
-        // UNErrorDomain code 4 → .deniedByDevice
-        let unDenied = NSError(domain: "UNErrorDomain", code: 4)
+        // .notificationsNotAllowed (raw 1) → .deniedByDevice (was
+        // mis-mapped to .invalidContent pre-SCA-408).
+        let unDenied = UNError(.notificationsNotAllowed)
         XCTAssertEqual(RollbackErrorReason.classify(unDenied), .deniedByDevice)
-        // UNErrorDomain other code → .unknown
-        let unOther = NSError(domain: "UNErrorDomain", code: 99)
-        XCTAssertEqual(RollbackErrorReason.classify(unOther), .unknown)
-        // NSURLErrorDomain → .systemUnavailable
-        let urlErr = NSError(domain: "NSURLErrorDomain", code: -1009)
+        // Content-class cases → .invalidContent. Sample one from each
+        // numeric range so a future Apple addition that we forget to
+        // map gets caught by `@unknown default`.
+        let unBadAttach = UNError(.attachmentInvalidURL)
+        XCTAssertEqual(RollbackErrorReason.classify(unBadAttach), .invalidContent)
+        let unNoContent = UNError(.notificationInvalidNoContent)
+        XCTAssertEqual(RollbackErrorReason.classify(unNoContent), .invalidContent)
+        let unBadProvider = UNError(.contentProvidingInvalid)
+        XCTAssertEqual(RollbackErrorReason.classify(unBadProvider), .invalidContent)
+        // NSURLErrorDomain → .systemUnavailable (unchanged).
+        let urlErr = NSError(domain: NSURLErrorDomain, code: -1009)
         XCTAssertEqual(RollbackErrorReason.classify(urlErr), .systemUnavailable)
-        // arbitrary other → .unknown
+        // arbitrary other → .unknown (unchanged).
         let other = NSError(domain: "test.synthetic", code: 42)
         XCTAssertEqual(RollbackErrorReason.classify(other), .unknown)
     }
@@ -696,42 +702,7 @@ private final class TestSettings: UNNotificationSettings, @unchecked Sendable {
 
 // MARK: - SpyPostHogClient (SCA-345)
 
-/// Test double for `PostHogClient` that records every `capture(_:properties:)`
-/// invocation in-memory instead of dispatching to the real PostHog SDK.
-/// Used by the SCA-320 / ADR 0009 regression tests above to assert the
-/// `use_soon_scheduled` property contract is preserved.
-///
-/// Uses `PostHogClient`'s DEBUG-only `init(testingOnly: Bool)` seam so the
-/// production singleton stays isolated. Concurrency model mirrors the
-/// parent class (`@unchecked Sendable`, nonisolated `capture`) so the
-/// override is signature-compatible; in practice every call site we
-/// exercise here runs on `@MainActor` (UseSoonScheduler is @MainActor),
-/// so the underlying array access is sequential.
-final class SpyPostHogClient: PostHogClient, @unchecked Sendable {
-    struct Capture {
-        let event: TelemetryEvent
-        let properties: [String: Any]
-    }
-
-    /// Append-only log of every `capture(...)` invocation, in order.
-    /// Guarded by `lock` so a future test that introduces a non-main-
-    /// actor caller doesn't silently race.
-    private let lock = NSLock()
-    private var _captures: [Capture] = []
-
-    var captures: [Capture] {
-        lock.lock()
-        defer { lock.unlock() }
-        return _captures
-    }
-
-    init() {
-        super.init(testingOnly: true)
-    }
-
-    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
-        lock.lock()
-        defer { lock.unlock() }
-        _captures.append(Capture(event: event, properties: properties))
-    }
-}
+// SCA-417: SpyPostHogClient hoisted to StirTests/Unit/Helpers/SpyPostHogClient.swift.
+// Same shape (captures: [Capture] + NSLock); shared with
+// LeftoversFollowupSchedulerTests so future test files that need a
+// PostHog spy import from one place.

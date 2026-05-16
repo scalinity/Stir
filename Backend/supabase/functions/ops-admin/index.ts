@@ -300,6 +300,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     layeredCheckFailed = true;
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Locking out ops console during an incident is the opposite of
+    // what we want when triaging.
     log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
   }
 
@@ -314,6 +317,8 @@ Deno.serve(async (req) => {
       await checkAndIncrement(client, 'ip:ops_admin_hourly', sourceIP);
       await checkAndIncrement(client, 'user:ops_admin_minutely', admin.authUserId);
     } catch (err) {
+      // SCA-396: fail-open per ADR 0036 (Phase-2 commit; Phase-1 above
+      // already passed under-cap, so a missed increment is bounded).
       log.warn('rate_limiter_failed', { err: sanitizeErrorForLog(err) });
     }
   }

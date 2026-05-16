@@ -26,6 +26,16 @@ import OSLog
 import UIKit
 import UserNotifications
 
+/// SCA-371 marker — thrown by `StirApp`'s configure-closure when the
+/// RootCoordinator weak ref deallocates mid-flight. The
+/// classifier (`classifyPostFailure` below) `is`-checks this type to
+/// route the error to a fault-level OSLog. SCA-409: hoisted to file
+/// scope so both StirApp + APNsRegistrationCoordinator share one
+/// definition (pre-fix the marker was defined inline in StirApp and
+/// the classifier matched on `String(describing:).contains(...)`,
+/// which silently misroutes typos / sibling type names).
+struct RootCoordinatorDeallocatedMarker: Error {}
+
 @MainActor
 final class APNsRegistrationCoordinator {
     static let shared = APNsRegistrationCoordinator()
@@ -82,6 +92,16 @@ final class APNsRegistrationCoordinator {
     /// Future field additions to `Snapshot` MUST bump this key (or use
     /// `decodeIfPresent` with sane defaults — pick one explicitly).
     private static let lastPushKey = "stir.apns.lastPushSnapshot.v2"
+    /// SCA-393 — superseded `.v1` key that Codable-stored the raw
+    /// 64-char hex APNs token at field `tokenHex`. SCA-372 bumped to
+    /// `.v2` (SHA-256 hex at `tokenHash`) but never SCRUBBED `.v1`,
+    /// so every upgrader from SCA-316/317 → SCA-371 carried the
+    /// plaintext token in UserDefaults indefinitely
+    /// (`NSFileProtectionCompleteUntilFirstUserAuthentication`,
+    /// readable by anyone with first-unlock access). `init` removes
+    /// the legacy key once per process; idempotent (no-op when
+    /// already scrubbed). No legitimate `.v1` reader remains. CWE-312.
+    private static let legacyV1Key = "stir.apns.lastPushSnapshot.v1"
 
     /// SCA-354: single in-flight POST Task. `schedulePost` cancels
     /// any previous Task before spawning a new one, serializing
@@ -108,6 +128,11 @@ final class APNsRegistrationCoordinator {
         self.center = center
         self.defaults = defaults
         self.registerForRemote = registerForRemote
+        // SCA-393: scrub the SCA-372-superseded `.v1` snapshot key so
+        // upgraders no longer carry the plaintext APNs token in
+        // UserDefaults. Idempotent — `removeObject` on an absent key
+        // is a no-op. See `legacyV1Key` docstring above for the CWE.
+        defaults.removeObject(forKey: Self.legacyV1Key)
     }
 
     /// Wire the coordinator to a live AIDispatch.pushRegister(...). Called
@@ -201,8 +226,14 @@ final class APNsRegistrationCoordinator {
     /// snapshot so cancel-and-replace pays no extra round-trip cost.
     private func schedulePost(reason: String) {
         inFlightPost?.cancel()
-        inFlightPost = Task { [weak self] in
-            await self?.postIfChanged(reason: reason)
+        // SCA-415: dropped `[weak self]` — `APNsRegistrationCoordinator.shared`
+        // is `@MainActor` singleton with app-lifetime (`StirApp` holds the
+        // reference until process exit), so the weak capture is dead code
+        // costing a retain-release pair per schedule. Strong capture is
+        // safe for as long as the singleton convention holds; if a future
+        // refactor introduces non-singleton instantiation, restore [weak self].
+        inFlightPost = Task {
+            await self.postIfChanged(reason: reason)
         }
     }
 
@@ -304,8 +335,15 @@ final class APNsRegistrationCoordinator {
                 // SCA-371: the configure-closure throws .unknown wrapping
                 // a typed marker when RootCoordinator deallocates. That's
                 // an invariant violation, not a routine error.
-                let typeName = String(describing: type(of: underlying))
-                if typeName.contains("RootCoordinatorDeallocated") {
+                // SCA-409: typed `is` check against the shared marker
+                // type. Pre-fix matched on `String(describing: type(of:
+                // underlying)).contains("RootCoordinatorDeallocated")`
+                // — a sibling type whose name happened to contain the
+                // substring (e.g. future `RootCoordinatorDeallocatedTwice`)
+                // would silently route to .invariantViolation; a typo
+                // at the marker site would silently downgrade to
+                // .transient. The typed check is refactor-safe.
+                if underlying is RootCoordinatorDeallocatedMarker {
                     return .invariantViolation
                 }
                 return .transient

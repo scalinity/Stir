@@ -6,6 +6,12 @@
 
 import { z, ZodError, type ZodIssue } from 'zod';
 import type { FieldError } from './errors.ts';
+// SCA-407: regex constants live in the leaf `regex.ts` module so both
+// validation.ts and auth.ts can consume without forming a peer-to-peer
+// import edge. Re-exported below to preserve the SCA-380 callers that
+// imported `UUID_V4_REGEX` from validation.ts.
+import { CONTROL_CHAR_REGEX, UUID_V4_REGEX } from './regex.ts';
+export { UUID_V4_REGEX } from './regex.ts';
 
 // ---------------------------------------------------------------------------
 // /v1/session/bootstrap
@@ -32,28 +38,12 @@ import type { FieldError } from './errors.ts';
 // build: iOS build string, e.g. "1.0.0 (42)". Required for telemetry.
 // os_version: iOS version string, e.g. "17.5.1". Required for telemetry.
 
-// SCA-380: exported so auth.ts can re-validate `installation_id` claim
-// from a verified JWT. Pre-SCA-380 the JWT-extracted value was only
-// type-checked + non-empty-checked, leaving a rogue / mis-minted JWT
-// that survives signature verification (e.g. internal tooling bug,
-// jose key rotation lag) free to inject arbitrary strings into
-// `installation_id`-keyed Postgres lookups. The regex re-check is
-// belt-and-suspenders: the only path that mints these JWTs already
-// validates the claim against this same regex on the way in, so a
-// healthy system never trips the new check.
-export const UUID_V4_REGEX =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 const CK_RECORD_NAME_REGEX = /^_[a-f0-9]{32}$/;
 
 // SCA-380: free-form telemetry strings reject any control character
-// (`\r`, `\n`, `\t`, NUL, escape, etc). `build` and `os_version` are
-// the only validation-time fields that flow untrusted into OSLog
-// breadcrumbs, PostHog properties, and `device_installations`
-// columns. Without this filter, a malicious client could inject CRLF
-// (`"1.0.0\r\nfake_log_line spoofed=true"`) into a structured log
-// stream and trick a downstream parser into seeing a fabricated
-// log entry. The codepoint range covers all C0 + DEL + C1 controls.
-const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f-\x9f]/;
+// (`\r`, `\n`, `\t`, NUL, escape, etc). The codepoint range
+// (CONTROL_CHAR_REGEX, owned by `regex.ts`) covers all C0 + DEL + C1
+// controls.
 const noControlChars = z.string().refine(
   (s) => !CONTROL_CHAR_REGEX.test(s),
   { message: 'must not contain control characters (CR, LF, NUL, etc.)' },
@@ -64,7 +54,12 @@ export const SessionBootstrapRequest = z.object({
   cloudkit_user_record_name: z.string()
     .regex(CK_RECORD_NAME_REGEX, 'must match `_` + 32 lowercase hex chars')
     .optional(),
-  cloudkit_web_auth_token: z.string().min(16).max(4096).optional(),
+  // SCA-404: defense-in-depth — token doesn't currently land in any
+  // log path, but a future debug-trace flag that captures the raw
+  // request body (or an upstream verifier-error breadcrumb that
+  // includes the URL with the token in the query string) would
+  // otherwise carry attacker-injected CRLF verbatim into OSLog.
+  cloudkit_web_auth_token: noControlChars.pipe(z.string().min(16).max(4096)).optional(),
   build: noControlChars.pipe(z.string().min(1).max(64)),
   os_version: noControlChars.pipe(z.string().min(1).max(64)),
 }).strict();
@@ -113,7 +108,11 @@ export type SessionBootstrapRequest = z.infer<typeof SessionBootstrapRequest>;
 const IMAGE_BASE64_MAX = 10 * 1024 * 1024;
 
 const PantryParseImagePart = z.object({
-  base64: z.string().min(100).max(IMAGE_BASE64_MAX),
+  // SCA-404: noControlChars defense-in-depth — base64 alphabet is
+  // [A-Za-z0-9+/=] so legitimate input never contains controls. A
+  // future debug log that captures the raw payload would otherwise
+  // forward an attacker-injected CRLF straight to OSLog.
+  base64: noControlChars.pipe(z.string().min(100).max(IMAGE_BASE64_MAX)),
   mime_type: z.enum(['image/jpeg', 'image/png', 'image/heic', 'image/webp']),
 }).strict();
 
@@ -122,7 +121,7 @@ export const PANTRY_PARSE_MULTI_IMAGE_MAX = 4;
 export const PantryParseRequest = z.object({
   client_request_id: z.string().uuid(),
   // Singular fields are optional now — required when `images` is absent.
-  image_base64: z.string().min(100).max(IMAGE_BASE64_MAX).optional(),
+  image_base64: noControlChars.pipe(z.string().min(100).max(IMAGE_BASE64_MAX)).optional(),
   image_mime_type: z.enum(['image/jpeg', 'image/png', 'image/heic', 'image/webp']).optional(),
   // Multi-image array. min(2) so a 1-image request must use the singular
   // fields — keeps the back-compat path unambiguous and matches the iOS

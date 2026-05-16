@@ -15,6 +15,7 @@ import { hashCanonicalKey } from '../functions/_shared/hashing.ts';
 import { SessionBootstrapRequest, zodToFieldErrors } from '../functions/_shared/validation.ts';
 import { followMergedInto, type AppUserRow } from '../functions/_shared/identity.ts';
 import { ZodError } from 'zod';
+import * as jose from 'jose';
 
 function requestWithAuth(token: string): Request {
   return new Request('http://example.test/', {
@@ -71,20 +72,50 @@ Deno.test('auth: malformed token → AuthError.reason=malformed', async () => {
 // flow through `SessionBootstrapRequest`'s UUID v4 regex) never trip
 // this — it's the rogue-mint backstop. Pin so a future refactor that
 // drops the re-check fails loudly.
+//
+// SCA-410: `issueSessionJWT` now ALSO validates installation_id at mint
+// time (matching the SCA-380 verify-side claim). Forging the JWT through
+// our own minter therefore throws before signing — sign one directly via
+// jose to bypass the mint-side guard and exercise the verify-side guard
+// alone.
 Deno.test('auth: rejects JWT whose installation_id claim is not a UUID v4', async () => {
   const canonicalKey = 'ck:_' + crypto.randomUUID().replaceAll('-', '');
-  // Forge a JWT with a non-UUID installation_id. Signature passes
-  // because we use `issueSessionJWT`'s own minter — only the SCA-380
-  // claim re-validate should reject.
-  // deno-lint-ignore no-explicit-any
-  const jwt = await issueSessionJWT({
+  const secret = new TextEncoder().encode(Deno.env.get('STIR_JWT_SECRET') ?? '');
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = await new jose.SignJWT({
     canonical_user_key: canonicalKey,
-    installation_id: 'rogue-non-uuid-string' as any,
+    installation_id: 'rogue-non-uuid-string',
     tier: 'free',
-  });
+    role: 'authenticated',
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setIssuer('stir-backend')
+    .setAudience('authenticated')
+    .setSubject(canonicalKey)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 3600)
+    .sign(secret);
+
   const err = await assertRejects(() => verifySessionJWT(requestWithAuth(jwt)), AuthError);
   assertEquals(err.reason, 'malformed');
   assertEquals(err.message, 'installation_id claim is not a UUID v4');
+});
+
+// SCA-410: mint-side regex check on issueSessionJWT. Pin the throw so a
+// future refactor that drops the guard surfaces in tests immediately.
+Deno.test('auth: SCA-410 — issueSessionJWT throws on non-UUID installation_id', async () => {
+  const canonicalKey = 'ck:_' + crypto.randomUUID().replaceAll('-', '');
+  await assertRejects(
+    () =>
+      issueSessionJWT({
+        canonical_user_key: canonicalKey,
+        // deno-lint-ignore no-explicit-any
+        installation_id: 'rogue-non-uuid-string' as any,
+        tier: 'free',
+      }),
+    Error,
+    'installation_id is not a UUID v4',
+  );
 });
 
 // -------------------------------------------------------------------------

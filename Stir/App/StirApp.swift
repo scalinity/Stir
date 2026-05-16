@@ -86,9 +86,11 @@ struct StirApp: App {
                     // pollute Sentry/PostHog dashboards that bucket by
                     // error code; this is an iOS-internal lifecycle bug,
                     // not a request-shape error.
-                    struct RootCoordinatorDeallocated: Error {}
+                    // SCA-409: shared marker type defined in
+                    // APNsRegistrationCoordinator.swift so the classifier
+                    // can `is`-check it without string-typed reflection.
                     Logger.app.fault("apns_register_aborted reason=root_coordinator_deallocated")
-                    throw StirError.unknown(underlying: RootCoordinatorDeallocated())
+                    throw StirError.unknown(underlying: RootCoordinatorDeallocatedMarker())
                 }
                 return try await dispatch.pushRegister(request: body)
             }

@@ -26,6 +26,8 @@ import "./_helpers/env.ts";
 import { assert, assertEquals } from "@std/assert";
 import * as jose from "jose";
 import {
+  _ageProviderJwtCacheForTests,
+  _cachedJwtForTests,
   _resetApnsCacheForTests,
   sendAPNsPush,
 } from "../functions/_shared/apns.ts";
@@ -309,29 +311,49 @@ Deno.test("SCA-123 W44: malformed PKCS#8 surfaces as config_invalid with wrap te
 // re-using the expired one (which would just 401 again, burning the
 // pgmq-dispatch retry budget).
 //
-// Test shape: arm sendAPNsPush #1 to hit a mock that returns 401. Then
-// arm send #2 to hit a 200 mock and assert the request carries a
-// FRESHLY-MINTED bearer (different `iat` claim than the 401 call's
-// JWT). Without the cache invalidation in apns.ts, both calls would
-// reuse the same cached JWT and the second's bearer would equal the
-// first's.
-Deno.test("SCA-352: 401 invalidates cachedProviderJwt — next call mints fresh", async () => {
+// SCA-403: pin the contract via the `_cachedJwtForTests()` seam (cache
+// is null after the 401) instead of the prior different-bytes
+// proxy. The proxy required a 1.1s sleep between mints so the iat
+// claim advanced by a whole second; the cache check is direct +
+// instantaneous + JWT-format-agnostic.
+//
+// SCA-412: the just-minted guard skips invalidation on fresh mints
+// (key/config bug, not stale-cache). Use `_ageProviderJwtCacheForTests`
+// to roll the cache's minted-at timestamp past the 5s threshold so the
+// 401 represents a genuinely-expired JWT (the SCA-352 contract path).
+Deno.test("SCA-352: aged-cache 401 invalidates cachedProviderJwt", async () => {
   setValidApnsEnv();
   _resetApnsCacheForTests();
 
-  let firstCallBearer: string | null = null;
-  let secondCallBearer: string | null = null;
+  // Prime the cache by issuing one successful send.
+  const { restore: restorePrime } = installMockFetch(() =>
+    new Response(null, { status: 200, headers: { "apns-id": "prime" } })
+  );
+  try {
+    const primeResult = await sendAPNsPush({
+      token: "sca352-token",
+      environment: "sandbox",
+      category: "reactivation",
+      alert: { title: "prime", body: "seed-cache" },
+    });
+    assertEquals(primeResult.ok, true);
+  } finally {
+    restorePrime();
+  }
+  const primedJwt = _cachedJwtForTests();
+  assert(primedJwt !== null, "cache must be primed before the 401 simulation");
 
-  // Send #1 — APNs returns 401.
-  const { restore: restore1 } = installMockFetch((call) => {
-    const headers = call.init.headers as Record<string, string>;
-    firstCallBearer = headers["authorization"] ?? headers["Authorization"] ??
-      null;
-    return new Response(
+  // Age the cache past the SCA-412 just-minted guard so the next 401
+  // represents a genuinely-expired JWT.
+  _ageProviderJwtCacheForTests(10);
+
+  // Trigger 401 — cache should clear.
+  const { restore: restore401 } = installMockFetch(() =>
+    new Response(
       JSON.stringify({ reason: "ExpiredProviderToken" }),
       { status: 401, headers: { "content-type": "application/json" } },
-    );
-  });
+    )
+  );
   try {
     const result1 = await sendAPNsPush({
       token: "sca352-token",
@@ -342,42 +364,52 @@ Deno.test("SCA-352: 401 invalidates cachedProviderJwt — next call mints fresh"
     assertEquals(result1.ok, false);
     if (!result1.ok) assertEquals(result1.reason, "config_invalid");
   } finally {
-    restore1();
+    restore401();
   }
 
-  // Need a small delay so iat advances by ≥1s; APNs JWT iat is whole
-  // seconds. Without this, a same-second mint would produce the same
-  // signed JWT bytes and the test would falsely "pass" — we'd think the
-  // cache was reused even though it was correctly invalidated.
-  await new Promise<void>((r) => setTimeout(r, 1100));
+  // SCA-403 contract pin: cache is null directly, no different-bytes proxy.
+  assertEquals(
+    _cachedJwtForTests(),
+    null,
+    "SCA-352: aged cache 401 must clear cachedProviderJwt",
+  );
 
-  // Send #2 — succeeds. Assert bearer is fresh (different iat).
-  const { restore: restore2 } = installMockFetch((call) => {
-    const headers = call.init.headers as Record<string, string>;
-    secondCallBearer = headers["authorization"] ?? headers["Authorization"] ??
-      null;
-    return new Response(null, {
-      status: 200,
-      headers: { "apns-id": "sca352-2" },
-    });
-  });
+  _resetApnsCacheForTests();
+});
+
+// SCA-412: just-minted JWT got 401 → DO NOT invalidate. Treats the
+// failure as a key/config bug (wrong APNS_AUTH_KEY_P8, NTP skew),
+// not a stale-cache bug. Mint coalescing stays effective; pgmq-
+// dispatch backoff controls retry rate; the cache effectively
+// unblocks itself for a fresh mint after 5s.
+Deno.test("SCA-412: just-minted 401 does NOT invalidate cache (mint-thrash guard)", async () => {
+  setValidApnsEnv();
+  _resetApnsCacheForTests();
+
+  // First call mints + immediately gets 401 → cache should STAY (just-minted).
+  const { restore } = installMockFetch(() =>
+    new Response(
+      JSON.stringify({ reason: "ExpiredProviderToken" }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )
+  );
   try {
-    const result2 = await sendAPNsPush({
-      token: "sca352-token",
+    const result = await sendAPNsPush({
+      token: "sca412-token",
       environment: "sandbox",
       category: "reactivation",
-      alert: { title: "200", body: "fresh-jwt" },
+      alert: { title: "401", body: "fresh-jwt" },
     });
-    assertEquals(result2.ok, true);
+    assertEquals(result.ok, false);
   } finally {
-    restore2();
+    restore();
   }
 
-  assert(firstCallBearer !== null, "first call should have set bearer");
-  assert(secondCallBearer !== null, "second call should have set bearer");
+  // Cache MUST still be populated — the just-minted guard short-circuits
+  // the invalidation that SCA-352 would otherwise perform.
   assert(
-    firstCallBearer !== secondCallBearer,
-    `cache invalidation: second call should mint a fresh JWT (got ${firstCallBearer} vs ${secondCallBearer})`,
+    _cachedJwtForTests() !== null,
+    "SCA-412: just-minted JWT got 401 — cache must NOT be cleared",
   );
 
   _resetApnsCacheForTests();

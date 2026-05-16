@@ -37,7 +37,10 @@ import {
   checkAndIncrement,
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
-import { writeAudit } from '../_shared/audit.ts';
+// SCA-406: writeAudit + hashCanonicalKey now flow through the typed
+// `_shared/identity_audit.ts` wrappers so the handler reads as one-line
+// helper invocations and the SCA-392 plumbing lives next to the helper.
+import { auditApnsEnvironmentFlip, auditUserStale } from '../_shared/identity_audit.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -113,6 +116,9 @@ Deno.serve(async (req) => {
       );
     }
   } catch (err) {
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Post-auth endpoint; locking active users out of push-prefs
+    // updates during a DB blip is worse than letting through extras.
     userLog.error('rate_limiter_failed', err);
   }
 
@@ -120,25 +126,9 @@ Deno.serve(async (req) => {
   const userRow = await readAppUser(client, claims.canonical_user_key);
   if (!userRow) {
     userLog.warn('user_row_missing');
-    // SCA-381: audit a user_stale rejection. JWT verified but the
-    // claim's canonical_user_key no longer resolves to a row — could
-    // be (a) row hard-deleted (shouldn't happen; status='banned' is
-    // the soft-delete path), (b) identity-merge in flight where the
-    // alias-forward landed but the JWT was minted seconds before,
-    // (c) test fixture cleanup raced with a real session. Audit row
-    // exposes whether (a) is happening at scale (prod incident) or
-    // just (b)/(c) noise. `actor_id` is the unresolvable claim
-    // itself so SREs can grep `action='auth_user_stale'` and join
-    // against `app_users` to confirm absence.
-    await writeAudit(client, userLog, {
-      actor_id: claims.canonical_user_key,
-      actor_email: null,
-      action: 'auth_user_stale',
-      target_table: 'app_users',
-      target_id: claims.canonical_user_key,
-      after: { endpoint: '/v1/push/register', reason: 'user_stale' },
-      request_id: requestId,
-    });
+    // SCA-381 audit_user_stale via SCA-406 helper (handles SCA-392
+    // actor_id type-mismatch fix internally).
+    await auditUserStale(client, userLog, claims, '/v1/push/register', requestId);
     return jsonError(ErrorCode.AUTH_01, 401, {
       message: 'User not found; re-bootstrap.',
       reason: 'user_stale',
@@ -164,6 +154,21 @@ Deno.serve(async (req) => {
   // row's key for the AND-filter.
   const targetUser = await followMergedInto(client, userRow);
   const resolvedKey = targetUser.canonical_user_key;
+
+  // SCA-397: post-merge banned-status re-check (CWE-863). The pre-merge
+  // status check above guards the install row, but if admin bans the
+  // CK target AFTER the install-keyed JWT was minted, the install row
+  // carries `status='merged'` (NOT `banned`); the pre-merge check passes;
+  // `followMergedInto` resolves to the banned target; push registration
+  // would otherwise proceed on a banned account until JWT expiry (~24h).
+  // Mirrors the symmetric defensive double-check session-bootstrap
+  // already runs at session-bootstrap/index.ts:262-273.
+  if (targetUser.status === 'banned') {
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
+  }
 
   // ---- Upsert: target the calling install's device_installation row
   // and attach/update the apns token + prefs. SCA-321: previously this
@@ -227,7 +232,16 @@ Deno.serve(async (req) => {
       notification_prefs_json: body.notification_prefs,
       last_seen_at: new Date().toISOString(),
     })
-    .eq('installation_id', installRow.installation_id);
+    // SCA-411: defense-in-depth. The SELECT above filters on
+    // `(installation_id, canonical_user_key=resolvedKey)`; mirror the
+    // `canonical_user_key` predicate on the UPDATE so a concurrent
+    // alias-forward that rewrites the row's canonical_user_key
+    // between SELECT and UPDATE can't let a stale read write into the
+    // now-rewritten row. installation_id is the PK so this is single-
+    // row-targeted today; the AND-clause is belt-and-suspenders if a
+    // future migration ever loosens the PK.
+    .eq('installation_id', installRow.installation_id)
+    .eq('canonical_user_key', resolvedKey);
   if (updErr) {
     userLog.error('install_update_failed', updErr);
     return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
@@ -236,24 +250,26 @@ Deno.serve(async (req) => {
   // SCA-381: env flip on the SAME install is unusual — TestFlight →
   // App Store graduation is the legitimate case, but a sustained
   // rate of unintended flips signals a misconfigured Debug→Release
-  // build path on prod devices. Audit row is permanent (counts only
-  // — actor_id hashed, no token/pref content) so SREs can grep
-  // `apns_environment_flipped` and join with `device_installations`
-  // to understand cohort behavior.
+  // build path on prod devices.
+  // SCA-399: detector intentionally fires only on `non-null prior →
+  // different non-null new`. session-bootstrap creates the install
+  // row with NULL env; the first push-register POST is the implicit
+  // baseline, not a "flip." A future maintenance path that resets
+  // env to NULL would re-baseline silently — explicit by design.
+  // SCA-406: SCA-392 type-mismatch fix + hashing live in the helper.
   if (
     installRow.apns_environment !== null &&
     installRow.apns_environment !== body.environment
   ) {
-    await writeAudit(client, userLog, {
-      actor_id: claims.canonical_user_key,
-      actor_email: null,
-      action: 'apns_environment_flipped',
-      target_table: 'device_installations',
-      target_id: installRow.installation_id,
-      before: { apns_environment: installRow.apns_environment },
-      after: { apns_environment: body.environment },
-      request_id: requestId,
-    });
+    await auditApnsEnvironmentFlip(
+      client,
+      userLog,
+      claims,
+      installRow.installation_id,
+      installRow.apns_environment,
+      body.environment,
+      requestId,
+    );
   }
 
   userLog.info('push_registered', {

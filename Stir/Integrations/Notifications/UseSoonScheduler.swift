@@ -97,22 +97,21 @@ final class UseSoonScheduler {
         now: Date = .init(),
         household: HouseholdProfile,
     ) async {
-        // 1. Suppression preflight via shared kit. The kit returns the
-        // reason; we map it to our telemetry event and bail.
+        // 1. Suppression preflight via shared kit.
+        // SCA-402: emit via shared kit helper. Pre-fix this scheduler had
+        // a near-identical switch as Leftovers but silently dropped the
+        // OSLog breadcrumb (asymmetric coverage). The helper closes that
+        // gap for free.
         if let reason = NotificationSchedulerKit.evaluateSuppression(
             history: history,
             now: now,
         ) {
-            switch reason {
-            case .unactionedStreak:
-                telemetry.capture(.useSoonSuppressed, properties: [
-                    "reason": "unactioned_streak",
-                ])
-            case .weeklyCap:
-                telemetry.capture(.useSoonSuppressed, properties: [
-                    "reason": "weekly_cap",
-                ])
-            }
+            NotificationSchedulerKit.emitSuppressed(
+                reason,
+                event: .useSoonSuppressed,
+                telemetry: telemetry,
+                logger: Logger.useSoon,
+            )
             return
         }
 

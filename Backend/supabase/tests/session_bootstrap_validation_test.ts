@@ -68,6 +68,40 @@ Deno.test('SessionBootstrapRequest: rejects DEL (0x7f) in build', () => {
   assertEquals(result.success, false);
 });
 
+// SCA-414: C1 control-char (0x80–0x9F) coverage. The noControlChars
+// regex `/[\x00-\x1f\x7f-\x9f]/` covers C0 + DEL + C1; the prior
+// SCA-380 tests covered C0 + DEL only. C1's NEL (0x85) is the
+// canonical regression target — some downstream parsers misinterpret
+// it as a line terminator.
+Deno.test('SessionBootstrapRequest: rejects C1 control char (NEL 0x85) in os_version', () => {
+  const result = SessionBootstrapRequest.safeParse({
+    ...baseValidBody,
+    os_version: '17.5' + String.fromCharCode(0x85) + 'injected',
+  });
+  assertEquals(result.success, false);
+});
+
+// SCA-404: cloudkit_web_auth_token + image base64 fields gained
+// noControlChars defense-in-depth. Prior SCA-380 covered build +
+// os_version only; these tests pin the new contract.
+Deno.test('SessionBootstrapRequest: rejects CRLF in cloudkit_web_auth_token', () => {
+  const result = SessionBootstrapRequest.safeParse({
+    ...baseValidBody,
+    cloudkit_user_record_name: '_' + 'a'.repeat(32),
+    cloudkit_web_auth_token: 'a'.repeat(20) + '\r\nfake_log_line spoofed=true',
+  });
+  assertEquals(result.success, false);
+});
+
+Deno.test('SessionBootstrapRequest: clean cloudkit_web_auth_token still parses', () => {
+  const result = SessionBootstrapRequest.safeParse({
+    ...baseValidBody,
+    cloudkit_user_record_name: '_' + 'a'.repeat(32),
+    cloudkit_web_auth_token: 'a'.repeat(40),
+  });
+  assertEquals(result.success, true);
+});
+
 Deno.test('SessionBootstrapRequest: still rejects unknown extra keys (.strict() preserved)', () => {
   const result = SessionBootstrapRequest.safeParse({
     ...baseValidBody,

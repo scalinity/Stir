@@ -116,6 +116,36 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         XCTAssertNil(store.suppressedUntil, "user engaged — clear suppression")
     }
 
+    /// SCA-376 + SCA-418: `markMostRecentActioned` clears the
+    /// suppression key UNCONDITIONALLY, even when history is empty.
+    /// Pre-SCA-376 the unconditional clear sat behind the
+    /// `guard let last = entries.indices.last else { return }` so an
+    /// empty-history call (e.g. SCA-317 use-soon card-tap routing
+    /// after a defaults reset) silently left the suppression armed.
+    /// SCA-418 pins the contract so a future "optimization" that
+    /// reverts the order surfaces in tests immediately.
+    func test_historyStore_markMostRecentActioned_emptyHistory_clearsSuppression() {
+        let store = NotificationHistoryStore(
+            defaults: defaults,
+            stateKey: "stir.leftovers_followup.history.v1",
+            suppressionKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
+        // Arm suppression manually (no history entries).
+        defaults.set(
+            Date().addingTimeInterval(7 * 86_400),
+            forKey: "stir.leftovers_followup.suppressed_until.v1",
+        )
+        XCTAssertNotNil(store.suppressedUntil, "precondition: suppression manually armed")
+        XCTAssertEqual(store.firesInLastWeek(asOf: Date()).count, 0, "precondition: history empty")
+
+        // SCA-376 contract: clears suppression even though entries.last is nil.
+        store.markMostRecentActioned(at: Date())
+        XCTAssertNil(
+            store.suppressedUntil,
+            "SCA-376/SCA-418: markMostRecentActioned must clear suppression UNCONDITIONALLY (empty-history path).",
+        )
+    }
+
     func test_historyStore_actionedRunResetsStreak() {
         let store = NotificationHistoryStore(
             defaults: defaults,
@@ -137,10 +167,12 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // Pre-populate the stateKey with garbage so JSONDecoder throws on
         // load(). Asserts the SCA-374 contract: load() returns [] AND
         // captures `notification_history_decode_failed` with both the
-        // discriminating state_key AND a non-empty error_description.
+        // discriminating state_key AND a closed-vocab error_reason.
+        // SCA-398: property is `error_reason` (HistoryDecodeErrorReason
+        // rawValue) not raw `error_description`.
         let stateKey = "stir.leftovers_followup.history.v1"
         defaults.set(Data([0x00, 0xFF, 0x42, 0x99]), forKey: stateKey)
-        let spy = SpyPostHogForHistory()
+        let spy = SpyPostHogClient()
         let store = NotificationHistoryStore(
             defaults: defaults,
             stateKey: stateKey,
@@ -149,12 +181,53 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         )
         let recent = store.firesInLastWeek(asOf: Date())
         XCTAssertEqual(recent.count, 0, "decode failure must reset to []")
-        XCTAssertEqual(spy.captured.count, 1, "decode failure must emit exactly once")
-        XCTAssertEqual(spy.captured.first?.event, .notificationHistoryDecodeFailed)
-        XCTAssertEqual(spy.captured.first?.properties["state_key"] as? String, stateKey)
-        let desc = spy.captured.first?.properties["error_description"] as? String
-        XCTAssertNotNil(desc)
-        XCTAssertFalse(desc?.isEmpty ?? true, "error_description must carry the JSONDecoder throw text")
+        XCTAssertEqual(spy.captures.count, 1, "decode failure must emit exactly once")
+        XCTAssertEqual(spy.captures.first?.event, .notificationHistoryDecodeFailed)
+        XCTAssertEqual(spy.captures.first?.properties["state_key"] as? String, stateKey)
+        // SCA-398: must be a closed-vocab rawValue, not a raw description.
+        let reason = spy.captures.first?.properties["error_reason"] as? String
+        XCTAssertNotNil(reason)
+        if let reason {
+            XCTAssertTrue(
+                HistoryDecodeErrorReason.allCases.map(\.rawValue).contains(reason),
+                "SCA-398: error_reason must be a HistoryDecodeErrorReason rawValue (closed-vocab); got \(reason)",
+            )
+        }
+        // Negative half: pre-fix this property was `error_description`. The
+        // closed-vocab rename is a wire-contract change; the old key should
+        // never appear post-SCA-398.
+        XCTAssertNil(
+            spy.captures.first?.properties["error_description"],
+            "SCA-398: error_description property removed in favor of error_reason",
+        )
+    }
+
+    /// SCA-398: HistoryDecodeErrorReason.classify maps each
+    /// DecodingError case to its corresponding closed-vocab rawValue.
+    /// Anything non-DecodingError → `.unknown`.
+    func test_historyDecodeErrorReason_classify_knownAndUnknown() {
+        let ctx = DecodingError.Context(codingPath: [], debugDescription: "test")
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.dataCorrupted(ctx)),
+            .dataCorrupted,
+        )
+        let key = TestCodingKey(stringValue: "fireAt")!
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.keyNotFound(key, ctx)),
+            .keyNotFound,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.typeMismatch(Date.self, ctx)),
+            .typeMismatch,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(DecodingError.valueNotFound(Bool.self, ctx)),
+            .valueNotFound,
+        )
+        XCTAssertEqual(
+            HistoryDecodeErrorReason.classify(NSError(domain: "test.synthetic", code: 1)),
+            .unknown,
+        )
     }
 
     func test_historyStore_validBlob_doesNotEmitDecodeFailure() {
@@ -162,7 +235,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         // negative half of the SCA-374 contract: a healthy decode path
         // emits ZERO `notification_history_decode_failed` events.
         let stateKey = "stir.leftovers_followup.history.v1"
-        let spy = SpyPostHogForHistory()
+        let spy = SpyPostHogClient()
         let store = NotificationHistoryStore(
             defaults: defaults,
             stateKey: stateKey,
@@ -172,7 +245,7 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
         store.recordScheduled(fireAt: Date())
         _ = store.firesInLastWeek(asOf: Date())
         XCTAssertTrue(
-            spy.captured.allSatisfy { $0.event != .notificationHistoryDecodeFailed },
+            spy.captures.allSatisfy { $0.event != .notificationHistoryDecodeFailed },
             "successful decode must NOT emit decode-failed telemetry",
         )
     }
@@ -202,17 +275,17 @@ final class LeftoversFollowupSchedulerTests: XCTestCase {
     }
 }
 
-// MARK: - Test spy
+// SCA-417: `SpyPostHogForHistory` removed in favor of the shared
+// `SpyPostHogClient` (StirTests/Unit/Helpers/SpyPostHogClient.swift).
+// Property name `captures` (was `captured`); `Capture` element type
+// (was `Captured`).
 
-/// SCA-374 — minimal PostHog spy that records `capture(_:properties:)`
-/// invocations. Subclasses `PostHogClient` via the DEBUG `init(testingOnly:)`
-/// seam so production code sees a real-looking client (no protocol leakage)
-/// while tests can assert on `captured`.
-private final class SpyPostHogForHistory: PostHogClient, @unchecked Sendable {
-    struct Captured { let event: TelemetryEvent; let properties: [String: Any] }
-    private(set) var captured: [Captured] = []
-    init() { super.init(testingOnly: true) }
-    override func capture(_ event: TelemetryEvent, properties: [String: Any] = [:]) {
-        captured.append(Captured(event: event, properties: properties))
-    }
+/// SCA-398 — test-only `CodingKey` so we can build a
+/// `DecodingError.keyNotFound` without dragging in a real Codable
+/// value type.
+private struct TestCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue _: Int) { nil }
 }

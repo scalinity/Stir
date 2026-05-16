@@ -18,7 +18,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createServiceClient } from './db.ts';
 import type { AuthReason } from './errors.ts';
 import { createLogger } from './logger.ts';
-import { UUID_V4_REGEX } from './validation.ts';
+// SCA-407: regex constants live in the leaf `regex.ts` module so
+// `auth.ts` and `validation.ts` both import from a leaf instead of
+// from each other. Pre-SCA-407 this came from validation.ts directly.
+import { UUID_V4_REGEX } from './regex.ts';
 
 // Named STIR_JWT_SECRET (not SUPABASE_JWT_SECRET) because Supabase's Edge
 // Runtime filters SUPABASE_*-prefixed vars from .env to protect reserved
@@ -63,6 +66,19 @@ export async function issueSessionJWT(
   claims: SessionClaims,
   opts: { ttlSeconds?: number } = {},
 ): Promise<string> {
+  // SCA-410: mirror the SCA-380 verify-side regex check at MINT time so
+  // the verify-side comment's invariant ("the only path that mints these
+  // JWTs already validates the claim against this same regex") actually
+  // holds in code, not just by current convention. Today every mint
+  // call site already validates installation_id via SessionBootstrapRequest;
+  // this guard makes the contract structural so a future endpoint
+  // that mints from a less-validated source can't slip a non-UUID
+  // installation_id past Postgres' UUID lookups.
+  if (!UUID_V4_REGEX.test(claims.installation_id)) {
+    throw new Error(
+      `issueSessionJWT: installation_id is not a UUID v4 — refusing to mint`,
+    );
+  }
   const ttl = opts.ttlSeconds ?? DEFAULT_JWT_TTL_SECONDS;
   const now = Math.floor(Date.now() / 1000);
   return await new jose.SignJWT({

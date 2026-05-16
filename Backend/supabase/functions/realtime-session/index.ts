@@ -361,7 +361,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — rate limiter outage shouldn't block paid users.
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Post-auth + billable + paid-tier; entitlement gate (Premium/Pro)
+    // catches Free-tier abuse first.
   }
 
   // ---------------------------------------------------------------------

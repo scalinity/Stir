@@ -52,13 +52,20 @@ enum NotificationSuppressReason: Sendable, Equatable {
 /// `addWithRollback` — the empty default would silently produce a
 /// malformed `notification_schedule_rollback_failed` telemetry property
 /// if a future caller forgot it. The raw values match the spec §15
-/// `scheduler_id` enum AND `NotificationKind`'s rawValues, so they're
-/// reused as the same wire-contract literal.
-enum SchedulerID: String, Sendable, Equatable {
-    case leftoversFollowup = "leftovers_followup"
-    case useSoon = "use_soon"
-    case reactivation
-}
+/// `scheduler_id` enum AND `NotificationKind`'s rawValues.
+///
+/// SCA-401: collapse the parallel enum into a typealias to
+/// `NotificationKind`. The two enums had identical cases + rawValues
+/// but no compile-time enforcement — a future rename of one without
+/// the other would silently split dashboards. With the typealias
+/// there is exactly one source of truth; the wire-contract literal
+/// (`stir_notification_kind` userInfo key, audit_log
+/// `scheduler_id` property, spec §15) all derive from
+/// `NotificationKind`. Existing `schedulerId: SchedulerID`
+/// parameter sites + `.useSoon` / `.leftoversFollowup` /
+/// `.reactivation` references keep working — typealias preserves
+/// source compatibility.
+typealias SchedulerID = NotificationKind
 
 /// SCA-367: closed-vocabulary error code passed to PostHog for the
 /// `notification_schedule_rollback_failed` event. Pre-fix the kit
@@ -85,20 +92,42 @@ enum RollbackErrorReason: String, Sendable, Equatable, CaseIterable {
     /// vocab reason. Used at the kit's `addWithRollback` callback
     /// boundary so PostHog never sees raw `localizedDescription`
     /// strings.
+    ///
+    /// SCA-408: typed cast against `UNError` (Apple's typed enum
+    /// wrapper around UNErrorDomain) instead of matching on raw
+    /// `nsError.domain == "UNErrorDomain"` + integer codes. Pre-fix:
+    /// SCA-367 mapped on `nsError.code == 1 → .invalidContent` and
+    /// `nsError.code == 4 → .deniedByDevice`. UNError.Code raw 1 is
+    /// actually `notificationsNotAllowed` (denied), and there is no
+    /// `Code` case at raw 4 — so the previous mapping was inverted
+    /// for code 1 and dead for code 4. The typed switch makes the
+    /// real Apple case names visible + flags new cases at compile
+    /// time via `@unknown default`.
     static func classify(_ error: Error) -> RollbackErrorReason {
-        let nsError = error as NSError
-        // UNErrorDomain code mapping per Apple docs.
-        if nsError.domain == "UNErrorDomain" {
-            switch nsError.code {
-            case 1:
-                return .invalidContent
-            case 4:
+        if let unError = error as? UNError {
+            switch unError.code {
+            case .notificationsNotAllowed:
                 return .deniedByDevice
-            default:
+            case .attachmentInvalidURL,
+                 .attachmentUnrecognizedType,
+                 .attachmentInvalidFileSize,
+                 .attachmentNotInDataStore,
+                 .attachmentMoveIntoDataStoreFailed,
+                 .attachmentCorrupt,
+                 .notificationInvalidNoDate,
+                 .notificationInvalidNoContent,
+                 .contentProvidingObjectNotAllowed,
+                 .contentProvidingInvalid,
+                 .badgeInputInvalid:
+                return .invalidContent
+            @unknown default:
                 return .unknown
             }
         }
-        if nsError.domain == "NSURLErrorDomain" {
+        // URLSession errors keep the NSError-domain check; URLError isn't
+        // tied to a specific framework boundary the kit owns.
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
             return .systemUnavailable
         }
         return .unknown
@@ -173,7 +202,8 @@ enum NotificationSchedulerKit {
     /// Pure classifier: given the scheduler's history store + a clock instant,
     /// return the reason a fresh schedule should bail (or `nil` to proceed).
     /// Order matches the pre-extraction sequence: suppression first, weekly
-    /// cap second. The caller emits its own telemetry + log line and returns.
+    /// cap second. The caller can emit its own telemetry + log line, OR use
+    /// `emitSuppressed` to delegate the standard reason → telemetry mapping.
     static func evaluateSuppression(
         history: NotificationHistoryStore,
         now: Date,
@@ -185,6 +215,44 @@ enum NotificationSchedulerKit {
             return .weeklyCap
         }
         return nil
+    }
+
+    /// SCA-402: standard suppression-emit. Each scheduler used to inline a
+    /// switch over `NotificationSuppressReason` mapping case →
+    /// telemetry-property + OSLog breadcrumb (LeftoversFollowupScheduler.swift
+    /// + UseSoonScheduler.swift carried byte-identical 14-line blocks; UseSoon
+    /// silently dropped the `until` OSLog breadcrumb leftovers wrote, an
+    /// asymmetric coverage gap). This helper centralizes the mapping so
+    /// (a) `reason` literal strings live in exactly one place, (b) future
+    /// `NotificationSuppressReason` cases compile-fail at one switch site,
+    /// (c) sibling schedulers get the OSLog breadcrumb for free.
+    ///
+    /// Caller pattern:
+    /// ```swift
+    /// if let reason = NotificationSchedulerKit.evaluateSuppression(...) {
+    ///     NotificationSchedulerKit.emitSuppressed(
+    ///         reason, event: .leftoversFollowupSuppressed,
+    ///         telemetry: telemetry, logger: Logger.leftoversFollowup,
+    ///     )
+    ///     return
+    /// }
+    /// ```
+    static func emitSuppressed(
+        _ reason: NotificationSuppressReason,
+        event: TelemetryEvent,
+        telemetry: PostHogClient,
+        logger: Logger,
+    ) {
+        switch reason {
+        case let .unactionedStreak(until):
+            telemetry.capture(event, properties: ["reason": "unactioned_streak"])
+            logger.info(
+                "suppressed until \(until.ISO8601Format(), privacy: .public) — skipping schedule",
+            )
+        case .weeklyCap:
+            telemetry.capture(event, properties: ["reason": "weekly_cap"])
+            logger.info("weekly cap (2/7d) reached — skipping schedule")
+        }
     }
 
     /// Outcome of `addWithRollback`. SCA-319 introduced the typed

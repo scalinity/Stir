@@ -308,7 +308,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open
+    // SCA-396: fail-open is intentional — see ADR 0036.
+    // Post-auth + billable; entitlement gate (Free tier 6/day) catches
+    // the runaway-spend case ahead of this gate.
   }
 
   // ---------------------------------------------------------------------
