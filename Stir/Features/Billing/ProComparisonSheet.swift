@@ -265,63 +265,72 @@ struct ProComparisonSheet: View {
     /// Premium purchase buttons (annual + monthly). Rendered as a
     /// de-emphasized section below the Pro CTAs with an "Or choose
     /// Premium" eyebrow divider — matches PaywallView's grammar so the
-    /// two surfaces stay visually consistent. Section only renders if
-    /// at least one Premium SKU is purchasable; individual nil rows
-    /// are skipped (partial-availability RC configs surface as one
-    /// row instead of one row + one "unavailable" placeholder).
-    @ViewBuilder
+    /// two surfaces stay visually consistent. SCA-683: section always
+    /// renders, mirroring PaywallView.premiumPlansSection (SCA-679).
+    /// Nil packages fall back to an "unavailable — check back later"
+    /// label inside `premiumPlanButton` so the Premium tier stays
+    /// visible during offerings-load failures and partial-availability
+    /// windows. Symmetric with the top-of-sheet Pro CTAs, which already
+    /// render with unavailable fallbacks rather than disappearing.
     private func premiumCTAs(offerings: PaywallOfferings) -> some View {
-        if offerings.premiumAnnualPackage != nil || offerings.premiumMonthlyPackage != nil {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                HStack(spacing: CGFloat.Stir.space2) {
-                    Text("Or choose Premium")
-                        .stirFont(.labelEyebrow)
-                        .foregroundStyle(Color.Stir.textTertiary)
-                    Rectangle()
-                        .fill(Color.Stir.divider)
-                        .frame(height: 1)
-                        .accessibilityHidden(true)
-                }
-                VStack(spacing: CGFloat.Stir.space2) {
-                    if let pkg = offerings.premiumAnnualPackage {
-                        premiumPlanButton(
-                            package: pkg,
-                            title: "Premium annual",
-                            priceSuffix: "/yr",
-                        )
-                    }
-                    if let pkg = offerings.premiumMonthlyPackage {
-                        premiumPlanButton(
-                            package: pkg,
-                            title: "Premium monthly",
-                            priceSuffix: "/mo",
-                        )
-                    }
-                }
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            HStack(spacing: CGFloat.Stir.space2) {
+                Text("Or choose Premium")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.textTertiary)
+                Rectangle()
+                    .fill(Color.Stir.divider)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
             }
-            .padding(.top, CGFloat.Stir.space2)
+            VStack(spacing: CGFloat.Stir.space2) {
+                premiumPlanButton(
+                    package: offerings.premiumAnnualPackage,
+                    title: "Premium annual",
+                    priceSuffix: "/yr",
+                    unavailableLabel: "Premium annual — unavailable",
+                )
+                premiumPlanButton(
+                    package: offerings.premiumMonthlyPackage,
+                    title: "Premium monthly",
+                    priceSuffix: "/mo",
+                    unavailableLabel: "Premium monthly — unavailable",
+                )
+            }
         }
+        .padding(.top, CGFloat.Stir.space2)
     }
 
     /// Single Premium plan row. Compact, bordered, de-emphasized vs
     /// the Pro CTAs above. Disabled during any in-flight purchase
-    /// (shared `isPurchaseInFlight` guard with the Pro buttons).
+    /// (shared `isPurchaseInFlight` guard with the Pro buttons) and
+    /// also disabled when `package` is nil — that branch renders the
+    /// unavailable label in place of the title + price (SCA-683,
+    /// matching PaywallView.premiumPlanRow's SCA-336 fallback).
     private func premiumPlanButton(
-        package: PaywallPackage,
+        package: PaywallPackage?,
         title: String,
         priceSuffix: String,
+        unavailableLabel: String,
     ) -> some View {
-        Button {
-            Task { await viewModel.purchase(productID: package.productID) }
+        let isDisabled = package == nil || isPurchaseInFlight
+        return Button {
+            if let package { Task { await viewModel.purchase(productID: package.productID) } }
         } label: {
             HStack(spacing: CGFloat.Stir.space2) {
-                Text(title)
-                    .stirFont(.labelMd)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                Spacer(minLength: CGFloat.Stir.space2)
-                Text("\(package.displayPrice)\(priceSuffix)")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.textTertiary)
+                if let package {
+                    Text(title)
+                        .stirFont(.labelMd)
+                        .foregroundStyle(Color.Stir.textPrimary)
+                    Spacer(minLength: CGFloat.Stir.space2)
+                    Text("\(package.displayPrice)\(priceSuffix)")
+                        .stirFont(.bodySm)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                } else {
+                    Text(unavailableLabel)
+                        .stirFont(.labelMd)
+                        .foregroundStyle(Color.Stir.textTertiary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, CGFloat.Stir.space3)
@@ -332,11 +341,13 @@ struct ProComparisonSheet: View {
                 RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd)
                     .stroke(Color.Stir.divider, lineWidth: 1),
             )
-            .opacity(isPurchaseInFlight ? 0.5 : 1)
+            .opacity(isDisabled ? 0.5 : 1)
         }
-        .disabled(isPurchaseInFlight)
+        .disabled(isDisabled)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(title), \(package.displayPrice)\(priceSuffix)")
+        .accessibilityLabel(
+            package.map { "\(title), \($0.displayPrice)\(priceSuffix)" } ?? unavailableLabel,
+        )
     }
 
     /// True while a purchase is in flight or has reached a terminal state
