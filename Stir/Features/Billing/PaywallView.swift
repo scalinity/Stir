@@ -387,49 +387,44 @@ struct PaywallView: View {
         offerings: PaywallOfferings,
         disablePurchaseFor: String?,
     ) -> some View {
-        if offerings.premiumAnnualPackage != nil || offerings.premiumMonthlyPackage != nil {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                HStack(spacing: CGFloat.Stir.space2) {
-                    Text("Or choose Premium")
-                        .stirFont(.labelEyebrow)
-                        .foregroundStyle(Color.Stir.textTertiary)
-                    Rectangle()
-                        .fill(Color.Stir.divider)
-                        .frame(height: 1)
-                        .accessibilityHidden(true)
-                }
-                // SCA-341: render only non-nil rows. The outer guard
-                // already gates the whole section on "at least one
-                // Premium package present", so a section is only shown
-                // when there's actually something purchasable inside.
-                // Previously both rows rendered unconditionally and a
-                // partial-availability RC config (one SKU rolling out,
-                // A/B variant, dashboard gap) surfaced a dimmed
-                // "Premium annual — unavailable" sibling next to a
-                // working row — looked like a broken UI rather than an
-                // intentional partial offering. `premiumPlanRow`'s nil
-                // fallback (SCA-336) is preserved for defense-in-depth
-                // if a future caller invokes it directly.
-                VStack(spacing: CGFloat.Stir.space2) {
-                    if let pkg = offerings.premiumAnnualPackage {
-                        premiumPlanRow(
-                            package: pkg,
-                            title: "Premium annual",
-                            priceSuffix: "/yr",
-                            unavailableLabel: "Premium annual — unavailable",
-                            disablePurchaseFor: disablePurchaseFor,
-                        )
-                    }
-                    if let pkg = offerings.premiumMonthlyPackage {
-                        premiumPlanRow(
-                            package: pkg,
-                            title: "Premium monthly",
-                            priceSuffix: "/mo",
-                            unavailableLabel: "Premium monthly — unavailable",
-                            disablePurchaseFor: disablePurchaseFor,
-                        )
-                    }
-                }
+        // SCA-679: Premium section always renders. Previously this was
+        // guarded on "at least one Premium package present" (SCA-341),
+        // which hid the entire tier when offerings failed to load —
+        // users on sim with a broken StoreKit config, or with a flaky
+        // RC fetch, saw a Pro-only paywall and no indication Premium
+        // existed at all. The inner `premiumPlanRow` already renders an
+        // "unavailable — check back later" label when its package is
+        // nil (SCA-336), and the top-of-paywall Pro CTAs mirror this
+        // behaviour — they render with unavailable labels rather than
+        // disappearing. Symmetric treatment surfaces the tier even
+        // during partial-availability windows (one SKU rolling out,
+        // A/B variant, dashboard gap) at the cost of a dimmed sibling
+        // row, which is the lesser UX evil vs. silent invisibility.
+        VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
+            HStack(spacing: CGFloat.Stir.space2) {
+                Text("Or choose Premium")
+                    .stirFont(.labelEyebrow)
+                    .foregroundStyle(Color.Stir.textTertiary)
+                Rectangle()
+                    .fill(Color.Stir.divider)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+            VStack(spacing: CGFloat.Stir.space2) {
+                premiumPlanRow(
+                    package: offerings.premiumAnnualPackage,
+                    title: "Premium annual",
+                    priceSuffix: "/yr",
+                    unavailableLabel: "Premium annual — unavailable",
+                    disablePurchaseFor: disablePurchaseFor,
+                )
+                premiumPlanRow(
+                    package: offerings.premiumMonthlyPackage,
+                    title: "Premium monthly",
+                    priceSuffix: "/mo",
+                    unavailableLabel: "Premium monthly — unavailable",
+                    disablePurchaseFor: disablePurchaseFor,
+                )
             }
         }
     }
@@ -451,10 +446,10 @@ struct PaywallView: View {
                 // label — previously this rendered both `Text(title)` on the
                 // left AND `Text(unavailableLabel)` on the right, repeating
                 // "Premium annual / Premium annual — unavailable" inline.
-                // (SCA-341 also makes the caller skip nil rows entirely
-                // when at least one sibling row is available, but this
-                // fallback still has to render cleanly for the all-nil
-                // edge case the caller is allowed to hand us.)
+                // SCA-679: caller no longer skips nil rows — both Premium
+                // rows always render, falling back to this label when their
+                // package is missing, so the tier stays visible during
+                // offerings-load failures or partial-availability windows.
                 if let package {
                     Text(title)
                         .stirFont(.labelMd)
