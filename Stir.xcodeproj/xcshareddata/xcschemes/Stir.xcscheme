@@ -132,7 +132,7 @@
       <CommandLineArguments>
       </CommandLineArguments>
       <StoreKitConfigurationFileReference
-         identifier = "../../Stir/Stir.storekit">
+         identifier = "../../Stir.storekit">
       </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction
