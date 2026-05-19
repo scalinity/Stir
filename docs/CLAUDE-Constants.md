@@ -92,6 +92,7 @@ POST /v1/ai/dinner-solve
 POST /v1/ai/realtime-session      # mints Gemini Live ephemeral token
 POST /v1/ai/cook-turn             # text fallback for voice
 POST /v1/ai/substitution          # also called from Live function-call round-trips
+POST /v1/ai/recipe-step-rewrite   # SCA-432 — post-accept prose rewrite of current step
 POST /v1/ai/recipe-import
 POST /v1/ai/grocery-generate
 POST /v1/push/register
@@ -261,6 +262,54 @@ Shape rules:
 - `quotas` is an **array** (iterable); fields `used`/`cap`/`period_end` (not `used_count`/`cap_count`/`period_start`); `period_end` always included, never client-computed.
 - `feature_flags` array of metadata objects, not flat map.
 - Single `expires_at` covers trial + subscription end; `is_trial` disambiguates. Nested `entitlements`. Timestamps absolute UTC; iOS localizes.
+
+## Rate-limit scopes (`Backend/supabase/functions/_shared/rate_limiter.ts`)
+
+Per-endpoint IP/user buckets. Add a new scope when adding a new endpoint; the policy lives next to the union in `rate_limiter.ts`.
+
+```
+ip:dinner_solve_daily               # 30/day
+ip:pantry_parse_daily               # 100/day
+ip:substitution_daily               # 50/day
+ip:recipe_step_rewrite_daily        # 100/day — SCA-432; 2× upstream substitution cap with headroom for double-tap + same-step re-cook
+ip:cook_turn_daily                  # 300/day
+ip:bootstrap_hourly                 # 20/hour
+ip:recipe_import_daily              # 40/day
+ip:grocery_generate_daily           # 100/day
+ip:push_register_hourly             # 20/hour
+ip:voice_turn_usage_daily           # 2000/day
+ip:realtime_session_daily           # see rate_limiter.ts
+ip:ops_admin_hourly                 # see rate_limiter.ts
+ip:users_delete_request_hourly      # see rate_limiter.ts
+user:dinner_solve_hourly            # 10/hour
+user:voice_turn_usage_hourly        # 500/hour
+user:cook_turn_hourly               # see rate_limiter.ts
+user:realtime_session_hourly        # see rate_limiter.ts
+user:ops_admin_minutely             # see rate_limiter.ts
+```
+
+Default posture is **fail-CLOSED** on Postgres outage (SCA-380 hardening, observation 4429) — limiter glitch should never let an attacker burn the AI budget. Single documented exception: `recipe-step-rewrite` fails OPEN because the call is non-fatal mid-cook (substitution itself has already been accepted by the time we reach the rewrite call; dropping it just leaves stale prose on the step card). If a new endpoint wants the same exception, document it here.
+
+## `ai_request_log.feature_key` enumeration
+
+Every AI Edge Function logs its calls under a stable `feature_key`; this is what `ai_request_log` rows and PostHog `$ai_generation` events slice on for cost-per-feature dashboards.
+
+```
+pantry_parse
+dinner_solve
+substitution
+recipe_step_rewrite      # SCA-432 — distinct from substitution so post-accept rewrite cost slices separately
+cook_turn
+recipe_import
+grocery_generate
+cook_mode_realtime       # voice-session mint + per-turn usage
+```
+
+Adding a new feature_key without updating this list is a wire-contract change — also update the AI pipeline map in `CLAUDE.md`.
+
+## Prompt rollout convention (`prompt_versions`)
+
+`prompt_versions` rows ship at `is_default=TRUE, is_enabled=TRUE`. First version of a new `feature_key` (`v1.0.0`) lands at `rollout_pct=100` because there's no prior version to A/B against — the new endpoint has zero traffic until iOS starts calling it. **Subsequent semver bumps follow the 5% canary convention** (`pickStandardPrompt` selects between `is_default` and the canary by `rollout_pct`). Example seed for both classes in `Backend/supabase/migrations/20260515210000_seed_prompt_versions_recipe_step_rewrite.sql` (v1.0.0 @ 100%) and the dinner-solve v2.0.0 canary noted in `CLAUDE.md` §AI pipeline map.
 
 ## `/v1/config/bootstrap` response
 

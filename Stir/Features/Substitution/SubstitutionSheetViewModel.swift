@@ -66,6 +66,16 @@ final class SubstitutionSheetViewModel {
 
     private var subEventID: UUID = UUID()
     private var persistedEvent: SubstitutionEvent?
+    /// Re-entrancy guard for `accept()`. SwiftUI buttons that spawn an
+    /// async Task on tap don't suppress concurrent taps — two rapid taps
+    /// before the first `await rewriteCurrentStep` yields would both
+    /// fire `recordDecision`, `applyAcceptedSwap`, the rewrite dispatch,
+    /// onFinished, and the `substitutionAccepted` PostHog event. Server-
+    /// side cache (sub_event_id stable) collapses the duplicate Gemini
+    /// call, but the duplicate telemetry corrupts the requested→accepted
+    /// funnel. This flag short-circuits the second entry. Not observable
+    /// — accept() is the only mutator and runs on @MainActor.
+    private var isAccepting: Bool = false
 
     init(
         recipePlan: RecipePlan,
@@ -117,6 +127,11 @@ final class SubstitutionSheetViewModel {
             onFinished()
             return
         }
+        // Re-entrancy guard — see `isAccepting` doc. The first tap wins;
+        // any concurrent re-entry exits silently. No onFinished() here:
+        // the in-flight first call owns the dismiss.
+        if isAccepting { return }
+        isAccepting = true
         // Snapshot the original ingredient label BEFORE applyAcceptedSwap
         // mutates the linked RecipeIngredient.displayName — the rewrite
         // call needs the pre-swap name to locate references in the prose.
@@ -501,7 +516,7 @@ final class SubstitutionSheetViewModel {
             recipeTitle: recipePlan.title,
         )
         do {
-            let response = try await aiDispatch.recipeStepRewrite(request: request)
+            let response = try await dispatchRewrite(request)
             do {
                 try repository.applyStepRewrite(step: step, rewrittenText: response.rewrittenText)
                 // Signal the host (CookModeViewModel.didRewriteStep) that
@@ -521,6 +536,32 @@ final class SubstitutionSheetViewModel {
                 "recipe_step_rewrite dispatch failed: \(error.localizedDescription, privacy: .public)",
             )
         }
+    }
+
+    #if DEBUG
+    /// DEBUG-only handler swap for the rewrite call. Set via
+    /// `_testingSetRewriteHandler`; consulted by `dispatchRewrite`. The
+    /// `#if DEBUG` gate keeps the storage out of release binaries.
+    /// Underscore prefix mirrors `_testingSeedSafeState` and marks it
+    /// as not-for-production.
+    fileprivate var _testingRewriteHandler: ((RecipeStepRewriteRequest) async throws -> RecipeStepRewriteResponse)?
+    #endif
+
+    /// Single dispatch site for the rewrite call. Production hits
+    /// `aiDispatch.recipeStepRewrite`; DEBUG tests can swap in a closure
+    /// via `_testingSetRewriteHandler` (see DEBUG extension below) so a
+    /// happy-path test doesn't need to spin a local server or mock
+    /// URLProtocol. The non-debug build path is the only one in release
+    /// binaries.
+    private func dispatchRewrite(
+        _ request: RecipeStepRewriteRequest,
+    ) async throws -> RecipeStepRewriteResponse {
+        #if DEBUG
+        if let handler = _testingRewriteHandler {
+            return try await handler(request)
+        }
+        #endif
+        return try await aiDispatch.recipeStepRewrite(request: request)
     }
 }
 
@@ -555,6 +596,17 @@ extension SubstitutionSheetViewModel {
             confidence: confidence,
             promptVersion: promptVersion,
         )
+    }
+
+    /// Test seam (SCA-432 /review): swap in a canned rewrite handler so
+    /// the happy-path of `rewriteCurrentStep` can be exercised without
+    /// a real Gemini round-trip. The handler receives the exact
+    /// `RecipeStepRewriteRequest` the production path would have sent,
+    /// so tests can also assert wire-shape correctness.
+    func _testingSetRewriteHandler(
+        _ handler: @escaping (RecipeStepRewriteRequest) async throws -> RecipeStepRewriteResponse,
+    ) {
+        _testingRewriteHandler = handler
     }
 }
 #endif

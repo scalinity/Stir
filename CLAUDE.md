@@ -100,6 +100,7 @@ Specs/, stir-app-design/, docs/{decisions,runbooks}/, docs/deferred-work.md
 | Cook substitution (voice) | Live function call → `/v1/ai/substitution` | flash | no | hard-rule validator |
 | Cook Q&A fallback | `/v1/ai/cook-turn` | flash (text) | no | schema |
 | Substitution (sheet) | `/v1/ai/substitution` | flash | no | hard-rule validator |
+| Cook substitution rewrite | `/v1/ai/recipe-step-rewrite` | flash | no | schema; sub_event_id idempotency with `:rewrite` cache suffix to avoid colliding with the upstream substitution cache row (SCA-432) |
 | Recipe import | `/v1/ai/recipe-import` | flash-lite | no | sanitize HTML, treat content as untrusted |
 | Grocery generate | `/v1/ai/grocery-generate` | flash-lite | no | post-model dedupe |
 

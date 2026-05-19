@@ -130,6 +130,66 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
                        "accept telemetry must still record acceptance on rewrite failure")
     }
 
+    /// Happy-path counterpart to test_accept_dispatchFailure_leavesStepTextUntouched:
+    /// when the rewrite dispatch returns a canned RecipeStepRewriteResponse,
+    /// accept() must (a) persist the rewrite onto RecipeStep.instructionText
+    /// AND (b) fire the onStepRewritten callback so the host VM bumps its
+    /// observation counter. Uses the DEBUG-only `_testingSetRewriteHandler`
+    /// seam to avoid driving a real Gemini round-trip.
+    func test_accept_dispatchSuccess_persistsRewriteAndFiresCallback() async throws {
+        let step = try makeStep(on: recipePlan, number: 1, instructionText: "Mix flour and water.")
+        let pasta = try XCTUnwrap(recipePlan.ingredientArray.first)
+        let repo = SubstitutionRepository(controller: controller)
+        let event = try repo.persist(SubstitutionRepository.PersistInput(
+            subEventId: UUID(),
+            session: session,
+            ingredient: pasta,
+            freeTextName: nil,
+            step: step,
+            userProblemText: "out of flour",
+            modelSuggestionText: "tortilla chips",
+            hardConstraintCheckPassed: true,
+        ))
+        let finishedExpect = expectation(description: "onFinished called")
+        let rewroteExpect = expectation(description: "onStepRewritten called")
+        let vm = makeVM(
+            currentStep: step,
+            onFinished: { finishedExpect.fulfill() },
+            onStepRewritten: { rewroteExpect.fulfill() },
+        )
+        vm._testingSeedSafeState(event: event, text: "tortilla chips", amountConversion: nil)
+
+        // Capture the dispatched request so the test also pins wire-shape
+        // correctness: sub_event_id reuse, originalIngredient snapshot,
+        // recipe_title threading.
+        var capturedRequest: RecipeStepRewriteRequest?
+        let cannedRewrite = "Mix the crushed tortilla chips with water until the dough holds."
+        vm._testingSetRewriteHandler { request in
+            capturedRequest = request
+            return RecipeStepRewriteResponse(
+                subEventID: request.subEventID,
+                rewrittenText: cannedRewrite,
+                promptVersion: "test-1.0.0",
+                latencyMS: 42,
+                retryCount: 0,
+            )
+        }
+
+        await vm.accept()
+        await fulfillment(of: [finishedExpect, rewroteExpect], timeout: 5.0)
+
+        XCTAssertEqual(step.instructionText, cannedRewrite,
+                       "happy-path rewrite must persist onto RecipeStep.instructionText")
+        XCTAssertEqual(event.acceptedBool, true)
+        let req = try XCTUnwrap(capturedRequest)
+        // The first recipePlan ingredient is "heavy cream" per setUp().
+        XCTAssertEqual(req.originalIngredient, "heavy cream",
+                       "originalIngredient must be the pre-swap displayName snapshot from event.missingLabel")
+        XCTAssertEqual(req.substituteIngredient, "tortilla chips")
+        XCTAssertEqual(req.stepInstructionText, "Mix flour and water.")
+        XCTAssertEqual(req.recipeTitle, recipePlan.title)
+    }
+
     // MARK: - Analytics emission (pre-dispatch)
 
     func test_submit_emitsSubstitutionRequestedBeforeDispatch() async {
@@ -298,6 +358,7 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
     private func makeVM(
         currentStep: RecipeStep? = nil,
         onFinished: @escaping () -> Void = {},
+        onStepRewritten: @escaping () -> Void = {},
         analytics: PostHogClient? = nil,
     ) -> SubstitutionSheetViewModel {
         SubstitutionSheetViewModel(
@@ -310,6 +371,7 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
             pantryRepository: PantryItemRepository(controller: controller),
             analytics: analytics ?? .shared,
             onFinished: onFinished,
+            onStepRewritten: onStepRewritten,
         )
     }
 

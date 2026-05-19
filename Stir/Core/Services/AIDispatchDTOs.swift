@@ -806,8 +806,12 @@ enum SubstitutionResult: Sendable {
 ///
 /// `subEventID` is the SAME UUID used for the upstream substitution
 /// call so the server's 10-min idempotency cache collapses a fast
-/// double-tap to one Gemini call. The feature_key on the cache row
-/// keeps this lookup distinct from the substitution call.
+/// double-tap to one Gemini call. The cache row's PK is
+/// `(canonical_user_key, request_id)` — `feature_key` is NOT in the key
+/// (migration 20260418000024). The server appends a `:rewrite` suffix
+/// (`REWRITE_CACHE_SUFFIX` in `recipe-step-rewrite/index.ts`) to the
+/// cache key so this lookup doesn't collide with the substitution
+/// body cached under the bare sub_event_id.
 struct RecipeStepRewriteRequest: Encodable, Sendable {
     let subEventID: UUID
     let stepInstructionText: String
