@@ -190,7 +190,17 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     userLog.error('rate_limiter_failed', err);
-    // Fail open — limiter glitch shouldn't block mid-cook rewrite.
+    // Documented exception to the SCA-380 fail-CLOSED default (the
+    // default applies to every other AI endpoint — see "Rate-limit
+    // scopes" in docs/CLAUDE-Constants.md). Fail OPEN here because:
+    //   (1) the rewrite is a non-fatal polish call — the substitution
+    //       was already accepted upstream, and the only consequence of
+    //       dropping the rewrite is stale step prose;
+    //   (2) the per-call cost is ~$0.001 (one Gemini Flash request
+    //       with minimal thinking), so an abuser saturating the
+    //       100/IP/day budget caps damage at ~$0.10/IP/day.
+    // If the cost calculus ever shifts (longer prompts, model
+    // upgrade), flip to fail-CLOSED.
   }
 
   // ---------------------------------------------------------------------
