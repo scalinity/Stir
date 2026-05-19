@@ -40,6 +40,37 @@ final class PaywallViewModelTests: XCTestCase {
         XCTAssertEqual(error, .networkUnreachable)
     }
 
+    func test_load_emptyOfferings_reachesDisplaying_withAllHelperPackagesNil() async {
+        // SCA-720 regression guard for SCA-679 + SCA-683 (Premium tier
+        // must stay visible when offerings load fails or returns empty).
+        //
+        // The VM must transition to `.displaying` even with zero packages
+        // — `.failedToLoad` only fires on an actual throw from the
+        // service. The paywall view then renders the Premium section
+        // unconditionally (PaywallView.premiumPlansSection) and the
+        // "Compare plans" sheet's `premiumCTAs` does the same, both
+        // falling back to "unavailable" labels in their plan rows when
+        // each helper returns nil. If a future refactor flips the VM to
+        // treat empty packages as failure, the section never renders
+        // and Premium silently disappears — the exact symptom SCA-679
+        // shipped to fix. Lock the prerequisite at the VM boundary.
+        let service = MockRevenueCatService()
+        service.offeringsResult = .success(PaywallOfferings(packages: []))
+        let vm = Self.makeVM(service: service)
+
+        await vm.load()
+
+        guard case .displaying(let offerings) = vm.state else {
+            return XCTFail("expected .displaying with empty offerings, got \(vm.state)")
+        }
+        XCTAssertEqual(offerings.packages.count, 0)
+        XCTAssertNil(offerings.premiumAnnualPackage, "Premium annual must be nil with empty packages — view falls back to unavailable label")
+        XCTAssertNil(offerings.premiumMonthlyPackage, "Premium monthly must be nil with empty packages — view falls back to unavailable label")
+        XCTAssertNil(offerings.proAnnualPackage)
+        XCTAssertNil(offerings.proMonthlyPackage)
+        XCTAssertNil(offerings.primaryTrialPackage)
+    }
+
     // MARK: - Purchase
 
     func test_purchase_successTransitionsToSucceeded_andTriggersRefresh() async {

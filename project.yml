@@ -317,7 +317,7 @@ schemes:
       # these via StoreKit2; the test_ key in Config.xcconfig pairs with
       # this file for end-to-end paywall testing in DEBUG builds. Real
       # device / TestFlight uses the App Store Connect products instead.
-      storeKitConfiguration: Stir/Stir.storekit
+      storeKitConfiguration: Stir.storekit
     test:
       config: Debug
       targets:
