@@ -427,3 +427,47 @@ Tracked tech debt + triggered refactors live in `docs/deferred-work.md`. Read be
 3. If spec and this file disagree, spec wins. Tell Daniel about the discrepancy.
 4. If genuinely ambiguous, surface the decision rather than picking silently.
 5. If about to write code that violates a north-star constraint, stop. They aren't negotiable.
+
+---
+
+## Cursor Cloud specific instructions
+
+This section is for cloud agents that start in an environment where the update script has already run.
+
+### Environment overview
+
+| Service | How to start | Port |
+|---------|-------------|------|
+| Supabase local stack (Postgres + Edge Runtime + Auth) | `cd Backend/supabase && supabase start` | `127.0.0.1:54321` |
+| Edge Functions (hot-reload dev) | `cd Backend/supabase && supabase functions serve --env-file .env` | same port (replaces built-in edge runtime) |
+| Ops Console (React/Vite) | `cd ops && npm run dev` | `localhost:5173` |
+
+### Critical startup caveats
+
+1. **Docker daemon must be running** before `supabase start`. Start with `sudo dockerd &>/tmp/dockerd.log &` then `sudo chmod 666 /var/run/docker.sock`.
+2. **`.env` must exist and be copied to `functions/.env`** before starting the stack. The edge runtime reads secrets from `functions/.env`, not the parent `.env`. Run: `cd Backend/supabase && cp .env functions/.env`.
+3. **`supabase functions serve --env-file .env`** must be run AFTER `supabase start` to inject env vars into the edge runtime. Without it, edge functions crash with `STIR_JWT_SECRET missing`. The built-in edge runtime from `supabase start` alone does NOT read from `functions/.env`.
+4. **Always `cd Backend/supabase`** before any `supabase` CLI command. Running from repo root creates a stray `supabase/` directory with zero config.
+5. **Deno is at `~/.deno/bin/deno`** — ensure `PATH` includes it (added to `~/.bashrc` by the update script).
+6. **SUPABASE_* vars in `.env`**: The Supabase CLI filters these from `functions serve` (reserved prefix), but `deno test` needs them. They must be present in `.env` for tests to find the local stack.
+
+### Running tests
+
+- **Backend (605 tests):** `cd Backend/supabase && deno test --config functions/deno.json --allow-all tests/`
+- **Ops console (12 tests):** `cd ops && npm run test`
+- **Lint:** `cd Backend/supabase && deno lint --config functions/deno.json functions/` (3 pre-existing warnings)
+- **Fmt check:** `cd Backend/supabase && deno fmt --check --config functions/deno.json functions/` (7 pre-existing unformatted files)
+
+### iOS (not available in Cloud Agent)
+
+iOS builds require macOS + Xcode 26. The `./scripts/run-ios-tests.sh` wrapper and `xcodebuild test` cannot run on Linux. Focus backend work on the Supabase + Deno stack.
+
+### Hello-world verification
+
+After starting the stack + functions serve, verify with:
+```bash
+curl -s http://127.0.0.1:54321/functions/v1/session-bootstrap -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"installation_id":"11111111-1111-4111-b111-111111111111","build":"1.0.0","os_version":"17.0"}'
+```
+Expect a JSON response with `session_jwt`, `canonical_user_key`, `entitlements`, and `feature_flags`.
