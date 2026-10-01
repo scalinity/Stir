@@ -123,8 +123,7 @@ pnpm-debug.log*
 # -----------------------------------------------------------------------------
 # AI tooling & session artifacts
 # -----------------------------------------------------------------------------
-.claude/*
-!.claude/settings.json
+.claude/
 .cursor/
 .aider*
 .continue/
