@@ -145,7 +145,7 @@ export function capturePosthogEvent(
       // brown-out — EdgeRuntime.waitUntil keeps the promise alive until
       // completion OR timeout, but without AbortSignal a hung fetch
       // would block until platform termination. Sibling callers
-      // (`_shared/apns.ts`, `_shared/gemini.ts`, `_shared/live_mint.ts`)
+      // (`_shared/apns.ts`, `_shared/gemini.ts`)
       // use the same pattern. CA2-C1 (2026-04-24).
       const res = await fetch(`${POSTHOG_HOST}/i/v0/e/`, {
         method: 'POST',

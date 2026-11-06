@@ -1,7 +1,7 @@
 // POST /functions/v1/realtime-session
 // Logical endpoint: POST /v1/ai/realtime-session (spec §3).
 //
-// Mints one Gemini Live ephemeral token for one Cook Session. Premium+
+// Mints one OpenAI Realtime client secret for one Cook Session. Premium+
 // only — voice cook sessions gate on voice_cook_mode entitlement and
 // consume one voice_cook_session quota row at mint time.
 //
@@ -14,9 +14,9 @@
 //   6. Quota: atomic voice_cook_session increment → 429 RATE-01 if capped
 //   7. Prompt: read active cook_mode_realtime v1.0.0
 //   8. Render system prompt with recipe + household context
-//   9. mintLiveToken() → 502 AI-01 + quota refund on Gemini upstream fail
+//   9. mintRealtimeSession() → 502 AI-01 + quota refund on upstream fail
 //  10. Log ai_request_log, return { auth_token, expires_at, session_id,
-//      ws_url, prompt_version }
+//      ws_url, prompt_version, setup_frame_json }
 //
 // The response's `auth_token` value is the mint's `.name` field
 // (auth_tokens/<hex>). iOS passes it unchanged as the `access_token`
@@ -40,8 +40,11 @@ import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { captureSafe } from '../_shared/posthog.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiModel } from '../_shared/gemini.ts';
-import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
+import {
+  mintRealtimeSession,
+  OpenAIRealtimeModel,
+  RealtimeMintError,
+} from '../_shared/realtime_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
 import {
   createLogger,
@@ -54,7 +57,7 @@ import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
 const FEATURE_KEY = 'cook_mode_realtime';
-const MODEL = GeminiModel.FlashLivePreview;
+const MODEL = OpenAIRealtimeModel.Mini;
 
 /** PostgREST error.code for SQLSTATE 23505 (unique_violation). */
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -80,11 +83,11 @@ const UNIQUE_VIOLATION_CODE = '23505';
  *   join against `ai_request_log`.
  * - `reason` — what tripped the refund. Discriminated:
  *     `no_active_prompt` — prompt-version table empty for FEATURE_KEY
- *     `mint_failed` — Gemini /v1alpha/auth_tokens returned 4xx/5xx
- *     `mint_unexpected_error` — non-LiveMintError thrown during mint
+ *     `mint_failed` — OpenAI /v1/realtime/client_secrets returned 4xx/5xx
+ *     `mint_unexpected_error` — non-RealtimeMintError thrown during mint
  * - `upstream_status` — number, present iff `reason='mint_failed'` and
- *   the LiveMintError carried a status code. Lets ops correlate
- *   refund storms with Gemini outage windows.
+ *   the RealtimeMintError carried a status code. Lets ops correlate
+ *   refund storms with provider outage windows.
  *
  * `is_refresh` is intentionally NOT a property: the `didConsumeQuota`
  * guard short-circuits refresh mints before the refund branch fires,
@@ -187,10 +190,10 @@ interface WireResponse {
   session_id: string;
   ws_url: string;
   prompt_version: string;
-  /** Pre-serialized `{"setup": {...}}` frame iOS MUST send as the first
-   * WebSocket message after `open`. Server waits for this before
-   * emitting `setupComplete`, even with a Constrained ephemeral token.
-   * See live_mint.setupFrameJSON for provenance. */
+  /** Pre-serialized `session.update` frame iOS sends as the first
+   * WebSocket message after `open`. It carries the truncation policy, and
+   * the server's `session.updated` reply is iOS's handshake ack. See
+   * realtime_mint.setupFrameJSON. */
   setup_frame_json: string;
 }
 
@@ -308,7 +311,7 @@ Deno.serve(async (req) => {
   //     refresh mints. Refreshes bypass the monthly voice_cook_session
   //     quota (ADR 0014 — is_refresh skips increment); without a
   //     rate-limit layer a runaway is_refresh=true loop could drive
-  //     Gemini API spend indefinitely. Fail-open on rate limiter
+  //     voice API spend indefinitely. Fail-open on rate limiter
   //     outage (same posture as other AI endpoints).
   // ---------------------------------------------------------------------
   const sourceIP = extractSourceIP(req);
@@ -606,8 +609,9 @@ Deno.serve(async (req) => {
 
   let mint;
   try {
-    // If the request carried a recap (session-refresh path per ADR 0014),
-    // append it as a clearly-delimited suffix to systemInstruction so the
+    // If the request carried a recap (refresh path — ADR 0014 handoff, kept
+    // for the 60-minute session limit and transport recovery per ADR 0038),
+    // append it as a clearly-delimited suffix to the instructions so the
     // new session's very first turn has continuity context. Delimiter
     // markers ensure the model treats the recap as context, not part of
     // the core style/rules contract.
@@ -615,11 +619,12 @@ Deno.serve(async (req) => {
       ? `${renderedPrompt}\n\n# Recent conversation context (from prior session)\n${body.recap.trim()}`
       : renderedPrompt;
 
-    mint = await mintLiveToken({
-      systemInstruction: systemInstructionWithRecap,
-      model: `models/${MODEL}`,
-      thinkingLevel: resolvedThinkingLevel,
+    mint = await mintRealtimeSession({
+      instructions: systemInstructionWithRecap,
+      model: MODEL,
+      reasoningEffort: resolvedThinkingLevel,
       turnDetectionMode: resolvedTurnDetectionMode,
+      safetyIdentifier: await hashCanonicalKey(claims.canonical_user_key),
     });
   } catch (err) {
     // Refund only if we actually consumed quota. Refresh mints
@@ -636,20 +641,20 @@ Deno.serve(async (req) => {
       );
       // SCA-145: refund-audit observability. See no_active_prompt
       // refund site for rationale. `upstream_status` is included on
-      // the LiveMintError branch so ops can correlate refunds with
-      // Gemini outage windows.
+      // the RealtimeMintError branch so ops can correlate refunds with
+      // provider outage windows.
       await emitVoiceQuotaRefund(userLog, {
         canonicalUserKey: claims.canonical_user_key,
         requestId,
-        reason: err instanceof LiveMintError ? 'mint_failed' : 'mint_unexpected_error',
+        reason: err instanceof RealtimeMintError ? 'mint_failed' : 'mint_unexpected_error',
         // exactOptionalPropertyTypes rejects `upstreamStatus: undefined`
         // — only set the key when there's a real value.
-        ...(err instanceof LiveMintError ? { upstreamStatus: err.statusCode } : {}),
+        ...(err instanceof RealtimeMintError ? { upstreamStatus: err.statusCode } : {}),
       });
     }
     // `refund_applied` metadata mirrors the actual refund decision so
     // ops triage isn't misled on refresh-mint failures.
-    if (err instanceof LiveMintError) {
+    if (err instanceof RealtimeMintError) {
       userLog.error('mint_failed', err, {
         upstream_status: err.statusCode,
         refund_applied: didConsumeQuota,
@@ -687,7 +692,7 @@ Deno.serve(async (req) => {
   // response lands on iOS:
   //
   //   1. Supersede: mark any prior unclosed rows for THIS user as
-  //      closed. Gemini Live has no server-side logout; this
+  //      closed. The client secret cannot be revoked server-side; this
   //      UPDATE is how we declare "the client's previous session_id
   //      is no longer accepting turns." The partial index
   //      `voice_session_owners_open_by_user_idx` makes the WHERE
@@ -759,7 +764,7 @@ Deno.serve(async (req) => {
   // trace view automatically via PostHog's pseudo-trace rollup.
 
   const wire: WireResponse = {
-    auth_token: mint.tokenName,
+    auth_token: mint.authToken,
     expires_at: mint.expiresAt,
     session_id: sessionId,
     ws_url: mint.wsUrl,

@@ -7,9 +7,9 @@
 //   - 204 on valid POST + ai_request_log row written with expected shape
 //   - Idempotency: repeat POST with same (session_id, turn_index)
 //     upserts via ON CONFLICT DO NOTHING — no row duplication
-//   - Cost math parity: backend's computeCostUSD on CLAUDE.md's spike-
-//     validated baseline input (125+825 audio prompt, 200 overhead, 1000
-//     text sys prompt, 150 audio out) produces ~$0.006/turn
+//   - Cost math parity: backend's computeCostUSD on a fixed turn shape
+//     (1000 text + 1150 audio in, 150 audio out) priced at the
+//     gpt-realtime-2.1-mini rates in MODEL_PRICING (ADR 0038)
 //
 // PostHog capture is NOT asserted here — posthog.ts is fire-and-forget
 // and observability-path tests would require a mock ingest server. The
@@ -59,8 +59,8 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
   const sessionId = overrides.session_id ?? crypto.randomUUID();
   const turns = overrides.turns ?? [{
     turn_index: 1,
-    // CLAUDE.md §Cost model baseline: 125 new audio + 825 carried audio +
-    // 200 overhead = 1150 audio in; 1000 text sys prompt; 150 audio out.
+    // Fixed turn shape for the cost pins: 1150 audio in, 1000 text in
+    // (instructions + recipe context), 150 audio out.
     prompt_tokens_text: 1000,
     prompt_tokens_audio: 1150,
     // Totals match the breakdown sum in the baseline case. When the
@@ -275,20 +275,20 @@ Deno.test('voice-turn-usage 204 + ai_request_log row with expected shape', async
   assertEquals(data.request_id, expectedRequestId);
   assertEquals(data.canonical_user_key, boot.canonical_user_key);
   assertEquals(data.feature_key, 'cook_mode_realtime');
-  assertEquals(data.model, 'gemini-3.1-flash-live-preview');
+  assertEquals(data.model, 'gpt-realtime-2.1-mini');
   // 1000 text + 1150 audio in; 0 text + 150 audio out.
   assertEquals(data.input_tokens, 2150);
   assertEquals(data.output_tokens, 150);
   assertEquals(data.thinking_level, 'minimal');
   assertEquals(data.prompt_version, '1.0.0');
-  // Cost math (per CLAUDE.md §Cost model, spike-validated):
-  //   text in:   1000  * $0.75  / 1_000_000 = $0.000750
-  //   audio in:  1150  * $3.00  / 1_000_000 = $0.003450
-  //   audio out: 150   * $12.00 / 1_000_000 = $0.001800
-  //   total                                 = $0.006000
+  // Cost math (gpt-realtime-2.1-mini, ADR 0038):
+  //   text in:   1000  * $0.60  / 1_000_000 = $0.000600
+  //   audio in:  1150  * $10.00 / 1_000_000 = $0.011500
+  //   audio out: 150   * $20.00 / 1_000_000 = $0.003000
+  //   total                                 = $0.015100
   // Allow ±$0.000010 for rounding at 6-decimal precision.
   const cost = Number(data.cost_usd);
-  const expected = 0.006;
+  const expected = 0.0151;
   if (Math.abs(cost - expected) > 0.00001) {
     throw new Error(`cost_usd ${cost} differs from baseline ${expected} by more than rounding`);
   }
@@ -370,7 +370,8 @@ Deno.test(
         prompt_tokens_text: 2000,
         prompt_tokens_audio: 500,
         prompt_tokens_total: 2500,
-        prompt_tokens_cached: 1800, // ~72% cached — hypothetical "caching firing"
+        prompt_tokens_cached: 1800, // cached text
+        prompt_tokens_cached_audio: 400, // cached audio (ADR 0038)
         response_tokens_text: 0,
         response_tokens_audio: 150,
         response_tokens_total: 150,
@@ -389,9 +390,18 @@ Deno.test(
     const data = await awaitAIRequestLogRow(
       client,
       `voice:${sessionId}:1`,
-      'prompt_cached_tokens',
+      'prompt_cached_tokens, cost_usd',
     );
-    assertEquals(data.prompt_cached_tokens, 1800);
+    // Text and audio cache hits both land in the one column.
+    assertEquals(data.prompt_cached_tokens, 2200);
+    // Each cached portion priced at its own rate:
+    //   text uncached:  200 * $0.60  / 1e6 = $0.000120
+    //   text cached:   1800 * $0.06  / 1e6 = $0.000108
+    //   audio uncached: 100 * $10.00 / 1e6 = $0.001000
+    //   audio cached:   400 * $0.30  / 1e6 = $0.000120
+    //   audio out:      150 * $20.00 / 1e6 = $0.003000
+    //   total                              = $0.004348
+    assertEquals(Number(data.cost_usd), 0.004348);
   },
 );
 
@@ -700,16 +710,16 @@ Deno.test(
     );
 
     // Pin (4): cost_usd includes the remainder priced at audio rates.
-    //   text in:      1000 * $0.75  / 1_000_000 = $0.000750
-    //   audio in:     1150 * $3.00  / 1_000_000 = $0.003450
-    //   prompt rem:    200 * $3.00  / 1_000_000 = $0.000600 (audio-in rate)
-    //   audio out:     150 * $12.00 / 1_000_000 = $0.001800
-    //   response rem:   10 * $12.00 / 1_000_000 = $0.000120 (audio-out rate)
-    //   total                                   = $0.006720
+    //   text in:      1000 * $0.60  / 1_000_000 = $0.000600
+    //   audio in:     1150 * $10.00 / 1_000_000 = $0.011500
+    //   prompt rem:    200 * $10.00 / 1_000_000 = $0.002000 (audio-in rate)
+    //   audio out:     150 * $20.00 / 1_000_000 = $0.003000
+    //   response rem:   10 * $20.00 / 1_000_000 = $0.000200 (audio-out rate)
+    //   total                                   = $0.017300
     // Tolerance 1e-6 matches production's Math.round(× 1e6) / 1e6 rounding
     // in voice-turn-usage/index.ts:410 (ai_request_log.cost_usd NUMERIC(10,6)).
     const cost = Number(data.cost_usd);
-    const expected = 0.006720;
+    const expected = 0.0173;
     if (Math.abs(cost - expected) > 1e-6) {
       throw new Error(
         `cost_usd ${cost} differs from expected ${expected} by more than 1e-6 (production rounding precision)`,

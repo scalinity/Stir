@@ -33,13 +33,13 @@ import { readAppUser } from '../_shared/identity.ts';
 import { computeCostUSD, MODEL_PRICING } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
-import { GeminiModel } from '../_shared/gemini.ts';
+import { OpenAIRealtimeModel } from '../_shared/realtime_mint.ts';
 import { VoiceTurnUsageRequest, zodToFieldErrors } from '../_shared/validation.ts';
 import { effectiveVoiceEnabled, readEntitlement } from '../_shared/entitlements.ts';
 import { checkAndIncrement, extractSourceIP, ipBucket } from '../_shared/rate_limiter.ts';
 
 const VOICE_FEATURE_KEY = 'cook_mode_realtime';
-const MODEL = GeminiModel.FlashLivePreview;
+const MODEL = OpenAIRealtimeModel.Mini;
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -375,28 +375,9 @@ Deno.serve(async (req) => {
       outputTokens = Math.max(outputTokens, breakdownResponseSum);
     }
 
-    // ADR 0015 invariant-break signal: implicit caching is expected to
-    // stay at zero on Gemini Live (measurement-locked). Any non-zero
-    // `prompt_tokens_cached` on Live is a trigger to manually re-check
-    // Google's Live-API pricing BEFORE the cost math feeds into a
-    // cap-reversal decision — the 25% discount rate we assume for
-    // FlashLivePreview in MODEL_PRICING is a best-guess defensive value,
-    // not a published Google rate. Warn-level so the Supabase log
-    // aggregator surfaces it to ops without spamming alerts.
-    if (turn.prompt_tokens_cached !== undefined && turn.prompt_tokens_cached > 0) {
-      userLog.warn('voice_live_caching_unexpected_nonzero', {
-        session_id: body.session_id,
-        turn_index: turn.turn_index,
-        prompt_tokens_cached: turn.prompt_tokens_cached,
-        prompt_tokens_text: turn.prompt_tokens_text,
-        note:
-          'ADR 0015 assumed cached=0 on Live; re-verify Google pricing page before trusting cost math',
-      });
-    }
-
-    // Breakdown sanity: `prompt_tokens_cached` MUST be ≤ `prompt_tokens_text`
-    // (cached tokens are a subset of text input — Google's cache stores
-    // text-only content; audio doesn't participate in implicit caching).
+    // Breakdown sanity: `prompt_tokens_cached` (cached text) MUST be ≤
+    // `prompt_tokens_text` — cached text is a subset of text input, as
+    // cached audio is of audio input.
     // If this ever fires, `computeCostUSD` silently clamps, but we need
     // the log so the upstream breakdown bug is visible instead of
     // swallowed by the clamp.
@@ -412,23 +393,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Cost = categorized breakdown via MODEL_PRICING + the uncategorized
-    // remainder priced at audio in/out rate (CLAUDE.md sharp-edge #15 —
-    // the AUDIO-mode per-pass overhead is charged as audio input).
+    // Cost = categorized breakdown via MODEL_PRICING + any uncategorized
+    // remainder (total above text + audio) priced at the audio in/out rate.
     //
-    // `cachedInputTokens` discounts the cached portion of text input
-    // at 25% of the standard rate. ADR 0015 measurement keeps this at
-    // 0 for every observed Live turn (caching doesn't fire on Live),
-    // but passing the value through means if Google ever enables Live
-    // caching the cost math reflects it without a code change. The
-    // Zod wire validator enforces `prompt_tokens_cached ≤ prompt_tokens_total`
-    // upstream; `computeCostUSD` also defensively clamps `cachedInputTokens
-    // ≤ textInputTokens` in case the breakdown attributes cached tokens
-    // to the audio column instead of text.
+    // Cached text and cached audio are priced at their own cached rates
+    // (OpenAI Realtime caches the conversation prefix automatically; ADR
+    // 0038). The Zod validator bounds both against the prompt total, and
+    // `computeCostUSD` clamps each to its modality defensively.
     const baseCost = computeCostUSD(MODEL, {
       textInputTokens: turn.prompt_tokens_text,
-      cachedInputTokens: turn.prompt_tokens_cached,
+      cachedInputTokens: turn.prompt_tokens_cached ?? 0,
       audioInputTokens: turn.prompt_tokens_audio,
+      cachedAudioInputTokens: turn.prompt_tokens_cached_audio ?? 0,
       textOutputTokens: turn.response_tokens_text,
       audioOutputTokens: turn.response_tokens_audio,
     });
@@ -454,13 +430,17 @@ Deno.serve(async (req) => {
         thinking_level: 'minimal',
         prompt_version: turn.prompt_version,
         retry_count: 0,
-        // Forward implicit-cache hit count straight from iOS. Zero/absent
-        // means either (a) Gemini Live caching didn't fire on this turn
-        // (the hypothesis we're trying to disprove) or (b) caching fired
-        // but the iOS accumulator was zero (shouldn't happen — iOS omits
-        // the field in that case). prompt_tokens_cached is optional in
-        // the Zod schema, so turn.prompt_tokens_cached may be undefined.
-        prompt_cached_tokens: turn.prompt_tokens_cached,
+        // Every cached input token for the turn, text and audio. Feeds
+        // PostHog `$ai_cache_read_input_tokens` — the voice cache hit rate
+        // that ADR 0038 makes the main voice cost signal. Stays NULL when
+        // the client reported neither field, so "not reported" stays
+        // distinguishable from "reported zero".
+        ...(turn.prompt_tokens_cached === undefined && turn.prompt_tokens_cached_audio === undefined
+          ? {}
+          : {
+            prompt_cached_tokens: (turn.prompt_tokens_cached ?? 0) +
+              (turn.prompt_tokens_cached_audio ?? 0),
+          }),
         // session_id populated from body.session_id (already validated as
         // UUID upstream). Indexed via idx_ai_request_log_voice_session for
         // ops aggregations; replaces split_part parsing at the query

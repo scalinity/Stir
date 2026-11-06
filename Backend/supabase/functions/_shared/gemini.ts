@@ -36,7 +36,6 @@ export enum GeminiModel {
   // GA replacement for `gemini-3.1-flash-lite-preview` (shut down 2026-05-25;
   // ADR 0038). Google lists its shutdown as 2027-05-07.
   FlashLite = 'gemini-3.1-flash-lite',
-  FlashLivePreview = 'gemini-3.1-flash-live-preview',
 }
 
 export type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
@@ -249,9 +248,9 @@ export async function geminiGenerate(args: GeminiGenerateArgs): Promise<GeminiGe
     // fragments of the rendered system prompt (transcript + household
     // dietary rules + pantry snapshot) — structured-JSON loggers then
     // ship that content to Edge Function logs on every refusal. The
-    // body is still available on `err.body` for env-gated dev debugging
-    // via `shouldLogGeminiBodies()`; the default log line stays PII-safe.
-    // Mirrors the same fix already applied in `_shared/live_mint.ts`.
+    // body is still available on `err.body` for targeted dev debugging;
+    // the default log line stays PII-safe.
+    // Same posture as `AITextError` and `RealtimeMintError`.
     throw new GeminiError(res.status, rawText);
   }
 
@@ -294,6 +293,4 @@ export async function geminiGenerate(args: GeminiGenerateArgs): Promise<GeminiGe
 }
 
 // ---------------------------------------------------------------------------
-// Live auth token mint
-// ---------------------------------------------------------------------------
-// Lives in `_shared/live_mint.ts`. Step-6 stub deleted (P2-D, 2026-04-23).
+// Voice runs on OpenAI Realtime (`_shared/realtime_mint.ts`, ADR 0038).

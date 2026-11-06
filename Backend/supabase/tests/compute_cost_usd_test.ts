@@ -4,53 +4,19 @@
 // the pure-function cost arithmetic without any HTTP or DB dependencies.
 //
 // Covers:
-//   - Baseline case (voice turn, no caching) matches the spike-validated
-//     $0.006/turn figure from CLAUDE.md §Cost model
+//   - Realtime voice turn (gpt-realtime-2.1-mini) uncached and cached
 //   - cachedInputTokens discounts the cached portion at the vendor's
 //     published cached rate (Gemini Flash 10%) and leaves non-text inputs untouched
 //   - cacheWriteInputTokens bills the Claude cache-write rate on its share
 //   - Defensive clamp: `cachedInputTokens > textInputTokens` doesn't
 //     produce a negative uncached-text portion
-//   - FlashLivePreview with cached=0 (the ADR 0015 locked-in steady state)
-//     produces exactly the old pre-discount cost — no regression
 //   - Flash generateContent path: cached portion is genuinely cheaper
 
 import { assertEquals } from '@std/assert';
 import { computeCostUSD } from '../functions/_shared/ai_request_log.ts';
 import { GeminiModel } from '../functions/_shared/gemini.ts';
 import { ClaudeModel } from '../functions/_shared/claude.ts';
-
-Deno.test('computeCostUSD baseline voice turn matches $0.006', () => {
-  // CLAUDE.md §Cost model baseline: 1000 text sys prompt + 1150 audio in +
-  // 150 audio out on FlashLivePreview.
-  const cost = computeCostUSD(GeminiModel.FlashLivePreview, {
-    textInputTokens: 1000,
-    audioInputTokens: 1150,
-    textOutputTokens: 0,
-    audioOutputTokens: 150,
-  });
-  //   text in:   1000 * $0.75  / 1e6 = $0.000750
-  //   audio in:  1150 * $3.00  / 1e6 = $0.003450
-  //   audio out: 150  * $12.00 / 1e6 = $0.001800
-  //   total                          = $0.006000
-  assertEquals(cost, 0.006);
-});
-
-Deno.test('computeCostUSD with cachedInputTokens=0 is identical to omitting the param', () => {
-  const counts = {
-    textInputTokens: 1000,
-    audioInputTokens: 1150,
-    textOutputTokens: 0,
-    audioOutputTokens: 150,
-  };
-  const without = computeCostUSD(GeminiModel.FlashLivePreview, counts);
-  const withZero = computeCostUSD(GeminiModel.FlashLivePreview, {
-    ...counts,
-    cachedInputTokens: 0,
-  });
-  assertEquals(without, withZero);
-  assertEquals(without, 0.006);
-});
+import { OpenAIRealtimeModel } from '../functions/_shared/realtime_mint.ts';
 
 Deno.test('computeCostUSD discounts cached text portion at 10% rate (Flash)', () => {
   // Flash textInPer1M = $0.50, cachedInPer1M = $0.05 (verified 2026-11-06).
@@ -107,27 +73,6 @@ Deno.test('computeCostUSD clamps cachedInputTokens ≤ textInputTokens', () => {
   assertEquals(cost, 0.0004);
 });
 
-Deno.test('computeCostUSD FlashLivePreview with cached=0 matches pre-discount math (ADR 0015 steady state)', () => {
-  // Regression guard: ADR 0015 locks in "cached never fires on Live,"
-  // so every real Live call passes cached=0 and the cost must remain
-  // exactly what the CLAUDE.md cost model asserts. If someone ever
-  // changes FlashLivePreview.cachedInPer1M to something like 0 (instead
-  // of 25%), this test stays green because cached=0 is a no-op — the
-  // complementary test above guards the non-zero path.
-  const liveCost = computeCostUSD(GeminiModel.FlashLivePreview, {
-    textInputTokens: 4000,
-    cachedInputTokens: 0,
-    audioInputTokens: 500,
-    textOutputTokens: 0,
-    audioOutputTokens: 125,
-  });
-  //   text:      4000 * $0.75  / 1e6 = $0.003000
-  //   audio in:   500 * $3.00  / 1e6 = $0.001500
-  //   audio out:  125 * $12.00 / 1e6 = $0.001500
-  //   total                          = $0.006000
-  assertEquals(liveCost, 0.006);
-});
-
 Deno.test('computeCostUSD lower-bounds negative cachedInputTokens at 0', () => {
   // Review finding: if a buggy caller passes a negative cached count,
   // the pre-fix version produced `uncached = text - (-N) = text + N`,
@@ -167,16 +112,6 @@ Deno.test('computeCostUSD coerces NaN/Infinity inputs to 0 (defense in depth)', 
   assertEquals(infinity, 0.0015);
 });
 
-Deno.test('computeCostUSD FlashLivePreview uses current image input pricing', () => {
-  const cost = computeCostUSD(GeminiModel.FlashLivePreview, {
-    textInputTokens: 0,
-    imageInputTokens: 1000,
-    textOutputTokens: 0,
-  });
-  // Live image/video input: 1000 * $1.00 / 1e6 = $0.001000.
-  assertEquals(cost, 0.001);
-});
-
 Deno.test('computeCostUSD handles zero textInputTokens gracefully', () => {
   // Degenerate input: zero text input with a non-zero cached count
   // shouldn't produce phantom cost. The double-clamp ensures cached
@@ -188,25 +123,6 @@ Deno.test('computeCostUSD handles zero textInputTokens gracefully', () => {
     textOutputTokens: 0,
   });
   assertEquals(cost, 0);
-});
-
-Deno.test('computeCostUSD discounts cached text on Live when non-zero (hypothetical future)', () => {
-  // Defensive behavior: IF Live caching ever starts firing, the cost
-  // math reflects the 25% discount. FlashLivePreview.cachedInPer1M =
-  // $0.1875 (25% of $0.75).
-  const cost = computeCostUSD(GeminiModel.FlashLivePreview, {
-    textInputTokens: 4000,
-    cachedInputTokens: 2000,
-    audioInputTokens: 500,
-    textOutputTokens: 0,
-    audioOutputTokens: 125,
-  });
-  //   uncached text: 2000 * $0.75   / 1e6 = $0.001500
-  //   cached text:   2000 * $0.1875 / 1e6 = $0.000375
-  //   audio in:       500 * $3.00   / 1e6 = $0.001500
-  //   audio out:      125 * $12.00  / 1e6 = $0.001500
-  //   total                               = $0.004875
-  assertEquals(cost, 0.004875);
 });
 
 Deno.test('computeCostUSD splits Claude input into uncached, cache-read and cache-write (Haiku 5.5)', () => {
@@ -224,4 +140,58 @@ Deno.test('computeCostUSD splits Claude input into uncached, cache-read and cach
     textOutputTokens: 2000,
   });
   assertEquals(cost, 0.001755);
+});
+
+Deno.test('computeCostUSD realtime mini uncached voice turn', () => {
+  // gpt-realtime-2.1-mini: text in $0.60, audio in $10, text out $2.40, audio out $20.
+  //   text in:   3300 * $0.60  / 1e6 = $0.001980
+  //   audio in:    38 * $10.00 / 1e6 = $0.000380
+  //   text out:    16 * $2.40  / 1e6 = $0.0000384
+  //   audio out:  100 * $20.00 / 1e6 = $0.002000
+  //   total                          = $0.0043984 → 0.004398
+  const counts = {
+    textInputTokens: 3300,
+    audioInputTokens: 38,
+    textOutputTokens: 16,
+    audioOutputTokens: 100,
+  };
+  assertEquals(computeCostUSD(OpenAIRealtimeModel.Mini, counts), 0.004398);
+  // Zero cached counts are identical to omitting them.
+  assertEquals(
+    computeCostUSD(OpenAIRealtimeModel.Mini, { ...counts, cachedInputTokens: 0, cachedAudioInputTokens: 0 }),
+    0.004398,
+  );
+});
+
+Deno.test('computeCostUSD realtime mini prices cached text and cached audio at their own rates', () => {
+  // Cached text $0.06, cached audio $0.30.
+  //   text uncached:   300 * $0.60  / 1e6 = $0.000180
+  //   text cached:    3000 * $0.06  / 1e6 = $0.000180
+  //   audio uncached:  140 * $10.00 / 1e6 = $0.001400
+  //   audio cached:    860 * $0.30  / 1e6 = $0.000258
+  //   text out:         16 * $2.40  / 1e6 = $0.0000384
+  //   audio out:       100 * $20.00 / 1e6 = $0.002000
+  //   total                               = $0.0040564 → 0.004056
+  const cost = computeCostUSD(OpenAIRealtimeModel.Mini, {
+    textInputTokens: 3300,
+    cachedInputTokens: 3000,
+    audioInputTokens: 1000,
+    cachedAudioInputTokens: 860,
+    textOutputTokens: 16,
+    audioOutputTokens: 100,
+  });
+  assertEquals(cost, 0.004056);
+});
+
+Deno.test('computeCostUSD clamps cachedAudioInputTokens ≤ audioInputTokens', () => {
+  // Bogus cached audio above the audio total: all 500 audio tokens are
+  // treated as cached, never a negative uncached portion.
+  //   500 * $0.30 / 1e6 = $0.000150
+  const cost = computeCostUSD(OpenAIRealtimeModel.Mini, {
+    textInputTokens: 0,
+    audioInputTokens: 500,
+    cachedAudioInputTokens: 9999,
+    textOutputTokens: 0,
+  });
+  assertEquals(cost, 0.00015);
 });

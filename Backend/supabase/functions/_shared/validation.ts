@@ -576,16 +576,17 @@ const TurnUsage = z.object({
   // for `ai_request_log.input_tokens` / `output_tokens` and prices the
   // uncategorized remainder at audio in/out rate.
   prompt_tokens_total: z.number().int().min(0).max(1_000_000),
-  // Gemini Live `cachedContentTokenCount` — portion of prompt tokens
-  // served from implicit context cache. When > 0, that portion is
-  // discounted in pricing (Gemini publishes ~25% of text-in rate for
-  // cached). Feeds `ai_request_log.prompt_cached_tokens` + PostHog
-  // `$ai_cache_read_input_tokens` so the cap-reversal trigger in spec §9
-  // ("cachedContentTokenCount ≥ 50% of promptTokenCount across 100
-  // sessions") is measurable. Optional — iOS omits when the accumulated
-  // count is zero (saves a field on the common path where caching isn't
-  // firing).
+  // Cached TEXT input tokens — the portion of `prompt_tokens_text` served
+  // from OpenAI Realtime's automatic prompt cache (ADR 0038). Feeds
+  // `ai_request_log.prompt_cached_tokens` (together with the cached audio
+  // below) and PostHog `$ai_cache_read_input_tokens`. Optional — iOS omits
+  // it when the turn's cached count is zero.
   prompt_tokens_cached: z.number().int().min(0).max(1_000_000).optional(),
+  // Cached AUDIO input tokens — the portion of `prompt_tokens_audio` served
+  // from the prompt cache. Priced separately because OpenAI's cached-audio
+  // rate differs from its cached-text rate. Optional (ADR 0038 addition);
+  // older clients omit it and their cached audio is billed at full rate.
+  prompt_tokens_cached_audio: z.number().int().min(0).max(1_000_000).optional(),
   response_tokens_text: z.number().int().min(0).max(1_000_000),
   response_tokens_audio: z.number().int().min(0).max(1_000_000),
   response_tokens_total: z.number().int().min(0).max(1_000_000),
@@ -615,10 +616,13 @@ export const VoiceTurnUsageRequest = z.object({
   .refine(
     (body) =>
       body.turns.every(
-        (t) => (t.prompt_tokens_cached ?? 0) <= t.prompt_tokens_total,
+        (t) =>
+          (t.prompt_tokens_cached ?? 0) + (t.prompt_tokens_cached_audio ?? 0) <=
+            t.prompt_tokens_total,
       ),
     {
-      message: 'prompt_tokens_cached must not exceed prompt_tokens_total',
+      message:
+        'prompt_tokens_cached + prompt_tokens_cached_audio must not exceed prompt_tokens_total',
       path: ['turns'],
     },
   );
