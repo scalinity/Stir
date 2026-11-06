@@ -31,7 +31,7 @@ export default function LoginPage() {
         {status === 'sent' ? (
           <div className="text-sm">
             <p className="mb-2">Check <span className="font-mono">{email}</span> for the sign-in link.</p>
-            <p className="text-neutral-500">You can close this tab; the link opens back here.</p>
+            <p className="text-neutral-400">You can close this tab; the link opens back here.</p>
           </div>
         ) : (
           <form onSubmit={submit} className="flex flex-col gap-3">
@@ -55,7 +55,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        <p className="text-xs text-neutral-600 mt-6">
+        <p className="text-xs text-neutral-400 mt-6">
           Admin access is gated on <code>ops_admins</code> membership (ADR 0023). Non-admins see an error after sign-in.
         </p>
       </div>
