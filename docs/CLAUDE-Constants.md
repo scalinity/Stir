@@ -2,31 +2,56 @@
 
 Reference companion to `CLAUDE.md`. Holds the load-bearing constants, JSON shapes, code blocks, and aliasing/usage-counter semantics. CLAUDE.md points here.
 
-## Gemini models and pricing
+## AI models and pricing
 
-```swift
-enum GeminiModel: String {
-    case flash = "gemini-3-flash-preview"
-    case flashLite = "gemini-3.1-flash-lite-preview"
-    case flashLivePreview = "gemini-3.1-flash-live-preview"
-}
+Text runs on Claude, voice on OpenAI Realtime, Gemini only as a text fallback (ADR 0038). Backend model enums (`Backend/supabase/functions/_shared/claude.ts`, `gemini.ts`, `realtime_mint.ts`):
+
+```ts
+enum ClaudeModel { Haiku = 'claude-haiku-5-5', Sonnet = 'claude-sonnet-5-5' }
+enum GeminiModel { Flash = 'gemini-3-flash-preview', FlashLite = 'gemini-3.1-flash-lite' }  // text fallback only
+enum OpenAIRealtimeModel { Mini = 'gpt-realtime-2.1-mini' }
 ```
 
-Paid tier per 1M tokens (April 2026; re-checked 2026-05-08 against https://ai.google.dev/gemini-api/docs/pricing):
+Per-feature text models (`_shared/ai_text.ts`). The `AI_TEXT_PROVIDER` secret ∈ {`anthropic` (default), `gemini`} picks the column for **every** endpoint at once; there is no per-request cross-vendor fallback. An unrecognized value throws at the first call.
 
-| Model | Text in | Audio in | Image in | Text out | Audio out | Cache |
-| --- | --- | --- | --- | --- | --- | --- |
-| flash | $0.50 | $1.00 | $0.50 | $3.00 | — | yes |
-| flash-lite | $0.25 | $0.50 | $0.25 | $1.50 | — | yes |
-| flash-live | $0.75 | $3.00 | $1.00 | $4.50 | $12.00 | **no** |
+| `feature_key` | `anthropic` (default) | `gemini` |
+| --- | --- | --- |
+| `pantry_parse` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `dinner_solve` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `substitution` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `recipe_step_rewrite` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `cook_turn` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `recipe_import` | `claude-haiku-5-5` | `gemini-3.1-flash-lite` |
+| `grocery_generate` | `claude-haiku-5-5` | `gemini-3.1-flash-lite` |
 
-Live audio: **25 tokens/second** both directions.
+`claude-sonnet-5-5` is the escalation model: a feature moves to it only when the parity check shows Haiku failing (ADR 0038). Claude calls use the official SDK with structured output through `output_config.format` (`json_schema`), no forced `tool_choice`, no prefill, no sampling parameters, SDK retries off; `stop_reason` is checked for `refusal` and `max_tokens` before content is read. Images: JPEG, PNG or WebP.
 
-## Cost model (device-measured April 2026; ADR 0014)
+Per 1M tokens, from `MODEL_PRICING` in `_shared/ai_request_log.ts` (sources and retrieval dates in ADR 0038):
 
-From 9+ turn sessions, N=4 refresh + pre-mint, 22% tool-call rate. Voice turn non-tool ~$0.008 (4,527 prompt + 124 audio out); tool-call ~$0.014 (8,822 + 150). Session 15 turns ~$0.13–0.16; 30 turns ~$0.27–0.32. Premium AI/mo target $1.89 (22.27% of $8.49 ARPU); 13×15-turn cap ~$1.69–$2.08. Pro AI/mo $3.69; 27-cap ~$3.51–$4.32. Free $0.075. Pantry scan single-image ~$0.005; multi-image (Pro 4-photo) ~$0.018–$0.024 at `maxOutputTokens=4096`. Retry-once disabled (SCA-36 W4) so schema-validation failure costs 1× → AI-02. `pantry_parse` unmetered per-user; bounded by `ip:pantry_parse_daily=100` (one IP ~$2.40/day at upper end). **If 95th-pct per-IP daily pantry-parse cost crosses $0.50, file ADR to revisit IP cap or add `user:pantry_parse_daily` at Pro.** Ranges assume 75/25–60/40 text:audio split.
+| Model | Text in | Text in cached | Cache write | Audio in | Audio in cached | Image in | Text out | Audio out |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude-haiku-5-5` | $0.10 | $0.01 | $0.125 | — | — | $0.10 | $0.50 | — |
+| `claude-sonnet-5-5` | $2.00 | $0.10 | $2.50 | — | — | $2.00 | $10.00 | — |
+| `gemini-3-flash-preview` | $0.50 | $0.05 | — | $1.00 | — | $0.50 | $3.00 | — |
+| `gemini-3.1-flash-lite` | $0.25 | $0.025 | — | $0.50 | — | $0.25 | $1.50 | — |
+| `gpt-realtime-2.1-mini` | $0.60 | $0.06 | — | $10.00 | $0.30 | $0.80 | $2.40 | $20.00 |
 
-**No caching on Live API** (ADR 0015): `cachedContentTokenCount = 0` across 50+ measured turns. Implicit caching that `generateContent` callers get does NOT fire on `BidiGenerateContent`. Don't assume non-zero caching savings on voice. Observability: `ai_request_log.prompt_cached_tokens`, PostHog `$ai_cache_read_input_tokens`; cap-reversal trigger in ADR 0015.
+Claude rates apply to prompts up to 100K tokens (Haiku 5.5 doubles above that; no Stir prompt approaches it). Realtime audio tokens: user audio **10 tokens/second**, model audio **20 tokens/second**. `gpt-realtime-2.1` (full; audio in $32, cached audio in $0.40, audio out $64) is the escalation path if mini misses tool calls in device testing; it is not wired up.
+
+## Cost model (ADR 0038; caps and prices unchanged)
+
+Voice Cook Session caps stay Free 0 / Premium 13 / Pro 27 (ADR 0015); SKU prices and margins are unchanged. Premium AI budget $1.89/mo, Pro $3.69/mo, Free $0.075/mo. Assumptions: 15 turns, 3 tool-call turns, 3,300-token static text prefix, 3.8 s user speech and 5.0 s model speech per turn, input transcription on.
+
+| Voice option | 15-turn session, 90% cache hits | no caching | Premium 13 / Pro 27 per month (cached) |
+| --- | ---: | ---: | --- |
+| `gpt-realtime-2.1-mini` | $0.085 | $0.254 | $1.11 / $2.31 |
+| `gpt-realtime-2.1` (escalation) | $0.294 | $0.944 | $3.82 / $7.93 |
+
+Text rates are about 5× lower per token than Gemini Flash (Haiku 5.5 $0.10 / $0.50 vs $0.50 / $3.00 per 1M). Voice on mini stays inside the Premium and Pro AI budgets only while the cache hit rate holds; without caching, 13 sessions at $0.254 cost about $3.30/mo. OpenAI caches the conversation prefix automatically (best-effort) and a session refresh discards that cache, so the voice cache hit rate is the key voice cost signal. Promotional credits are held on both the Anthropic and OpenAI platforms; amounts and expiry dates are unknown, so these rates are what Stir pays once the credits run out.
+
+Observability: per-turn `prompt_tokens_cached` (cached text) and optional `prompt_tokens_cached_audio` (cached audio) on `/v1/ai/voice-turn-usage`; `ai_request_log.prompt_cached_tokens` and PostHog `$ai_cache_read_input_tokens` carry cached text + cached audio. Cached text and cached audio are priced at their own cached rates.
+
+Retry-once disabled (SCA-36 W4) so schema-validation failure costs 1× → AI-02. `pantry_parse` unmetered per-user; bounded by `ip:pantry_parse_daily=100`. **If 95th-pct per-IP daily pantry-parse cost crosses $0.50, file ADR to revisit IP cap or add `user:pantry_parse_daily` at Pro.**
 
 ## StoreKit SKUs
 
@@ -60,25 +85,45 @@ Group `stir.subscriptions`. Family Sharing **off** all SKUs. **Apple fees:** Y1 
 
 **Preference memory** (ADR 0030): iOS `PreferenceMemoryService` reads `OutcomeFeedback` from CloudKit, projects bounded digest (≤600 prompt tokens), sends as `feedback_summary` on `/v1/ai/dinner-solve`. Server kill switch `feature_flags.preference_memory_enabled` (default true). Tier window enforced on iOS — out-of-window ratings never leave device.
 
-## Gemini Live session constants
+## Realtime voice session constants
+
+OpenAI Realtime, `gpt-realtime-2.1-mini` (ADR 0038). Backend, baked into the mint (`_shared/realtime_mint.ts`):
+
+```ts
+REALTIME_SECRET_TTL_SEC     = 120   // window in which the client secret can open a session
+REALTIME_MAX_OUTPUT_TOKENS  = 400   // ADR 0010: session max_output_tokens
+REALTIME_TRUNCATION = { type: 'retention_ratio', retention_ratio: 0.8,
+                        token_limits: { post_instructions: 8000 } }
+// OpenAI session maximum: 60 minutes. Mint call: 10 s timeout, SDK retries off.
+// Session config: reasoning.effort ∈ {minimal, low} (flag cook_voice_thinking_level),
+// output_modalities ['audio'], voice 'marin', PCM16 mono 24 kHz in and out,
+// input noise_reduction far_field, input transcription 'gpt-transcribe',
+// tool_choice 'auto', safety identifier = hashed canonical user key.
+// Turn detection (flag voice_turn_detection_mode), both with create_response true and
+// interrupt_response false (half-duplex mic gate, ADR 0011):
+//   semantic_vad: eagerness 'auto'
+//   server_vad:   threshold 0.6, prefix_padding_ms 300, silence_duration_ms 800
+// Tools: substitution_check, start_timer, get_timer_status, pause_timer,
+//        resume_timer, cancel_timer, restart_timer, set_step
+```
+
+Wire: `POST /v1/ai/realtime-session` → `{auth_token, expires_at, session_id, ws_url, prompt_version, setup_frame_json}`. `auth_token` is the `ek_` client secret from `POST https://api.openai.com/v1/realtime/client_secrets`; `ws_url` is `wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini`; iOS connects with `Authorization: Bearer <auth_token>`. `setup_frame_json` is a `session.update` frame carrying the truncation policy and is the first client message; the `session.updated` reply is the handshake ack. A tool result starts no response by itself: iOS sends `response.create` after `function_call_output`.
+
+iOS (`Stir/Integrations/GeminiLive/RealtimeSession.swift`):
 
 ```swift
-enum LiveSessionLimits {
-    static let maxSessionDurationSec       = 30 * 60   // Gemini hard limit
-    static let idleDisconnectSec           = 15 * 60   // Gemini hard limit
-    static let contextWindowTokens         = 131_072   // non-binding with refresh cadence
-    static let refreshAtElapsedSec         = 10 * 60   // Stir policy
-    static let refreshAtTurnCount          = 4         // ADR 0014
-    static let refreshAtPromptTokenCount   = 10_000    // burst trigger; ADR 0014
-    static let maxOutputTokens             = 400       // ADR 0010, baked into mint
-    static let tokenSoftCapPerSession      = 40_000    // alert
-    static let tokenHardCapPerSession      = 80_000    // force reset
-    static let tokenMintOpenWindowSec      = 60        // new_session_expire_time offset
-    static let tokenMintHardDeadlineSec    = 35 * 60   // expire_time offset
-    static let tokenMintUses               = 1
-    // Removed: pruneKeepLastNTurns — refresh IS pruning. ADR 0014.
+enum LiveSessionBudget {
+    static let setupHandshakeSec: Double              = 5        // wait for session.updated
+    static let turnCompleteSec: Double                = 30       // wait for response.done
+    static let refreshAtSessionAgeSec: TimeInterval   = 55 * 60  // only proactive refresh trigger (ADR 0038)
+    static let preMintAtSessionAgeSec: TimeInterval   = 54 * 60  // mint the next secret one minute ahead
+    static let preMintStalenessSec: TimeInterval      = 90       // discard an older pre-minted secret
+    static let clientSecretMinRemainingSec: TimeInterval = 15    // min time left on a secret to use it
+    static let turnStuckWatchdogSec: TimeInterval     = 15       // .modelSpeaking with no audio
 }
 ```
+
+Server truncation bounds per-turn prompt growth, so there are no turn-count or prompt-token refresh triggers. Refresh runs only near the 60-minute session limit and for transport recovery, because a refresh opens a new session and discards the prompt cache.
 
 ## Endpoints
 
@@ -89,9 +134,9 @@ POST /v1/session/bootstrap
 GET  /v1/config/bootstrap
 POST /v1/ai/pantry-parse
 POST /v1/ai/dinner-solve
-POST /v1/ai/realtime-session      # mints Gemini Live ephemeral token
+POST /v1/ai/realtime-session      # mints OpenAI Realtime client secret
 POST /v1/ai/cook-turn             # text fallback for voice
-POST /v1/ai/substitution          # also called from Live function-call round-trips
+POST /v1/ai/substitution          # also called from Realtime function-call round-trips
 POST /v1/ai/recipe-step-rewrite   # SCA-432 — post-accept prose rewrite of current step
 POST /v1/ai/recipe-import
 POST /v1/ai/grocery-generate
@@ -101,13 +146,14 @@ POST /v1/ops/flag-output
 *    /v1/ops/admin/*              # Supabase Auth admin role + RLS
 ```
 
-Gemini (Edge Functions only; iOS only the Live WebSocket):
+Providers (Edge Functions only; iOS only opens the OpenAI Realtime WebSocket):
 
 ```
-POST .../v1beta/models/gemini-3-flash-preview:generateContent
-POST .../v1beta/models/gemini-3.1-flash-lite-preview:generateContent
-POST .../v1alpha/auth_tokens                               # Live mint (v1alpha)
-WSS  wss://.../v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=auth_tokens/<id>
+Anthropic Messages API via @anthropic-ai/sdk       # all text features (client.messages.create)
+POST https://api.openai.com/v1/realtime/client_secrets          # Realtime mint (Edge Function)
+WSS  wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini   # iOS, Authorization: Bearer <ek_ secret>
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent       # fallback, AI_TEXT_PROVIDER=gemini
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent        # fallback, AI_TEXT_PROVIDER=gemini
 ```
 
 ## Error code matrix
@@ -119,7 +165,7 @@ enum ErrorCode: String {
     case net01="NET-01"            // network unreachable (URLSession; no response)
     case internal01="INTERNAL-01"  // 500-class server error
     case ai01="AI-01", ai02="AI-02", ai03="AI-03"  // unavailable / low confidence / slow
-    case aiVoice01="AI-VOICE-01"   // Live API down, text fallback active
+    case aiVoice01="AI-VOICE-01"   // realtime voice down (or disable_cook_realtime), text fallback active
     case import01="IMPORT-01"      // recipe import parse failed
     case permCam01="PERM-CAM-01", permMic01="PERM-MIC-01"
     case permPhoto01="PERM-PHOTO-01", permRem01="PERM-REM-01"
@@ -315,7 +361,7 @@ Adding a new feature_key without updating this list is a wire-contract change �
 
 ```json
 { "entitlements":{...same as bootstrap}, "feature_flags":[...same],
-  "prompts":[{ "feature_key":"dinner_solve", "version":"0.0.0", "provider_model":"gemini-3-flash-preview",
+  "prompts":[{ "feature_key":"dinner_solve", "version":"0.0.0", "provider_model":"claude-haiku-5-5",
                "schema_hash":"", "is_default":true, "is_enabled":false }] }
 ```
 
@@ -325,14 +371,17 @@ Adding a new feature_key without updating this list is a wire-contract change �
 
 Client (PostHog): `paywall_variant`, `widget_nudge_enabled`, `leftovers_mode_enabled`.
 
-Server (`feature_flags`): `prompt_version_override`, `recipe_import_async_threshold`, `priority_queue_pro_enabled`, `cook_voice_thinking_level` ∈ {minimal,low}, `cook_voice_default_on`, `voice_turn_detection_mode` ∈ {semantic_vad,server_vad} (consumed at mint), `disable_scan_parse`, `disable_cook_voice` / `disable_cook_realtime` (alias), `disable_imports`, `force_saved_meals_only`, `preference_memory_enabled` (SCA-44/ADR 0030; default true; when false dinner-solve renders `feedback_json` null even if iOS sent populated `feedback_summary`; failing-open on flag-read errors).
+Server (`feature_flags`): `prompt_version_override`, `recipe_import_async_threshold`, `priority_queue_pro_enabled`, `cook_voice_thinking_level` ∈ {minimal,low} (sets the OpenAI Realtime reasoning effort at mint), `cook_voice_default_on`, `voice_turn_detection_mode` ∈ {semantic_vad,server_vad} (selects OpenAI's semantic VAD or server VAD at mint), `disable_scan_parse`, `disable_cook_voice` / `disable_cook_realtime` (alias; routes voice to the C.3 on-device fallback with `AI-VOICE-01`), `disable_imports`, `force_saved_meals_only`, `preference_memory_enabled` (SCA-44/ADR 0030; default true; when false dinner-solve renders `feedback_json` null even if iOS sent populated `feedback_summary`; failing-open on flag-read errors).
 
 ## Environment variables
 
 Backend (Supabase Edge Function secrets):
 
 ```
-GEMINI_API_KEY     # legacy-format key (AIzaSy..., 39 chars). AQ.xxx fails on auth_tokens (sharp-edge #18). Project MUST be paid tier (sharp-edge #17).
+ANTHROPIC_API_KEY  # Claude text (all text features by default). Read via the official SDK in _shared/claude.ts.
+OPENAI_API_KEY     # OpenAI Realtime client-secret mint (POST /v1/realtime/client_secrets). Never reaches iOS.
+GEMINI_API_KEY     # Text fallback only; read only when AI_TEXT_PROVIDER=gemini.
+AI_TEXT_PROVIDER   # OPTIONAL. 'anthropic' (default when unset) | 'gemini'. One selection for every text endpoint; no per-request fallback; any other value throws at the first call.
 STIR_JWT_SECRET    # HS256 signer. Renamed from SUPABASE_JWT_SECRET — Supabase reserves SUPABASE_* and filters them from .env.
 REVENUECAT_WEBHOOK_SECRET
 APNS_AUTH_KEY_ID, APNS_AUTH_KEY_P8 (base64), APNS_TEAM_ID, APNS_BUNDLE_ID
@@ -341,4 +390,4 @@ LOG_IP_SALT        # 32-byte hex, HMAC-SHA256 input for ipBucket(). Rotated mont
 STIR_PGMQ_DISPATCH_SECRET  # 32-byte hex, shared with `app.stir_pgmq_dispatch_secret`. pgmq-dispatch rejects calls without matching `X-Stir-Cron-Secret`. MUST be set before exposing function publicly.
 ```
 
-iOS (`Config.xcconfig`, gitignored; `.example` documents shape): `SUPABASE_URL`, `SUPABASE_ANON_KEY` (only for `/v1/session/bootstrap`, RLS-enforced), `REVENUECAT_PUBLIC_API_KEY`, `POSTHOG_PUBLIC_API_KEY`, `SENTRY_DSN_PUBLIC`. Never present anywhere: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY on iOS`.
+iOS (`Config.xcconfig`, gitignored; `.example` documents shape): `SUPABASE_URL`, `SUPABASE_ANON_KEY` (only for `/v1/session/bootstrap`, RLS-enforced), `REVENUECAT_PUBLIC_API_KEY`, `POSTHOG_PUBLIC_API_KEY`, `SENTRY_DSN_PUBLIC`. Never present on iOS: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`. iOS holds only the short-lived Realtime client secret (`ek_…`) returned by `/v1/ai/realtime-session`.

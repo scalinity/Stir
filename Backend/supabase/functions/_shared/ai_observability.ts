@@ -52,6 +52,15 @@ export interface AIGenerationMetadata {
   path?: 'live_api' | 'gemini_fallback';
 }
 
+/** PostHog `$ai_provider` for a logged model ID (ADR 0038). The model
+ * string is the source of truth for which provider served the call. */
+export function providerForModel(model: string): 'anthropic' | 'openai' | 'gemini' | 'unknown' {
+  if (model.startsWith('claude-')) return 'anthropic';
+  if (model.startsWith('gpt-')) return 'openai';
+  if (model.startsWith('gemini-')) return 'gemini';
+  return 'unknown';
+}
+
 /**
  * Single-call dual-write: upsert `ai_request_log` row AND fire PostHog
  * `$ai_generation` on successful insert. Enforces the 1:1 reconciliation
@@ -117,7 +126,7 @@ export function recordAIRequest(
       $ai_span_id: rowEntry.request_id,
       $ai_span_name: generation.span_name,
       $ai_model: rowEntry.model,
-      $ai_provider: 'gemini',
+      $ai_provider: providerForModel(rowEntry.model),
       $ai_input_tokens: rowEntry.input_tokens,
       $ai_output_tokens: rowEntry.output_tokens,
       $ai_total_cost_usd: rowEntry.cost_usd,

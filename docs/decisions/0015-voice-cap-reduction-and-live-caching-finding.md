@@ -1,6 +1,6 @@
 # ADR 0015: Voice cap reduction (Premium 20→13, Pro 40→27) and permanent "no caching on Live API" assumption
 
-- **Status**: Accepted
+- **Status**: Accepted for the caps (Premium 13 / Pro 27, unchanged); the "no caching on Live API" assumption is **retired by 0038** (2026-11-06) — OpenAI Realtime caches the prompt prefix automatically, and the cost model in ADR 0038 replaces the inputs below.
 - **Date**: 2026-04-23
 - **Owner-step**: Step 6 wrap-up; caps apply from this release forward
 - **Related**: CLAUDE.md §Tier entitlements · CLAUDE.md §Cost model · CLAUDE.md §Gemini Live sharp-edges · Spec §9 "Cost model" · Spec §5 "Tier entitlements" · ADR 0008 (voice-temporarily-free during testing — supersedes-adjacent for Free-tier cap) · ADR 0010 (max_output_tokens 400) · ADR 0014 (session refresh IS pruning) · `_shared/entitlements.ts` · `voice-turn-usage/index.ts` · `ai_observability.ts`

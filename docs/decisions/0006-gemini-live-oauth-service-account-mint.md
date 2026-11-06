@@ -1,6 +1,6 @@
 # ADR 0006: Gemini Live ephemeral-token mint uses OAuth service-account auth, not API-key auth
 
-- **Status**: Rejected
+- **Status**: Rejected (moot since 0038, 2026-11-06 — voice no longer runs on Gemini Live; kept as history)
 - **Date**: 2026-04-19
 - **Owner-step**: Step 6 (Cook Mode voice)
 - **Rejected on**: 2026-04-19 (same day — within hours of "Accepted")

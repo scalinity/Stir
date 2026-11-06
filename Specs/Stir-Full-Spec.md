@@ -114,9 +114,9 @@ None in v1. User, buyer, and approver are the same person. No family account, no
 When Stir is not confident about a scan, it does not guess silently. It asks compact disambiguation questions: "cilantro or parsley?", "cooked rice?" It will not claim certainty on allergens, spoilage, or doneness.
 
 **AI degradation / provider outage**
-Stir runs on a single AI vendor (Google Gemini). If Gemini is fully unavailable, Stir shifts to saved-meal replay, cached plans, local timers, and the manual Substitution Sheet (which becomes inert — shows "AI unavailable, try again later"). No cross-vendor fallback is wired up in v1. Rationale: Gemini's paid SLA is 99.9%, giving ~8.7 hours/year expected downtime. The operational cost of maintaining a second vendor (keys, rate limits, legal disclosures, dual eval runs, dual Edge Function branches) outweighs the insurance value at v1 scale.
+Stir runs one AI vendor per job: Claude for text, OpenAI Realtime for voice (ADR 0038). If the text provider is fully unavailable, Stir shifts to saved-meal replay, cached plans, local timers, and the manual Substitution Sheet (which becomes inert — shows "AI unavailable, try again later"). There is no per-request cross-vendor fallback and no cross-vendor retry chain. The `AI_TEXT_PROVIDER` secret (`anthropic` default, `gemini`) switches every text endpoint to Gemini at once; it is an operator action taken ahead of or during a text outage, not something a failing request triggers.
 
-If only the Live API (voice) is unavailable, Cook Mode voice silently falls back to a text path: local Speech STT → Gemini 3 Flash text → AVSpeechSynthesizer. Banner `AI-VOICE-01` appears.
+If only the voice vendor (OpenAI Realtime) is unavailable, Cook Mode voice silently falls back to a text path: local Speech STT → text model via `/v1/ai/cook-turn` (Claude Haiku 5.5 by default) → AVSpeechSynthesizer. Banner `AI-VOICE-01` appears.
 
 **Bad data**
 Imported recipes that parse poorly land in an edit screen, never directly in Cook Mode. Scan errors are editable before any dinner solve.
@@ -154,10 +154,10 @@ Imported recipes that parse poorly land in an edit screen, never directly in Coo
 | Analytics        | **PostHog**                                                     | Product analytics + feature flags + experiments in one place; send only pseudonymous events                                                  | Mixpanel would need a separate feature-flag tool                                                                                                          |
 | Error monitoring | **Sentry**                                                      | Mature iOS + Supabase/Deno coverage, release health, stack traces                                                                            | Bugsnag is fine but no meaningful advantage here                                                                                                          |
 | Push             | **APNs direct**                                                 | iOS-only app, no need for a third-party push layer                                                                                           | OneSignal is unnecessary extra surface                                                                                                                    |
-| Primary AI (text/multimodal) | **Gemini 3 Flash**                                  | Best balance of multimodal quality, latency, and cost for scan/solve/substitution. Paid tier content is not used to improve Google's products. | OpenAI GPT-5.4 mini was evaluated as a cross-vendor fallback and rejected — operational tax (dual keys, dual eval runs, dual legal disclosures) exceeds the insurance value at v1 scale given Gemini's 99.9% SLA. |
-| Cook Mode voice  | **Gemini 3.1 Flash Live Preview (`thinkingLevel: minimal`)**    | Native audio-to-audio via Live API, optimized for lowest time-to-first-token. Production deployments report 250–500ms TTFA. 131K context window. Native function calling with streaming. Supports session-level configuration of turn detection (server VAD or semantic VAD). Stir's voice-model job is narrow (conversational routing + tool calls) so MINIMAL reasoning is sufficient — substitution reasoning is delegated to Gemini 3 Flash + hard-rule validator. | OpenAI `gpt-realtime-mini` was the previous choice, rejected to consolidate on a single vendor. gpt-realtime-mini has stronger spontaneous tool-call preamble behavior, but preambles can be produced by Gemini Live via explicit system-prompt instruction. Gemini 3.1 Flash Live at thinkingLevel=HIGH is disqualified by latency (2.98s TTFA). |
-| Cheap AI lane    | **Gemini 3.1 Flash-Lite**                                       | Best for recipe normalization and grocery structuring                                                                                        | GPT-5.4 nano is cheap, but Flash-Lite is a cleaner fit for an all-Google stack                                                                            |
-| On-device AI     | **Vision OCR/barcode + Speech framework + AVSpeechSynthesizer** | Vision used for recipe OCR and barcode scanning. Speech framework + AVSpeechSynthesizer retained as the Cook Mode voice fallback path only (when Gemini Live is unavailable), not the primary Cook Mode voice stack. Avoids an iOS 18.2+ / Apple Intelligence device dependency. | Apple Foundation Models Framework would force an iOS 18.2+ and supported-device branch the handoff did not choose                                         |
+| Text AI (text/multimodal) | **Claude Haiku 5.5 (`claude-haiku-5-5`) via the official Anthropic SDK** | Every text feature (scan, solve, substitution, step rewrite, cook-turn, import, grocery) runs on Haiku 5.5 at $0.10 / $0.50 per 1M tokens, about 5× cheaper per token than Gemini Flash ($0.50 / $3.00). Structured output through `output_config.format` (json_schema). `claude-sonnet-5-5` ($2 / $10) is the escalation model for any feature where the parity check shows Haiku failing. | GPT-6 Luna has the same price as Haiku 5.5 ($0.10 / $0.50) but a lower Artificial Analysis Intelligence Index at every effort; rejected (ADR 0038). A per-request cross-vendor retry chain is not built. |
+| Cook Mode voice  | **OpenAI Realtime `gpt-realtime-2.1-mini` (reasoning effort `minimal`) over WebSocket** | Native speech-to-speech with function calling and session-level turn detection (semantic VAD or server VAD). OpenAI caches the conversation prefix automatically (cached audio input $0.30/M, cached text $0.06/M), bills user audio at 10 tokens/s and model audio at 20 tokens/s, and supports server-side truncation. Stir's voice-model job is narrow (conversational routing + tool calls) so minimal reasoning is sufficient — substitution reasoning is delegated to the text model + hard-rule validator. Anthropic has no realtime audio API. | `gpt-realtime-2.1` (full) rejected on cost: ~$0.29 per 15-turn session with caching, about 2× the Premium AI budget; it is the escalation path if mini misses tool calls in device testing. GPT-Live 1 ($0.05/min, billed for every second the session is open) rejected: Cook Mode holds the voice session from entry to dismiss. A speech-to-text → Claude → text-to-speech pipeline rejected: two more vendors, added latency, a second set of turn-taking bugs. WebRTC rejected: needs a third-party framework on iOS; WebSocket keeps `URLSessionWebSocketTask`. |
+| Text fallback    | **Gemini behind `AI_TEXT_PROVIDER=gemini`**                     | One server-side secret switches every text endpoint to Gemini: `gemini-3-flash-preview` for scan, solve, substitution, step rewrite and cook-turn; `gemini-3.1-flash-lite` (GA) for recipe import and grocery. Costs one client file. | Removing Gemini entirely was rejected: the promotional credits on the Anthropic and OpenAI platforms are finite. Gemini is not a per-request fallback: one selection applies to all endpoints. |
+| On-device AI     | **Vision OCR/barcode + Speech framework + AVSpeechSynthesizer** | Vision used for recipe OCR and barcode scanning. Speech framework + AVSpeechSynthesizer retained as the Cook Mode voice fallback path only (when OpenAI Realtime is unavailable), not the primary Cook Mode voice stack. Avoids an iOS 18.2+ / Apple Intelligence device dependency. | Apple Foundation Models Framework would force an iOS 18.2+ and supported-device branch the handoff did not choose                                         |
 
 CloudKit gives each app container one public database and a separate private database for each user; Apple also documents that `NSPersistentCloudKitContainer` maintains a local replica of the data. That matches Stir's hybrid, local-first posture almost exactly. ([Apple Developer][1])
 
@@ -216,7 +216,7 @@ Stir/
     RevenueCat/
     PostHog/
     Sentry/
-    GeminiLive/
+    GeminiLive/               # Realtime voice client (OpenAI Realtime WebSocket)
   Extensions/
     ShareExtension/
     Widgets/
@@ -229,13 +229,13 @@ Backend/
   supabase/
     migrations/               # SQL schema + RLS policies
     functions/                # Deno Edge Functions, one per /v1 endpoint
-      _shared/                # shared utils (auth, Gemini client, validators, hard-rule engine)
+      _shared/                # shared utils (auth, ai_text router, Claude/Gemini/OpenAI Realtime clients, validators, hard-rule engine)
       session-bootstrap/
       config-bootstrap/
       ai-pantry-parse/
       ai-dinner-solve/
-      ai-realtime-session/    # mints Gemini Live ephemeral session token
-      ai-cook-turn/           # text fallback when Live API unavailable
+      ai-realtime-session/    # mints OpenAI Realtime client secret
+      ai-cook-turn/           # text fallback when realtime voice unavailable
       ai-substitution/        # also invoked from Realtime function-call round-trips
       ai-recipe-import/
       ai-grocery-generate/
@@ -254,8 +254,8 @@ Backend/
 | `/v1/config/bootstrap`    | GET    | session JWT                                         | Fetch feature flags, prompt versions, quota snapshot                              | cacheable                   |
 | `/v1/ai/pantry-parse`     | POST   | session JWT                                         | Parse scan image into structured ingredients                                      | yes via `client_request_id` |
 | `/v1/ai/dinner-solve`     | POST   | session JWT; Premium+ entitlement when `context_hint=leftovers` | Generate 3 ranked dinner options. Leftovers mode (`context_hint=leftovers`) rejects Free users with `ENT-LEFTOVERS-01` before consuming quota. | yes via `solve_request_id`  |
-| `/v1/ai/realtime-session` | POST   | session JWT + Premium+ entitlement check            | Mint a short-lived Gemini Live ephemeral session token for Cook Mode voice. Server holds the Gemini API key and session config (model, voice, system prompt, allowed function calls, thinking level); client opens a stateful WebSocket directly to Gemini Live using the ephemeral token. Rejects with `ENT-VOICE-01` if user has no Cook Mode voice entitlement, or `RATE-01` if user has exceeded voice Cook Session quota. | session-scoped token; one mint per Realtime session, re-minted on session refresh (~every 10 min or 15 turns) |
-| `/v1/ai/cook-turn`        | POST   | session JWT                                         | Text fallback for Cook Mode voice when Live API is unavailable                    | no; conversational          |
+| `/v1/ai/realtime-session` | POST   | session JWT + Premium+ entitlement check            | Mint a short-lived OpenAI Realtime client secret (`ek_…`, from `POST /v1/realtime/client_secrets`) for Cook Mode voice. Server holds the OpenAI API key and session config (model, voice, system prompt, allowed function calls, reasoning effort, turn detection, output cap); client opens a stateful WebSocket directly to OpenAI Realtime using the secret. Response `{auth_token, expires_at, session_id, ws_url, prompt_version, setup_frame_json}`: `auth_token` is the `ek_` secret, `setup_frame_json` is a `session.update` frame carrying the truncation policy whose `session.updated` reply is the handshake ack. Rejects with `ENT-VOICE-01` if user has no Cook Mode voice entitlement, or `RATE-01` if user has exceeded voice Cook Session quota. | session-scoped token; one mint per Realtime session, re-minted on session refresh (near the 60-minute session limit, and for transport recovery) |
+| `/v1/ai/cook-turn`        | POST   | session JWT                                         | Text fallback for Cook Mode voice when realtime voice is unavailable              | no; conversational          |
 | `/v1/ai/substitution`     | POST   | session JWT                                         | Resolve missing ingredient / equipment / dietary change. Also invoked as the Realtime session's substitution function-call handler. | yes via `sub_event_id`      |
 | `/v1/ai/recipe-import`    | POST   | session JWT                                         | Normalize URL / OCR text into structured recipe                                   | yes via `import_id`         |
 | `/v1/ai/grocery-generate` | POST   | session JWT                                         | Generate grocery diff list from plan/session                                      | yes via `source_id`         |
@@ -266,16 +266,16 @@ Backend/
 
 ### AI architecture
 
-**Vendor:** Google Gemini (sole provider). All AI traffic routes through Gemini family models. No cross-vendor fallback is wired up in v1.
+**Vendors (ADR 0038):** Claude for text, OpenAI Realtime for voice. Gemini remains callable for text only, behind the `AI_TEXT_PROVIDER` secret. There is no per-request cross-vendor fallback.
 
 **Routing logic**
 
-* Pantry scan / dinner solve / substitutions (outside Cook Mode) → **Gemini 3 Flash**
-* **Cook Mode voice turns → Gemini 3.1 Flash Live Preview at `thinkingLevel: minimal` via direct client↔Gemini Live WebSocket connection.** The Supabase backend mints an ephemeral session token via the Gemini Live API's token-minting endpoint; the main Gemini API key never leaves Supabase Edge Functions. Each Cook Session gets a fresh ephemeral token; long Cook Sessions (>~10 min OR >15 turns, whichever comes first) transparently refresh by minting a new token and reopening the Live connection with a summarized context carry-over.
-* **Cook Mode substitutions → triggered as a function call from inside the active Live API session, using an explicit Tool Call Preamble pattern: the system prompt instructs the model to speak a short neutral filler ("Let me check") immediately before emitting the function call. The function handler runs Gemini 3 Flash text generation with the standalone substitution prompt and the hard-rule validator, then returns a structured result which the Live session speaks back. The voice model never invents substitutions.**
-* Recipe normalization / grocery structuring → **Gemini 3.1 Flash-Lite**
-* Gemini Live API unavailable → Cook Mode voice falls back to local Speech (STT) → Gemini 3 Flash (text) → AVSpeechSynthesizer (TTS), with the `AI-VOICE-01` banner shown
-* Gemini API fully down → no fresh AI generation; saved meals, cached plans, local timers, and manual edit paths remain functional
+* **Text** (pantry scan, dinner solve, substitution, recipe-step rewrite, cook-turn, recipe import, grocery) → Claude through the official `@anthropic-ai/sdk`. Every text feature uses **`claude-haiku-5-5`** today; **`claude-sonnet-5-5`** is the escalation model for a feature where the parity check shows Haiku failing. Structured output goes through `output_config.format` (`json_schema`); the response `stop_reason` is checked for `refusal` and `max_tokens` before content is read.
+* **Text provider switch:** the `AI_TEXT_PROVIDER` secret ∈ {`anthropic` (default), `gemini`} selects the provider for every text endpoint at once. Under `gemini`, `gemini-3-flash-preview` serves scan, solve, substitution, step rewrite and cook-turn, and `gemini-3.1-flash-lite` (GA) serves recipe import and grocery. An unrecognized value fails loudly at the first call rather than choosing a provider.
+* **Cook Mode voice turns → OpenAI Realtime `gpt-realtime-2.1-mini` (reasoning effort `minimal`) via a direct client↔OpenAI WebSocket** (`wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini`). The Supabase backend mints a client secret with `POST /v1/realtime/client_secrets`; the main OpenAI API key never leaves Supabase Edge Functions. The secret has a 120-second window to open a connection, and a session lasts at most 60 minutes. Audio is PCM16 mono 24 kHz in both directions. Each Cook Session gets a fresh client secret; the client refreshes the session (new secret, new socket) only near the 60-minute limit (at 55 minutes, with the secret pre-minted at 54 minutes) and for transport recovery.
+* **Cook Mode substitutions → triggered as a function call from inside the active Realtime session. The tool descriptions instruct the model to speak a short neutral filler ("Let me check") before emitting the call. The function handler runs the text model with the standalone substitution prompt and the hard-rule validator, then returns a structured result as `function_call_output`; the client then sends an explicit `response.create` so the model speaks it back (a tool result alone does not start a response). The voice model never invents substitutions.**
+* Realtime voice unavailable → Cook Mode voice falls back to local Speech (STT) → text model via `/v1/ai/cook-turn` → AVSpeechSynthesizer (TTS), with the `AI-VOICE-01` banner shown
+* Text provider fully down → no fresh AI generation; saved meals, cached plans, local timers, and manual edit paths remain functional
 
 **Context management**
 
@@ -287,9 +287,9 @@ Backend/
   * recipe plan
   * current step
   * last 4 user/assistant turns
-* Cook Mode Live sessions bootstrap from the same typed state at session open; per-turn context then accumulates server-side within the session only, scoped to one Cook Session and discarded when the session closes
-* **Session refresh as pruning**: Gemini Live has no mid-session history truncation frame, so cost is bounded by minting a new ephemeral token with a compact recap appended to `systemInstruction` and atomically swapping the WebSocket. Triggers: every 10 turns since last refresh OR any single turn exceeding 15,000 prompt tokens. This is the primary cost control lever given that Gemini Live does not support prompt caching AND does not support client-side truncation. See ADR 0014 for the protocol-level correction.
-* On step advance / timer completion / substitution, the app sends a typed event to the active Live session so the model's notion of "current step" stays accurate
+* Cook Mode Realtime sessions bootstrap from the same typed state at session open; per-turn context then accumulates server-side within the session only, scoped to one Cook Session and discarded when the session closes
+* **Server truncation bounds per-turn growth; refresh does not.** The session's setup frame (`session.update`) sets `truncation` to `retention_ratio` 0.8 with `token_limits.post_instructions` 8000: when the conversation after the instructions exceeds 8,000 tokens, the server drops the oldest items and keeps 80%, so truncation does not recur every turn. OpenAI caches the conversation prefix automatically, and a refresh opens a new session and discards that cache, so refresh is the expensive path and is kept only for the 60-minute session limit and transport recovery. The invariant is that per-turn prompt tokens stay bounded. See ADR 0038 decision 4.
+* On step advance / timer completion / substitution, the app sends a typed event to the active Realtime session so the model's notion of "current step" stays accurate
 * Imported recipes are always treated as **untrusted content**, never as executable instructions
 
 **Prompt versioning**
@@ -311,12 +311,12 @@ Backend/
 * JSON schema validation on every model response
 * Any response that fails validation or violates hard rules is discarded and retried
 * Realtime substitution function-call outputs run through the same hard-rule validator as the standalone `/v1/ai/substitution` endpoint before being spoken back
-* Cook Mode system prompt pins `max_output_tokens` at ~150 to enforce response brevity and cap runaway output audio cost
+* The Realtime session config pins `max_output_tokens: 400` (ADR 0010) to enforce response brevity and cap runaway output audio cost
 
 **Cost observability**
 
 * Every AI response logs provider, model, input tokens, output tokens, latency, cost, thinking_level
-* Live sessions log per-turn audio token counts (input and output) and per-session cumulative totals, with a hard cap triggering automatic session refresh
+* Voice sessions log per-turn token counts (text and audio, input and output, plus cached text and cached audio input) and per-session cumulative totals; the voice cache hit rate is the key voice cost signal
 * Daily rollups by feature and user cohort
 
 ## 4. Data Model
@@ -771,19 +771,19 @@ All tables live in Supabase Postgres with Row-Level Security enabled. Every row 
 
 | Feature                     | Description                                            | User story + acceptance criteria                                                                                                                                           | Screens                        | Data touchpoints                                | Integrations                         | Success metric             |
 | --------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------- | ------------------------------------ | -------------------------- |
-| Camera pantry scan          | Scan fridge/pantry/counter into structured ingredients | As a cook, I want to point at ingredients and get a usable list in <10s. **Accept:** image captured, parsed, editable chips shown, user can continue even with uncertainty | Scan Camera, Scan Review       | MediaAsset, PantryItem, MealSolveRequest        | Camera, Vision, Gemini 3 Flash       | scan completion rate       |
+| Camera pantry scan          | Scan fridge/pantry/counter into structured ingredients | As a cook, I want to point at ingredients and get a usable list in <10s. **Accept:** image captured, parsed, editable chips shown, user can continue even with uncertainty | Scan Camera, Scan Review       | MediaAsset, PantryItem, MealSolveRequest        | Camera, Vision, Claude Haiku 5.5     | scan completion rate       |
 | Household setup             | Capture diet, dislikes, servings, equipment            | As a new user, I want Stir to know my constraints before it suggests food. **Accept:** setup completes in <30s and persists                                                | Welcome, Setup screens         | HouseholdProfile, DietaryRule, KitchenEquipment | local only                           | onboarding completion      |
-| Tonight solver              | Generate 3 ranked dinner options                       | As a tired user, I want three real choices, not 30. **Accept:** up to 3 options, all pass hard constraints, each shows fit reason. If <3 options pass hard rules (sparse pantry + strict dietary rules), show what's available plus a 'broaden constraints' CTA — never pad with rule-violating options                                        | Constraints, Dinner Options    | MealSolveRequest, SuggestedDish, RecipePlan     | Gemini 3 Flash                       | solve-to-selection rate    |
-| Ranking labels              | Show fastest / least waste / best fit                  | As a user, I want to know why each option exists. **Accept:** each option displays a primary label and short rationale                                                     | Dinner Options                 | SuggestedDish                                   | Gemini 3 Flash                       | option trust click-through |
+| Tonight solver              | Generate 3 ranked dinner options                       | As a tired user, I want three real choices, not 30. **Accept:** up to 3 options, all pass hard constraints, each shows fit reason. If <3 options pass hard rules (sparse pantry + strict dietary rules), show what's available plus a 'broaden constraints' CTA — never pad with rule-violating options                                        | Constraints, Dinner Options    | MealSolveRequest, SuggestedDish, RecipePlan     | Claude Haiku 5.5                     | solve-to-selection rate    |
+| Ranking labels              | Show fastest / least waste / best fit                  | As a user, I want to know why each option exists. **Accept:** each option displays a primary label and short rationale                                                     | Dinner Options                 | SuggestedDish                                   | Claude Haiku 5.5                     | option trust click-through |
 | Pantry staples profile      | Persist assumed staples separately from scans          | As a user, I want Stir to assume oil/spices/rice without rescanning every time. **Accept:** staples editable and applied in solves                                         | Household Preferences          | PantryItem                                      | local/CloudKit                       | repeat solve rate          |
 | Cook Mode (tap-based)       | Step cards + swipe/tap progression. Available on all tiers. | As a cook, I want the app to stay on the current step, not bury me in text. **Accept:** current step visible, next/previous reliable, timers attach to steps               | Cook Mode                      | RecipePlan, Step, CookingSession, Timer         | ActivityKit                          | cook start rate            |
 | Auto timers                 | Generate timers from steps                             | As a cook, I want timers without manual setup. **Accept:** timers created from step metadata and editable before start                                                     | Cook Mode                      | Timer, Step                                     | local notifications, Live Activities | timer usage rate           |
-| Hands-free Q&A              | Voice question answering in Cook Mode. **Premium+ only.** | As a user, I want to ask "what next?" or "is this simmering?" without leaving the flow. **Accept:** spoken response begins <1.0s p95 (time-to-first-audio) and is tied to the current step; user can interrupt mid-response (barge-in); voice button tapped on Free tier → hard paywall presenting annual trial CTA. | Cook Mode, Paywall             | VoiceTurn, CookingSession                       | Microphone, Gemini 3.1 Flash Live Preview (primary); Speech + Gemini 3 Flash text + AVSpeechSynthesizer (fallback when Live API unavailable) | cook-mode turn success, voice-triggered conversion |
-| Mid-cook substitutions      | Resolve missing ingredient/equipment/change-of-plan. Text-based for Free (sheet); voice-invoked via function call for Premium+. | As a user, I want a rescue path when I'm out of something. **Accept:** substitute respects hard rules and updates current plan                                             | Substitution Sheet             | SubstitutionEvent, RecipePlan                   | Gemini 3 Flash                       | accepted substitution rate |
+| Hands-free Q&A              | Voice question answering in Cook Mode. **Premium+ only.** | As a user, I want to ask "what next?" or "is this simmering?" without leaving the flow. **Accept:** spoken response begins <1.0s p95 (time-to-first-audio) and is tied to the current step; user can interrupt mid-response (barge-in); voice button tapped on Free tier → hard paywall presenting annual trial CTA. | Cook Mode, Paywall             | VoiceTurn, CookingSession                       | Microphone, OpenAI Realtime `gpt-realtime-2.1-mini` (primary); Speech + Claude Haiku 5.5 text + AVSpeechSynthesizer (fallback when realtime voice unavailable) | cook-mode turn success, voice-triggered conversion |
+| Mid-cook substitutions      | Resolve missing ingredient/equipment/change-of-plan. Text-based for Free (sheet); voice-invoked via function call for Premium+. | As a user, I want a rescue path when I'm out of something. **Accept:** substitute respects hard rules and updates current plan                                             | Substitution Sheet             | SubstitutionEvent, RecipePlan                   | Claude Haiku 5.5                     | accepted substitution rate |
 | Portion scaling             | Recompute ingredient amounts and steps                 | As a user, I want to halve/double a meal. **Accept:** ingredients and timer hints rescaled before or during session                                                        | Dish Preview, Cook Mode        | RecipePlan, RecipeIngredient                    | local compute                        | scale feature use          |
-| Leftovers mode              | Suggest next-day reuse                                 | As a user, I want leftovers to become the next dinner, not waste. **Accept:** leftovers create a follow-up suggestion or reminder                                          | Feedback Sheet, Leftovers      | OutcomeFeedback, PantryItem, RecipePlan         | local notifications, Gemini 3 Flash  | leftovers follow-up rate   |
+| Leftovers mode              | Suggest next-day reuse                                 | As a user, I want leftovers to become the next dinner, not waste. **Accept:** leftovers create a follow-up suggestion or reminder                                          | Feedback Sheet, Leftovers      | OutcomeFeedback, PantryItem, RecipePlan         | local notifications, Claude Haiku 5.5 | leftovers follow-up rate   |
 | Share extension import      | Accept recipes from Safari/social share sheet          | As a user, I want to import a recipe without copy/paste. **Accept:** URL/text lands in Import Review and normalizes into editable steps                                    | Share Extension, Import Review | RecipeImport, RecipePlan                        | Share Extension                      | import start rate          |
-| Photo/screenshot OCR import | Turn screenshots or recipe cards into steps            | As a user, I want to photograph a recipe and cook from it. **Accept:** OCR text extracted on device, AI normalizer produces editable structure                             | Import Entry, Import Review    | MediaAsset, RecipeImport, RecipePlan            | Photos, Vision, Gemini 3.1 Flash-Lite | OCR parse accept rate      |
+| Photo/screenshot OCR import | Turn screenshots or recipe cards into steps            | As a user, I want to photograph a recipe and cook from it. **Accept:** OCR text extracted on device, AI normalizer produces editable structure                             | Import Entry, Import Review    | MediaAsset, RecipeImport, RecipePlan            | Photos, Vision, Claude Haiku 5.5     | OCR parse accept rate      |
 | Grocery export              | Send missing items to Reminders                        | As a user, I want the shortfall list in my existing reminders app. **Accept:** items export to chosen list; on permission denial, list stays in-app                        | Grocery Export                 | GroceryList, GroceryItem                        | EventKit Reminders                   | export completion          |
 | Pantry correction chips     | Fix scan mistakes fast                                 | As a user, I want correcting the scan to be easier than retyping. **Accept:** add/remove/rename via chips, no full form required                                           | Scan Review                    | PantryItem                                      | local                                | correction completion      |
 | Saved meals / favorites     | Replay meals that worked                               | As a user, I want one-tap replay for reliable weeknight wins. **Accept:** saved favorite opens straight to preview or Cook Mode                                            | Saved Library, Recipe Detail   | RecipePlan, OutcomeFeedback                     | CloudKit                             | repeat-cook rate           |
@@ -1090,11 +1090,13 @@ Use the AI cost model from §12.
 
 Assumptions (per active user, per month):
 
-* **Free AI cost**: $0.075 (scan + solve + import + grocery; no voice)
-* **Premium AI cost**: $1.89 (Free features + 13 voice Cook Sessions at ADR 0015 caps; measured range $1.69–$2.08)
-* **Pro AI cost**: $3.69 (Premium features + scaled to 27 voice Cook Sessions at ADR 0015 caps; measured range $3.51–$4.32)
+* **Free AI budget**: $0.075 (scan + solve + import + grocery; no voice)
+* **Premium AI budget**: $1.89 (Free features + 13 voice Cook Sessions at ADR 0015 caps)
+* **Pro AI budget**: $3.69 (Premium features + scaled to 27 voice Cook Sessions at ADR 0015 caps)
 * backend + observability = **$0.20**
 * support reserve = **$0.15**
+
+The table below uses the budget lines above, which are unchanged by ADR 0038 (caps, SKU prices and margins stay as set). Modeled spend at the ADR 0038 rates is in §12.1: it sits inside the Premium and Pro budgets only while the voice cache hit rate holds.
 
 | Tier                          | Net revenue/mo |    AI | Infra | Support | Contribution margin/mo | 4-month CAC ceiling |
 | ----------------------------- | -------------: | ----: | ----: | ------: | ---------------------: | ------------------: |
@@ -1108,7 +1110,7 @@ Assumptions (per active user, per month):
 
 **Margin flags:**
 
-* **Pro annual year-1 contribution margin is $4.13/mo — healthy.** The Pro voice cap is deliberately set at 27 sessions per ADR 0015 (2026-04-23 revision after device-measured Live API cost data revealed the implicit-caching assumption was empirically false) and Pro annual priced at $139.99 to protect against the power-law usage distribution — a small fraction of Pro users consume at the cap while average users leave quota unused, so the realized average drifts toward the cap, not the mean. Pre-ADR-0015 configurations (40 and 60-session caps at various price points) were considered and rejected — they yielded fragile margins that couldn't absorb the per-turn cost reality plus any usage variance, and left insufficient headroom for founder-discount promotional codes during beta. The "preserve price, trim cap" tradeoff was durable where the alternative was a price-raise cliff. If beta telemetry shows <15% of Pro users hitting the 27-session cap AND caching emerges on Live API (ADR 0015 trigger query), consider raising the cap selectively via a superseding ADR rather than across the board.
+* **Pro annual year-1 contribution margin is $4.13/mo — healthy.** The Pro voice cap is deliberately set at 27 sessions per ADR 0015 and Pro annual priced at $139.99 to protect against the power-law usage distribution — a small fraction of Pro users consume at the cap while average users leave quota unused, so the realized average drifts toward the cap, not the mean. The cap and price leave headroom for founder-discount promotional codes during beta. ADR 0038 leaves caps, prices and margins unchanged; voice margin now depends on the cache hit rate of the Realtime session (OpenAI caches the conversation prefix automatically, on a best-effort basis), measured per turn and watched on the AI Ops dashboard. If beta telemetry shows <15% of Pro users hitting the 27-session cap AND the voice cache hit rate holds, consider raising the cap selectively via a superseding ADR rather than across the board.
 * **Premium monthly is the healthiest SKU.** $6.25/mo contribution margin, $25.01 4-month CAC ceiling. Optimize acquisition here.
 * **Free tier is $0.43/mo net negative.** At 5% free-to-paid conversion over 6 months and ~8 months average paid retention, each converted free user generates ~$30–60 lifetime value depending on SKU mix minus ~$2.55 in free-tier cost — comfortably net-positive at projected economics. Worth monitoring if free-tier cost drifts above $0.50/mo or if conversion falls below 3%.
 
@@ -1241,79 +1243,86 @@ Export initiated from Settings via share sheet.
 
 * user content sync: Apple CloudKit-managed regioning
 * backend operational metadata: U.S. region
-* AI provider: Google Gemini paid API endpoints, U.S.-hosted for launch configuration
+* AI providers: Anthropic API (text) and OpenAI Realtime (voice); Google Gemini API only while `AI_TEXT_PROVIDER=gemini`. Processing-region configuration for these providers is not yet recorded here.
 
 ## 12. AI Component Audit
 
 ### Provider choice and pricing
 
-**Single provider: Google Gemini.** All AI traffic (scan, solve, voice, substitution, import, grocery) routes through Gemini family models. No cross-vendor fallback is wired up in v1.
+**Two providers, one per job (ADR 0038).** Text (scan, solve, substitution, step rewrite, cook-turn, import, grocery) runs on the Claude API. Voice runs on OpenAI Realtime. Gemini is callable for text only behind the `AI_TEXT_PROVIDER` secret. There is no per-request cross-vendor fallback. Prices and sources, with retrieval dates, are in ADR 0038; the backend's `MODEL_PRICING` (`_shared/ai_request_log.ts`) is the single source of truth for cost math.
 
-**Pricing (Google AI, paid tier, per 1M tokens):**
+**Pricing (per 1M tokens):**
 
-| Model | Input (text/image/video) | Input (audio) | Output | Cache |
-| --- | --- | --- | --- | --- |
-| Gemini 3 Flash Preview | $0.50 | $1.00 | $3.00 | $0.05 text / $0.10 audio + $1.00/1M/hour storage |
-| Gemini 3.1 Flash-Lite Preview | $0.25 | $0.50 | $1.50 | $0.025 text + $1.00/1M/hour storage |
-| Gemini 3.1 Flash Live Preview | $0.75 (text) | $3.00 | $4.50 (text) / $12.00 (audio) | Not supported |
+| Model | Role | Input (text / image) | Input cached | Output | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Claude Haiku 5.5 (`claude-haiku-5-5`) | text, all features | $0.10 | $0.01 read; $0.125 write | $0.50 | rates apply to prompts up to 100K tokens; no Stir prompt approaches it |
+| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | text escalation model | $2.00 | $0.10 read; $2.50 write | $10.00 | used only where Haiku fails the parity check |
+| Gemini 3 Flash Preview (`gemini-3-flash-preview`) | text fallback (`AI_TEXT_PROVIDER=gemini`) | $0.50 | $0.05 | $3.00 | |
+| Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite`, GA) | text fallback, import + grocery | $0.25 | $0.025 | $1.50 | |
 
-Key Live API facts:
-- Audio tokens are metered at 25 tokens per second of audio (both directions)
-- `thinkingLevel` defaults to `minimal` for Live sessions, optimized for lowest time-to-first-token
-- Context window: 131,072 tokens
-- Function calling: supported with streaming
-- Caching: **not supported** for the Live API — cost control relies on context pruning
-- Preview status: still labeled preview as of April 2026; mitigated by the `disable_cook_realtime` kill switch
+| Model | Role | Text in | Text in cached | Audio in | Audio in cached | Text out | Audio out |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI `gpt-realtime-2.1-mini` | Cook Mode voice | $0.60 | $0.06 | $10.00 | $0.30 | $2.40 | $20.00 |
 
-Google's paid tier states content is **not** used to improve its products.
+Key Realtime facts:
+- Transport: WebSocket, `wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini`, authenticated with a client secret minted server-side at `POST /v1/realtime/client_secrets`. The secret has a 120-second window to open a connection; a session lasts at most 60 minutes.
+- Audio: PCM16 mono 24 kHz in both directions. OpenAI bills user audio at 10 tokens/s and model audio at 20 tokens/s.
+- Reasoning effort is `minimal` by default (the `cook_voice_thinking_level` flag selects `minimal` or `low`), optimized for lowest time-to-first-audio.
+- Function calling: supported; a tool result starts no response by itself, so the client sends an explicit `response.create` after `function_call_output`.
+- Caching: **automatic** prompt caching of the conversation prefix, best-effort. Server truncation (`retention_ratio` 0.8, `post_instructions` 8000) bounds per-turn prompt growth; a session refresh discards the cache, so refresh is kept to the 60-minute limit and transport recovery.
+- Escalation: `gpt-realtime-2.1` (audio in $32, cached audio in $0.40, audio out $64 per 1M) is the escalation path if mini misses tool calls in device testing; it is not wired up.
+
+Promotional credits are held on both the Anthropic and OpenAI platforms; amounts and expiry dates are unknown. The rates above are what Stir pays once the credits run out.
 
 **Target ARPU used in % calculations**
 Premium monthly net ARPU = **$8.4915**
 
 ### 12.1 Cost table
 
-> **Updated 2026-04-23 with ADR 0015 cap reshuffle.** Step 6 Cook Mode voice shipped and was exercised across multiple 9+ turn sessions. Per-turn prompt tokens came in ~3x higher than the ADR 0014 amendment modeled, because the baked-in systemInstruction + recipe context + pantry + household + AUDIO-mode overhead is ~3,800 tokens per turn, not ~1,500. Real 15-turn session cost lands at ~$0.13-0.16 (vs $0.12-0.15 projected). Pre-ADR-0015, the 20-session/mo Premium cap would have landed at $2.56-$3.10/mo — 35-64% over the $1.89 AI budget line. ADR 0015 (2026-04-23) cut caps to Premium 13 / Pro 27 after a second device-measured finding confirmed implicit caching empirically does NOT fire on `gemini-3.1-flash-live-preview` (50+ turns checked, `usageMetadata.cachedContentTokenCount` zero or absent throughout). The "wait for caching GA" mitigation option is permanently assumed unavailable in cost models; the trigger-to-revisit query in ADR 0015 is the only path to reopen. See ADR 0014 "measured-reality cost correction" amendment and ADR 0015 for the full caching-finding + cap-reshuffle rationale.
+> **Caps unchanged; rates per ADR 0038.** Voice caps stay Free 0 / Premium 13 / Pro 27 sessions per month (ADR 0015), and SKU prices and margins are unchanged. This section prices usage at the ADR 0038 rates, using the token shapes ADR 0014 measured on device. The Premium and Pro AI budget lines ($1.89 and $3.69) are the guardrails the modeled spend is held against.
 
-**Voice Cook Mode cost model (device-measured):** context accumulates across turns at full audio input rate (no cache, no mid-session pruning — refresh IS the cost lever, ADR 0014). Refresh triggers at `turnCount - lastRefreshedAtTurn >= 4` OR `promptTokens > 10_000` on a single turn, `max_output_tokens: 400` cap (ADR 0010), pre-mint one turn before refresh (shaves ~1.9s off handoff).
+**Voice Cook Mode cost model:** OpenAI Realtime caches the conversation prefix automatically, so per-turn cost depends on the cache hit rate. Server truncation (`retention_ratio` 0.8, `post_instructions` 8000) bounds per-turn prompt growth without opening a new session; a refresh discards the cache and happens only near the 60-minute limit and on transport recovery. `max_output_tokens: 400` caps output (ADR 0010). Assumptions (ADR 0038): 15 turns, 3 tool-call turns, a 3,300-token static text prefix, 3.8 s of user speech and 5.0 s of model speech per turn, input transcription on.
 
-Per turn, measured on 9-turn device session, cadence N=4, ~22% tool-call rate:
-- Non-tool turn (steady-state): ~4,527 prompt tokens + ~124 response audio tokens
-- Tool-call turn (double generation pass for toolCall + toolResponse): ~8,822 prompt tokens + ~150 response
-- Prompt split ≈ 75/25 text/audio at low end, 60/40 at high end (backend captures `prompt_audio_tokens` + `prompt_text_tokens` for exact per-call breakdown in `ai_request_log` → PostHog LLM Observability)
-- Blended rate at 75/25: $1.31/M prompt; at 60/40: $1.65/M prompt
+A tool-call turn is a double generation pass (the call, then the spoken reply after `function_call_output`), billed as two responses. The backend captures `prompt_tokens_text`, `prompt_tokens_audio`, `prompt_tokens_cached` (cached text) and `prompt_tokens_cached_audio` per turn for the exact breakdown in `ai_request_log` → PostHog LLM Observability.
 
-Session cost at ~22% tool-call rate (7 refreshes per 30 turns):
-- **15-turn session**: ~$0.13 (low end, 75/25) to ~$0.16 (high end, 60/40)
-- **20-turn session**: ~$0.17 to ~$0.21
-- **30-turn session**: ~$0.27 to ~$0.32
+| Voice option | 15-turn session, 90% cache hits | 15-turn session, no caching | Premium 13 / Pro 27 sessions per month (cached) |
+| --- | ---: | ---: | --- |
+| `gpt-realtime-2.1-mini` (Cook Mode voice) | $0.085 | $0.254 | $1.11 / $2.31 |
+| `gpt-realtime-2.1` (escalation path, not wired up) | $0.294 | $0.944 | $3.82 / $7.93 |
+
+Voice on mini stays inside the Premium $1.89 and Pro $3.69 AI budgets only while the cache hit rate holds. Without caching, 13 sessions at $0.254 would cost about $3.30 per month and 27 sessions about $6.86, both above their budgets. The full `gpt-realtime-2.1` model at 13 sessions would cost about twice the Premium budget. The voice cache hit rate (`ai_request_log.prompt_cached_tokens`, which carries cached text plus cached audio tokens, over total prompt tokens, per turn) is therefore the key voice cost signal.
 
 | Feature                 | Model                 | Representative token budget                                 |                               Cost per interaction | Volume / Premium user / month | Monthly AI cost / Premium user | % of Premium net ARPU |
 | ----------------------- | --------------------- | ----------------------------------------------------------- | -------------------------------------------------: | ----------------------------: | -----------------------------: | --------------------: |
-| Pantry scan parse       | Gemini 3 Flash        | 1 image @1120 tokens + ~1080 text/context input, 450 output |  `(2200 × $0.50/1M) + (450 × $3.00/1M) = $0.00245` |                            10 |                     `$0.02450` |               `0.29%` |
-| Dinner solve            | Gemini 3 Flash        | 2400 input, 900 output                                      |  `(2400 × $0.50/1M) + (900 × $3.00/1M) = $0.00390` |                            12 |                     `$0.04680` |               `0.55%` |
-| Voice Cook Mode session (15 turns, measured) | Gemini 3.1 Flash Live Preview (MINIMAL) | ~4,527 prompt / non-tool turn + ~8,822 / tool-call turn + ~124 response audio/turn; 75/25 to 60/40 text:audio split | `~$0.142 per 15-turn session` (midpoint of $0.13-$0.16 range) | 13 sessions (ADR 0015) | `$1.84600` | `21.74%` |
-| Substitution rescue     | Gemini 3 Flash        | 1600 input, 260 output                                      |  `(1600 × $0.50/1M) + (260 × $3.00/1M) = $0.00158` |                             8 |                     `$0.01264` |               `0.15%` |
-| Recipe import normalize | Gemini 3.1 Flash-Lite | 2200 OCR text input, 550 output                             | `(2200 × $0.25/1M) + (550 × $1.50/1M) = $0.001375` |                             4 |                     `$0.00550` |               `0.06%` |
-| Grocery list generation | Gemini 3.1 Flash-Lite | 650 input, 140 output                                       | `(650 × $0.25/1M) + (140 × $1.50/1M) = $0.0003725` |                             4 |                     `$0.00149` |               `0.02%` |
+| Pantry scan parse       | Claude Haiku 5.5      | 2200 input incl. image, 450 output (nominal)                |  `(2200 × $0.10/1M) + (450 × $0.50/1M) = $0.000445` |                            10 |                     `$0.00445` |               `0.05%` |
+| Dinner solve            | Claude Haiku 5.5      | 2400 input, 900 output (nominal)                            |  `(2400 × $0.10/1M) + (900 × $0.50/1M) = $0.00069` |                            12 |                     `$0.00828` |               `0.10%` |
+| Voice Cook Mode session (15 turns, 90% cache hits) | `gpt-realtime-2.1-mini` (reasoning `minimal`) | 15 turns, 3 tool-call turns, 3,300-token static text prefix, 3.8 s user / 5.0 s model speech per turn, input transcription on | `$0.085 per 15-turn session` (ADR 0038) | 13 sessions (ADR 0015) | `$1.11000` | `13.07%` |
+| Substitution rescue     | Claude Haiku 5.5      | 1600 input, 260 output (nominal)                            |  `(1600 × $0.10/1M) + (260 × $0.50/1M) = $0.00029` |                             8 |                     `$0.00232` |               `0.03%` |
+| Recipe import normalize | Claude Haiku 5.5      | 2200 OCR text input, 550 output (nominal)                   | `(2200 × $0.10/1M) + (550 × $0.50/1M) = $0.000495` |                             4 |                     `$0.00198` |               `0.02%` |
+| Grocery list generation | Claude Haiku 5.5      | 650 input, 140 output (nominal)                             | `(650 × $0.10/1M) + (140 × $0.50/1M) = $0.000135` |                             4 |                     `$0.00054` |               `0.01%` |
 
-**Total monthly AI cost / Premium user = `0.02450 + 0.04680 + 1.84600 + 0.01264 + 0.00550 + 0.00149 = $1.93693`**
-**Total AI cost as % of Premium net ARPU = `1.93693 / 8.4915 = 22.81%`**
+The text rows use nominal token budgets, not Claude-tokenizer measurements; Claude token counts are not yet measured and will replace them from `ai_request_log`. The voice row is the ADR 0038 model, not a device measurement on OpenAI Realtime.
 
-**Lands inside the 22.27% Premium AI guardrail per ADR 0015.** At 13-session × 15-turn cap, total is ~$1.94/mo (22.8% of ARPU) — hugs the guardrail with minimal slack; measured range $1.69–$2.08/mo accounts for tool-call rate variance (12%–35% observed band). Slack is in the cap itself, not per-call cost. If usage concentrates toward the heavy tail OR average session length exceeds 15 turns OR tool-call rate trends above 22%, margin tightens. Monitor `ai_cost_usd_per_active_user` during beta; revisit via ADR 0015 trigger query (`prompt_cached_tokens / input_tokens` rolling median ≥ 0.30) if cap hit-rate is low but realized cost drifts.
+**Total monthly AI cost / Premium user = `0.00445 + 0.00828 + 1.11000 + 0.00232 + 0.00198 + 0.00054 = $1.12757`**
+**Total AI cost as % of Premium net ARPU = `1.12757 / 8.4915 = 13.28%`**
 
-**Free user AI cost = `0.02450 (6 scans/10) + 0.04680 + 0.01264 (if 8 subs used) + 0.00550 (2 imports) + 0.00149 + $0 (no voice) ≈ $0.075/user/month`.** Voice is the dominant cost line; stripping it makes Free tier net-positive on AI spend. ADR 0008 (Free 20 voice sessions during step-6 development) is Superseded by ADR 0015 — Free reverts to 0 voice sessions in the ADR 0015 release, consolidating with the Premium 20→13 and Pro 40→27 cap changes.
+**Inside the $1.89 Premium AI budget (22.3% of ARPU) only while the voice cache hit rate holds.** At the 13-session × 15-turn cap and 90% cache hits, modeled spend is ~$1.13/mo; with no caching the same sessions cost ~$3.30/mo in voice alone, above the budget. Voice margin therefore depends on the cache hit rate, which OpenAI calls best-effort. If usage concentrates toward the heavy tail OR average session length exceeds 15 turns OR the tool-call rate trends above 3 of 15 turns, spend rises. Monitor `ai_cost_usd_per_active_user` and the per-turn voice cache hit rate during beta.
 
-**Pro user AI cost ≈ $3.69/user/month** driven by 27 voice Cook Sessions at ~$0.133 each (per ADR 0015; measured range $3.51–$4.32/mo).
+**Free user AI cost** has no voice line. Free text spend is bounded by the Premium text figure above (about $0.018/user/month at the nominal budgets), inside the $0.075 Free budget line. Voice is the dominant cost line; stripping it makes the Free tier net-positive on AI spend. ADR 0008 (Free 20 voice sessions during step-6 development) is Superseded by ADR 0015 — Free has 0 voice sessions.
 
-Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pro user's AI cost**. This is a feature-concentrated cost profile — runaway voice cost is the single most likely way unit economics break. Operational monitoring of per-user voice session token consumption is therefore critical.
+**Pro user voice cost ≈ $2.31/user/month** for 27 voice Cook Sessions at 90% cache hits (ADR 0038), against a $3.69 Pro AI budget line; with no caching, 27 sessions would cost about $6.86.
+
+Voice Cook Mode is **98.4% of a Premium user's modeled AI cost**. This is a feature-concentrated cost profile — a falling voice cache hit rate or runaway voice cost is the single most likely way unit economics break. Operational monitoring of per-user voice token consumption and the voice cache hit rate is therefore critical.
 
 ### 12.2 Feature-by-feature audit
+
+Text features run on Claude Haiku 5.5 unless a feature's entry says otherwise; a feature moves to Claude Sonnet 5.5 only when the parity check shows Haiku failing it (ADR 0038). The parity check runs each Claude candidate on the same inputs as the Gemini fallback, requires schema-valid output and a clean hard-rule validator pass, compares outputs side by side, and scores `eval:substitutions` (100% hard-rule pass required). Under `AI_TEXT_PROVIDER=gemini` the same features run on `gemini-3-flash-preview` (scan, solve, substitution, step rewrite, cook-turn) and `gemini-3.1-flash-lite` (import, grocery).
 
 #### Pantry scan parse
 
 * **What it does**: turns one kitchen image into a structured ingredient list with confidence bands
-* **Model**: Gemini 3 Flash
-* **Rationale**: multimodal strength + low cost
+* **Model**: Claude Haiku 5.5 (image input; JPEG, PNG or WebP)
+* **Rationale**: multimodal input at the lowest text price ($0.10 / $0.50 per 1M); structured output through `output_config.format`
 * **Latency budget**: p95 < 4.0s from image upload to reviewed chips
 * **Inference path**: image + household profile + bundled ingredient ontology excerpt → JSON schema output
 * **Streaming**: no; single-shot response
@@ -1335,7 +1344,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 #### Dinner solve
 
 * **What it does**: produce exactly 3 ranked dinner options
-* **Model**: Gemini 3 Flash
+* **Model**: Claude Haiku 5.5 (the `done` SSE frame carries the serving `model`, which iOS emits as `dinner_solve_completed.model`)
 * **Latency budget**: p95 < 3.5s
 * **Inference path**: pantry snapshot + preferences + time/equipment + recent feedback summary → 3 structured options
 * **Streaming**: yes, card-by-card streaming to improve perceived latency
@@ -1355,37 +1364,39 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 #### Voice Cook Mode turn (Premium+ only)
 
 * **What it does**: answer current-step questions and keep the user moving, hands-free
-* **Model**: **Gemini 3.1 Flash Live Preview** at `thinkingLevel: minimal`, via stateful WebSocket to the Live API using an ephemeral session token minted by Supabase
-* **Fallback**: when Live API is unavailable, transparent fallback to local Speech (STT) → Gemini 3 Flash (text) → AVSpeechSynthesizer (TTS) with `AI-VOICE-01` banner
-* **Latency budget**: **p95 < 1.0s time-to-first-audio** (Gemini Live production reports 250–500ms TTFA on US networks); p95 < 2.5s total round-trip for text fallback path
+* **Model**: **OpenAI Realtime `gpt-realtime-2.1-mini`** at reasoning effort `minimal`, via stateful WebSocket (`wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini`) using a client secret minted by Supabase. Voice `marin`, PCM16 mono 24 kHz both ways, user-speech transcription on, far-field noise reduction.
+* **Fallback**: when realtime voice is unavailable, transparent fallback to local Speech (STT) → text model via `/v1/ai/cook-turn` (Claude Haiku 5.5 by default) → AVSpeechSynthesizer (TTS) with `AI-VOICE-01` banner. The `disable_cook_realtime` flag forces this route.
+* **Latency budget**: **p95 < 1.0s time-to-first-audio** (ADR 0012 gates; to be measured on OpenAI Realtime); p95 < 2.5s total round-trip for text fallback path
 * **Inference path**: streamed user audio + session system prompt (current recipe plan, current step, last 4 turns, timer state, hard dietary rules, allowed function calls) → streamed audio response. Substitutions and timer actions exposed as function calls, not free-form speech.
-* **Streaming**: native bidirectional audio; barge-in and turn-taking handled by the Live API
+* **Streaming**: native bidirectional audio; turn-taking handled by server turn detection (`semantic_vad` or `server_vad`). The session sets `interrupt_response: false` to match the half-duplex mic gate (ADR 0011): the client does not forward mic audio while the model speaks, so barge-in by speech is not a supported path.
 * **Reliability tolerance**: concise, step-grounded, no made-up steps; no model-invented substitutions
 * **Guardrails**:
 
   * system prompt pins the model to the current step and forbids substitutions outside the function-call path
   * food-safety-sensitive questions get a prepended safety cue before the spoken answer
   * substitution function-call outputs run through the same hard-rule validator as the standalone substitution feature before being spoken
-  * per-session audio token budget caps at 40K cumulative tokens → forces session refresh; hard cap at 80K → session reset with banner
-  * `max_output_tokens: 150` enforced at session config to prevent runaway output audio cost
-  * **Tool Call Preamble pattern — [UNVALIDATED ASSUMPTION — week-one spike required before Cook Mode voice build proceeds].** The intent is that the system prompt instructs the model to say a short neutral filler ("Let me check", "One moment") simultaneously with emitting any tool call, masking the ~2s substitution backend round-trip. Unlike OpenAI's gpt-realtime family, Gemini Live is not known to produce preambles spontaneously, and its adherence to a prompt instruction to 'speak X then emit tool call' under MINIMAL reasoning has not been independently benchmarked. The week-one spike must measure preamble-present rate across ≥50 tool-call invocations. **Mandatory mitigation regardless of spike outcome: client-side pre-recorded filler audio.** The iOS client plays one of three pre-recorded neutral filler clips ("Let me check", "One moment", "Give me a second") the instant a `toolCall` frame arrives, independently of any model-emitted preamble. This covers the ~2s backend round-trip deterministically. The prompt-level preamble is best-effort polish on top; if it fires the client filler is skipped or overlapped cleanly. If spike shows model preamble rate <90%, the client-side clip is the primary UX and model preamble is disabled via system prompt to avoid double-speak.
-  * Turn detection: start with `semantic_vad` (chunks based on utterance completion) to reduce false-positive tokenization of non-speech kitchen noise; fall back to `server_vad` if semantic VAD proves unreliable in testing
-  * Session refresh as pruning (ADR 0014): trigger a new mint + WS swap every 10 turns OR whenever a single turn exceeds 15,000 prompt tokens, carrying a compact recap (~200-300 tokens) in the new session's `systemInstruction` for continuity. Earlier drafts specified `session.update` with audio-item truncation; that frame type doesn't exist on Gemini Live.
-* **Eval set**: `eval_cook_turns_v1.jsonl` with 120 scripted dialogues, run against **both** the Live API path and the text fallback path
+  * server truncation (`retention_ratio` 0.8, `token_limits.post_instructions` 8000) bounds per-turn prompt growth inside a session; the session is not refreshed to prune
+  * `max_output_tokens: 400` (ADR 0010) enforced at session config to prevent runaway output audio cost
+  * **Tool Call Preamble pattern — [UNVALIDATED ASSUMPTION — adherence on `gpt-realtime-2.1-mini` is not yet measured; device testing must cover every tool].** The tool descriptions instruct the model to say a short neutral filler ("Let me check", "One moment") before emitting a slow tool call (`substitution_check`, and the timer calls other than `get_timer_status`), masking the ~2s substitution backend round-trip; `get_timer_status` and `set_step` need no preamble. The test must measure preamble-present rate across ≥50 tool-call invocations. If the rate is <90%, a client-side pre-recorded neutral filler clip ("Let me check", "One moment", "Give me a second") plays the instant a function-call event arrives, and the model preamble is disabled via the tool descriptions to avoid double-speak.
+  * Tool results: after `function_call_output` the client sends an explicit `response.create`; without it the model does not speak the result
+  * Turn detection: start with `semantic_vad` (chunks based on utterance completion) to reduce false-positive tokenization of non-speech kitchen noise; the `voice_turn_detection_mode` flag switches to `server_vad` if semantic VAD proves unreliable in testing
+  * Session refresh (ADR 0038): the client opens a new session (new client secret, new socket) only when the socket nears OpenAI's 60-minute limit (55 minutes, secret pre-minted at 54 minutes) and for transport recovery. It is not a pruning mechanism: each refresh discards the prompt cache.
+* **Eval set**: `eval_cook_turns_v1.jsonl` with 120 scripted dialogues, run against **both** the realtime voice path and the text fallback path
 * **Success criteria**:
 
   * wrong-step answer rate < 3% on both paths
-  * p95 time-to-first-audio < 1.0s on Live API; p95 total latency < 2.5s on fallback
+  * p95 time-to-first-audio < 1.0s on the realtime path; p95 total latency < 2.5s on fallback
   * user "helpful" thumbs-up ≥ 80%
-  * barge-in acknowledged within 300ms on Live API
-  * preamble-present rate ≥ 95% on Live API tool-call turns (verifiable from audio transcripts in eval)
-  * per-session cumulative token usage stays below 40K in >95% of sessions (validates pruning)
+  * barge-in (mic tap during model speech) acknowledged within 300ms on the realtime path
+  * preamble-present rate ≥ 95% on realtime tool-call turns (verifiable from audio transcripts in eval)
+  * per-turn prompt tokens stay bounded by truncation across a long scripted session (validates the truncation policy)
+  * voice cache hit rate holds at the level the cost model assumes (90%); see §12.1
 
 #### Substitution rescue
 
 * **What it does**: propose safe replacements mid-cook
-* **Model**: Gemini 3 Flash
-* **Invocation**: standalone from the Substitution Sheet (all tiers), or as a function call from inside the active Cook Mode Live API session (Premium+)
+* **Model**: Claude Haiku 5.5
+* **Invocation**: standalone from the Substitution Sheet (all tiers), or as a function call from inside the active Cook Mode Realtime session (Premium+)
 * **Latency budget**: p95 < 2.8s
 * **Inference path**: missing ingredient + current recipe + hard rules + equipment
 * **Streaming**: no; single structured suggestion
@@ -1405,7 +1416,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 #### Recipe import normalize
 
 * **What it does**: normalize OCR text / URL content into title, ingredients, steps
-* **Model**: Gemini 3.1 Flash-Lite
+* **Model**: Claude Haiku 5.5
 * **Latency budget**: synchronous URL imports < 4s; screenshot OCR imports async if >1 page
 * **Inference path**: on-device OCR / fetched HTML cleanup → structured recipe schema
 * **Streaming**: no
@@ -1425,7 +1436,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 #### Grocery list generation
 
 * **What it does**: generate missing-item list and map to Reminders-friendly structure
-* **Model**: Gemini 3.1 Flash-Lite
+* **Model**: Claude Haiku 5.5
 * **Latency budget**: p95 < 1.5s
 * **Inference path**: recipe ingredients - pantry remembered items = draft grocery list
 * **Streaming**: no
@@ -1446,11 +1457,11 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 | -------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------ |
 | Pantry scan parse          | no user text can alter system instructions; image and OCR treated as content only                      | none; no external retrieval                                      | request built only from current user local state | schema validation + confidence threshold           | allergen misclassification, hidden-ingredient hallucination | nightly eval + live low-confidence rate alert              | "Check allergens yourself" when ambiguous        |
 | Dinner solve               | imported recipe text never included in solve prompt as authority                                       | none in v1                                                       | no shared memory; CloudKit private DB boundary   | schema + hard-rule validator                       | allergen/diet violations, unrealistic meals                 | canary prompt rollout, rollback if hard-rule violations >0 | explicit warning if spoilage/freshness uncertain |
-| Voice Cook Mode turn       | user utterances cannot override system prompt; tool surface limited to substitution + timer function calls | none                                                             | session context scoped to one Cook Session only; Live API session closed when Cook Mode exits | no free-form tool execution; substitution function-call outputs re-validated by hard-rule engine before being spoken | bad food-safety advice, timing errors, model-invented substitutions | helpfulness ↓ or complaint ↑ triggers rollback; Live-to-fallback ratio monitored | prepend safety cue on meat/eggs/leftovers        |
+| Voice Cook Mode turn       | user utterances cannot override system prompt; tool surface limited to substitution + timer function calls | none                                                             | session context scoped to one Cook Session only; Realtime session closed when Cook Mode exits | no free-form tool execution; substitution function-call outputs re-validated by hard-rule engine before being spoken | bad food-safety advice, timing errors, model-invented substitutions | helpfulness ↓ or complaint ↑ triggers rollback; realtime-to-fallback ratio monitored | prepend safety cue on meat/eggs/leftovers        |
 | Substitution rescue        | same as above                                                                                          | none                                                             | same as above                                    | structured output only                             | allergen exposure, recipe breakage                          | zero hard-rule violations accepted                         | user retains judgment; visible safety warning    |
 | Recipe import normalize    | imported HTML/OCR sanitized; never allow "ignore previous instructions" content to act as instructions | HTML cleaned, scripts stripped, URL domain allowlist for fetcher | import scoped to current user only               | sanitize text before display                       | malformed steps, copyright attribution omission             | parse-failure alerting by source type                      | imported recipes always editable before use      |
 
-**Provider training-data policy:** Google Gemini paid API — content is not used to improve products. ([Google AI for Developers][5])
+**Provider data policy:** Gemini paid API content is not used to improve Google's products ([Google AI for Developers][5]); this applies only while `AI_TEXT_PROVIDER=gemini`. The Anthropic API and OpenAI API data-use terms are not yet recorded in this spec and must be checked and recorded before launch (see §19 AI subprocessor disclosure).
 
 ### 12.4 Global AI safety rules
 
@@ -1473,9 +1484,9 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
   * network 5xx / timeouts: exponential backoff 0.5s, 1.5s, 3s
   * schema failures: one automatic retry on same model, then escalate
   * client errors 4xx: no retry
-  * Live API connect failure or mid-session drop: one immediate attempt (re-mint ephemeral token + reconnect), then fall back to the text Cook Mode path with `AI-VOICE-01` banner
-  * Live API ephemeral token mint failure: single retry with exponential backoff, then fall back
-  * Gemini API complete outage (all models): surface `AI-01`, user can use saved meals, cached plans, local timers, manual Substitution Sheet becomes inert
+  * Realtime connect failure or mid-session drop: one immediate attempt (re-mint client secret + reconnect), then fall back to the text Cook Mode path with `AI-VOICE-01` banner
+  * Realtime client-secret mint failure: single retry with exponential backoff, then fall back (the mint call itself has no SDK retry and a 10 s timeout; the handler refunds the voice quota on failure)
+  * Text provider complete outage (all models): surface `AI-01`, user can use saved meals, cached plans, local timers, manual Substitution Sheet becomes inert. Each text call retries once on a 5xx at the handler; the Claude SDK's own retries are off so the two layers do not compound.
 * persistent offline queue only for:
 
   * feedback submission
@@ -1492,7 +1503,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 * cook completion
 * subscription funnel
 * AI cost by feature
-* Gemini service health
+* AI provider health (Anthropic, OpenAI Realtime; Gemini while `AI_TEXT_PROVIDER=gemini`)
 * sync health
 
 **Metrics**
@@ -1506,7 +1517,8 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 * `mean_rating`
 * `ai_cost_usd_per_active_user` segmented by tier (Free / Premium / Pro)
 * `voice_session_tokens_p95` (catches runaway sessions before cost spikes)
-* `cook_voice_live_share` (share of voice cook turns served by Live API vs text fallback)
+* `voice_cache_hit_rate` (cached text + cached audio input tokens over total prompt tokens per voice turn; the key voice cost signal)
+* `cook_voice_live_share` (share of voice cook turns served by the realtime path vs text fallback)
 * `cook_voice_ttfa_p95_ms`
 * `preamble_present_rate` (share of tool calls preceded by filler audio)
 * `cloudkit_sync_error_rate`
@@ -1515,13 +1527,13 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 **Alerts**
 
 * any AI request failure rate > 5% over 15 min
-* Live API fallback share > 10% over 30 min (indicates Live API degradation)
-* Live API p95 time-to-first-audio > 1.5s over 30 min
+* Realtime fallback share > 10% over 30 min (indicates realtime voice degradation)
+* Realtime p95 time-to-first-audio > 1.5s over 30 min
 * dinner solve hard-rule violation > 0 in canary
 * AI cost / Premium user > $3.00 daily (roughly 2x expected)
 * AI cost / Pro user > $8.00 daily
-* voice_session_tokens_p95 > 50K (pruning is failing)
-* preamble_present_rate < 90% (Gemini not following tool-call preamble instruction)
+* voice_session_tokens_p95 > 50K (truncation is failing)
+* preamble_present_rate < 90% (the voice model not following the tool-call preamble instruction)
 * CloudKit sync error rate > 3%
 * crash-free sessions < 99.2%
 * payment confirmation lag > 10 min p95
@@ -1529,7 +1541,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 
 ### Security (web2)
 
-* Supabase Edge Function secrets store provider keys (**single Gemini API key**, RevenueCat webhook secret, APNs auth key). **No provider API keys ever in the app bundle.** Cook Mode voice uses the ephemeral-token pattern: the client receives a short-lived session token from `/v1/ai/realtime-session` scoped to one Live API session, and connects directly to Gemini Live with that token. The main Gemini API key stays in Supabase and is never exposed to the client.
+* Supabase Edge Function secrets store provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` — the last used only when `AI_TEXT_PROVIDER=gemini` — plus the RevenueCat webhook secret and APNs auth key). **No provider API keys ever in the app bundle.** Cook Mode voice uses the client-secret pattern: the client receives a short-lived OpenAI Realtime client secret (`ek_…`) from `/v1/ai/realtime-session` that can only open one session, within a 120-second window, and connects directly to OpenAI Realtime with it. The main OpenAI API key stays in Supabase and is never exposed to the client.
 * HTTPS only
 * signed session JWT from backend; short TTL
 * request size caps:
@@ -1537,7 +1549,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
   * images 5 MB compressed max
   * OCR text 50 KB max
 * URL fetch allowlist and content-type validation for recipe imports
-* rate limiting by IP + canonical user key + endpoint, enforced in Edge Functions and backed by Postgres counters. Per-user voice Cook Session quota enforced at token-mint time — `/v1/ai/realtime-session` refuses to mint a new ephemeral token if the user has no voice entitlement or has exceeded their monthly cap. **Apple ID rotation defense:** IP-based layer caps daily Dinner Solve count at 30 across all canonical user keys originating from the same IP — targets the sign-out-of-iCloud-to-reset-quota abuse vector without penalizing legitimate household-shared IPs (daily 30 is well above any real household usage).  
+* rate limiting by IP + canonical user key + endpoint, enforced in Edge Functions and backed by Postgres counters. Per-user voice Cook Session quota enforced at token-mint time — `/v1/ai/realtime-session` refuses to mint a new client secret if the user has no voice entitlement or has exceeded their monthly cap. **Apple ID rotation defense:** IP-based layer caps daily Dinner Solve count at 30 across all canonical user keys originating from the same IP — targets the sign-out-of-iCloud-to-reset-quota abuse vector without penalizing legitimate household-shared IPs (daily 30 is well above any real household usage).  
 * webhook signature verification for RevenueCat
 * APNs auth key stored only server-side
 * all local sensitive identifiers in Keychain, not `UserDefaults`
@@ -1547,7 +1559,7 @@ Voice Cook Mode is now **95.3% of a Premium user's AI cost** and **97.5% of a Pr
 See §12.3. In addition:
 
 * strip HTML, markdown links, hidden text, and suspicious control sequences from imported recipes
-* cap model outputs by schema and token budget (`max_output_tokens: 150` on Live sessions)
+* cap model outputs by schema and token budget (`max_output_tokens: 400` on Realtime sessions, ADR 0010)
 * never render model output as rich HTML
 * redact user free-text in logs unless user opted into diagnostics
 
@@ -1592,19 +1604,23 @@ See §12.3. In addition:
 * `widget_nudge_enabled`
 * `leftovers_mode_enabled`
 * `cook_voice_default_on` (Premium+ only; whether voice mic affordance is default-active vs default-off)
-* `voice_turn_detection_mode` (values: `semantic_vad` | `server_vad`)
+* `voice_turn_detection_mode` (values: `semantic_vad` | `server_vad`; selects OpenAI's semantic VAD or server VAD, consumed at mint)
 
 **Server flags via backend**
 
 * `prompt_version_override`
 * `recipe_import_async_threshold`
 * `priority_queue_pro_enabled`
-* `cook_voice_thinking_level` (values: `minimal` | `low`; MINIMAL is default, LOW is escalation path if reasoning proves insufficient)
+* `cook_voice_thinking_level` (values: `minimal` | `low`; sets the Realtime reasoning effort. `minimal` is default, `low` is the escalation path if reasoning proves insufficient)
+
+**Server secrets (not flags)**
+
+* `AI_TEXT_PROVIDER` (values: `anthropic` default | `gemini`; one selection for every text endpoint, no per-request fallback; an unrecognized value fails at the first call)
 
 **Kill switches**
 
 * `disable_scan_parse`
-* `disable_cook_realtime` (disables Live API mint; all Premium+ voice traffic falls back to Gemini text + AVSpeechSynthesizer with `AI-VOICE-01` banner)
+* `disable_cook_realtime` (disables the Realtime mint; all Premium+ voice traffic falls back to the text model + AVSpeechSynthesizer with `AI-VOICE-01` banner)
 * `disable_imports`
 * `force_saved_meals_only`
 
@@ -1612,16 +1628,18 @@ See §12.3. In addition:
 
 | Failure                   | Fallback                                                 |
 | ------------------------- | -------------------------------------------------------- |
-| Gemini Live API unavailable (token mint fails, WebSocket connect fails, or mid-session drop with failed reconnect) | Cook Mode voice falls back to local Speech → Gemini 3 Flash text → AVSpeechSynthesizer, with `AI-VOICE-01` banner. **Pre-warm at Cook Mode entry:** initialize `SFSpeechRecognizer` and load the selected AVSpeechSynthesizer voice into memory even while the Live path is working, so fallback can engage in <200ms if Live drops mid-session. Expected fallback TTFA p95: 1.5–2.5s (Speech STT ~500ms + Gemini Flash text ~800ms + AVSpeechSynthesizer start ~200ms + network variance). No barge-in on fallback path; turn-taking is tap-to-speak. This UX gap is material — Premium is sold on hands-free cooking, so fallback is treated as a first-class product path, not a last-resort degraded mode. |
-| Gemini API fully unavailable | No fresh AI generation. Saved meals, cached plans, manual edit paths, local timers, local grocery list, Reminders export all continue to work. Substitution Sheet becomes inert with friendly copy. |
+| OpenAI Realtime unavailable (client-secret mint fails, WebSocket connect fails, or mid-session drop with failed reconnect) | Cook Mode voice falls back to local Speech → text model (`/v1/ai/cook-turn`) → AVSpeechSynthesizer, with `AI-VOICE-01` banner. **Pre-warm at Cook Mode entry:** initialize `SFSpeechRecognizer` and load the selected AVSpeechSynthesizer voice into memory even while the realtime path is working, so fallback can engage in <200ms if realtime drops mid-session. Expected fallback TTFA p95: 1.5–2.5s (Speech STT ~500ms + text model ~800ms + AVSpeechSynthesizer start ~200ms + network variance; the text-model share is to be re-measured on Claude Haiku 5.5). No barge-in on fallback path; turn-taking is tap-to-speak. This UX gap is material — Premium is sold on hands-free cooking, so fallback is treated as a first-class product path, not a last-resort degraded mode. |
+| Text provider fully unavailable (Claude, or Gemini while `AI_TEXT_PROVIDER=gemini`) | No fresh AI generation. Saved meals, cached plans, manual edit paths, local timers, local grocery list, Reminders export all continue to work. Substitution Sheet becomes inert with friendly copy. |
 | CloudKit unavailable      | local-only mode                                          |
 | RevenueCat unavailable    | use cached entitlements for 24h grace                    |
 | Reminders unavailable     | in-app grocery list + copy/share                         |
-| Speech framework unavailable and Live API unavailable | tap-only Cook Mode     |
+| Speech framework unavailable and realtime voice unavailable | tap-only Cook Mode     |
 
 ### Model / prompt rollback
 
 * every prompt version pinned by semantic version
+* the model per text feature is set in the backend's per-feature model map (`_shared/ai_text.ts`); a feature moves from `claude-haiku-5-5` to `claude-sonnet-5-5` only when the parity check shows Haiku failing
+* text provider rollback: set the `AI_TEXT_PROVIDER` secret to `gemini` (every text endpoint switches together; there is no per-feature or per-request switch)
 * new prompt versions run on offline eval set before staging
 * canary rollout starts at 5%
 * automatic rollback if:
@@ -1630,7 +1648,8 @@ See §12.3. In addition:
   * fallback rate doubles
   * user thumbs-down rate > 15% above baseline
   * p95 latency > SLO for 30 min
-  * voice_session_tokens_p95 spikes >30% above baseline (pruning regression)
+  * voice_session_tokens_p95 spikes >30% above baseline (truncation regression)
+  * voice cache hit rate falls materially below the cost model's 90% assumption (voice margin regression)
 
 ## 14. Admin & Ops Tooling
 
@@ -1706,10 +1725,10 @@ The dispatch path wraps the row in a Sentry-shaped envelope with `event_id = cos
 | `cook_step_advanced`               | step_index, manual_or_voice                                                                    | usage depth                | Cook Mode               |
 | `timer_started`                    | duration_bucket, generated_vs_manual (generated/manual/voice)                                    | timer adoption             | Cook Mode               |
 | `voice_affordance_tapped`          | tier (free/premium/pro), result (paywall_shown/voice_started/permission_denied/busy/voice_stopped) | conversion funnel          | Paywall + Cook Mode     |
-| `cook_turn_submitted`              | turn_type, current_step_index, path=live_api/gemini_fallback                                    | voice Q&A usage            | AI Ops                  |
+| `cook_turn_submitted`              | turn_type, current_step_index, path=live_api/gemini_fallback (wire values; `live_api` = realtime path, `gemini_fallback` = C.3 on-device fallback path) | voice Q&A usage            | AI Ops                  |
 | `cook_turn_resolved`               | latency_ttfa_ms, latency_total_ms, barge_in, path, result_type (normal/tool_call/error), error_code? | Cook Mode quality          | AI Ops                  |
 | `voice_session_token_snapshot`     | session_id, turns_so_far, cumulative_tokens, current_step_index                                | runaway cost detection     | AI Ops                  |
-| `voice_session_refreshed`          | session_id, refresh_reason (turns/tokens/goaway/transport_error; minutes reserved), turns_at_refresh, success | refresh cadence + refresh success rate | AI Ops                  |
+| `voice_session_refreshed`          | session_id, refresh_reason (minutes/transport_error), turns_at_refresh, success | refresh cadence + refresh success rate | AI Ops                  |
 | `voice_quota_refund`               | request_id, reason ∈ {no_active_prompt, mint_failed, mint_unexpected_error}, upstream_status? | refund-audit observability (SCA-145) — disambiguates the increment-then-refund path on the placeholder-key CI path from never-incremented. NOTE: `request_id` is a request-scoped log correlator only — refund branches return BEFORE `logAIRequest()`, so no `ai_request_log` row joins. Find refunded requests via PostHog Insight on this event. | AI Ops                  |
 | `substitution_requested`           | problem_type, invocation=sheet/realtime_function_call, sub_event_id                            | rescue usage               | Cook Mode               |
 | `substitution_accepted`            | accepted, constraint_safe, invocation=sheet/realtime_function_call, sub_event_id, reason (user_accepted/user_rejected/unsafe_acknowledged/auto_applied/unsafe_refused) | rescue quality             | Flywheel / AI Ops       |
@@ -1769,10 +1788,12 @@ The dispatch path wraps the row in a Sentry-shaped envelope with `event_id = cos
 
 - **`paywall_viewed.trigger`** — discrete string identifying the surface that produced the paywall presentation. Stable wire values; renaming any breaks an existing PostHog dashboard. Current values: `dinner_solve_quota_exhausted`, `pantry_cap_reached` (user hit their tier's remembered-pantry cap on Pantry Management — Free 25 / Premium 250 / Pro 1000), `recipe_import_quota_exhausted`, `saved_favorites_gate`, `widgets_gate`, `leftovers_gate`, `multi_image_scan_gate`, `settings_upgrade` (Free user tapping Settings > Plan & Billing > Upgrade to Premium → full PaywallView), `settings_pro_comparison` (Settings > Plan & Billing → Pro-comparison sheet directly, used by both Free "See Pro features" and Premium "Upgrade to Pro" entry points; `current_tier` discriminates the two), `voice_affordance_tapped`, `voice_cook_quota_exhausted`. `settings_upgrade` and `settings_pro_comparison` are intentionally distinct so the Premium-trial funnel (PaywallView path) and the Pro-comparison funnel don't conflate — comparison-sheet impressions don't lead to a Premium trial, only to Pro purchase or dismiss. Mirrored 1:1 with `PaywallTrigger.telemetryValue` (iOS); adding a new value requires updating `PaywallTrigger.swift`, this list, and the CLAUDE.md telemetry list in the same commit.
 - **`cook_turn_resolved.result_type`** — every terminal turn path emits `cook_turn_resolved`, including errors and interruptions. Values: `normal` (successful reply), `tool_call` (successful reply that executed a model-suggested action — advance step, start timer), `error` (endTurn threw — emptyTranscript, network, AI-VOICE-01, rate limit, any StirError). Error emissions carry `error_code` (the Stir ErrorCode raw value) and `latency_ttfa_ms = 0` since TTFA couldn't be clocked. Submitted:resolved ratio must stay ~1:1 — a drift below 90% indicates silent error swallowing, not real turn failure.
-- **`cook_turn_resolved.latency_ttfa_ms`** — Live path: driver-level, from server's `inputTranscription.finished=true` to first `modelTurn.parts[].inlineData` audio chunk (frame-level precision). Fallback path: Speech-to-Text wall-clock latency. Zero on error paths where neither anchor was reached.
+- **`cook_turn_resolved.latency_ttfa_ms`** — Realtime path: driver-level, from the server's `speech_stopped` event (VAD end of user speech) to the first model audio chunk (`response.output_audio.delta`), frame-level precision. Fallback path: Speech-to-Text wall-clock latency. Zero on error paths where neither anchor was reached.
 - **`cook_turn_resolved.barge_in`** — `true` when the user tapped the mic during the prior turn's `modelSpeaking` state to start THIS turn. Semantics: "this turn began by interrupting the previous turn's playback", not "this turn was interrupted" (the resolved event fires at turnComplete, before playback finishes, so we can't retroactively flag an in-flight turn). Flag is reset after emission. `helpful_vote` was previously scaffolded-but-unwired; removed from the emission pending a thumbs-up/down UI.
-- **`voice_session_refreshed.refresh_reason`** — shipped values: `turns` (crossed `refreshAtTurnCount = 4` boundary per ADR 0014), `tokens` (hit `refreshAtPromptTokenCount` soft cap on a single turn), `goaway` (server emitted a goAway frame), `transport_error` (WebSocket errored mid-session; refresh as recovery). Reserved for future: `minutes` (crossed `refreshAtElapsedSec` — not yet wired).
+- **`voice_session_refreshed.refresh_reason`** — values: `minutes` (the socket's age crossed the 55-minute refresh point, ahead of OpenAI's 60-minute session limit; ADR 0038) and `transport_error` (WebSocket errored mid-session; refresh as recovery). Turn-count and prompt-token triggers do not exist: server truncation bounds per-turn growth, and each refresh discards the prompt cache.
 - **`voice_session_refreshed.success`** — boolean. Fires on BOTH success and failure paths of `refreshSession()` (not just on request, as pre-2026-04-22 drafts). `success=true` → the swap committed, new session is live; `success=false` → any step threw (mint / WS open / setup handshake / post-swap cleanup). Dashboards compute refresh success rate = `count(success=true) / count(*)`. Failure emission makes the "Voice session health" tile bidirectional — prior one-sided design left refresh failures telemetry-invisible.
+- **`dinner_solve_completed.model`** — taken from the `model` field of the backend's dinner-solve `done` SSE frame, so it names the model that actually served the solve (Claude, or Gemini while `AI_TEXT_PROVIDER=gemini`). The field is optional on the wire so older cached solves still decode; iOS emits `unknown` for those. No event names change.
+- **Voice turn token fields (`/v1/ai/voice-turn-usage`)** — each turn carries `prompt_tokens_text`, `prompt_tokens_audio`, `prompt_tokens_cached` (cached text), the optional `prompt_tokens_cached_audio` (cached audio; older clients omit it and their cached audio is billed at the full audio rate), and the response token fields. Cached text and cached audio are priced at their own cached rates. Constraint: `prompt_tokens_cached + prompt_tokens_cached_audio ≤ prompt_tokens_total`. `ai_request_log.prompt_cached_tokens` and PostHog `$ai_cache_read_input_tokens` carry cached text plus cached audio tokens. The voice cache hit rate is the key voice cost signal.
 - **`substitution_requested.sub_event_id`** / **`substitution_accepted.sub_event_id`** + **`substitution_accepted.invocation`** — the rescue-usage funnel joins requested → accepted pairs on `sub_event_id`. Both events MUST fire for every substitution attempt on both the sheet and voice paths — no half-depth asymmetry. The voice path has no user confirm step, so safe results auto-emit `substitution_accepted` with `accepted=true, constraint_safe=true, reason=auto_applied`, and unsafe results auto-emit `accepted=false, constraint_safe=false, reason=unsafe_refused`. Sheet `reason` values are `user_accepted` / `user_rejected` / `unsafe_acknowledged`. Dashboards slice voice vs sheet on `invocation` and accept-rate via `reason`.
 - **`voice_substitution_disambiguated`** — pinned by SCA-148 (CookModeViewModel.matchIngredient longest-match preference follow-up). Fires when the voice-side matcher detects ≥2 substring candidates whose displayName length ties at the longest length (e.g. "ric" against a recipe with both "rice" and "rind"). The CA1-H2 longest-match preference can disambiguate "rice" vs "white rice" / "rice noodles" (10 vs 12 chars) but collapses on equal-length matches. Properties: `session_id` (UUID string of the cooking-session, "unknown" placeholder when nil pre-persist — matches `leftovers_dish_selected.source_recipe_plan_id` convention), `candidate_count` (≥2, the number of equally-long winners), `surface` ∈ closed enum `{voice, tap}` mirroring `VoiceSessionTelemetry.SubstitutionDisambiguationSurface` (voice is the only emit site today; tap reserved for if the SubstitutionSheet auto-apply branch ever picks up matchIngredient logic), `resolved_to` ∈ closed enum `{free_text_fallback}` mirroring `VoiceSessionTelemetry.SubstitutionDisambiguationResolution`. v1 emits ONLY `free_text_fallback` — ambiguous voice matches route to the free-text persistence path (no recipe row mutation; the model's narration carries the user-facing swap). SCA-199 (/review-2 S1) trimmed three speculative resolution values (`user_picked_first`/`user_picked_second`/`timed_out`) that were declared in advance of the Phase 2 mid-turn-prompt UX; re-add cases when the prompt-UX commit actually lands rather than locking the wire vocabulary today. Adding a new `surface` or `resolved_to` value is a wire-contract change — update `VoiceSessionTelemetry.swift` enum + this clarification + CLAUDE.md telemetry list in the same commit. Dashboard signal: 7-day rolling rate of `voice_substitution_disambiguated / substitution_requested(invocation=realtime_function_call) ≥ 1%` justifies the prompt-UX build-out per the SCA-148 ticket trigger.
 - **`pantry_tombstone_reaper_ran`** — pinned by SCA-97. Fires from `PantryTombstoneReaper.runIfDue(...)` after every successful pass through `PantryItemRepository.purgeTombstones(olderThan:for:)` — the reaper is foreground-triggered (alongside the existing `softDeleteExpired` sweep in `RootView`'s scenePhase `.active` branch), once-per-day-cadence-throttled via a UserDefaults timestamp (`com.scalinity.stir.pantry.tombstoneReaper.lastRunAt`), and bounded by a 90-day retention window. **Emitted on every successful run, including zero-row passes** — the dashboard signal is "reaper ran today" not "reaper found something today", so missing emissions reliably indicate a wiring regression (foreground hook detached, repo throwing every call). Properties are counts only — never ingredient names — to satisfy ADR 0009's privacy invariant. Failed runs (Core Data fault during fetch/save) emit nothing AND don't move the cadence timestamp, so the next foreground retries instead of waiting a full day. `rows_purged` is the integer count of soft-deleted PantryItem rows whose `deletedAt < (now - retention)` was hard-deleted on this run; `retention_days` is the configured retention window in whole days (default 90, configurable via the reaper's init for tests / future tier scaling). Throttle-skipped foregrounds are silent. Dashboard signal: a sudden drop in distinct-user emission rate signals the foreground hook is detached; a sudden spike in `rows_purged` p95 signals a soft-delete burst (e.g. bulk-pantry-clear via `softDeleteAll`) is now aging into the retention window. CCPA scope is satisfied independently by the account-delete path (SCA-61 / SCA-88); this reaper is purely a CloudKit-zone-size hygiene loop.
@@ -1809,10 +1830,11 @@ Distinct from the product event table above. `$ai_generation` and `$ai_trace` fe
 | `$ai_trace_id`          | feature grouping id                                                                                   |
 | `$ai_span_id`           | request id (= ai_request_log.request_id)                                                              |
 | `$ai_span_name`         | `pantry_parse` \| `dinner_solve` \| `substitution` \| `recipe_import` \| `grocery_generate` \| `cook_turn` \| `recipe_import_async` \| `voice_cook_turn` |
-| `$ai_model`             | Gemini model string                                                                                   |
-| `$ai_provider`          | `gemini` (always)                                                                                     |
+| `$ai_model`             | model string (`claude-haiku-5-5`, `gpt-realtime-2.1-mini`, or a Gemini fallback model)                |
+| `$ai_provider`          | provider of `$ai_model`: `anthropic` \| `openai` \| `gemini`                                          |
 | `$ai_input_tokens`      | int                                                                                                   |
 | `$ai_output_tokens`     | int                                                                                                   |
+| `$ai_cache_read_input_tokens` | int, cached input tokens; emitted only when non-zero. On voice turns it carries cached text plus cached audio tokens (`ai_request_log.prompt_cached_tokens`). The voice cache hit rate is the key voice cost signal. |
 | `$ai_total_cost_usd`    | USD (6-decimal precision, server-computed)                                                             |
 | `$ai_latency`           | seconds                                                                                               |
 | `$ai_is_error`          | bool                                                                                                  |
@@ -1822,7 +1844,7 @@ Distinct from the product event table above. `$ai_generation` and `$ai_trace` fe
 | `thinking_level`        | `minimal` \| `low`                                                                                    |
 | `retry_count`           | int (0 = first try)                                                                                   |
 | `error_code`            | Stir ErrorCode duplicate for non-LLM filters                                                          |
-| `path`                  | `live_api` \| `gemini_fallback` — voice-turn calls only; absent on non-voice AI                       |
+| `path`                  | `live_api` \| `gemini_fallback` — voice-turn calls only; absent on non-voice AI (unchanged wire values: `live_api` = realtime path, `gemini_fallback` = C.3 fallback path) |
 
 **`$ai_trace` properties (voice sessions only in v1):** exactly ONE `$ai_trace` per session, fired from iOS `CookModeViewModel` at session close. Carries both input_state (captured at VM attach time) and output_state (session totals) in a single emission — PostHog is append-only, so a mint-time + close-time pair would create two sibling events rather than updating a single record (ADR 0009).
 
@@ -1851,7 +1873,7 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
 5. **Retention**
    weekly cohorts anchored on `cook_session_completed`
 6. **AI Ops**
-   cost/user by tier, cost/feature, voice-session token distribution, fallback rate, latency, schema failures, Live API share + TTFA, preamble-present rate
+   cost/user by tier, cost/feature, voice-session token distribution, voice cache hit rate, fallback rate, latency, schema failures, realtime voice share + TTFA, preamble-present rate
 7. **Flywheel**
    ingredient corrections, substitution acceptances, ratings, favorites
 
@@ -1876,7 +1898,8 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
 * paywall gate logic (including voice entitlement gating)
 * entitlement mapping
 * reminder export mapper
-* voice-session token budget tracker (prune-at-3-turns logic)
+* voice turn usage accumulator (sums usage across both responses of a tool-call turn, including cached text and cached audio tokens)
+* text-provider selection (`AI_TEXT_PROVIDER` unset or `anthropic` → Claude models; `gemini` → Gemini models; any other value throws)
 
 **Integration tests**
 
@@ -1886,12 +1909,13 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
 * CloudKit sync conflict resolution
 * APNs token registration
 * backend model routing
-* Gemini Live session establishment through `/v1/ai/realtime-session`, including session config bootstrap with recipe context, thinking_level=minimal, max_output_tokens cap, and turn detection config
-* Cook Mode Live API function-call round-trips to `/v1/ai/substitution` with hard-rule validator invocation
-* Cook Mode forced-fallback path (`disable_cook_realtime` flag on → verify Gemini text + AVSpeechSynthesizer still works end-to-end)
+* OpenAI Realtime client-secret mint through `/v1/ai/realtime-session`, including session config bootstrap with recipe context, reasoning effort `minimal`, `max_output_tokens: 400`, turn detection config, and a `setup_frame_json` that carries the truncation policy
+* Cook Mode Realtime function-call round-trips to `/v1/ai/substitution` with hard-rule validator invocation, including the explicit `response.create` after `function_call_output`
+* Cook Mode forced-fallback path (`disable_cook_realtime` flag on → verify text model + AVSpeechSynthesizer still works end-to-end)
 * Voice entitlement enforcement: Free user hitting `/v1/ai/realtime-session` → 403 with `ENT-VOICE-01`
 * Supabase RLS policy tests: confirm a session JWT for user A cannot read user B's `usage_counters`, `ai_request_log`, or `entitlement_snapshots` rows
-* Session refresh (ADR 0014): verify refresh triggers at `turnCount - lastRefreshedAtTurn >= 10` AND on any single turn with `promptTokens > 15000`, that setupComplete on the new WS lands within 5s, and per-turn prompt tokens reset to ~6-7k baseline on the first turn of the new session. Earlier "session pruning via `session.update`" test was removed — the frame doesn't exist on Gemini Live.
+* Server truncation (ADR 0038): in a long scripted session, per-turn prompt tokens stay bounded by the `retention_ratio` / `post_instructions` policy and the cached-token share stays high; no refresh fires before the 55-minute point.
+* Session refresh (ADR 0038): verify refresh triggers when the socket reaches 55 minutes (secret pre-minted at 54 minutes) and on transport error, and that the new socket's `session.updated` handshake ack lands within 5s.
 
 **Manual QA checklist before each beta/prod build**
 
@@ -1911,10 +1935,10 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
 * downgrade from Pro to Premium
 * restore purchases
 * billing grace banner state (sandbox)
-* Cook Mode voice via Gemini Live (happy path, barge-in, substitution via function call with preamble)
+* Cook Mode voice via OpenAI Realtime (happy path, barge-in, every tool: substitution via function call with preamble, each timer call, step navigation)
 * Cook Mode voice forced to text fallback (`disable_cook_realtime` on) with `AI-VOICE-01` banner visible
-* Cook Mode long session (>15 turns) — verify silent refresh
-* Cook Mode noisy environment (kitchen sounds) — verify pruning keeps costs bounded
+* Cook Mode long session (>15 turns) — verify no refresh fires, per-turn prompt tokens stay bounded and the cache hit rate stays high; a session reaching the 55-minute point refreshes silently
+* Cook Mode noisy environment (kitchen sounds) — verify turn detection does not misfire and truncation keeps costs bounded
 * saved meal replay offline
 * widget tap deep link
 * shortcut run deep link
@@ -1938,10 +1962,11 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
   * ≥25% of Free beta users who tap the voice affordance start a trial
   * median meal rating ≥ 4
   * no blocker bug in core funnel
-  * AI cost / active beta Premium user < **$2.50** (50% buffer above $1.71 projection)
+  * AI cost / active beta Premium user < **$2.50** (above the $1.89 Premium AI budget line; modeled spend is ~$1.13, §12.1)
   * AI cost / active beta Pro user < **$6.50**
-  * Cook Mode Live API share ≥ 90% of voice turns
-  * preamble-present rate ≥ 90% on Live API tool-call turns
+  * voice cache hit rate holds near the cost model's 90% assumption
+  * Cook Mode realtime voice share ≥ 90% of voice turns
+  * preamble-present rate ≥ 90% on realtime tool-call turns
 
 ### AI eval set
 
@@ -1949,15 +1974,17 @@ Trace aggregation: PostHog's pseudo-trace rollup sums `$ai_generation` costs and
 | ----------------------- | ------------: | ------------------------------------ |
 | `eval_pantry_scan_v1`   |    150 photos | precision ≥ 0.90, recall ≥ 0.75      |
 | `eval_dinner_solve_v1`  | 200 scenarios | 100% hard-rule pass, 85% cookability |
-| `eval_cook_turns_v1`    |     300 turns | wrong-step rate < 3% on both Live API and fallback paths; preamble-present rate ≥ 95% on Live API tool-call turns. Size rationale: at n=120 a one-sided 95% CI around 0 observed errors only bounds the true rate below ~2.5%, which is indistinguishable from the 3% target; n=300 tightens to ~1%, enough for the eval to fail a real regression. For tighter bounds (±0.5% around the target) the set would need n≥500 — accept n=300 as the v1 minimum. |
-| `eval_substitutions_v1` |     300 cases | 100% hard-rule pass (0 allergen violations observed). Size rationale: allergen substitution is legally sensitive. At n=100 observing 0/100 violations only proves <3.6% real violation rate at 95% CI — that exposure is not acceptable for allergen-adjacent output. At n=300 the same 0 observed bounds true rate below ~1.2%. Weight the set heavily toward allergen-adjacent substitutions (peanut, tree nut, dairy, gluten, egg, shellfish, soy), equipment swaps that change safety profile (no-oven dairy-heavy recipe), and dietary-constraint intersections (vegan + nut-free). Synthetic candidates can be generated via Gemini 3 Pro and hand-validated for ~8–12 hours of curation work. |
+| `eval_cook_turns_v1`    |     300 turns | wrong-step rate < 3% on both realtime and fallback paths; preamble-present rate ≥ 95% on realtime tool-call turns. Size rationale: at n=120 a one-sided 95% CI around 0 observed errors only bounds the true rate below ~2.5%, which is indistinguishable from the 3% target; n=300 tightens to ~1%, enough for the eval to fail a real regression. For tighter bounds (±0.5% around the target) the set would need n≥500 — accept n=300 as the v1 minimum. |
+| `eval_substitutions_v1` |     300 cases | 100% hard-rule pass (0 allergen violations observed). Size rationale: allergen substitution is legally sensitive. At n=100 observing 0/100 violations only proves <3.6% real violation rate at 95% CI — that exposure is not acceptable for allergen-adjacent output. At n=300 the same 0 observed bounds true rate below ~1.2%. Weight the set heavily toward allergen-adjacent substitutions (peanut, tree nut, dairy, gluten, egg, shellfish, soy), equipment swaps that change safety profile (no-oven dairy-heavy recipe), and dietary-constraint intersections (vegan + nut-free). Synthetic candidates can be generated via a frontier model and hand-validated for ~8–12 hours of curation work. |
 | `eval_recipe_import_v1` |   100 recipes | 85% acceptable without major edit    |
 | `eval_grocery_v1`       |     100 plans | 98% missing-item recall              |
+
+Eval harness status (ADR 0025, ADR 0038): five of the six harnesses are stubs; only `eval:substitutions` has a corpus (50 cases). Until the others have corpora, the Claude-versus-Gemini parity check (§12.2) is weaker evidence than a scored corpus.
 
 Run evals:
 
 * on every prompt change
-* on every model swap
+* on every model swap (including a change to the `AI_TEXT_PROVIDER` selection or a per-feature model)
 * nightly against staging defaults
 * before turning canary > 25%
 
@@ -1965,14 +1992,14 @@ Run evals:
 
 * prompt injection attempts in imported recipe text
 * OCR with embedded "ignore instructions" text
-* voice-spoken injection attempts during a Cook Mode Live API session (verify substitution function-call validator still rejects allergen violations)
-* malformed JSON from provider
+* voice-spoken injection attempts during a Cook Mode Realtime session (verify substitution function-call validator still rejects allergen violations)
+* malformed JSON from provider, and a Claude `stop_reason: "refusal"` or `max_tokens` response (verify neither is read as content)
 * cross-user data isolation check using two beta accounts/devices
-* forced Gemini Live outage → fallback path engages correctly
-* forced full Gemini outage → saved-meals-only mode engages correctly
+* forced realtime voice outage → fallback path engages correctly
+* forced full text-provider outage → saved-meals-only mode engages correctly
 * billing-grace + AI usage interaction
 * quota bypass attempts via clock change / reinstall
-* voice entitlement bypass attempts (e.g., Free user manipulating local state to request Live session token)
+* voice entitlement bypass attempts (e.g., Free user manipulating local state to request a Realtime client secret)
 * offensive / harmful text entered during cook turns
 * allergen-specific substitution stress set
 
@@ -2211,7 +2238,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 
 * allergy / food-safety disclaimer wording
 * ToS limitation-of-liability language for cooking guidance
-* privacy policy disclosure of AI subprocessors and analytics vendors (Google Gemini including Live API, Supabase as operational-metadata processor)
+* privacy policy disclosure of AI subprocessors and analytics vendors (Anthropic for text, OpenAI for Realtime voice, Google Gemini only while `AI_TEXT_PROVIDER=gemini`, Supabase as operational-metadata processor)
 * CCPA request handling workflow and designated contact
 * App Store age-rating and "not for children under 13" positioning
 * creator seeding / offer-code terms if using promotional campaigns
@@ -2238,7 +2265,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 | Meal-planning calendar                   | easy to bloat into planning software                                           |
 | Custom on-device LLM                     | complexity with little v1 benefit                                              |
 | Apple Foundation Models path             | would fragment device support and conflict with the chosen minimum iOS posture |
-| Cross-vendor AI fallback (OpenAI)        | operational tax exceeds insurance value at v1 scale; single-provider bet accepted |
+| Per-request cross-vendor AI fallback     | one text provider is selected for all endpoints through `AI_TEXT_PROVIDER`; a retry chain across vendors doubles eval runs and Edge Function branches (ADR 0038) |
 | Fine-tuning proprietary models           | no need before eval-driven prompt work tops out                                |
 | Full offline AI generation               | not necessary for launch                                                       |
 | Free-tier voice Cook Sessions            | voice is the Premium differentiator; free voice undermines the upgrade trigger and flips free-tier unit economics negative |
@@ -2267,7 +2294,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 8. Set Family Sharing **off** for all SKUs.
 9. Configure RevenueCat project, offerings, entitlements, and webhook destination.
 10. Point App Store Server Notifications / RevenueCat integration correctly.
-11. Create Google Gemini paid API project with access to: Gemini 3 Flash, Gemini 3.1 Flash-Lite, and **Gemini 3.1 Flash Live Preview**. Enable Live API for the project. Verify billing is enabled (Live API requires paid tier).
+11. Create AI provider accounts and API keys: an Anthropic API key (models `claude-haiku-5-5` and `claude-sonnet-5-5`) and an OpenAI API key with access to `gpt-realtime-2.1-mini` (Realtime client secrets). A Google Gemini paid API key is needed only to use the `AI_TEXT_PROVIDER=gemini` fallback.
 12. Create Supabase project:
 
     * Postgres database (run migrations in `Backend/supabase/migrations/` for the operational schema in §4)
@@ -2277,7 +2304,8 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
     * Supabase Auth restricted to admin role for `/ops` console access
 13. Set Edge Function secrets in Supabase:
 
-    * Gemini API key (single key; used for all Gemini features including Live API ephemeral token minting)
+    * `ANTHROPIC_API_KEY` (text) and `OPENAI_API_KEY` (Realtime client-secret minting); `GEMINI_API_KEY` only if `AI_TEXT_PROVIDER=gemini` will be used
+    * `AI_TEXT_PROVIDER` (optional; `anthropic` is the default, `gemini` selects the text fallback)
     * RevenueCat webhook secret
     * APNs auth key identifiers
     * PostHog key
@@ -2303,7 +2331,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 27. Configure phased release and custom product pages.
 28. Create support email and deletion-request path.
 29. Decide whether to use a cookie-free landing page or implement web consent if adding marketing cookies.
-30. **Verify Supabase region / Google Cloud Gemini endpoint region alignment before beta.** Supabase is the sole network hop between iOS client and Gemini for all non-voice AI calls (client → Edge Function → Gemini → back). If Supabase project is provisioned in a region that's not adjacent to the Gemini endpoint (e.g., Supabase us-east-1 + Gemini us-central1), expect +100–200ms egress on every AI request. For Dinner Solve (p95 target 3.5s) that's 3–6% of the latency budget. Check actual round-trip with a production-representative payload and provision Supabase accordingly — us-central1 is the safest default. If reprovisioning is infeasible, update §12.2 latency budgets to reflect measured reality.
+30. **Verify Supabase region / text-provider endpoint alignment before beta.** Supabase is the sole network hop between iOS client and the text provider for all non-voice AI calls (client → Edge Function → Claude → back). Voice does not take this hop: the client connects directly to OpenAI Realtime, and the Edge Function only mints the client secret. Measure the Edge Function → Claude round trip with a production-representative payload and provision Supabase accordingly. For Dinner Solve (p95 target 3.5s), check how much of the latency budget the egress uses. If reprovisioning is infeasible, update §12.2 latency budgets to reflect measured reality.
 
 ## 22. Open Questions
 
@@ -2327,19 +2355,19 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 6. **Do users trust leftovers suggestions?**
    Measure leftover reminder open rate and follow-up cook starts.
 
-7. **Is single-vendor (Google) risk acceptable long-term?**
-   Accepted for v1. Rationale: Gemini's 99.9% paid SLA gives ~8.7 hrs/year expected downtime, during which saved meals and cached plans cover the core experience. Operational cost of maintaining a cross-vendor fallback (OpenAI/Anthropic) exceeds the insurance value at v1 scale. **Pre-committed revisit triggers:** (a) cumulative Live API unavailability >2 hours in any rolling 30-day window as measured by `cook_voice_live_share` telemetry → enable OpenAI `gpt-realtime-mini` as secondary Cook Mode vendor within 30 days (this is a planned contingency, not proactive buildout — spec `docs/decisions/fallback-vendor.md` should be drafted pre-launch with the mint endpoint shape and Edge Function routing already scoped); (b) actual Gemini text API downtime exceeds 2x the SLA in any quarter → same trigger, text path; (c) Gemini pricing or data-policy changes materially adversely → full vendor re-evaluation; (d) Live API leaves preview status with material behavioral differences (preamble adherence regression, pricing reshape, TTFA change) → eval revalidation + trigger review. Do not leave this open-ended post-launch; you will be too busy to make the call cleanly.
+7. **Is the two-vendor setup (Claude for text, OpenAI for voice) acceptable long-term?**
+   Accepted (ADR 0038). The cost is two vendors, two SDKs and two bills. Text can move to Gemini through the `AI_TEXT_PROVIDER` secret (all endpoints at once); there is no per-request cross-vendor fallback, and voice has no second vendor (the Speech → text → AVSpeechSynthesizer path covers a voice outage). Promotional credits are held on both the Anthropic and OpenAI platforms, but amounts and expiry dates are unknown; once they run out the rates in §12 are what Stir pays. **Measurements that keep the decision honest:** voice cache hit rate per turn, tool-call success per tool, and TTFA against the ADR 0012 gates. Revisit voice cost if the cache hit rate falls (§12.1), revisit the model if device testing shows `gpt-realtime-2.1-mini` missing tool calls (`gpt-realtime-2.1` is the escalation path), and revisit GPT-Live 1 only if Cook Mode moves to open-on-ask sessions.
 
-8. **Will Gemini Live Preview remain behaviorally stable through v1 launch?**
-   The API is in preview. Mitigated by the `disable_cook_realtime` kill switch (instant cutover to text fallback) and the weekly eval runs that would catch behavioral drift. Revisit at GA.
+8. **Does `gpt-realtime-2.1-mini` handle every Cook Mode tool reliably?**
+   Artificial Analysis' agentic benchmark scores mini at 22.5% on tool use; the full `gpt-realtime-2.1` scores 38.0%. Device testing must cover every tool (`substitution_check`, the five timer calls, `get_timer_status`, `set_step`). Mitigated by the `disable_cook_realtime` kill switch (instant cutover to the text fallback) and the escalation path to `gpt-realtime-2.1`.
 
 9. **Do the 13/27 voice-session caps (ADR 0015) match real usage shapes?**
-   Premium 13 / Pro 27 caps were set using step-6 device-measured per-turn cost + the permanent-no-caching assumption (implicit caching empirically doesn't fire on `gemini-3.1-flash-live-preview`). The caps align with median weekday-cooker patterns (~3 cooking-heavy days × 4 weeks ≈ 12 sessions) but may be tight for a daily-cooker segment. Watch cap hit-rate + post-cap churn during beta. If >30% of Premium users hit the cap AND churn spikes after, consider a superseding ADR that either raises the cap (if the ADR 0015 caching-trigger query also fires) or shifts tier pricing. Trigger criteria detailed in ADR 0015 "Trigger to revisit."
+   Premium 13 / Pro 27 caps are unchanged by ADR 0038. The caps align with median weekday-cooker patterns (~3 cooking-heavy days × 4 weeks ≈ 12 sessions) but may be tight for a daily-cooker segment. Watch cap hit-rate + post-cap churn during beta. If >30% of Premium users hit the cap AND churn spikes after, consider a superseding ADR that either raises the cap (if the voice cache hit rate also holds) or shifts tier pricing.
 
 ### Post-launch risk areas
 
 * CloudKit edge cases when users move between local-only and synced mode
-* Gemini Live Preview API behavior or pricing changes during v1 lifecycle
+* OpenAI Realtime or Claude pricing and behavior changes during the v1 lifecycle, and a voice cache hit rate below the cost model's assumption
 * soft paywall timing hurting early trust
 * creator-content installs not turning into retained cooks
 * import quality variance from chaotic recipe pages and screenshots
@@ -2359,7 +2387,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 * [ ] New user can reach 3 dinner options from a live or sample scan in <120 seconds p90 (stretch <90s on the sample-photo path)
 * [ ] User can select a dish and enter Cook Mode in <3 minutes
 * [ ] Tap-based Cook Mode works for all tiers with next/prev step, timers, and Substitution Sheet
-* [ ] Voice Cook Mode works for Premium+ users with Gemini Live API primary + fallback to text path + `AI-VOICE-01` banner
+* [ ] Voice Cook Mode works for Premium+ users with OpenAI Realtime primary + fallback to text path + `AI-VOICE-01` banner
 * [ ] Voice affordance on Free tier triggers hard paywall (`ENT-VOICE-01`) with annual trial CTA as primary
 * [ ] Recipe import works from URL and screenshot
 * [ ] Grocery export works to Reminders with denial fallback
@@ -2370,12 +2398,12 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 
 * [ ] Pantry scan eval passes target thresholds
 * [ ] Dinner solve passes 100% hard-rule eval
-* [ ] Substitution eval has 0 hard-rule violations (both standalone and Live API function-call invocations)
-* [ ] Cook Mode turn eval passes wrong-step rate target on both Live API and fallback paths
-* [ ] Preamble-present rate ≥ 95% on Live API tool-call turns in eval
+* [ ] Substitution eval has 0 hard-rule violations (both standalone and Realtime function-call invocations)
+* [ ] Cook Mode turn eval passes wrong-step rate target on both realtime and fallback paths
+* [ ] Preamble-present rate ≥ 95% on realtime tool-call turns in eval
 * [ ] Recipe import eval meets acceptance target
 * [ ] Total monthly AI cost estimate remains under **$2.50/active Premium user** and **$6.50/active Pro user** at launch assumptions (50% buffer above projections)
-* [ ] Live API fallback path is tested and functional
+* [ ] Realtime voice fallback path is tested and functional
 
 **Data + sync**
 
@@ -2399,7 +2427,7 @@ Apple requires app privacy details in App Store Connect and privacy-manifest / r
 * [ ] PostHog receives funnel and AI cost events
 * [ ] Backend rate limiting active (including per-user voice Cook Session minute/count caps)
 * [ ] RevenueCat webhook signature verified
-* [ ] No API keys in app bundle. Cook Mode voice uses ephemeral Gemini Live session tokens minted by Supabase Edge Functions; the main Gemini API key stays server-side.
+* [ ] No API keys in app bundle. Cook Mode voice uses short-lived OpenAI Realtime client secrets minted by Supabase Edge Functions; `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `GEMINI_API_KEY` stay server-side.
 * [ ] Prompt rollback and feature kill switches work (including `disable_cook_realtime`)
 * [ ] Session pruning verified — cumulative voice session tokens stay <40K in 95%+ of sessions
 

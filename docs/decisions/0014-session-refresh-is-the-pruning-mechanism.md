@@ -1,6 +1,6 @@
 # ADR 0014: Session refresh IS the pruning mechanism on Gemini Live
 
-- **Status**: Accepted (amended 2026-04-22 PM — threshold tune + recap simplification; second pass same afternoon lowered cadence 7 → 2)
+- **Status**: **Superseded by 0038** (2026-11-06) — voice moved to OpenAI Realtime, where server-side truncation bounds per-turn growth and a refresh would discard the prompt cache; refresh survives only for the 60-minute session limit and transport recovery. Previously Accepted (amended 2026-04-22 PM — threshold tune + recap simplification; second pass same afternoon lowered cadence 7 → 2).
 - **Date**: 2026-04-22
 - **Owner-step**: Step 6 (voice) — supersedes the pruning + refresh-stub deferrals from ADR 0012
 - **Supersedes**: ADR 0012 items B (pruneAfterStepAdvance as log-only stub) and C (refreshSession as log-only stub). Items A (FillerClipPlayer) and D (TTFA probe) of ADR 0012 remain Accepted.

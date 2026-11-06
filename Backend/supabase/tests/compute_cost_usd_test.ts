@@ -195,3 +195,11 @@ Deno.test('computeCostUSD clamps cachedAudioInputTokens ≤ audioInputTokens', (
   });
   assertEquals(cost, 0.00015);
 });
+
+Deno.test('providerForModel maps logged model IDs to the PostHog $ai_provider value', async () => {
+  const { providerForModel } = await import('../functions/_shared/ai_observability.ts');
+  assertEquals(providerForModel('claude-haiku-5-5'), 'anthropic');
+  assertEquals(providerForModel('gpt-realtime-2.1-mini'), 'openai');
+  assertEquals(providerForModel('gemini-3-flash-preview'), 'gemini');
+  assertEquals(providerForModel('something-else'), 'unknown');
+});
