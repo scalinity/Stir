@@ -118,7 +118,6 @@ struct RepeatCandidateCard: View {
         }
         .padding(CGFloat.Stir.screenMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.Stir.paper50)
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .onAppear {

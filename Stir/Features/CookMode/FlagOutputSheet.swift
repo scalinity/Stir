@@ -85,25 +85,18 @@ struct FlagOutputSheet: View {
                     }
                 }
             }
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
             .navigationTitle("Report issue")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Report issue",
-                leading: {
-                    StirTopBarCloseButton(isEnabled: !isSubmitting) { dismiss() }
-                },
-                trailing: {
-                    StirTopBarTextButton(
-                        "Submit",
-                        emphasis: .prominent,
-                        isEnabled: canSubmit,
-                    ) { Task { await submit() } }
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                        .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") { Task { await submit() } }
+                        .disabled(!canSubmit)
+                }
+            }
         }
     }
 

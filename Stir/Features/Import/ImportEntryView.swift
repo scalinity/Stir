@@ -40,19 +40,14 @@ struct ImportEntryView: View {
                 .padding(.top, 16)
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
-            .safeAreaInset(edge: .bottom) { footer }
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
+            .scrollEdgeBar(edge: .bottom) { footer }
             .navigationTitle("Import recipe")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Import recipe",
-                leading: {
-                    StirTopBarCloseButton(action: onDismiss)
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark", action: onDismiss)
+                }
+            }
             .onChange(of: pickerItem) { _, newItem in
                 if let newItem { Task { await handlePicked(newItem) } }
             }
@@ -187,7 +182,6 @@ struct ImportEntryView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)
-        .background(Color.Stir.paper50.ignoresSafeArea(.all, edges: .bottom))
     }
 
     // MARK: - Photo pick → OCR
@@ -278,26 +272,17 @@ private struct PasteSheet: View {
                 .padding(20)
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
             .navigationTitle("Paste recipe")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Paste recipe",
-                leading: {
-                    StirTopBarCloseButton { dismiss() }
-                },
-                trailing: {
-                    StirTopBarTextButton(
-                        "Import",
-                        emphasis: .prominent,
-                        isEnabled: !text.isEmpty,
-                        action: onSubmit,
-                    )
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import", action: onSubmit)
+                        .disabled(text.isEmpty)
+                }
+            }
         }
     }
 }

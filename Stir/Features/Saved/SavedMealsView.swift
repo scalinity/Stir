@@ -143,48 +143,27 @@ struct SavedMealsView: View {
                 list
             }
         }
-        // Page bg + nav bar tinted paper50 keeps the saved-tab surface
-        // continuous with Tonight (matches mockup 10 §Saved Library).
-        //
-        // Nav bar is hidden so we can render the serif title inline in
-        // the safeAreaInset header — the `.principal` ToolbarItem
-        // approach grew the bar unpredictably with a non-default font
-        // and left a wide dead-air gap below the title. The inline
-        // `Text("Saved meals")` carries the `.isHeader` accessibility
-        // trait, so VoiceOver still announces a header for the screen.
+        // Page bg paper50 keeps the saved-tab surface continuous with
+        // Tonight (matches mockup 10 §Saved Library).
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
-        // Propagates to descendants — any future navigationDestination
-        // pushed from this view must restore its own toolbar.
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top) {
-            // Single source of truth for title vertical rhythm. Above-
-            // title padding and title-to-filterBar VStack spacing are
-            // wired to the same value so the "Saved meals" band stays
-            // symmetric — bumping one without the other would silently
-            // un-center the title within its header strip.
-            let titleVerticalPadding = CGFloat.Stir.space5
-            VStack(spacing: titleVerticalPadding) {
-                Text("Saved meals")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.top, titleVerticalPadding)
-                filterBar
+        .navigationTitle("Saved meals")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $searchQuery, prompt: "Search by title or ingredient")
+        .textInputAutocapitalization(.sentences)
+        .autocorrectionDisabled()
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                sortMenu
             }
-            .padding(.horizontal, CGFloat.Stir.screenMargin)
-            .padding(.bottom, CGFloat.Stir.space2)
-            .background(Color.Stir.paper50)
-            // Hairline seam — header inset is sticky, so when list
-            // rows scroll behind it the divider keeps the boundary
-            // legible. Subtle on paper50 (ink100 vs #FAF7F2) but
-            // present.
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.Stir.divider)
-                    .frame(height: 1)
-            }
+        }
+        // The All / Favorites filter stays pinned (not in the list) so
+        // it remains reachable when a Favorites-only filter empties the
+        // list and the empty state replaces it.
+        .scrollEdgeBar(edge: .top) {
+            filterPicker
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.vertical, CGFloat.Stir.space2)
         }
         .task {
             await load()
@@ -278,66 +257,37 @@ struct SavedMealsView: View {
         }
     }
 
-    // MARK: - Filter bar
+    // MARK: - Filter + sort
 
-    private var filterBar: some View {
-        VStack(spacing: CGFloat.Stir.space2) {
-            HStack {
-                Picker("Filter", selection: Binding(
-                    get: { showFavoritesOnly },
-                    set: { newValue in
-                        // Free tier can't view favorites-only; tap → paywall.
-                        if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
-                            coordinator.presentPaywall(.savedFavoritesGate)
-                            return
-                        }
-                        showFavoritesOnly = newValue
-                    },
-                )) {
-                    Text("All").tag(false)
-                    Text("Favorites").tag(true)
+    private var filterPicker: some View {
+        Picker("Filter", selection: Binding(
+            get: { showFavoritesOnly },
+            set: { newValue in
+                // Free tier can't view favorites-only; tap → paywall.
+                if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
+                    coordinator.presentPaywall(.savedFavoritesGate)
+                    return
                 }
-                .pickerStyle(.segmented)
-
-                Menu {
-                    Picker("Sort", selection: $sortOption) {
-                        ForEach(SortOption.allCases, id: \.self) { opt in
-                            Text(opt.rawValue).tag(opt)
-                        }
-                    }
-                } label: {
-                    Image.Stir.sort
-                        .foregroundStyle(Color.Stir.ink700)
-                        .minTapTarget()
-                }
-                .accessibilityLabel("Sort — \(sortOption.rawValue)")
-            }
-
-            HStack(spacing: CGFloat.Stir.space2) {
-                Image.Stir.search
-                    .foregroundStyle(Color.Stir.ink500)
-                    .accessibilityHidden(true)
-                TextField("Search by title or ingredient", text: $searchQuery)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled()
-                    .foregroundStyle(Color.Stir.ink900)
-                if !searchQuery.isEmpty {
-                    Button { searchQuery = "" } label: {
-                        Image.Stir.clearField
-                            .foregroundStyle(Color.Stir.ink300)
-                            .minTapTarget()
-                    }
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .frame(minHeight: 44)
-            .padding(.horizontal, CGFloat.Stir.space3)
-            .padding(.vertical, CGFloat.Stir.space2)
-            .stirCard(
-                borderColor: Color.Stir.ink100,
-                radius: CGFloat.Stir.radiusMd,
-            )
+                showFavoritesOnly = newValue
+            },
+        )) {
+            Text("All").tag(false)
+            Text("Favorites").tag(true)
         }
+        .pickerStyle(.segmented)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort", selection: $sortOption) {
+                ForEach(SortOption.allCases, id: \.self) { opt in
+                    Text(opt.rawValue).tag(opt)
+                }
+            }
+        } label: {
+            Label { Text("Sort") } icon: { Image.Stir.sort }
+        }
+        .accessibilityLabel("Sort — \(sortOption.rawValue)")
     }
 
     // MARK: - List

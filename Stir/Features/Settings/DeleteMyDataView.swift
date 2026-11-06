@@ -54,25 +54,12 @@ struct DeleteMyDataView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            // SCA-421: match every other pushed Settings sub-view —
-            // the floating StirCustomTabBar's measured frame is
-            // shorter than its visual extent, so the system-reserved
-            // bottom inset alone clips the fallback card.
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle("Delete my data")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Delete my data")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
     }
 
     // MARK: - Sections

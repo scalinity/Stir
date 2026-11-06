@@ -35,18 +35,13 @@ struct LeftoversRoot: View {
                     onSelect: onSelect,
                     onDismiss: onDismiss,
                 )
-                // Keep `.navigationTitle` for the implicit back-chevron
-                // label any deeper pushed screen reads, plus VoiceOver —
-                // visible chrome is `.stirTopBar` below.
                 .navigationTitle("Use what's left")
                 .navigationBarTitleDisplayMode(.inline)
-                // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-                .stirTopBar(
-                    title: "Use what's left",
-                    leading: {
-                        StirTopBarCloseButton(action: onDismiss)
-                    },
-                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", systemImage: "xmark", action: onDismiss)
+                    }
+                }
             }
         }
     }

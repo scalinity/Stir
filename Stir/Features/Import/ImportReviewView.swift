@@ -36,22 +36,17 @@ struct ImportReviewView: View {
                 .padding(.top, 12)
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
-            .safeAreaInset(edge: .bottom) { footer }
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
+            .scrollEdgeBar(edge: .bottom) { footer }
             .navigationTitle("Review import")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Review import",
-                leading: {
-                    StirTopBarCloseButton {
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") {
                         viewModel.cancelImport()
                         onDismiss()
                     }
-                },
-            )
+                }
+            }
         }
     }
 
@@ -195,7 +190,6 @@ struct ImportReviewView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)
-        .background(Color.Stir.paper50.ignoresSafeArea(.all, edges: .bottom))
     }
 }
 

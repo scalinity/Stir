@@ -91,24 +91,11 @@ struct PaywallView: View {
             contentView
                 .tint(Color.Stir.ember600)
                 .background(Color.Stir.backgroundPrimary)
-                .toolbar(.hidden, for: .navigationBar)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    // SCA-455 follow-up: putting `StirCircleIconButton`
-                    // inside a `ToolbarItem` wasn't enough — iOS 26 wraps
-                    // every toolbar child in Liquid Glass at the toolbar
-                    // layer, regardless of the child's own styling. The
-                    // only reliable opt-out is to render outside the
-                    // system toolbar entirely (same fix as SCA-436 for
-                    // DishPreview). A trailing-aligned HStack keeps the
-                    // close in the top-left without forcing the rest of
-                    // the screen to know about it.
-                    HStack {
-                        StirTopBarCloseButton { dismiss() }
-                        Spacer()
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", systemImage: "xmark") { dismiss() }
                     }
-                    .padding(.horizontal, CGFloat.Stir.space3)
-                    .padding(.vertical, CGFloat.Stir.space2)
-                    .background(Color.Stir.backgroundPrimary)
                 }
                 .stirToast($restoreToast)
                 .task {

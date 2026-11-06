@@ -80,9 +80,6 @@
 		3D7402B9004272A35109EBE7 /* VoiceSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49FE6CFDD113808B37FD886C /* VoiceSessionState.swift */; };
 		3D9E28432763AC59B7539298 /* OnboardingCompletionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E65F36F5781AC35635A660 /* OnboardingCompletionView.swift */; };
 		40453A0006723DFBC4204EB4 /* StirCardModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */; };
-		DCC2EB8C382440B8874D75DC /* StirDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7EF46E30914B2C909A1D02 /* StirDialog.swift */; };
-		3579809D246B4E57A183654B /* StirCircleIconButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A5A33B94BE14ABA9D65CADA /* StirCircleIconButton.swift */; };
-		F4F4BA4BFE3340CDBB73FC20 /* StirTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF1E947FDC244C392753194 /* StirTopBar.swift */; };
 		404A71437E3D50A8F0FBF9B1 /* Icons.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91E50133C48D87663B85ECA /* Icons.swift */; };
 		40C72D0CDD81C7374A4D3012 /* AsyncTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1699722B425275029A36EF08 /* AsyncTimeoutTests.swift */; };
 		DEAA93F28B2C45D8BE35F975 /* ScanFlashModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A18F2DB2C849C89DA07AC8 /* ScanFlashModeTests.swift */; };
@@ -376,7 +373,7 @@
 		9432C4F5502844E82680B82D /* SavedMealsTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */; };
 		60AD30993B1BAC692CEB33EE /* SectionEyebrow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */; };
 		85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */; };
-		3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */; };
+		3434E307445431069B76FF8B /* ScrollEdgeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D42252D0A51F9B57EA75F6F /* ScrollEdgeBar.swift */; };
 		8B3E60A3B36F85AE3C73D5BC /* StirPlate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D230E72CEDAF340F4A81112 /* StirPlate.swift */; };
 		29E4E3053223D0DEE68075FF /* StepDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B517F0D7861F2F1422BC6B9 /* StepDots.swift */; };
 		DB80E19E94A78DE9A9A05B7E /* RecipePlan+Duration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6EAD77FE506844DFBB72138 /* RecipePlan+Duration.swift */; };
@@ -462,9 +459,6 @@
 		212DCA793F0B530B0FB3990B /* SetupPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPreferencesView.swift; sourceTree = "<group>"; };
 		2434E80AC9763FDEBBF0EE82 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirCardModifier.swift; sourceTree = "<group>"; };
-		5C7EF46E30914B2C909A1D02 /* StirDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirDialog.swift; sourceTree = "<group>"; };
-		2A5A33B94BE14ABA9D65CADA /* StirCircleIconButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirCircleIconButton.swift; sourceTree = "<group>"; };
-		CEF1E947FDC244C392753194 /* StirTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirTopBar.swift; sourceTree = "<group>"; };
 		25542F9CFA67245AA2778979 /* ScanCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureView.swift; sourceTree = "<group>"; };
 		26F65455A56922BCB77CCFA5 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 		288F193547101468063792F0 /* AppIntentsGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentsGateTests.swift; sourceTree = "<group>"; };
@@ -753,7 +747,7 @@
 		022FB33FAEF8E71D659EAB13 /* SavedMealsTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMealsTutorial.swift; sourceTree = "<group>"; };
 		095AA3D9AA5CD18FCD8F80A3 /* SectionEyebrow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEyebrow.swift; sourceTree = "<group>"; };
 		9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirRowDivider.swift; sourceTree = "<group>"; };
-		9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirNavigationTitle.swift; sourceTree = "<group>"; };
+		9D42252D0A51F9B57EA75F6F /* ScrollEdgeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollEdgeBar.swift; sourceTree = "<group>"; };
 		4D230E72CEDAF340F4A81112 /* StirPlate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StirPlate.swift; sourceTree = "<group>"; };
 		9B517F0D7861F2F1422BC6B9 /* StepDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepDots.swift; sourceTree = "<group>"; };
 		E6EAD77FE506844DFBB72138 /* RecipePlan+Duration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RecipePlan+Duration.swift"; sourceTree = "<group>"; };
@@ -1459,9 +1453,6 @@
 				01D49FE011A7B0E41C4BFAD6 /* StarRatingRow.swift */,
 				A8BFEBB31097C1FCA950EB7A /* StepCard.swift */,
 				24B29AC406E70C3F7C1D2D3C /* StirCardModifier.swift */,
-				2A5A33B94BE14ABA9D65CADA /* StirCircleIconButton.swift */,
-				5C7EF46E30914B2C909A1D02 /* StirDialog.swift */,
-				CEF1E947FDC244C392753194 /* StirTopBar.swift */,
 				4D230E72CEDAF340F4A81112 /* StirPlate.swift */,
 				9216EFEA25E6AFB48220E9C0 /* StirRowDivider.swift */,
 				79EEF31ED777951AF778AD00 /* TextButton.swift */,
@@ -1479,7 +1470,7 @@
 		F728C4D477118D00D7897E93 /* Modifiers */ = {
 			isa = PBXGroup;
 			children = (
-				9D42252D0A51F9B57EA75F6F /* StirNavigationTitle.swift */,
+				9D42252D0A51F9B57EA75F6F /* ScrollEdgeBar.swift */,
 			);
 			path = Modifiers;
 			sourceTree = "<group>";
@@ -1999,13 +1990,10 @@
 				373B720A9EB97C429D3E770E /* StirAppIntentsGate.swift in Sources */,
 				2A86FF2CBC76C2B79340E894 /* StirAppShortcutsProvider.swift in Sources */,
 				40453A0006723DFBC4204EB4 /* StirCardModifier.swift in Sources */,
-				DCC2EB8C382440B8874D75DC /* StirDialog.swift in Sources */,
-				3579809D246B4E57A183654B /* StirCircleIconButton.swift in Sources */,
-				F4F4BA4BFE3340CDBB73FC20 /* StirTopBar.swift in Sources */,
 				95A7A5D7A7CB21BF9B90C5AF /* StirDeepLink.swift in Sources */,
 				5E6AC0A940D710330894EB3C /* StirError.swift in Sources */,
 				63CAE82D1AC92EC0A569CE12 /* StirGlyph.swift in Sources */,
-				3434E307445431069B76FF8B /* StirNavigationTitle.swift in Sources */,
+				3434E307445431069B76FF8B /* ScrollEdgeBar.swift in Sources */,
 				C200803A785580A86DBEE427 /* StirNotificationDelegate.swift in Sources */,
 				8B3E60A3B36F85AE3C73D5BC /* StirPlate.swift in Sources */,
 				85BE1CBE08327FF19DA353C9 /* StirRowDivider.swift in Sources */,

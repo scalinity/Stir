@@ -113,7 +113,11 @@ struct CookModeRoot: View {
     var body: some View {
         Group {
             if let viewModel {
-                StepCardView(viewModel: viewModel)
+                // Cook Mode's chrome (title + Close) is the system
+                // navigation bar; StepCardView owns its toolbar.
+                NavigationStack {
+                    StepCardView(viewModel: viewModel)
+                }
                     .sheet(isPresented: Binding(
                         get: { viewModel.substitutionPresentationRequested },
                         set: { viewModel.substitutionPresentationRequested = $0 },

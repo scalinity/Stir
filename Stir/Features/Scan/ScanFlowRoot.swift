@@ -236,18 +236,13 @@ private struct ScanPrimerBody: View {
                 )
             }
         }
-        // Keep `.navigationTitle` for the implicit back-chevron
-        // label any deeper pushed screen reads, plus VoiceOver —
-        // visible chrome is `.stirTopBar` below.
         .navigationTitle("Scan kitchen")
         .navigationBarTitleDisplayMode(.inline)
-        // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-        .stirTopBar(
-            title: "Scan kitchen",
-            leading: {
-                StirTopBarCloseButton(action: onCancel)
-            },
-        )
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close", systemImage: "xmark", action: onCancel)
+            }
+        }
     }
 
     @ViewBuilder

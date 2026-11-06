@@ -46,67 +46,42 @@ private enum DietRuleEntry: Hashable {
 
 struct SetupPreferencesView: View {
     @Bindable var viewModel: OnboardingViewModel
-    let onBack: () -> Void
     let onContinue: () -> Void
     let onSkip: () -> Void
 
     init(
         viewModel: OnboardingViewModel,
-        onBack: @escaping () -> Void = {},
         onContinue: @escaping () -> Void,
         onSkip: @escaping () -> Void = {},
     ) {
         self.viewModel = viewModel
-        self.onBack = onBack
         self.onContinue = onContinue
         self.onSkip = onSkip
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            navHeader
+            progressHeader
             scrollingBody
             footer
         }
         .background(Color.Stir.paper50)
-        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Skip", action: onSkip)
+                    .accessibilityLabel("Skip onboarding")
+            }
+        }
     }
 
     // MARK: - Sections
 
-    private var navHeader: some View {
-        HStack(alignment: .center) {
-            Button(action: onBack) {
-                HStack(spacing: CGFloat.Stir.space1 / 2) { // 2pt
-                    Image.Stir.back
-                        .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
-                    Text("Back")
-                        .stirFont(.labelLg)
-                }
-                .foregroundStyle(Color.Stir.ember600)
-                .frame(minHeight: 44)
-                .padding(.horizontal, CGFloat.Stir.space1 + 2) // 6pt
-                .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Back to Welcome")
-
-            Spacer()
-            OnboardingProgressDots(current: 1, total: 2)
-            Spacer()
-
-            // Skip affordance — visual in commit 2, real behavior in commit 3.
-            Button(action: onSkip) {
-                Text("Skip")
-                    .stirFont(.bodySm)
-                    .foregroundStyle(Color.Stir.ink500)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Skip onboarding")
-        }
-        .padding(.horizontal, CGFloat.Stir.space3) // 12pt
-        .padding(.top, CGFloat.Stir.space2)
-        .padding(.bottom, CGFloat.Stir.space3 - 2) // 10pt
+    /// Step progress. Back and Skip live in the system navigation bar.
+    private var progressHeader: some View {
+        OnboardingProgressDots(current: 1, total: 2)
+            .frame(maxWidth: .infinity)
+            .padding(.top, CGFloat.Stir.space2)
+            .padding(.bottom, CGFloat.Stir.space3 - 2) // 10pt
     }
 
     private var scrollingBody: some View {

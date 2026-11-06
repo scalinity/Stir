@@ -30,21 +30,12 @@ struct TutorialReplayView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4)
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle("Replay tutorials")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Replay tutorials")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-            }
-        }
-        .toolbarBackground(Color.Stir.paper50, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
     }
 
     private var introBlock: some View {

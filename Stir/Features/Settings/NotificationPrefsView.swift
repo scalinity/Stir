@@ -3,11 +3,10 @@
 // Settings → Notifications. Per-toggle opt-in for each notification
 // type Stir ships, rebuilt 2026-04-28 onto the custom design system
 // to match `SettingsRootView` and `HouseholdPreferencesView`:
-// paper50 background, principal-toolbar New York title, uppercase
+// paper50 background under the system navigation bar, uppercase
 // `labelEyebrow` section header, grouped `stirCard()` body with 1pt
-// `ink100` internal dividers, 64pt bottom inset for the floating
-// `StirCustomTabBar`. SF-Pro nav title + iOS-default `Form` chrome
-// + green-tinted toggles all replaced.
+// `ink100` internal dividers. iOS-default `Form` chrome + green-tinted
+// toggles replaced.
 //
 // Trial-reminder toggle removed in the same change — the feature was
 // retired in SCA-74 (2026-05-07): `TrialReminderScheduler`,
@@ -48,17 +47,12 @@ struct NotificationPrefsView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            // Match `SettingsRootView` clearance for the −14pt-encroach
-            // floating `StirCustomTabBar`. This view is pushed inside
-            // the Settings tab's NavigationStack, so the floating bar
-            // is still visible behind it.
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
-        .stirNavigationTitle("Notifications")
         // Persistence wiring — `.onChange` fires when @State `prefs`
         // mutates from the toggle's two-way binding. Doesn't fire on
         // initial mount, so the store-seeded values in `.task` don't

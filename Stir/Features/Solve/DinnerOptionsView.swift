@@ -10,14 +10,11 @@
 // skeleton + error surfaces stay inline — they're one-off during-stream
 // states, not reusable components.
 //
-// Uses the shared `.stirTopBar(...)` extension (SCA-457) to replace
-// the system navigation bar. iOS 26 paints toolbar Buttons with Liquid
-// Glass; the only reliable opt-out is rendering chrome in
-// `.safeAreaInset(.top)` outside the system toolbar — exactly what
-// `StirTopBar` does, app-wide. `onCancel` is optional: SolveAgainRoot
-// passes a dismiss closure (cover-level exit since back-nav leads to
-// a hidden placeholder), ScanFlowRoot passes nil and the leading slot
-// renders a Stir back-chevron that calls `dismiss()` to pop to .review.
+// Chrome is the system navigation bar (ADR 0037). `onCancel` is
+// optional: SolveAgainRoot passes a dismiss closure (cover-level exit,
+// since back-nav would lead to its hidden placeholder root) and the
+// system back button is hidden in favor of a Close toolbar button;
+// ScanFlowRoot passes nil and the system back button pops to .review.
 
 import SwiftUI
 
@@ -28,14 +25,11 @@ struct DinnerOptionsView: View {
     /// constraints and re-solve in place. ScanFlowRoot owns the sheet
     /// presentation state; we just signal it.
     let onTune: () -> Void
-    /// When non-nil, the leading header slot renders a "Cancel" text
-    /// button that invokes this closure. SolveAgainRoot passes
+    /// When non-nil, the system back button is replaced by a Close
+    /// toolbar button that invokes this closure. SolveAgainRoot passes
     /// `onDismiss` (drops the cover); ScanFlowRoot passes nil so the
-    /// leading slot renders a back-chevron StirCircleIconButton that
-    /// calls `dismiss()` to pop to .review.
+    /// system back button pops to .review.
     let onCancel: (() -> Void)?
-
-    @Environment(\.dismiss) private var dismiss
 
     init(
         viewModel: SolveViewModel,
@@ -61,26 +55,21 @@ struct DinnerOptionsView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // `navigationTitle` retained for VoiceOver + the implicit
-        // back-chevron label any deeper push reads. Visible chrome
-        // comes from `.stirTopBar(...)` — the system toolbar route
-        // paints iOS 26 Liquid Glass on every Button inside it, no
-        // per-button opt-out (SCA-457 escape hatch, app-wide).
         .navigationTitle("Dinner options")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .stirTopBar(
-            title: "Dinner options",
-            leading: { leadingControl },
-            trailing: {
-                StirCircleIconButton(
-                    icon: Image.Stir.filter,
-                    accessibilityLabel: "Tune dinner options",
-                    foreground: Color.Stir.ember600,
-                    action: onTune,
-                )
-            },
-        )
+        .navigationBarBackButtonHidden(onCancel != nil)
+        .toolbar {
+            if let onCancel {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark", action: onCancel)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: onTune) {
+                    Label { Text("Tune dinner options") } icon: { Image.Stir.filter }
+                }
+            }
+        }
         .task(id: "solve-once") {
             if viewModel.phase == .constraints {
                 viewModel.startSolve()
@@ -94,24 +83,6 @@ struct DinnerOptionsView: View {
             content: { DinnerOptionsTutorial() },
             shouldPresent: viewModel.slots.contains { $0.dish != nil },
         )
-    }
-
-    // MARK: - Top bar leading slot
-
-    /// Either a close icon button (cover-level exit when SolveAgainRoot
-    /// passed `onCancel`) or a Stir back-chevron that pops the nav
-    /// stack one level (default for ScanFlowRoot, which pops to .review).
-    @ViewBuilder
-    private var leadingControl: some View {
-        if let onCancel {
-            StirTopBarCloseButton(action: onCancel)
-        } else {
-            StirCircleIconButton(
-                icon: Image(systemName: "chevron.left"),
-                accessibilityLabel: "Back",
-                action: { dismiss() },
-            )
-        }
     }
 
     // MARK: - Sections

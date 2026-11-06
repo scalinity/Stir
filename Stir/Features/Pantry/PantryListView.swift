@@ -89,23 +89,18 @@ struct PantryListView: View {
                     .background(Color.Stir.paper50)
             }
         }
+        .navigationTitle("Pantry")
         .navigationBarTitleDisplayMode(.inline)
-        // SCA-457: the SCA-436 toolbar swap to StirCircleIconButton kept
-        // the iOS 26 Liquid Glass pill (applied at the ToolbarItem
-        // layer, not the button content). Move the "+" outside the
-        // system toolbar via .stirTopBar.
-        .stirTopBar(
-            title: "Pantry",
-            trailing: {
-                StirCircleIconButton(
-                    icon: Image.Stir.plus,
-                    accessibilityLabel: "Add item",
-                    foreground: Color.Stir.ember600,
-                    action: { showingAddSheet = true },
-                )
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Label { Text("Add item") } icon: { Image.Stir.plus }
+                }
                 .disabled(viewModel == nil)
-            },
-        )
+            }
+        }
         // SCA-54: searchable lives at the screen-level Group (not the
         // inner List inside `populatedList`) so iOS owns the transition
         // between the pinned navigation-bar drawer and the scrolling
@@ -328,7 +323,7 @@ struct PantryListView: View {
                 // Delete-all footer. Lives inside the List as its own
                 // Section so it scrolls with the content (user must
                 // reach the end to find it — discoverable but not
-                // accident-prone). Confirmation sheet at the view
+                // accident-prone). Confirmation dialog at the view
                 // root provides the destructive-action safety net per
                 // the global "executing actions with care" guidance.
                 // Hidden when the search filter narrows results so
@@ -362,53 +357,29 @@ struct PantryListView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.Stir.paper50)
-            // Tab-bar bottom-clearance compensation. StirCustomTabBar
-            // uses `padding(.bottom, -.space3Half)` (−14pt) to encroach
-            // into the home-indicator inset. The List's auto safeArea
-            // reservation already covers the bar's measured frame —
-            // `contentMargins(.scrollContent)` adds ON TOP of that, so
-            // it only needs to cover the negative-padding extent + a
-            // small visual buffer (≈14pt + 10pt = 24pt = `.space5`).
-            // SCA-20 originally copied Tonight's 64pt value, but
-            // Tonight uses `.padding(.bottom)` INSIDE a ScrollView's
-            // VStack — that primitive composes with safeArea differently
-            // and needs the larger number. SCA-50 right-sizes Pantry to
-            // its actual primitive, removing the visible "extra-tall
-            // tab bar" gap. Coupled with the bar's chrome — change one,
-            // recheck the other.
-            .contentMargins(.bottom, CGFloat.Stir.space5, for: .scrollContent)
             // SCA-54: searchable hoisted to the outer Group at screen
             // scope; no `.searchable` modifier remains here. Keeping
             // the comment so a future reader doesn't accidentally
             // re-attach it to the inner List.
         }
         .background(Color.Stir.paper50)
-        // Themed destructive bulk-delete confirmation. Lives at the
-        // populatedList root (not on the button itself) so the sheet
+        // Destructive bulk-delete confirmation. Lives at the
+        // populatedList root (not on the button itself) so the dialog
         // stays attached even if the button scrolls out of view between
-        // tap and confirm. Item count is captured at present-time so a
-        // CloudKit-merge that lands while the sheet is up doesn't lie
-        // about what's being deleted — the sheet text reads against the
-        // snapshot at tap; the actual delete walks the live count via
-        // softDeleteAll.
-        //
-        // SCA-50: was `.confirmationDialog(...)` which renders as an
-        // iOS-26 glass popover anchored to the trigger — looked
-        // off-theme on the surrounding Stir surface. Custom sheet uses
-        // the same backstop (cancel-default focus, primary CTA only on
-        // explicit destructive tap) while honoring the design system.
-        .sheet(isPresented: $showingDeleteAllConfirmation) {
-            PantryDeleteAllConfirmationSheet(
-                itemCount: vm.items.count,
-                onConfirm: {
-                    showingDeleteAllConfirmation = false
-                    vm.deleteAllItems()
-                },
-            )
-            .presentationDetents([.height(360)])
-            .presentationCornerRadius(CGFloat.Stir.radiusLg)
-            .presentationBackground(Color.Stir.paper50)
-            .presentationDragIndicator(.visible)
+        // tap and confirm. The title reads the item count at present
+        // time; the actual delete walks the live set via softDeleteAll.
+        // Cancel is the default — the delete fires only on the explicit
+        // destructive tap.
+        .confirmationDialog(
+            vm.items.count == 1 ? "Delete this item?" : "Delete all \(vm.items.count) items?",
+            isPresented: $showingDeleteAllConfirmation,
+            titleVisibility: .visible,
+        ) {
+            Button("Delete all items", role: .destructive) {
+                vm.deleteAllItems()
+            }
+        } message: {
+            Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
         }
         // Edit sheet stays here (rather than hoisted to outer Group)
         // because it's `.sheet(item:)` driven by a row tap and only
@@ -501,104 +472,6 @@ struct PantryListView: View {
 // the entity's `@NSManaged var id: UUID?` would collide with any
 // `var id: NSManagedObjectID` we tried to declare. Sheet(item:)
 // happily uses the inherited objectID-based identity.
-
-// MARK: - PantryDeleteAllConfirmationSheet
-
-/// Themed confirmation modal for bulk-delete on the pantry list (SCA-50).
-/// Replaces the system `.confirmationDialog` whose iOS-26 glass-popover
-/// styling clashed with the rest of the Stir surface. Lives in the same
-/// file as its only caller — promoting to `DesignSystem/Components/`
-/// only makes sense once a second destructive flow needs the same shape
-/// (favorites bulk-clear is the next plausible candidate).
-private struct PantryDeleteAllConfirmationSheet: View {
-    let itemCount: Int
-    let onConfirm: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        // ScrollView so Dynamic-Type at AX text sizes scrolls within the
-        // locked `.height(360)` detent instead of clipping the destructive
-        // CTA. At default text sizes the content fits and the ScrollView
-        // is invisible — at AX3+ users can scroll the title/body to
-        // surface the buttons. Cheap insurance for the explicit detent.
-        ScrollView {
-            VStack(alignment: .leading, spacing: CGFloat.Stir.space4) {
-                VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                    Text(titleText)
-                        .stirFont(.displaySm)
-                        .foregroundStyle(Color.Stir.ink900)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("This removes every item from your pantry. You can't undo this in the app, but scanned items can be re-added.")
-                        .stirFont(.bodyMd)
-                        .foregroundStyle(Color.Stir.ink500)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: CGFloat.Stir.space3)
-
-                VStack(spacing: CGFloat.Stir.space3) {
-                    // Destructive CTA. Mirrors PrimaryButton's geometry
-                    // (full-width, 52pt tall, radiusMd) but swaps the
-                    // ember600 fill for crimson600 — the standing
-                    // "destructive primary action" treatment the design
-                    // system already exposes via Color.Stir.crimson600
-                    // (== .danger). Built inline rather than parameterizing
-                    // PrimaryButton so the change stays scoped to SCA-50.
-                    Button(action: onConfirm) {
-                        Text("Delete all items")
-                            .stirFont(.labelLg)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Color.Stir.paper50)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .frame(height: 52)
-                            .background(
-                                RoundedRectangle(
-                                    cornerRadius: CGFloat.Stir.radiusMd,
-                                    style: .continuous,
-                                )
-                                .fill(Color.Stir.crimson600),
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(accessibilityText)
-                    .accessibilityHint("Removes every pantry item. This cannot be undone in the app.")
-
-                    // Cancel dismisses via @Environment(\.dismiss) so the
-                    // explicit-button path and the swipe-down/backdrop-tap
-                    // gesture-dismiss path resolve through the same hook —
-                    // a future telemetry addition (e.g.
-                    // pantry_delete_all_cancelled) only needs one
-                    // subscription point. onConfirm stays as a parent
-                    // closure because the destructive intent must NOT
-                    // fire on gesture-dismiss.
-                    SecondaryButton(title: "Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-            .padding(.horizontal, CGFloat.Stir.screenMargin)
-            .padding(.top, CGFloat.Stir.space5)
-            .padding(.bottom, CGFloat.Stir.space4)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .scrollContentBackground(.hidden)
-        .background(Color.Stir.paper50)
-    }
-
-    /// Header copy with proper grammar at the singular case. Stir's
-    /// English-only launch (spec §11) doesn't excuse "Delete all 1
-    /// items?" — branching on itemCount is one ternary and removes
-    /// the user-visible grammar slip.
-    private var titleText: String {
-        itemCount == 1 ? "Delete this item?" : "Delete all \(itemCount) items?"
-    }
-
-    private var accessibilityText: String {
-        itemCount == 1 ? "Delete this pantry item" : "Delete all \(itemCount) pantry items"
-    }
-}
 
 /// Folds the error-toast + tombstone-toast wiring out of the outer
 /// `body` so the expression stays under SwiftUI's typecheck ceiling.
