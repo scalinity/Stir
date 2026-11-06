@@ -87,7 +87,10 @@ Group `stir.subscriptions`. Family Sharing **off** all SKUs. **Apple fees:** Y1 
 
 ## Realtime voice session constants
 
-OpenAI Realtime, `gpt-realtime-2.1-mini` (ADR 0038). Backend, baked into the mint (`_shared/realtime_mint.ts`):
+OpenAI Realtime, `gpt-realtime-2.1-mini` (ADR 0038). Backend session defaults attached to the mint (`_shared/realtime_mint.ts`):
+
+
+ADR 0041 retains direct iOS-to-OpenAI voice. A client secret can open multiple upstream sessions until expiry, and connection configuration can override its attached defaults. The 400-token output cap is applied by the supported app; mint quotas do not enforce downstream connection count or spend. Quota-free continuations require a ready owned predecessor, matching cooking session, original charge proof, root age below two hours and predecessor age below 65 minutes; one pending successor is claimed atomically.
 
 ```ts
 REALTIME_SECRET_TTL_SEC     = 120   // window in which the client secret can open a session

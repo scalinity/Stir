@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — pending lawyer review.
 **Effective date:** TBD (set on launch)
-**Last updated:** 2026-04-24
+**Last updated:** 2026-11-06
 
 This is the initial Stir ToS draft, structured per spec §19. Daniel sends to lawyer; lawyer revises liability + dispute-resolution language; Daniel publishes the finalized version at https://getstir.app/terms.
 
@@ -21,7 +21,7 @@ These Terms of Service ("Terms") govern your access to and use of the Stir mobil
 
 ## 1. Service description
 
-Stir is an iPhone application that helps you decide what to cook from ingredients you already have. Stir uses artificial intelligence (specifically Google's Gemini family of models) to:
+Stir is an iPhone application that helps you decide what to cook from ingredients you already have. Stir uses artificial intelligence (Anthropic's Claude API for text/images and OpenAI's Realtime API for Premium voice, with an operator-selected Google Gemini text/image fallback) to:
 
 - Identify ingredients from photos of your kitchen
 - Suggest dinner ideas based on your ingredients, time, and dietary preferences

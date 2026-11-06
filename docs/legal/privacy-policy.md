@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — pending lawyer review.
 **Effective date:** TBD (set on launch)
-**Last updated:** 2026-04-24
+**Last updated:** 2026-11-06
 
 This is the initial Stir Privacy Policy draft, structured per spec §11 and §19. Daniel sends to lawyer; lawyer revises subprocessor and CCPA workflow language; Daniel publishes the finalized version at https://getstir.app/privacy.
 
@@ -39,15 +39,15 @@ Stir is built privacy-conscious by design:
 
 ### 2.2 Photos
 
-- **Kitchen scan images:** When you scan your kitchen, the photo is sent to our server-side AI processing pipeline (powered by Google Gemini) for ingredient identification. Raw scan images are deleted within 7 days.
+- **Kitchen scan images:** When you scan your kitchen, the photo is sent through our backend to Anthropic's Claude API for ingredient identification. Stir processes scan images per request and does not durably store those image bytes.
 
 ### 2.3 Audio
 
-- **Voice Cook Mode audio:** When you use Premium voice Cook Mode, audio is streamed in real-time to Google's Gemini Live API for transcription and response generation. Audio waveforms are not stored long-term; voice turn metadata (duration, token counts) is retained for 30 days for cost accounting and debugging.
+- **Voice Cook Mode audio:** When you use Premium voice Cook Mode, audio is streamed directly from the app to OpenAI's Realtime API, with relevant recipe, pantry and dietary context. Stir does not durably store the audio waveform. Operational voice metadata (duration, token counts) is retained in Stir's backend for 30 days. OpenAI's separate retention is described in §4.
 
 ### 2.4 Free-text input
 
-- **Constraints you type:** When you type a constraint like "20 minutes" or "use spinach first," the text is sent to our AI processing pipeline. Free-text input is not retained beyond the request.
+- **Constraints you type:** When you type a constraint like "20 minutes" or "use spinach first," the text is sent to our AI processing pipeline. Text and derived responses may pass through the short-lived processing and retry stores described in §6; this is separate from saved content in your iCloud.
 - **In-app feedback:** When you tap the "flag" button on an AI result and submit feedback, your text is retained for 12 months for AI quality improvement.
 
 ### 2.5 Usage data
@@ -88,13 +88,13 @@ We do NOT use your data for:
 
 ## 4. AI processing — special note
 
-When you use Stir's AI features, your input data (photos, audio, free-text) is sent to Google LLC's Gemini API. Google's paid-tier API policy explicitly states that:
+Text and image features use Anthropic's Claude API. Premium voice sends audio and relevant recipe, pantry and dietary context to OpenAI's Realtime API. An operator-controlled fallback can route text and image requests to Google's paid Gemini API; it does not switch providers within a request. We send the context needed to answer the request, including dietary preferences when relevant.
 
-> Content submitted to Gemini paid-tier APIs is not used to improve Google's products.
+Anthropic's published commercial policy excludes API inputs and outputs from model training by default. Its standard API retention policy provides deletion within 30 days, subject to agreed settings and safety/legal exceptions. See [Anthropic's training policy](https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training) and [commercial retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 
-This applies to Stir's usage. Your scan photos, voice audio, and free-text input are processed for the immediate request and then discarded by Google per their published policy.
+OpenAI's API policy excludes API data from model training unless the customer opts in. Its Realtime endpoint has no application-state retention; default abuse-monitoring logs may retain content for up to 30 days, with policy/legal exceptions. See [OpenAI's API data controls](https://developers.openai.com/api/docs/guides/your-data).
 
-We send only what's required for the AI request (your photo, audio, or text plus relevant context like your dietary preferences and pantry). We do not send your name, email, location, or any other personal information that Google could use to identify you.
+These published policies do not establish Stir's entitlement to zero-retention settings. We do not promise immediate provider deletion or assert an unverified special retention agreement. Google's paid API terms govern the optional Gemini route; see [Gemini API terms](https://ai.google.dev/gemini-api/terms).
 
 ## 5. Third-party subprocessors
 
@@ -102,10 +102,12 @@ The following companies process data on our behalf:
 
 | Subprocessor | Service | Data they receive |
 |---|---|---|
-| **Google LLC** | Gemini API (all AI features) | Scan photos, voice audio, free-text constraints, recipe context |
-| **Supabase Inc.** | Postgres + Edge Functions backend | canonical_user_key, quota counters, subscription state, AI request logs (no user content beyond what's specified above) |
+| **Anthropic, PBC** | Claude API (text and image features) | Scan photos, recipe text, constraints, dietary preferences and pantry/recipe context |
+| **OpenAI** | Realtime API (Premium voice) | Voice audio, recipe, pantry and dietary context, tool requests/results |
+| **Google LLC** | Paid Gemini API (operator-selected text/image fallback) | Text/image inputs and the context needed for those requests |
+| **Supabase Inc.** | Postgres + Edge Functions backend | canonical_user_key, quota counters, subscription state, AI request metadata, transient queued import text and parsed-response replay caches (§6) |
 | **RevenueCat Inc.** | Subscription management | App Store receipts, subscription lifecycle events |
-| **PostHog Inc.** | Product analytics | Pseudonymous interaction events keyed on canonical_user_key |
+| **PostHog Inc.** | Product analytics | Pseudonymous interaction events keyed on a hashed identifier |
 | **Functional Software, Inc. (Sentry)** | Crash and error reporting | Scrubbed stack traces, performance metrics |
 | **Apple Inc.** | CloudKit private DB, APNs push, StoreKit | User content (your private CloudKit container), push tokens, subscription state |
 
@@ -115,13 +117,13 @@ We have data processing agreements with each subprocessor. We do not allow subpr
 
 We retain different categories of data for different periods, balancing service functionality with privacy. Two storage layers govern these retentions:
 
-- **Your iCloud private database** (CloudKit) holds your user content (preferences, pantry items, saved recipes, cooking sessions). This data lives in your own iCloud account and is governed by Apple's iCloud terms — you control it directly via your Apple ID. Stir does not have server-side copies of these records.
-- **Stir's operational backend** (Supabase) holds quotas, subscription state, and operational metadata keyed on a pseudonymous user identifier. Data here is subject to Stir's retention policies below.
+- **Your iCloud private database** (CloudKit) holds your user content (preferences, pantry items, saved recipes, cooking sessions). This data lives in your own iCloud account and is governed by Apple's iCloud terms — you control it directly via your Apple ID. Stir does not maintain a second permanent content library on its backend. The transient processing exceptions below can contain user content.
+- **Stir's operational backend** (Supabase) holds quotas, subscription state, operational metadata and the bounded processing/retry copies listed below, keyed on a pseudonymous user identifier. Data here is subject to Stir's retention policies below.
 
 | Data class | Storage layer | Retention |
 |---|---|---|
 | Household profile, dietary preferences | CloudKit (your iCloud) | Until you delete via the App or iCloud |
-| Pantry remembered items | CloudKit | Until you delete; expired items auto-purge after 30 days |
+| Pantry remembered items | CloudKit | Until you delete; expired ephemeral items leave the active pantry on foreground. Deleted rows are purged after 90 days when maintenance next runs. |
 | Saved recipes / favorites | CloudKit | Until you delete |
 | Cooking sessions | CloudKit | App-managed rolling 24-month window |
 | Substitution events | CloudKit | Until you delete (lives alongside the cooking session) |
@@ -130,6 +132,9 @@ We retain different categories of data for different periods, balancing service 
 | AI request logs (operational, all features) | Stir backend | Automatic; deleted hourly after 30 days |
 | Raw kitchen scan images | Stir backend (transient) | Processed and discarded per request; not durably stored |
 | Imported recipe images | Stir backend (transient) | Processed and discarded per request; not durably stored |
+| Completed recipe-import source URL/hash records | Core Data / CloudKit | Removed after 30 days when Stir next selects the household or enters the foreground |
+| Queued recipe-import text | Stir backend (transient) | Removed immediately on completion/failure; unfinished work expires after 10 minutes and the next minute cleanup removes its text. Cleanup can be delayed by a database outage. Source URLs are omitted from the queue. |
+| Parsed AI responses for retry/result retrieval | Stir backend (transient) | Readable for 10 minutes. Expired rows are cleaned every 5 minutes in batches; backlog or database outages can delay physical removal. Expired imports require an explicit new attempt. |
 | Grocery export metadata | CloudKit | Until you delete |
 | Crash logs | Sentry (third-party processor) | Per Sentry's standard retention (~90 days) |
 | Analytics events | PostHog (third-party processor) | Per PostHog's standard retention (~13 months) |
@@ -172,7 +177,7 @@ We do not discriminate against users who exercise their CCPA rights.
 
 ### 7.7 How to exercise these rights
 
-**In-app (primary):** open **Stir > Settings > Delete my data**. The screen explains what will be deleted, asks you to type a confirmation phrase, and submits a deletion request to our backend. Subscription auto-renew is canceled automatically; refunds are managed via the App Store.
+**In-app (primary):** open **Stir > Settings > Delete my data**. The screen asks for a confirmation phrase and submits an authenticated backend request. After acceptance, it removes the selected household locally and queues normal iCloud synchronization. Deleting data does not cancel an App Store subscription; manage renewal and refunds in the App Store.
 
 **Email (fallback):** if you can't access the app — for example, you've been locked out, or you're submitting a request on behalf of a deceased user — email **privacy@getstir.app** with the subject line "Privacy request: \<know | delete | correct\>". Include the Apple ID email associated with your subscription so we can verify your identity. We may need to verify your identity before fulfilling certain requests.
 
@@ -180,10 +185,10 @@ We respond within 30 days for any path.
 
 For deletion requests:
 - Operational data (Stir backend): purged within 30 days of request
-- User content (CloudKit): you delete this directly via Stir > Settings > Delete Local Data, or by signing out of iCloud / removing Stir from iCloud. The in-app **Delete my data** flow also triggers a CloudKit erase across your devices on next launch.
+- User content (Core Data / CloudKit): the confirmed in-app flow removes the selected household's content locally. iCloud removal depends on successful synchronization; local removal alone does not confirm cloud deletion. Minimal identity/deletion anchors remain to remove old content that arrives later. Other households on the device are kept separate.
 - Third-party processors (PostHog, Sentry, RevenueCat): we forward deletion requests to each subprocessor and they process per their own SLA
 
-You will receive an email confirmation when each step completes.
+The app reports local removal and a later successful iCloud export separately. Backend/provider steps remain pending until verified; contact privacy@getstir.app for their status. Start over creates a fresh local household without canceling the pending backend request. Stir does not collect an email address through this flow, so it does not promise an automatic confirmation email.
 
 ## 8. Children
 
@@ -204,7 +209,7 @@ Despite these safeguards, no system is 100% secure. We will notify affected user
 
 ## 10. International transfers
 
-Stir is currently available only in the United States App Store. Data is processed in U.S.-based infrastructure (Supabase U.S. region, Google Gemini U.S.-hosted endpoints). If you use Stir from outside the U.S., your data is transferred to and processed in the U.S.
+Stir is currently available only in the United States App Store. Stir's backend uses a U.S. Supabase region. Anthropic, OpenAI and the optional Google route process data under their respective service terms; no unverified U.S.-only processing or special data-residency agreement is promised. If you use Stir outside the U.S., your data may be transferred internationally.
 
 ## 11. Changes to this Privacy Policy
 
@@ -220,6 +225,8 @@ We may update this Privacy Policy from time to time. Material changes will be co
 
 ## Lawyer review checklist (DRAFT signal — remove before publish)
 
+- [ ] Verify the published privacy page and in-app disclosures name Anthropic for text/images and OpenAI for voice before release; source updates do not publish the website.
+- [ ] Verify actual provider-account training/retention settings and any special agreements; published defaults alone do not establish them.
 - [ ] §5 subprocessor list — finalize legal entity names; verify each subprocessor has executed a DPA aligned to CCPA
 - [ ] §6 retention table — verify against each subprocessor's actual retention, especially RevenueCat's
 - [ ] §7 CCPA workflow — confirm 30-day SLA matches required law and our internal capability (`docs/runbooks/ccpa-deletion-workflow.md`)

@@ -148,7 +148,7 @@ Imported recipes that parse poorly land in an edit screen, never directly in Coo
 | View state       | **`@Observable` view models**                                   | Small, testable, and natural for SwiftUI 17+                                                                                                 | TCA is too heavy for this scope                                                                                                                           |
 | Persistence      | **Core Data + NSPersistentCloudKitContainer**                   | Most predictable choice for sync, migrations, history tracking, and extension-safe persistence; matches a local-first app with iCloud sync   | SwiftData is attractive, but Core Data remains the safer production choice for CloudKit-heavy sync and migration stability on an iOS 17 deployment target |
 | App sync         | **CloudKit private database via NSPersistentCloudKitContainer** | Keeps user content local-first, synced across the user's devices, with user isolation at the database boundary and a local replica on device | Supabase/Firebase as source-of-truth would duplicate the data plane and quietly turn the product into a web-backed app                                    |
-| Backend          | **Supabase (Postgres + Edge Functions + Auth + pgmq/pg_cron)**  | Thin operational backend only: AI relay, quotas, prompt versions, feature flags, push jobs, entitlements, ops dashboard. RLS keyed on `canonical_user_key` on every ops table. Operational Postgres does **not** mirror user content — pantry/recipes/sessions stay in CloudKit as the source of truth. | Cloudflare Workers + D1 + KV + Queues is an equally valid thin-backend stack but adds tooling surface when Supabase Postgres + Edge Functions already cover the same needs. Pure Postgres-as-app-DB (with user content in Supabase) was also rejected — that would duplicate CloudKit and create two sources of truth. |
+| Backend          | **Supabase (Postgres + Edge Functions + Auth + pgmq/pg_cron)**  | Thin operational backend only: AI relay, quotas, prompt versions, feature flags, push jobs, entitlements, ops dashboard. RLS keyed on `canonical_user_key` on every ops table. Saved pantry/recipes/sessions stay in CloudKit as the source of truth. ADR 0042 permits brief queued-import text and parsed-response replay copies, with explicit expiry and cleanup; these are content, not metadata. | Cloudflare Workers + D1 + KV + Queues is an equally valid thin-backend stack but adds tooling surface when Supabase Postgres + Edge Functions already cover the same needs. Pure Postgres-as-app-DB (with user content in Supabase) was also rejected — that would duplicate CloudKit and create two sources of truth. |
 | Payments         | **RevenueCat over StoreKit 2**                                  | Faster entitlement reconciliation, clean webhooks, simpler restore/upgrade/grace handling, still native Apple billing underneath             | Pure StoreKit 2 is viable, but more server plumbing for a solo build                                                                                      |
 | Auth             | **No mandatory login**                                          | Keeps first-session friction low and honors the handoff                                                                                      | Forced Sign in with Apple adds avoidable friction                                                                                                         |
 | Analytics        | **PostHog**                                                     | Product analytics + feature flags + experiments in one place; send only pseudonymous events                                                  | Mixpanel would need a separate feature-flag tool                                                                                                          |
@@ -254,7 +254,7 @@ Backend/
 | `/v1/config/bootstrap`    | GET    | session JWT                                         | Fetch feature flags, prompt versions, quota snapshot                              | cacheable                   |
 | `/v1/ai/pantry-parse`     | POST   | session JWT                                         | Parse scan image into structured ingredients                                      | yes via `client_request_id` |
 | `/v1/ai/dinner-solve`     | POST   | session JWT; Premium+ entitlement when `context_hint=leftovers` | Generate 3 ranked dinner options. Leftovers mode (`context_hint=leftovers`) rejects Free users with `ENT-LEFTOVERS-01` before consuming quota. | yes via `solve_request_id`  |
-| `/v1/ai/realtime-session` | POST   | session JWT + Premium+ entitlement check            | Mint a short-lived OpenAI Realtime client secret (`ek_…`, from `POST /v1/realtime/client_secrets`) for Cook Mode voice. Server holds the OpenAI API key and session config (model, voice, system prompt, allowed function calls, reasoning effort, turn detection, output cap); client opens a stateful WebSocket directly to OpenAI Realtime using the secret. Response `{auth_token, expires_at, session_id, ws_url, prompt_version, setup_frame_json}`: `auth_token` is the `ek_` secret, `setup_frame_json` is a `session.update` frame carrying the truncation policy whose `session.updated` reply is the handshake ack. Rejects with `ENT-VOICE-01` if user has no Cook Mode voice entitlement, or `RATE-01` if user has exceeded voice Cook Session quota. | session-scoped token; one mint per Realtime session, re-minted on session refresh (near the 60-minute session limit, and for transport recovery) |
+| `/v1/ai/realtime-session` | POST   | session JWT + Premium+ entitlement check            | Mint a short-lived OpenAI Realtime client secret (`ek_…`, from `POST /v1/realtime/client_secrets`) for Cook Mode voice. Server holds the OpenAI API key and session config (model, voice, system prompt, allowed function calls, reasoning effort, turn detection, output cap); client opens a stateful WebSocket directly to OpenAI Realtime using the secret. Response `{auth_token, expires_at, session_id, ws_url, prompt_version, setup_frame_json}`: `auth_token` is the `ek_` secret, `setup_frame_json` is a `session.update` frame carrying the truncation policy whose `session.updated` reply is the handshake ack. Rejects with `ENT-VOICE-01` if user has no Cook Mode voice entitlement, or `RATE-01` if user has exceeded voice Cook Session quota. | reusable client secret; supported app mints per connection and on bounded charged-session continuation (ADR 0041) |
 | `/v1/ai/cook-turn`        | POST   | session JWT                                         | Text fallback for Cook Mode voice when realtime voice is unavailable              | no; conversational          |
 | `/v1/ai/substitution`     | POST   | session JWT                                         | Resolve missing ingredient / equipment / dietary change. Also invoked as the Realtime session's substitution function-call handler. | yes via `sub_event_id`      |
 | `/v1/ai/recipe-import`    | POST   | session JWT                                         | Normalize URL / OCR text into structured recipe                                   | yes via `import_id`         |
@@ -267,6 +267,9 @@ Backend/
 ### AI architecture
 
 **Vendors (ADR 0038):** Claude for text, OpenAI Realtime for voice. Gemini remains callable for text only, behind the `AI_TEXT_PROVIDER` secret. There is no per-request cross-vendor fallback.
+
+**Direct voice boundary (ADR 0041):** The supported app connects directly to OpenAI. The server authorizes and meters mint requests, including a charged cooking-session chain for bounded quota-free continuations. OpenAI client secrets can create multiple sessions within their 120-second connection window, and clients may override attached settings. The configured 400-token output cap and truncation bound the supported client's behavior; they do not enforce a downstream spend or connection limit against a modified client. A Stir ownership-row close does not revoke an OpenAI connection. Keep direct streaming with this accepted boundary; no relay is part of this design.
+
 
 **Routing logic**
 
@@ -311,7 +314,7 @@ Backend/
 * JSON schema validation on every model response
 * Any response that fails validation or violates hard rules is discarded and retried
 * Realtime substitution function-call outputs run through the same hard-rule validator as the standalone `/v1/ai/substitution` endpoint before being spoken back
-* The Realtime session config pins `max_output_tokens: 400` (ADR 0010) to enforce response brevity and cap runaway output audio cost
+* The supported client configures `max_output_tokens: 400` (ADR 0010/0041) for response brevity; a modified connection may override this default
 
 **Cost observability**
 
@@ -1185,6 +1188,8 @@ The "Remembered pantry items" cap is shipped to iOS on `entitlements.standing_pa
 
 ### Retention policy
 
+Saved user content stays in Core Data / CloudKit. ADR 0042 permits two server processing exceptions: queued recipe text has a ten-minute processing deadline and is scrubbed on completion/failure or the next minute expiry sweep; parsed responses remain readable for ten minutes and expired rows are removed by the existing five-minute, 1,000-row cleanup batches. Backlogs/outages can delay physical removal. Source URLs are omitted from the queue, and expired import results require an explicit new attempt.
+
 | Data class                      | Retention                                    | Notes                                                                     |
 | ------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------- |
 | Household profile / preferences | until user deletes account/data              | synced via CloudKit                                                       |
@@ -1205,8 +1210,8 @@ The "Remembered pantry items" cap is shipped to iOS on `entitlements.standing_pa
 
 CCPA baseline:
 
-* local delete: immediate
-* CloudKit delete queue: same session when possible
+* local delete: remove the authenticated household after backend request acceptance; retain minimal identity/deletion anchors for late imports (ADR 0040)
+* CloudKit: normal export propagates local child deletions; report local save and a subsequent successful matching-store export separately, without claiming every device has synchronized
 * backend metadata purge: within **30 days**
 * analytics pseudonymization / delete request: within **30 days**
 * support path: in-app settings + support email
@@ -1281,7 +1286,7 @@ Premium monthly net ARPU = **$8.4915**
 
 > **Caps unchanged; rates per ADR 0038.** Voice caps stay Free 0 / Premium 13 / Pro 27 sessions per month (ADR 0015), and SKU prices and margins are unchanged. This section prices usage at the ADR 0038 rates, using the token shapes ADR 0014 measured on device. The Premium and Pro AI budget lines ($1.89 and $3.69) are the guardrails the modeled spend is held against.
 
-**Voice Cook Mode cost model:** OpenAI Realtime caches the conversation prefix automatically, so per-turn cost depends on the cache hit rate. Server truncation (`retention_ratio` 0.8, `post_instructions` 8000) bounds per-turn prompt growth without opening a new session; a refresh discards the cache and happens only near the 60-minute limit and on transport recovery. `max_output_tokens: 400` caps output (ADR 0010). Assumptions (ADR 0038): 15 turns, 3 tool-call turns, a 3,300-token static text prefix, 3.8 s of user speech and 5.0 s of model speech per turn, input transcription on.
+**Voice Cook Mode cost model:** OpenAI Realtime caches the conversation prefix automatically, so per-turn cost depends on the cache hit rate. Server truncation (`retention_ratio` 0.8, `post_instructions` 8000) bounds per-turn prompt growth without opening a new session; a refresh discards the cache and happens only near the 60-minute limit and on transport recovery. The supported client sets `max_output_tokens: 400` (ADR 0010/0041); it is not an enforced downstream spend limit. Assumptions (ADR 0038): 15 turns, 3 tool-call turns, a 3,300-token static text prefix, 3.8 s of user speech and 5.0 s of model speech per turn, input transcription on.
 
 A tool-call turn is a double generation pass (the call, then the spoken reply after `function_call_output`), billed as two responses. The backend captures `prompt_tokens_text`, `prompt_tokens_audio`, `prompt_tokens_cached` (cached text) and `prompt_tokens_cached_audio` per turn for the exact breakdown in `ai_request_log` → PostHog LLM Observability.
 
@@ -1376,7 +1381,7 @@ Text features run on Claude Haiku 5.5 unless a feature's entry says otherwise; a
   * food-safety-sensitive questions get a prepended safety cue before the spoken answer
   * substitution function-call outputs run through the same hard-rule validator as the standalone substitution feature before being spoken
   * server truncation (`retention_ratio` 0.8, `token_limits.post_instructions` 8000) bounds per-turn prompt growth inside a session; the session is not refreshed to prune
-  * `max_output_tokens: 400` (ADR 0010) enforced at session config to prevent runaway output audio cost
+  * `max_output_tokens: 400` (ADR 0010/0041) configured as a mutable output default for the supported client
   * **Tool Call Preamble pattern — [UNVALIDATED ASSUMPTION — adherence on `gpt-realtime-2.1-mini` is not yet measured; device testing must cover every tool].** The tool descriptions instruct the model to say a short neutral filler ("Let me check", "One moment") before emitting a slow tool call (`substitution_check`, and the timer calls other than `get_timer_status`), masking the ~2s substitution backend round-trip; `get_timer_status` and `set_step` need no preamble. The test must measure preamble-present rate across ≥50 tool-call invocations. If the rate is <90%, a client-side pre-recorded neutral filler clip ("Let me check", "One moment", "Give me a second") plays the instant a function-call event arrives, and the model preamble is disabled via the tool descriptions to avoid double-speak.
   * Tool results: after `function_call_output` the client sends an explicit `response.create`; without it the model does not speak the result
   * Turn detection: start with `semantic_vad` (chunks based on utterance completion) to reduce false-positive tokenization of non-speech kitchen noise; the `voice_turn_detection_mode` flag switches to `server_vad` if semantic VAD proves unreliable in testing

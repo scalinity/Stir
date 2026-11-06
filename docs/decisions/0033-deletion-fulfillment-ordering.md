@@ -14,10 +14,10 @@ runbook-only. Privacy Policy §7.2 commits to a 30-day SLA, which
 puts the manual approach on a clock.
 
 The fulfillment worker (SCA-88) walks five subsystems:
-1. PostHog identify-merge
+1. Awaited PostHog person/event/recording deletion
 2. Sentry user erase
 3. RevenueCat alias cleanup
-4. CloudKit zone-delete trigger
+4. Outstanding client-side CloudKit synchronization check
 5. Postgres row sweep
 
 The order is load-bearing. Two options were live during design:
@@ -35,19 +35,17 @@ The order is load-bearing. Two options were live during design:
 
 ## Decision
 
-**Postgres sweep runs LAST.** Plus a key sub-decision (revised 2026-05-08
-under SCA-222): the worker inserts the durable `audit_log` row AFTER
-the `DELETE FROM app_users` succeeds, not before. Originally we
-inserted the audit row first because the cascade was about to delete
-`deletion_requests` and we wanted a surviving anchor — but that
-ordering had two reachable bugs (the audit row outliving a failed
-DELETE; duplicate audit rows on retry). Inserting after success means:
-- Failed deletions leave NO audit row (the `deletion_requests.failed`
-  row is the only record).
-- Retries can't produce duplicates.
-- `audit_log.actor_id ON DELETE SET NULL` already keeps the audit row
-  alive across the cascade — there's no "anchor must exist before
-  cascade" constraint that justified the earlier ordering.
+**Postgres sweep runs LAST.** Before cascading away the deletion request,
+persist any outstanding processor/client actions in an idempotent
+`deletion_requests.external_actions_pending` audit record. A failed write
+blocks the sweep so the request remains retryable. This record says only
+that work is pending and may survive an unsuccessful sweep.
+
+Insert the separate `deletion_requests.fulfilled` audit record only after
+`DELETE FROM app_users` succeeds. No pre-delete record claims fulfillment.
+`audit_log.actor_id ON DELETE SET NULL` allows these records to survive
+independently of the deleted operational user. ADR 0040 defines the
+client-side removal and external-action boundaries.
 
 The trade-off is intentional: Option A's "external services run with
 no canonical key" is a worse failure mode than Option B's "operational
@@ -64,20 +62,23 @@ inbound refs in the same step before issuing DELETE — the merged_into
 chain is a forward alias and the dangling alias rows have nothing
 useful to point to once the canonical row is gone.
 
-## Why CloudKit can't be server-side
+## CloudKit completion boundary
 
-Apple's CloudKit Web Services API exposes only the public DB.
-Private-DB writes are unreachable from any server-side context — the
-keys live in the user's iCloud account and are addressable only by
-code running in the user's app process. We mark
-`external_refs.cloudkit.requires_client_action=true`; iOS sees this on
-next launch and triggers `CKContainer.privateCloudDatabase
-.deleteRecordZone(zoneID)`.
+The confirmed in-app flow erases the authenticated household through Core Data
+and records a durable local cutoff before clearing credentials. Empty deleted
+household roots remain as routing anchors for late imports. Normal CloudKit
+export propagates these child deletions; the app reports local removal and a
+subsequent successful export separately. It never deletes an entire zone.
+ADR 0040 defines the client flow, retry, start-over and account-scope rules.
 
-If the user never relaunches, their CloudKit data persists. Privacy
-Policy §6 documents this asymmetry. CloudKit data is the user's own
-iCloud, not Stir-controlled — the same boundary that lets a user
-delete a Stir-saved recipe by signing out of iCloud entirely.
+The backend retains `external_refs.cloudkit.requires_client_action=true` because
+it has no authenticated per-household CloudKit erase receipt. Before the sweep,
+any unfinished processor/client checks are saved in an idempotent
+`deletion_requests.external_actions_pending` audit row. Failure to persist that
+record blocks the cascade. The record states outstanding actions only; the
+separate `deletion_requests.fulfilled` record still follows the successful
+Postgres delete. An HTTP 202 from PostHog records queued work and a manual
+completion check, not `completed_at`.
 
 ## Why audit_log lives on a separate table
 
@@ -101,13 +102,12 @@ audit_log row:
   after_json   = { deletion_request_id, external_refs }
 ```
 
-This means a completed deletion has TWO records:
-- `audit_log` row — durable, queryable by hash forever.
-- `deletion_requests` row — gone (cascade).
-
-Failed deletions have ONLY the `deletion_requests` row, in the
-`failed` state. The audit_log row is only written on the success
-path. (Earlier draft had the audit insert BEFORE the DELETE; that
+A successful Postgres sweep removes the `deletion_requests` row by
+cascade. Outstanding external actions already have their durable pending
+record; the final fulfilled-audit insert is attempted afterward. If that
+final insert fails, the pending record still survives. A failed sweep keeps
+the request row for retry and can also have the pending record. Audit-table
+retention remains governed by its existing scheduled cleanup. (Earlier draft had the audit insert BEFORE the DELETE; that
 introduced two reachable bugs — audit row outliving a failed
 DELETE, plus duplicate audit rows on the documented ops replay
 path. Revised under SCA-222.)

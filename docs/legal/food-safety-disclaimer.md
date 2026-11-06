@@ -1,7 +1,7 @@
 # Food Safety Disclaimer — In-app Strings
 
 **Status:** Source of truth for in-app disclaimer copy. Lawyer-reviewed wording lives here; iOS code references these strings.
-**Last updated:** 2026-04-24
+**Last updated:** 2026-11-06
 
 Per spec §19 ("Claims risk") + ToS §2 ("AI-generated content disclaimer") + ToS §5 ("Limitation of liability"), Stir must display a food-safety disclaimer in 4 specific places. This doc is the single source of truth for the wording.
 
@@ -39,7 +39,7 @@ The wording avoids:
 ```
 About Stir's AI
 
-Stir uses Google's Gemini AI to:
+Stir uses Anthropic's Claude API for text/images and OpenAI's Realtime API for Premium voice. An operator-selected Google Gemini route can serve text/image requests. These AI features:
 - Identify ingredients from photos of your kitchen
 - Suggest dinner ideas based on what you have
 - Provide step-by-step cooking guidance
