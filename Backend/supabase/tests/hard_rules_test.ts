@@ -7,14 +7,110 @@
 
 import { assertEquals } from '@std/assert';
 import {
+  allergyKeywordsFor,
   type CandidateDish,
-  type DishContext,
   type DietaryRule,
+  type DishContext,
   type SubstitutionCandidate,
   type SubstitutionContext,
   validateDish,
   validateSubstitution,
 } from '../functions/_shared/hard_rules.ts';
+
+const selectableAllergens: Record<string, string[]> = {
+  peanut: ['groundnut'],
+  tree_nut: ['almond'],
+  nut: ['cashew'],
+  dairy: ['butter', 'whey'],
+  egg: ['albumen'],
+  soy: ['tofu'],
+  gluten: ['wheat flour', 'semolina'],
+  shellfish: ['shrimp'],
+  fish: ['salmon', 'anchovies'],
+  sesame: ['tahini'],
+};
+
+Deno.test('hard-rules: every selectable allergy has a deliberate expansion in both validators', async () => {
+  const options = await Deno.readTextFile(
+    new URL('../../../Stir/Features/Onboarding/OnboardingOptions.swift', import.meta.url),
+  );
+  const enumBody = options.split('enum AllergenOption:')[1]!.split('var displayName:')[0]!;
+  const rawValues = [...enumBody.matchAll(/^\s*case\s+(\w+)(?:\s*=\s*"([^"]+)")?/gm)]
+    .map((match) => match[2] ?? match[1]);
+  assertEquals(rawValues.sort(), Object.keys(selectableAllergens).sort());
+  for (const [allergen, products] of Object.entries(selectableAllergens)) {
+    assertEquals(
+      allergyKeywordsFor(allergen).length > 1,
+      true,
+      `${allergen} needs an explicit expansion`,
+    );
+    for (const name of products) {
+      const dietaryRules = [rule('allergy', allergen)];
+      const candidate = dish();
+      candidate.recipe_plan.ingredients = [{ display_name: name }];
+      assertEquals(
+        validateDish(candidate, ctx({ dietaryRules })).valid,
+        false,
+        `${allergen}: ${name}`,
+      );
+      assertEquals(
+        validateSubstitution({
+          substitution_text: name,
+          reasoning: 'Use it.',
+          constraint_safe: true,
+        }, { dietaryRules, availableEquipment: [] }).valid,
+        false,
+        `${allergen}: ${name}`,
+      );
+    }
+  }
+});
+
+Deno.test('hard-rules: allergens in instructions and quantities reject initial and replacement candidates', () => {
+  for (const hardConstraintPass of [true, false]) {
+    for (const source of ['step', 'amount'] as const) {
+      const candidate = dish();
+      candidate.hard_constraint_pass = hardConstraintPass;
+      candidate.recipe_plan.ingredients = [{
+        display_name: 'oil',
+        amount_text: source === 'amount' ? '1 tbsp peanut oil' : '1 tbsp',
+      }];
+      candidate.recipe_plan.steps = [{
+        step_number: 1,
+        instruction_text: source === 'step' ? 'Top with crushed peanuts.' : 'Cook the rice.',
+      }];
+      const result = validateDish(candidate, ctx({ dietaryRules: [rule('allergy', 'peanut')] }));
+      assertEquals(result.valid, false, source);
+      assertEquals(result.issues.some((issue) => issue.kind === 'allergen'), true);
+    }
+  }
+});
+
+Deno.test('hard-rules: a diet-name exception cannot hide a restricted quantity', () => {
+  const candidate = dish();
+  candidate.recipe_plan.ingredients = [{
+    display_name: 'milk thistle',
+    amount_text: '2 tbsp butter',
+  }];
+  assertEquals(
+    validateDish(candidate, ctx({ dietaryRules: [rule('diet', 'vegan')] })).valid,
+    false,
+  );
+});
+
+Deno.test('hard-rules: final instructions preserve known plant-name diet exceptions without hiding other ingredients', () => {
+  const candidate = dish();
+  candidate.recipe_plan.ingredients = [{ display_name: 'chicken of the woods' }];
+  candidate.recipe_plan.steps = [{
+    step_number: 1,
+    instruction_text: 'Cook the chicken of the woods mushrooms in oil.',
+  }];
+  const context = ctx({ dietaryRules: [rule('diet', 'vegan')] });
+  assertEquals(validateDish(candidate, context).valid, true);
+  candidate.recipe_plan.steps[0]!.instruction_text =
+    'Cook chicken of the woods mushrooms in butter.';
+  assertEquals(validateDish(candidate, context).valid, false);
+});
 
 function dish(overrides: Partial<CandidateDish> = {}): CandidateDish {
   return {
@@ -38,7 +134,11 @@ function dish(overrides: Partial<CandidateDish> = {}): CandidateDish {
   } as CandidateDish;
 }
 
-function rule(kind: DietaryRule['kind'], value: string, severity: DietaryRule['severity'] = 'hard'): DietaryRule {
+function rule(
+  kind: DietaryRule['kind'],
+  value: string,
+  severity: DietaryRule['severity'] = 'hard',
+): DietaryRule {
   return { kind, value, severity };
 }
 
@@ -55,9 +155,20 @@ Deno.test('hard-rules: eggplant FIRES egg allergy (known safety-first FP)', () =
   // a retry on a legitimate eggplant dish over a missed egg allergen.
   // The same conservatism applies to any "X-plant", "X-free", etc name
   // that contains the allergen as a substring. Documented, not fixed.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'eggplant', canonical_slug: 'eggplant', amount_text: '1 large', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'eggplant',
+        canonical_slug: 'eggplant',
+        amount_text: '1 large',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'egg')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -66,49 +177,115 @@ Deno.test('hard-rules: eggplant FIRES egg allergy (known safety-first FP)', () =
 Deno.test('hard-rules: eggplant passes egg-free DIET (word boundary)', () => {
   // Diet rules DO use word-boundary for short keywords. Eggplant in
   // a vegan-diet check must not trigger.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'eggplant', canonical_slug: 'eggplant', amount_text: '1 large', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'eggplant',
+        canonical_slug: 'eggplant',
+        amount_text: '1 large',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegan')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: butternut squash does NOT fire on dairy-free diet', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'butternut squash', canonical_slug: 'butternut-squash', amount_text: '1', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'butternut squash',
+        canonical_slug: 'butternut-squash',
+        amount_text: '1',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'dairy-free')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: chicken-of-the-woods mushroom passes vegetarian', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'chicken of the woods', canonical_slug: null, amount_text: '1 lb', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'chicken of the woods',
+        canonical_slug: null,
+        amount_text: '1 lb',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegetarian')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: buckwheat passes gluten-free', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'buckwheat flour', canonical_slug: 'buckwheat', amount_text: '2 cups', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'buckwheat flour',
+        canonical_slug: 'buckwheat',
+        amount_text: '2 cups',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'gluten-free')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: wheatgrass passes gluten-free', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'wheatgrass juice', canonical_slug: 'wheatgrass', amount_text: '1 shot', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'wheatgrass juice',
+        canonical_slug: 'wheatgrass',
+        amount_text: '1 shot',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'gluten-free')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: milk thistle passes dairy-free', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'milk thistle', canonical_slug: null, amount_text: '1 tsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'milk thistle',
+        canonical_slug: null,
+        amount_text: '1 tsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'dairy-free')] }));
   assertEquals(result.valid, true);
 });
@@ -118,33 +295,77 @@ Deno.test('hard-rules: milk thistle passes dairy-free', () => {
 // -----------------------------------------------------------------------
 
 Deno.test('hard-rules: scrambled eggs still fires egg allergy', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'scrambled eggs', canonical_slug: null, amount_text: '3', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'scrambled eggs',
+        canonical_slug: null,
+        amount_text: '3',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'egg')] }));
   assertEquals(result.valid, false);
 });
 
 Deno.test('hard-rules: chicken breast still fires vegetarian', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'chicken breast', canonical_slug: 'chicken', amount_text: '1 lb', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'chicken breast',
+        canonical_slug: 'chicken',
+        amount_text: '1 lb',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegetarian')] }));
   assertEquals(result.valid, false);
 });
 
 Deno.test('hard-rules: butter still fires on vegan diet', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'butter', canonical_slug: null, amount_text: '2 tbsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'butter',
+        canonical_slug: null,
+        amount_text: '2 tbsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegan')] }));
   assertEquals(result.valid, false);
 });
 
 Deno.test('hard-rules: salmon fires vegetarian (long keyword unchanged)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'salmon fillet', canonical_slug: null, amount_text: '1', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'salmon fillet',
+        canonical_slug: null,
+        amount_text: '1',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegetarian')] }));
   assertEquals(result.valid, false);
 });
@@ -154,25 +375,58 @@ Deno.test('hard-rules: salmon fires vegetarian (long keyword unchanged)', () => 
 // -----------------------------------------------------------------------
 
 Deno.test('hard-rules: allergy fires even on is_optional ingredient (safety)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'peanuts', canonical_slug: null, amount_text: '1/4 cup', is_optional: true }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'peanuts',
+        canonical_slug: null,
+        amount_text: '1/4 cup',
+        is_optional: true,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'peanut')] }));
   assertEquals(result.valid, false);
 });
 
 Deno.test('hard-rules: dislike skips is_optional ingredient', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'cilantro', canonical_slug: null, amount_text: '1 tbsp', is_optional: true }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'cilantro',
+        canonical_slug: null,
+        amount_text: '1 tbsp',
+        is_optional: true,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('dislike', 'cilantro')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: diet skips is_optional ingredient', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'beef', canonical_slug: null, amount_text: '1 oz', is_optional: true }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'beef',
+        canonical_slug: null,
+        amount_text: '1 oz',
+        is_optional: true,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegetarian')] }));
   assertEquals(result.valid, true);
 });
@@ -182,21 +436,54 @@ Deno.test('hard-rules: diet skips is_optional ingredient', () => {
 // -----------------------------------------------------------------------
 
 Deno.test('hard-rules: pescatarian blocks beef but allows salmon', () => {
-  const beef = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'beef chuck', canonical_slug: null, amount_text: '1 lb', is_optional: false }],
-  }});
-  const salmon = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'salmon', canonical_slug: null, amount_text: '1', is_optional: false }],
-  }});
+  const beef = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'beef chuck',
+        canonical_slug: null,
+        amount_text: '1 lb',
+        is_optional: false,
+      }],
+    },
+  });
+  const salmon = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'salmon',
+        canonical_slug: null,
+        amount_text: '1',
+        is_optional: false,
+      }],
+    },
+  });
   const c = ctx({ dietaryRules: [rule('diet', 'pescatarian')] });
   assertEquals(validateDish(beef, c).valid, false);
   assertEquals(validateDish(salmon, c).valid, true);
 });
 
 Deno.test('hard-rules: unknown diet passes silently (dietKeywordsFor → null)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'beef', canonical_slug: null, amount_text: '1 lb', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'beef',
+        canonical_slug: null,
+        amount_text: '1 lb',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'halal')] }));
   assertEquals(result.valid, true); // 'halal' has no automated keyword list
 });
@@ -219,10 +506,19 @@ Deno.test('hard-rules: time_over_budget not triggered when maxTimeMinutes undefi
 });
 
 Deno.test('hard-rules: avoidEquipment contributes to unavailable set', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null,
-    ingredients: [],
-    steps: [{ step_number: 1, instruction_text: 'Set air fryer to 400F for 20 min.', timer_seconds: null }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      ingredients: [],
+      steps: [{
+        step_number: 1,
+        instruction_text: 'Set air fryer to 400F for 20 min.',
+        timer_seconds: null,
+      }],
+    },
+  });
   const result = validateDish(d, {
     dietaryRules: [],
     availableEquipment: ['air_fryer'],
@@ -238,8 +534,17 @@ Deno.test('hard-rules: avoidEquipment contributes to unavailable set', () => {
 Deno.test('hard-rules: claims_pass_falsely added alongside the real issue', () => {
   const d = dish({
     hard_constraint_pass: true,
-    recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-      ingredients: [{ display_name: 'chicken', canonical_slug: null, amount_text: '1 lb', is_optional: false }],
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'chicken',
+        canonical_slug: null,
+        amount_text: '1 lb',
+        is_optional: false,
+      }],
     },
   });
   const result = validateDish(d, ctx({ dietaryRules: [rule('diet', 'vegetarian')] }));
@@ -256,27 +561,60 @@ Deno.test('hard-rules: claims_pass_falsely added alongside the real issue', () =
 // -----------------------------------------------------------------------
 
 Deno.test('hard-rules: nut allergy fires on almond (no "nut" substring)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'almond flour', canonical_slug: 'almond-flour', amount_text: '1 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'almond flour',
+        canonical_slug: 'almond-flour',
+        amount_text: '1 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
 });
 
 Deno.test('hard-rules: nut allergy fires on cashew (no "nut" substring)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'cashew butter', canonical_slug: 'cashew-butter', amount_text: '2 tbsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'cashew butter',
+        canonical_slug: 'cashew-butter',
+        amount_text: '2 tbsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
 });
 
 Deno.test('hard-rules: nut allergy still fires on walnut (substring "nut" hit)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'walnuts', canonical_slug: null, amount_text: '1/4 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'walnuts',
+        canonical_slug: null,
+        amount_text: '1/4 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -286,9 +624,20 @@ Deno.test('hard-rules: nut allergy fires on peanut (legume but mockup chip is co
   // The mockup's "nut-free" chip makes no botanical distinction. A user
   // tapping it expects peanut protection too — even though peanuts are
   // a legume, not a tree nut.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'peanut oil', canonical_slug: 'peanut-oil', amount_text: '2 tbsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'peanut oil',
+        canonical_slug: 'peanut-oil',
+        amount_text: '2 tbsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -296,9 +645,20 @@ Deno.test('hard-rules: nut allergy fires on peanut (legume but mockup chip is co
 
 Deno.test('hard-rules: tree_nut allergy fires on almond / cashew / pistachio', () => {
   for (const ingredient of ['almonds', 'cashew cream', 'pistachio paste']) {
-    const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-      ingredients: [{ display_name: ingredient, canonical_slug: null, amount_text: '1 cup', is_optional: false }],
-    }});
+    const d = dish({
+      recipe_plan: {
+        servings: 2,
+        difficulty: 2,
+        cuisine: null,
+        steps: [],
+        ingredients: [{
+          display_name: ingredient,
+          canonical_slug: null,
+          amount_text: '1 cup',
+          is_optional: false,
+        }],
+      },
+    });
     const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'tree_nut')] }));
     assertEquals(result.valid, false, `tree_nut should fire on ${ingredient}`);
     assertEquals(result.issues[0]?.kind, 'allergen');
@@ -308,17 +668,39 @@ Deno.test('hard-rules: tree_nut allergy fires on almond / cashew / pistachio', (
 Deno.test('hard-rules: tree_nut does NOT fire on peanut (legume, not tree nut)', () => {
   // tree_nut explicitly excludes peanut — user can pick both `peanut`
   // and `tree_nut` to cover everything; coarse `nut` covers both at once.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'peanut butter', canonical_slug: 'peanut-butter', amount_text: '1/2 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'peanut butter',
+        canonical_slug: 'peanut-butter',
+        amount_text: '1/2 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'tree_nut')] }));
   assertEquals(result.valid, true);
 });
 
 Deno.test('hard-rules: peanut allergy fires on groundnut (alt name)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'groundnut oil', canonical_slug: null, amount_text: '2 tbsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'groundnut oil',
+        canonical_slug: null,
+        amount_text: '2 tbsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'peanut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -326,9 +708,20 @@ Deno.test('hard-rules: peanut allergy fires on groundnut (alt name)', () => {
 
 Deno.test('hard-rules: shellfish allergy fires on shrimp / lobster / crab', () => {
   for (const ingredient of ['shrimp', 'lobster tail', 'crab meat']) {
-    const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-      ingredients: [{ display_name: ingredient, canonical_slug: null, amount_text: '4 oz', is_optional: false }],
-    }});
+    const d = dish({
+      recipe_plan: {
+        servings: 2,
+        difficulty: 2,
+        cuisine: null,
+        steps: [],
+        ingredients: [{
+          display_name: ingredient,
+          canonical_slug: null,
+          amount_text: '4 oz',
+          is_optional: false,
+        }],
+      },
+    });
     const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'shellfish')] }));
     assertEquals(result.valid, false, `shellfish should fire on ${ingredient}`);
     assertEquals(result.issues[0]?.kind, 'allergen');
@@ -337,9 +730,20 @@ Deno.test('hard-rules: shellfish allergy fires on shrimp / lobster / crab', () =
 
 Deno.test('hard-rules: soy allergy fires on tofu / tempeh / miso (no "soy" substring)', () => {
   for (const ingredient of ['silken tofu', 'tempeh strips', 'white miso']) {
-    const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-      ingredients: [{ display_name: ingredient, canonical_slug: null, amount_text: '4 oz', is_optional: false }],
-    }});
+    const d = dish({
+      recipe_plan: {
+        servings: 2,
+        difficulty: 2,
+        cuisine: null,
+        steps: [],
+        ingredients: [{
+          display_name: ingredient,
+          canonical_slug: null,
+          amount_text: '4 oz',
+          is_optional: false,
+        }],
+      },
+    });
     const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'soy')] }));
     assertEquals(result.valid, false, `soy should fire on ${ingredient}`);
     assertEquals(result.issues[0]?.kind, 'allergen');
@@ -348,9 +752,20 @@ Deno.test('hard-rules: soy allergy fires on tofu / tempeh / miso (no "soy" subst
 
 Deno.test('hard-rules: peanut allergy unchanged on plain "peanut" (regression guard)', () => {
   // The expansion is additive; bare-rawValue substring must still hit.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'peanuts', canonical_slug: null, amount_text: '1/4 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'peanuts',
+        canonical_slug: null,
+        amount_text: '1/4 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'peanut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -367,33 +782,77 @@ Deno.test('hard-rules: peanut allergy unchanged on plain "peanut" (regression gu
 // -----------------------------------------------------------------------
 
 Deno.test('hard-rules: nut allergy does NOT fire on coconut (CA2-1)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'coconut milk', canonical_slug: 'coconut-milk', amount_text: '1 can', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'coconut milk',
+        canonical_slug: 'coconut-milk',
+        amount_text: '1 can',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, true, 'coconut should not trip nut allergy');
 });
 
 Deno.test('hard-rules: nut allergy does NOT fire on butternut squash (CA2-1)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'butternut squash', canonical_slug: 'butternut-squash', amount_text: '1', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'butternut squash',
+        canonical_slug: 'butternut-squash',
+        amount_text: '1',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, true, 'butternut should not trip nut allergy');
 });
 
 Deno.test('hard-rules: nut allergy does NOT fire on nutmeg (CA2-1)', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'nutmeg', canonical_slug: 'nutmeg', amount_text: '1 tsp', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'nutmeg',
+        canonical_slug: 'nutmeg',
+        amount_text: '1 tsp',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, true, 'nutmeg should not trip nut allergy');
 });
 
 Deno.test('hard-rules: nut allergy STILL fires on walnut after tightening', () => {
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'walnut halves', canonical_slug: null, amount_text: '1/2 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'walnut halves',
+        canonical_slug: null,
+        amount_text: '1/2 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
@@ -402,19 +861,48 @@ Deno.test('hard-rules: nut allergy STILL fires on walnut after tightening', () =
 Deno.test('hard-rules: nut allergy STILL fires on bare "nut" word', () => {
   // Word-boundary still permits the plain "nut" word, just not as a
   // substring of compound words.
-  const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-    ingredients: [{ display_name: 'mixed nuts', canonical_slug: null, amount_text: '1 cup', is_optional: false }],
-  }});
+  const d = dish({
+    recipe_plan: {
+      servings: 2,
+      difficulty: 2,
+      cuisine: null,
+      steps: [],
+      ingredients: [{
+        display_name: 'mixed nuts',
+        canonical_slug: null,
+        amount_text: '1 cup',
+        is_optional: false,
+      }],
+    },
+  });
   const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
   assertEquals(result.valid, false);
   assertEquals(result.issues[0]?.kind, 'allergen');
 });
 
 Deno.test('hard-rules: nut allergy fires on confection (marzipan/praline/nougat) (CA2-16)', () => {
-  for (const ingredient of ['marzipan filling', 'praline topping', 'nougat layer', 'gianduja chocolate']) {
-    const d = dish({ recipe_plan: { servings: 2, difficulty: 2, cuisine: null, steps: [],
-      ingredients: [{ display_name: ingredient, canonical_slug: null, amount_text: '2 tbsp', is_optional: false }],
-    }});
+  for (
+    const ingredient of [
+      'marzipan filling',
+      'praline topping',
+      'nougat layer',
+      'gianduja chocolate',
+    ]
+  ) {
+    const d = dish({
+      recipe_plan: {
+        servings: 2,
+        difficulty: 2,
+        cuisine: null,
+        steps: [],
+        ingredients: [{
+          display_name: ingredient,
+          canonical_slug: null,
+          amount_text: '2 tbsp',
+          is_optional: false,
+        }],
+      },
+    });
     const result = validateDish(d, ctx({ dietaryRules: [rule('allergy', 'nut')] }));
     assertEquals(result.valid, false, `nut should fire on ${ingredient}`);
     assertEquals(result.issues[0]?.kind, 'allergen');

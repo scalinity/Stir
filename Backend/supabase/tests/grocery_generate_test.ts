@@ -8,6 +8,8 @@
 import { assertEquals, assertExists } from '@std/assert';
 import { quickBootstrap, testIPHeaders } from './_helpers/factory.ts';
 import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
+import { groceryCacheKey } from '../functions/_shared/grocery_cache_key.ts';
+import { GroceryGenerateRequest } from '../functions/_shared/validation.ts';
 
 await clearRateLimitBuckets();
 
@@ -93,13 +95,14 @@ Deno.test('grocery_generate: VAL-01 when source_type is invalid', async () => {
 // Idempotency replay
 // ---------------------------------------------------------------------------
 
-Deno.test('grocery_generate: idempotency — same source_id returns cache', async () => {
+Deno.test('grocery_generate: idempotency — identical input returns cache', async () => {
   const { session_jwt, canonical_user_key } = await quickBootstrap();
   const sourceId = crypto.randomUUID();
+  const requestBody = validBody({ source_id: sourceId });
   const client = serviceClient();
   await client.from('ai_response_cache').insert({
     canonical_user_key,
-    request_id: sourceId,
+    request_id: await groceryCacheKey(GroceryGenerateRequest.parse(requestBody)),
     response_body: {
       source_id: sourceId,
       source_type: 'recipe',
@@ -128,7 +131,7 @@ Deno.test('grocery_generate: idempotency — same source_id returns cache', asyn
       Authorization: `Bearer ${session_jwt}`,
       ...testIPHeaders(),
     },
-    body: JSON.stringify(validBody({ source_id: sourceId })),
+    body: JSON.stringify(requestBody),
   });
   assertEquals(res.status, 200);
   assertEquals(res.headers.get('x-cache'), 'hit');
@@ -137,5 +140,50 @@ Deno.test('grocery_generate: idempotency — same source_id returns cache', asyn
   // priority field is required on every missing_items row per spec §4.17.
   for (const item of body.missing_items as Array<{ priority?: string }>) {
     assertExists(item.priority);
+  }
+});
+
+Deno.test('grocery_generate: changed pantry for one recipe selects the corresponding fresh diff', async () => {
+  const { session_jwt, canonical_user_key } = await quickBootstrap();
+  const sourceId = crypto.randomUUID();
+  const before = GroceryGenerateRequest.parse(
+    validBody({ source_id: sourceId, pantry_snapshot: [] }),
+  );
+  const after = GroceryGenerateRequest.parse(validBody({
+    source_id: sourceId,
+    pantry_snapshot: [{ display_name: 'chicken thighs' }],
+  }));
+  const client = serviceClient();
+  const missing = [{ display_name: 'chicken thighs', grocery_category: 'meat', priority: 'high' }];
+  const alreadyHave = [{ display_name: 'chicken thighs' }];
+  for (
+    const [input, missingItems, haveItems] of [
+      [before, missing, []],
+      [after, [], alreadyHave],
+    ] as const
+  ) {
+    const { error } = await client.from('ai_response_cache').insert({
+      canonical_user_key,
+      request_id: await groceryCacheKey(input),
+      feature_key: 'grocery_generate',
+      status_code: 200,
+      response_body: {
+        source_id: sourceId,
+        source_type: 'recipe',
+        missing_items: missingItems,
+        already_have: haveItems,
+        total_item_count: missingItems.length,
+        prompt_version: 'test',
+        retry_count: 0,
+      },
+    });
+    assertEquals(error, null);
+  }
+  for (const input of [before, after, before]) {
+    const response = await callGroceryGenerate(input, session_jwt);
+    assertEquals(response.status, 200);
+    const hasChicken = input.pantry_snapshot.length > 0;
+    assertEquals(response.body.missing_items, hasChicken ? [] : missing);
+    assertEquals(response.body.already_have, hasChicken ? alreadyHave : []);
   }
 });

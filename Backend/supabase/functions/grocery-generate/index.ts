@@ -10,9 +10,8 @@
 // Output contract: every missing_item carries `priority` per spec §4.17
 // (GroceryItem.priority is required); default 'normal' enforced post-model.
 //
-// Idempotency: source_id = RecipePlan UUID (or CookingSession UUID for
-// session-scoped groceries). Same idempotency_cache pattern as other
-// /v1/ai/* handlers — 10-min TTL.
+// Idempotency: fingerprint the source plus current recipe/pantry input.
+// Identical retries replay for 10 minutes; changed pantry/recipe regenerates.
 
 import { z, ZodError } from 'zod';
 import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
@@ -31,6 +30,7 @@ import {
   extractSourceIP,
 } from '../_shared/rate_limiter.ts';
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
+import { groceryCacheKey } from '../_shared/grocery_cache_key.ts';
 
 const FEATURE_KEY = 'grocery_generate';
 const MODEL = textModelFor('grocery_generate');
@@ -171,8 +171,9 @@ Deno.serve(async (req) => {
   const client = createServiceClient();
 
   // ---- Idempotency
+  const cacheKey = await groceryCacheKey(body);
   try {
-    const hit = await readCache(client, claims.canonical_user_key, body.source_id);
+    const hit = await readCache(client, claims.canonical_user_key, cacheKey);
     if (hit) {
       userLog.info('cache_replay', { age_seconds: hit.age_seconds });
       return responseFromCache(hit, requestId);
@@ -272,6 +273,11 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatencyMs += err.usage.latencyMs;
+      }
       if (err instanceof AITextError && err.status >= 500) {
         userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt === 0) {
@@ -365,7 +371,7 @@ Deno.serve(async (req) => {
     await writeCache(
       client,
       claims.canonical_user_key,
-      body.source_id,
+      cacheKey,
       FEATURE_KEY,
       200,
       responseBody,

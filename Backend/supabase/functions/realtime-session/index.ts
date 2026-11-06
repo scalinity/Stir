@@ -1,7 +1,9 @@
 // POST /functions/v1/realtime-session
 // Logical endpoint: POST /v1/ai/realtime-session (spec §3).
 //
-// Mints one OpenAI Realtime client secret for one Cook Session. Premium+
+// Mints a reusable OpenAI Realtime client secret for a charged Cook Session.
+// The secret does not enforce one upstream session or immutable client config;
+// that separate relay boundary is tracked by SA2-C1. Premium+
 // only — voice cook sessions gate on voice_cook_mode entitlement and
 // consume one voice_cook_session quota row at mint time.
 //
@@ -18,10 +20,9 @@
 //  10. Log ai_request_log, return { auth_token, expires_at, session_id,
 //      ws_url, prompt_version, setup_frame_json }
 //
-// The response's `auth_token` value is the mint's `.name` field
-// (auth_tokens/<hex>). iOS passes it unchanged as the `access_token`
-// query param on the WebSocket URL (which we also pre-build into
-// ws_url for convenience).
+// `auth_token` is an `ek_…` client secret sent in the WebSocket bearer
+// header by the supported client. Session defaults remain client-mutable.
+// Closing an ownership row does not revoke upstream credentials (ADR 0041).
 //
 // Quota refund rules (match dinner-solve pattern):
 //   - Refund ONLY on mint upstream 5xx / timeout.
@@ -58,9 +59,6 @@ import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.
 
 const FEATURE_KEY = 'cook_mode_realtime';
 const MODEL = OpenAIRealtimeModel.Mini;
-
-/** PostgREST error.code for SQLSTATE 23505 (unique_violation). */
-const UNIQUE_VIOLATION_CODE = '23505';
 
 /**
  * SCA-145 — refund-audit observability. Emit `voice_quota_refund` to
@@ -124,76 +122,12 @@ async function emitVoiceQuotaRefund(
   });
 }
 
-/**
- * Supersede any prior open `voice_session_owners` row for this user,
- * then insert the new one. Retries once on unique_violation — the
- * UNIQUE partial index `voice_session_owners_one_open_per_user_uniq`
- * enforces "at most one open row per user" at the DB layer, so a
- * concurrent-mint race produces 23505 on one side. Single retry
- * handles the two-way race; a three-way race is pathological and
- * logged.
- *
- * Returns true if the new row landed, false if both attempts failed.
- */
-async function supersedeAndInsertWithRetry(args: {
-  client: ReturnType<typeof createServiceClient>;
-  sessionId: string;
-  canonicalUserKey: string;
-  userLog: { warn: (msg: string, fields?: Record<string, unknown>) => void };
-}): Promise<boolean> {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    // Supersede any currently-open row for this user.
-    const { error: updateErr } = await args.client
-      .from('voice_session_owners')
-      .update({ closed_at: new Date().toISOString() })
-      .eq('canonical_user_key', args.canonicalUserKey)
-      .is('closed_at', null);
-    if (updateErr) {
-      args.userLog.warn('voice_session_owner_supersede_failed', {
-        attempt,
-        err: updateErr.message,
-      });
-      // Supersede failure doesn't prevent the INSERT from trying —
-      // if the unique index rejects it we know why. If it succeeds,
-      // we accept that the prior row may still be open (stale
-      // closed_at), which voice-turn-usage will gate correctly.
-    }
-    const { error: insertErr } = await args.client
-      .from('voice_session_owners')
-      .insert({
-        session_id: args.sessionId,
-        canonical_user_key: args.canonicalUserKey,
-      });
-    if (!insertErr) return true;
-    // Retry only on unique_violation (23505). All other errors we
-    // log and bail — the issue isn't a race we can resolve by
-    // retrying (network, permission, schema drift).
-    if (insertErr.code !== UNIQUE_VIOLATION_CODE) {
-      args.userLog.warn('voice_session_owner_insert_failed', {
-        attempt,
-        code: insertErr.code,
-        err: insertErr.message,
-      });
-      return false;
-    }
-    args.userLog.warn('voice_session_owner_insert_race_retry', {
-      attempt,
-      code: insertErr.code,
-    });
-  }
-  return false;
-}
-
 interface WireResponse {
   auth_token: string;
   expires_at: string;
   session_id: string;
   ws_url: string;
   prompt_version: string;
-  /** Pre-serialized `session.update` frame iOS sends as the first
-   * WebSocket message after `open`. It carries the truncation policy, and
-   * the server's `session.updated` reply is iOS's handshake ack. See
-   * realtime_mint.setupFrameJSON. */
   setup_frame_json: string;
 }
 
@@ -456,6 +390,7 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 6. Quota: atomic voice_cook_session increment (skipped on refresh)
   // ---------------------------------------------------------------------
+  // Refresh mints must claim a ready, charged server-owned chain below.
   // Refresh mints are silent handoffs within an already-active cook
   // session (ADR 0014). The user's original session start consumed a
   // quota slot; the refresh is a cost-control mechanism on the SAME
@@ -516,11 +451,38 @@ Deno.serve(async (req) => {
     quotaCap = quotaResult.cap;
   }
 
+  const sessionId = crypto.randomUUID();
+  const claimArgs = { p_session_id: sessionId, p_canonical_user_key: claims.canonical_user_key };
+  const { data: claimed, error: claimError } = await client.rpc('stir_voice_session_claim', {
+    ...claimArgs,
+    p_cooking_session_id: body.cooking_session_id,
+    p_is_refresh: body.is_refresh,
+  });
+  if (claimError || !claimed) {
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
+      );
+    }
+    // An unproved continuation never reaches the provider or skips a new charge.
+    return jsonError(claimError ? ErrorCode.NET_01 : ErrorCode.VAL_01, claimError ? 500 : 400, {
+      message: claimError
+        ? 'Could not start voice. Try again.'
+        : 'No active charged cook is available to continue.',
+      field_errors: [{ field: 'is_refresh', issue: 'active charged cooking session required' }],
+    }, requestId);
+  }
+
   // ---------------------------------------------------------------------
   // 7. Prompt + render
   // ---------------------------------------------------------------------
   // Already read in parallel above (P3-G); just gate on the result.
   if (!activePrompt) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
     if (didConsumeQuota && consumedPeriodStart) {
       await refundQuota(
         client,
@@ -627,6 +589,7 @@ Deno.serve(async (req) => {
       safetyIdentifier: await hashCanonicalKey(claims.canonical_user_key),
     });
   } catch (err) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
     // Refund only if we actually consumed quota. Refresh mints
     // skip the increment entirely; refunding there would decrement
     // a counter we never touched and grant the user extra free
@@ -680,57 +643,27 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 9. Log + respond
   // ---------------------------------------------------------------------
-  const sessionId = crypto.randomUUID();
-
-  // P1-B / SA2-W4 (2026-04-23; revised post-review): persist the
-  // (session_id → owner) binding so `/v1/ai/voice-turn-usage` can
-  // reject turns posted under someone else's session_id AND turns
-  // posted on a superseded session.
-  //
-  // Two-step sequence, inline (not fire-and-forget), because the
-  // ordering matters and both steps must complete before the mint
-  // response lands on iOS:
-  //
-  //   1. Supersede: mark any prior unclosed rows for THIS user as
-  //      closed. The client secret cannot be revoked server-side; this
-  //      UPDATE is how we declare "the client's previous session_id
-  //      is no longer accepting turns." The partial index
-  //      `voice_session_owners_open_by_user_idx` makes the WHERE
-  //      predicate O(log n) even at scale.
-  //
-  //   2. Insert the new row with closed_at=NULL. The authenticated
-  //      client's next /v1/ai/voice-turn-usage POST will pass the
-  //      ownership + lifecycle checks; any concurrent POST under an
-  //      OLD session_id will now hit closed_at IS NOT NULL and 403
-  //      with `reason: session_closed` — the smoke-test-targeted
-  //      signal ops need to distinguish "forgot to mint" (missing)
-  //      from "client holding stale session_id" (closed).
-  //
-  // Inline (not waitUntil) because a fire-and-forget order creates
-  // a race: iOS can POST its first turn BEFORE the supersede
-  // UPDATE lands, missing the old row's new closed_at timestamp.
-  // The 10-30ms latency cost is negligible on the mint path.
-  // Supersede + insert with one retry on unique_violation (SQLSTATE
-  // 23505). The UNIQUE partial index
-  // `voice_session_owners_one_open_per_user_uniq` enforces "at most
-  // one open row per user" at the DB layer. Under a concurrent-mint
-  // race, the losing INSERT returns 23505; we retry once — the
-  // retry's UPDATE finds the winner's row open and closes it, then
-  // the INSERT succeeds. A third concurrent mint on the same user
-  // within the same instant is pathological; if it ever happens
-  // we'll see repeated 23505s in logs and have a known case to
-  // address.
-  const inserted = await supersedeAndInsertWithRetry({
-    client,
-    sessionId,
-    canonicalUserKey: claims.canonical_user_key,
-    userLog,
-  });
-  if (!inserted) {
-    userLog.warn('voice_session_owner_write_gave_up', {});
-    // Non-fatal for the mint — voice-turn-usage will fail-close on
-    // the missing binding, which disables THIS session's turn posts
-    // but doesn't break the response path.
+  const { data: ready, error: readyError } = await client.rpc(
+    'stir_voice_session_ready',
+    claimArgs,
+  );
+  if (readyError || !ready) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
+      );
+    }
+    return jsonError(
+      ErrorCode.AI_01,
+      503,
+      { message: 'Voice session changed. Try again.' },
+      requestId,
+    );
   }
 
   // Cost is zero at mint time — the minted session's real spend arrives via

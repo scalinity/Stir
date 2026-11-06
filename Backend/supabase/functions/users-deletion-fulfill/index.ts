@@ -5,24 +5,20 @@
 // Walks rows in deletion_requests where state='approved', flips each to
 // 'processing', then runs subsystem cleanup steps in order:
 //
-//   1. PostHog identify-merge — emit $delete_person capture so the
-//      retention pipeline marks the distinct_id for cleanup.
+//   1. PostHog person deletion — await the authenticated API; a 202 is
+//      queued, with a retained manual completion check.
 //   2. Sentry user erase — DELETE the user identifier from Sentry's user
 //      feedback / event metadata. Best-effort; SENTRY_AUTH_TOKEN env var
 //      gate.
 //   3. RevenueCat alias cleanup — DELETE /v1/subscribers/{app_user_id}.
 //      Best-effort; REVENUECAT_SECRET_API_KEY env var gate.
-//   4. CloudKit zone-delete trigger — Apple's CloudKit Web Services API
-//      cannot reach a user's PRIVATE database from server-side. We mark
-//      external_refs_json.cloudkit.requires_client_action=true; iOS sees
-//      the marker on next launch and triggers CKContainer.privateCloudDatabase
-//      .deleteRecordZone(zoneID). Until the user re-launches, their CloudKit
-//      data persists — Privacy Policy §6 acknowledges this.
-//   5. Postgres row sweep — LAST step. Insert audit_log durable record,
-//      THEN DELETE FROM app_users (CASCADE-deletes device_installations,
-//      entitlement_snapshots, usage_counters, ai_request_log,
-//      notification_jobs, AND deletion_requests itself). The audit_log
-//      row is the surviving anchor.
+//   4. CloudKit — confirmed client flow removes household records locally
+//      and propagates through Core Data sync. Server confirmation is unavailable;
+//      retain the outstanding client check in the durable record.
+//   5. Postgres row sweep — LAST step. Preserve pending external actions
+//      before DELETE FROM app_users cascades through operational rows,
+//      cached results, jobs and the deletion request. Record fulfillment
+//      only afterward; the pending record survives final-audit failure.
 //
 // State transitions: approved -> processing -> completed | failed.
 // Resume policy: if a previous tick partially succeeded, the
@@ -42,7 +38,7 @@ import { z } from 'zod';
 import { createServiceClient } from '../_shared/db.ts';
 import { createLogger } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
-import { capturePosthogEvent } from '../_shared/posthog.ts';
+import { requestPostHogDeletion } from '../_shared/posthog.ts';
 import type { Logger } from '../_shared/logger.ts';
 
 const CLAIM_LIMIT = 5; // one tick handles at most 5 deletions
@@ -119,27 +115,13 @@ interface FulfillContext {
 }
 
 async function stepPostHog(ctx: FulfillContext): Promise<SubsystemRecord> {
-  // PostHog has no API to delete a person from an Edge Function with the
-  // public ingest key. We emit a `$delete_person` capture event which
-  // PostHog routes to the retention pipeline. Best-effort.
-  if (ctx.refs.posthog?.completed_at) return ctx.refs.posthog;
-
-  try {
-    capturePosthogEvent(ctx.log, {
-      event: '$delete_person',
-      distinctId: ctx.canonicalUserKeyHash,
-      properties: {
-        deletion_request_id: ctx.rowId,
-        source: 'users-deletion-fulfill',
-      },
-    });
-    return {
-      completed_at: new Date().toISOString(),
-      distinct_id_hash: ctx.canonicalUserKeyHash,
-    };
-  } catch (err) {
-    return { error: truncate(String(err), STEP_ERROR_MAX) };
-  }
+  // Legacy completed_at came from a fire-and-forget capture and is not proof
+  // of deletion. Reconcile it through the authenticated person-delete API.
+  if (ctx.refs.posthog?.requires_manual_action) return ctx.refs.posthog;
+  return {
+    ...await requestPostHogDeletion(ctx.canonicalUserKeyHash),
+    distinct_id_hash: ctx.canonicalUserKeyHash,
+  };
 }
 
 async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
@@ -178,7 +160,8 @@ async function stepSentry(ctx: FulfillContext): Promise<SubsystemRecord> {
   try {
     // Bulk-issue-delete by user.id query. NOTE: the docstring above
     // explains why this is event-deletion only, not full user-erase.
-    const url = `https://sentry.io/api/0/projects/${orgSlug}/${projectSlug}/issues/?query=user.id:${ctx.canonicalUserKeyHash}`;
+    const url =
+      `https://sentry.io/api/0/projects/${orgSlug}/${projectSlug}/issues/?query=user.id:${ctx.canonicalUserKeyHash}`;
     const resp = await fetch(url, {
       method: 'DELETE',
       headers: {
@@ -263,23 +246,18 @@ async function stepRevenueCat(ctx: FulfillContext): Promise<SubsystemRecord> {
   }
 }
 
-async function stepCloudKit(ctx: FulfillContext): Promise<SubsystemRecord> {
-  // Server-side CloudKit zone-delete is not possible: Apple's Web Services
-  // API only addresses the public DB. Private DB lives on the user's
-  // iCloud and is reachable only by code running in their app process.
-  //
-  // Mark requires_client_action=true. iOS reads this field on next launch
-  // (via /v1/session/bootstrap or a dedicated /v1/users/deletion-status
-  // probe) and triggers CKContainer.privateCloudDatabase.deleteRecordZone.
-  // Until the user re-launches, their CloudKit data persists — Privacy
-  // Policy §6 documents this asymmetry.
+function stepCloudKit(ctx: FulfillContext): Promise<SubsystemRecord> {
+  // The confirmed app flow removes only the selected household through Core
+  // Data. CloudKit export is asynchronous and has no server acknowledgement.
+  // Preserve this outstanding check; the server must not claim cloud erasure.
   if (ctx.refs.cloudkit?.completed_at || ctx.refs.cloudkit?.requires_client_action) {
-    return ctx.refs.cloudkit;
+    return Promise.resolve(ctx.refs.cloudkit);
   }
-  return {
+  return Promise.resolve({
     requires_client_action: true,
     triggered_at: new Date().toISOString(),
-  };
+    error: 'cloudkit_client_cleanup_unverified',
+  });
 }
 
 async function stepPostgres(
@@ -287,6 +265,27 @@ async function stepPostgres(
   client: ReturnType<typeof createServiceClient>,
 ): Promise<SubsystemRecord> {
   if (ctx.refs.postgres?.completed_at) return ctx.refs.postgres;
+
+  // The cascade removes deletion_requests. Preserve unfinished external work
+  // first so a later fulfilled-audit failure cannot lose its only retry record.
+  // INSERT ... ON CONFLICT DO NOTHING keeps this append-only and idempotent;
+  // it records pending actions, never claims that deletion has completed.
+  const outstanding = Object.values(ctx.refs).some((ref) =>
+    ref?.requires_manual_action || ref?.requires_client_action
+  );
+  if (outstanding) {
+    const { error } = await client.from('audit_log').upsert({
+      id: ctx.rowId,
+      actor_id: null,
+      actor_email: null,
+      action: 'deletion_requests.external_actions_pending',
+      target_table: 'app_users',
+      target_id: ctx.canonicalUserKeyHash,
+      after_json: { deletion_request_id: ctx.rowId, external_refs: ctx.refs },
+      request_id: ctx.requestId,
+    }, { onConflict: 'id', ignoreDuplicates: true });
+    if (error) return { error: 'external_actions_record_failed' };
+  }
 
   // 1. Pre-resolve inbound merged_into references (SCA-222).
   //    `app_users.merged_into` is `REFERENCES app_users(canonical_user_key)
@@ -505,14 +504,7 @@ async function processOne(
       })
       .eq('id', row.id);
 
-    capturePosthogEvent(log, {
-      event: 'deletion_request_failed',
-      distinctId: row.canonical_user_key_hash,
-      properties: {
-        deletion_request_id: row.id,
-        failure_reason: reason,
-      },
-    });
+    log.warn('deletion_request_failed', { deletion_request_id: row.id });
 
     return 'failed';
   }
@@ -537,39 +529,23 @@ async function processOne(
       })
       .eq('id', row.id);
 
-    capturePosthogEvent(log, {
-      event: 'deletion_request_failed',
-      distinctId: row.canonical_user_key_hash,
-      properties: {
-        deletion_request_id: row.id,
-        failure_reason: 'postgres_sweep_error',
-      },
-    });
+    log.warn('deletion_request_failed', { deletion_request_id: row.id });
     return 'failed';
   }
 
   // Postgres sweep CASCADEd; the deletion_requests row is gone. The
   // audit_log row is the surviving anchor. Capture the success event
   // using the row id we already had in memory.
-  capturePosthogEvent(log, {
-    event: 'deletion_request_completed',
-    distinctId: row.canonical_user_key_hash,
-    properties: {
-      deletion_request_id: row.id,
-      had_manual_actions: !!(
-        ctx.refs.sentry?.requires_manual_action ||
-        ctx.refs.revenuecat?.requires_manual_action
-      ),
-      requires_client_action: !!ctx.refs.cloudkit?.requires_client_action,
-    },
-  });
+  log.info('deletion_request_postgres_removed', { deletion_request_id: row.id });
 
   // If any subsystem requires manual action, count this as partial — the
   // privacy promise is met for server-side data, but ops triage may still
   // be needed for unconfigured external services.
   const hadManual = !!(
+    ctx.refs.posthog?.requires_manual_action ||
     ctx.refs.sentry?.requires_manual_action ||
-    ctx.refs.revenuecat?.requires_manual_action
+    ctx.refs.revenuecat?.requires_manual_action ||
+    ctx.refs.cloudkit?.requires_client_action
   );
   return hadManual ? 'partial' : 'completed';
 }
@@ -721,4 +697,4 @@ function truncate(s: string, max: number): string {
 
 // Exported for testing; the test harness invokes processOne directly
 // against a service-role client.
-export { fulfillSweep, processOne };
+export { fulfillSweep, processOne, stepPostgres };

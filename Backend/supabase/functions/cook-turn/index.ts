@@ -340,6 +340,11 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatency += err.usage.latencyMs;
+      }
       if (err instanceof AITextError && err.status >= 500 && attempt === 0) {
         retryCount++;
         userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });

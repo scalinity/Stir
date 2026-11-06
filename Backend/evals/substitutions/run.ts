@@ -2,19 +2,21 @@
 //
 // Loads eval_substitutions_v1.jsonl, calls /v1/ai/substitution for each
 // case against a running local Supabase, checks hard-rule pass rate and
-// schema validity. Exits non-zero on ANY allergen/dietary violation —
+// schema validity. Exits non-zero on every required failure —
 // substitution must hit 100% hard-rule pass per spec §12.2.
 //
 // Usage:
 //   STIR_RUN_AI_EVALS=1 pnpm run eval:substitutions
 // Requires:
 //   - `supabase start` + `supabase functions serve --env-file .env`
-//   - GEMINI_API_KEY set (real paid-tier key; each run consumes credits)
+//   - Selected text provider credentials set (each run consumes credits)
 //
 // Gate via STIR_RUN_AI_EVALS=1 so a casual `deno run` can't accidentally
-// burn Gemini quota. CI does NOT run this — it's intentionally local-only
+// burn provider quota. CI does NOT run this — it's intentionally local-only
 // until step 8's eval pipeline ships.
 
+import { evaluateOutcome, hasRequiredFailures } from './score.ts';
+import { SubstitutionWireResponse } from '../../supabase/functions/_shared/substitution_output.ts';
 import '../../supabase/tests/_helpers/env.ts';
 import { quickBootstrap, testSourceIP } from '../../supabase/tests/_helpers/factory.ts';
 
@@ -44,19 +46,6 @@ interface EvalCase {
   remaining_ingredients: string[];
 }
 
-interface SubstitutionWireResponse {
-  sub_event_id: string;
-  substitution_text: string;
-  amount_conversion: string | null;
-  constraint_safe: boolean;
-  constraint_violation_reason: string | null;
-  reasoning: string;
-  confidence: 'high' | 'medium' | 'low';
-  prompt_version: string;
-  latency_ms: number;
-  retry_count: number;
-}
-
 interface CaseOutcome {
   name: string;
   category: string;
@@ -72,7 +61,7 @@ const RUN_GATE = Deno.env.get('STIR_RUN_AI_EVALS') === '1';
 
 async function main(): Promise<void> {
   if (!RUN_GATE) {
-    console.error('STIR_RUN_AI_EVALS=1 not set. Refusing to burn Gemini credits silently.');
+    console.error('STIR_RUN_AI_EVALS=1 not set. Refusing to burn provider credits silently.');
     console.error('To run: STIR_RUN_AI_EVALS=1 pnpm run eval:substitutions');
     Deno.exit(2);
   }
@@ -90,7 +79,9 @@ async function main(): Promise<void> {
   // Bootstrap a shared session — eval runs don't need per-case identity.
   const session = await quickBootstrap();
   const jwt = session.session_jwt;
-  console.log(`Bootstrapped session for canonical_user_key=${session.canonical_user_key.slice(0, 20)}...`);
+  console.log(
+    `Bootstrapped session for canonical_user_key=${session.canonical_user_key.slice(0, 20)}...`,
+  );
 
   const outcomes: CaseOutcome[] = [];
   const startedAt = performance.now();
@@ -134,7 +125,7 @@ async function main(): Promise<void> {
     });
     const latency = Math.round(performance.now() - caseStarted);
 
-    let body: SubstitutionWireResponse | { error: string; message: string };
+    let body: unknown;
     try {
       body = await res.json();
     } catch (err) {
@@ -154,13 +145,15 @@ async function main(): Promise<void> {
     }
 
     if (res.status !== 200) {
-      const errBody = body as { error: string; message: string };
+      const errBody = body as { error?: string; message?: string } | null;
       outcomes.push({
         name: c.name,
         category: c.category,
         expect: c.expect,
         passed: false,
-        failureReason: `http ${res.status}: ${errBody.error ?? 'unknown'} — ${errBody.message ?? ''}`,
+        failureReason: `http ${res.status}: ${errBody?.error ?? 'unknown'} — ${
+          errBody?.message ?? ''
+        }`,
         latency_ms: latency,
         retry_count: 0,
         constraint_safe: false,
@@ -169,10 +162,9 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const wire = body as SubstitutionWireResponse;
-
-    // Verify the response matches expectations.
-    const evaluated = evaluateOutcome(c, wire);
+    const evaluated = evaluateOutcome(c, body);
+    const parsedWire = SubstitutionWireResponse.safeParse(body);
+    const wire = parsedWire.success ? parsedWire.data : null;
     outcomes.push({
       name: c.name,
       category: c.category,
@@ -180,103 +172,29 @@ async function main(): Promise<void> {
       passed: evaluated.passed,
       ...(evaluated.reason ? { failureReason: evaluated.reason } : {}),
       latency_ms: latency,
-      retry_count: wire.retry_count,
-      constraint_safe: wire.constraint_safe,
+      retry_count: wire?.retry_count ?? 0,
+      constraint_safe: wire?.constraint_safe ?? false,
     });
-    console.log(evaluated.passed
-      ? `ok (${latency}ms, retry=${wire.retry_count}, safe=${wire.constraint_safe})`
-      : `FAIL (${evaluated.reason})`);
+    console.log(
+      evaluated.passed
+        ? `ok (${latency}ms, retry=${wire?.retry_count ?? 0}, safe=${
+          wire?.constraint_safe ?? false
+        })`
+        : `FAIL (${evaluated.reason})`,
+    );
   }
 
   const totalMs = Math.round(performance.now() - startedAt);
   report(outcomes, totalMs);
 
-  // Fail the process on any hard-rule violation (allergen/dietary appearing
-  // in a response that should have been safe). Non-zero exit so CI can
-  // gate on this when eval pipeline lands in step 8.
-  const safeCategoryFailures = outcomes.filter((o) =>
-    !o.passed && (o.category === 'allergen' || o.category === 'intersection')
-  );
-  if (safeCategoryFailures.length > 0) {
-    console.error(`\nFATAL: ${safeCategoryFailures.length} safety-critical failures. Exit 1.`);
+  // Every fixture is required: equipment, recall, schema and HTTP failures
+  // are failures too, even when no allergen-category case failed.
+  if (hasRequiredFailures(outcomes)) {
+    console.error(
+      `\nFATAL: ${outcomes.filter((o) => !o.passed).length} required failures. Exit 1.`,
+    );
     Deno.exit(1);
   }
-}
-
-function evaluateOutcome(
-  c: EvalCase,
-  wire: SubstitutionWireResponse,
-): { passed: boolean; reason?: string } {
-  // For cases we expect to be unsafe: the ONLY valid response is
-  // constraint_safe=false. If the model found a safe substitution we
-  // didn't anticipate, treat as PASS (we're conservative — if the model
-  // found a clever safe option for the peanut-satay trap, great, but it
-  // usually won't).
-  if (c.expect === 'unsafe') {
-    // Accept either the canned-safe fallback OR a genuine safe find.
-    // Still check must_not_contain in case the model fabricated a "safe"
-    // answer that secretly contains the allergen.
-    if (!wire.constraint_safe) return { passed: true };
-    const leak = findLeak(wire, c.must_not_contain);
-    if (leak) {
-      return {
-        passed: false,
-        reason: `expected unsafe but model claimed safe AND leaked keyword '${leak}'`,
-      };
-    }
-    // Genuine safe find — note in log but count as pass.
-    return { passed: true };
-  }
-
-  // expect === 'safe'
-  const leak = findLeak(wire, c.must_not_contain);
-  if (leak) {
-    return {
-      passed: false,
-      reason: `response contains forbidden keyword '${leak}'`,
-    };
-  }
-
-  // When we expected safe and the model returned constraint_safe=false,
-  // that's a miss: model couldn't find a substitution we know exists in
-  // the pantry. Count as fail but it's a recall miss, not a safety breach.
-  if (!wire.constraint_safe) {
-    return {
-      passed: false,
-      reason: `expected safe substitution but model returned constraint_safe=false`,
-    };
-  }
-
-  return { passed: true };
-}
-
-// Needles matched as whole words (plural allowed) instead of substrings,
-// the same curated-set approach as the validator's diet check
-// (WORD_BOUNDARY_KEYWORDS in _shared/hard_rules.ts). Only needles with a
-// demonstrated false positive belong here: "cream" matched the baking
-// technique "creaming". "milk", "butter" and "egg" stay substring so
-// "buttermilk" and "eggs" still count as leaks.
-const WHOLE_WORD_NEEDLES: ReadonlySet<string> = new Set(['cream']);
-
-function containsNeedle(haystack: string, needle: string): boolean {
-  if (!WHOLE_WORD_NEEDLES.has(needle)) return haystack.includes(needle);
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![a-z0-9])${escaped}s?(?![a-z0-9])`).test(haystack);
-}
-
-function findLeak(wire: SubstitutionWireResponse, needles: string[]): string | null {
-  if (needles.length === 0) return null;
-  const combined = [
-    wire.substitution_text,
-    wire.reasoning,
-    wire.amount_conversion ?? '',
-  ].join(' ').toLowerCase();
-  for (const n of needles) {
-    const needle = n.toLowerCase().trim();
-    if (!needle) continue;
-    if (containsNeedle(combined, needle)) return n;
-  }
-  return null;
 }
 
 function report(outcomes: CaseOutcome[], totalMs: number): void {

@@ -164,7 +164,7 @@ Deno.test('substitution: recipe_steps optional — body without the field passes
   // validBody() already omits recipe_steps; this test pins that intentionally.
   const body = validBody();
   // deno-lint-ignore no-explicit-any
-  const recipeCtx = (body.recipe_context as any);
+  const recipeCtx = body.recipe_context as any;
   if (recipeCtx.recipe_steps !== undefined) {
     throw new Error('test setup drift: validBody() should not include recipe_steps');
   }
@@ -217,7 +217,9 @@ Deno.test('substitution: recipe_steps populated — body with full step list pas
   );
   if (res.status === 400) {
     throw new Error(
-      `well-formed recipe_steps should not trip VAL-01; got ${res.status} ${JSON.stringify(res.body)}`,
+      `well-formed recipe_steps should not trip VAL-01; got ${res.status} ${
+        JSON.stringify(res.body)
+      }`,
     );
   }
 });
@@ -331,7 +333,7 @@ Deno.test('substitution: idempotency cache returns prior response for same (user
   };
   await admin.from('ai_response_cache').insert({
     canonical_user_key: boot.canonical_user_key,
-    request_id: subEventId,
+    request_id: subEventId + ':safety-v2',
     response_body: cachedBody,
     status_code: 200,
     feature_key: 'substitution',
@@ -372,7 +374,7 @@ Deno.test('substitution: SA2-01 — cached response for user A is NOT replayed f
   };
   await admin.from('ai_response_cache').insert({
     canonical_user_key: bootA.canonical_user_key,
-    request_id: sharedSubEventId,
+    request_id: sharedSubEventId + ':safety-v2',
     response_body: userACachedBody,
     status_code: 200,
     feature_key: 'substitution',

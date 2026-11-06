@@ -584,6 +584,11 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatencyMs += err.usage.latencyMs;
+      }
       if (err instanceof AITextError && err.status >= 500) {
         userLog.warn('ai_upstream_error', {
           attempt: attempt + 1,
@@ -937,7 +942,12 @@ async function requestReplacementDish(
     };
   } catch (err) {
     if (err instanceof AITextError) {
-      return { dish: null, tokensIn: 0, tokensOut: 0, latencyMs: 0 };
+      return {
+        dish: null,
+        tokensIn: err.usage?.inputTokens ?? 0,
+        tokensOut: err.usage?.outputTokens ?? 0,
+        latencyMs: err.usage?.latencyMs ?? 0,
+      };
     }
     throw err;
   }

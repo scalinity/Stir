@@ -697,6 +697,8 @@ function rewriteBody(o: {
     step_instruction_text: o.step,
     original_ingredient: o.original,
     substitute_ingredient: o.substitute,
+    dietary_rules: [],
+    available_equipment: ['stovetop', 'oven'],
     ...(o.conversion ? { amount_conversion: o.conversion } : {}),
     ...(o.title ? { recipe_title: o.title } : {}),
   };

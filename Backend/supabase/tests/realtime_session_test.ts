@@ -267,43 +267,18 @@ Deno.test('realtime-session: Premium user reaches mint (proves pre-mint logic OK
 });
 
 // ---------------------------------------------------------------------------
-// is_refresh: quota-skip + rate-limit (P1-N)
+// Refresh admission: an exempt continuation requires server-owned charge proof.
+// This HTTP case cannot reach the provider; RPC chain/concurrency cases live in
+// voice_refresh_chain_test.ts. Mint success remains a separately gated live check.
 // ---------------------------------------------------------------------------
-//
-// Refresh mints bypass the monthly voice_cook_session quota (ADR 0014 —
-// `is_refresh` skips increment). The tests below pin both observable
-// consequences of `didConsumeQuota = !body.is_refresh`:
-//
-//   (1) quota-skip: `is_refresh=true` must NOT increment the counter,
-//       and must NOT be blocked by `used_count >= cap_count`. A user at
-//       cap can still refresh.
-//   (2) refund-guard gating (implicit): both refund paths (no active
-//       prompt, mint-throw) gate on `didConsumeQuota && consumedPeriodStart`,
-//       so a mint-failure on the `is_refresh=true` path MUST NOT fire
-//       `refundQuota`. The post-call `used_count` being identical to
-//       the pre-call value pins this — if the refund fired incorrectly,
-//       the counter would decrement below the pre-call value.
-//
-// Not pinned here (filed to §Deferred): the `is_refresh=false`
-// increment-then-refund path on mint failure. On the placeholder-key
-// CI path, refund returns used_count to its pre-call value, so post-
-// call state is indistinguishable from "never incremented". Requires
-// either a real mint (STIR_RUN_AI_INTEGRATION_TESTS) or refund-audit
-// observability to disambiguate.
 
-Deno.test('realtime-session: is_refresh=true skips quota increment even at cap', async () => {
-  if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') {
-    // The invariant under test is the pre-mint quota-skip branch;
-    // reaching the mint is sufficient.
-    return;
-  }
+Deno.test('realtime-session: unproved refresh is rejected even at cap', async () => {
   const bs = await quickBootstrap();
   await promoteToPremiumWithVoiceQuota(bs.canonical_user_key);
 
   // Set used_count = cap_count. On the non-refresh path this would
   // return 429 RATE-01 (see "RATE-01 when voice_cook_session cap
-  // reached"). On the refresh path, the whole quota branch is
-  // skipped, so the call proceeds to mint.
+  // reached"). An unproved refresh must be rejected before minting.
   const client = serviceClient();
   await client
     .from('usage_counters')
@@ -316,10 +291,8 @@ Deno.test('realtime-session: is_refresh=true skips quota increment even at cap',
     bs.session_jwt,
   );
 
-  // Pin (1a): at-cap + is_refresh=true does NOT produce 429. Reaching
-  // the mint proves all pre-mint logic including the quota-branch skip
-  // worked; a 429 here means is_refresh is not skipping the quota branch.
-  assertReachedMint(res, 'is_refresh at cap');
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, 'VAL-01');
 
   // Pin (1b): post-call used_count is unchanged from the pre-call
   // value (20). If didConsumeQuota=false had been violated and the

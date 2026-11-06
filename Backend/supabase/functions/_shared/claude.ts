@@ -10,7 +10,7 @@
 //     `nullable:true`); `toJsonSchema` converts them to the JSON Schema subset
 //     structured outputs accept (lowercase types, `additionalProperties:false`
 //     on every object, nullable as `anyOf` with null).
-//   - `stop_reason: "refusal"` is checked before content is read.
+//   - Refused or truncated completions fail before content is read.
 //   - No sampling parameters (`temperature`/`top_p`/`top_k` are 400s on API
 //     version 2026-10-21, which this SDK release sends).
 //   - SDK retries are off: handlers own their retry-once-on-5xx policy, and a
@@ -18,7 +18,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { AITextArgs, AITextResult, AIThinkingLevel } from './ai_text.ts';
-import { AITextError } from './ai_text_error.ts';
+import { AITextError, type AITextUsage } from './ai_text_error.ts';
 
 export enum ClaudeModel {
   Haiku = 'claude-haiku-5-5',
@@ -35,7 +35,12 @@ let sharedClient: Anthropic | undefined;
 function clientFor(fetchImpl: typeof fetch | undefined): Anthropic {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY missing; cannot call Claude.');
   if (fetchImpl) {
-    return new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: TIMEOUT_MS, maxRetries: 0, fetch: fetchImpl });
+    return new Anthropic({
+      apiKey: ANTHROPIC_API_KEY,
+      timeout: TIMEOUT_MS,
+      maxRetries: 0,
+      fetch: fetchImpl,
+    });
   }
   sharedClient ??= new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: TIMEOUT_MS, maxRetries: 0 });
   return sharedClient;
@@ -118,7 +123,12 @@ export async function claudeGenerate(model: ClaudeModel, args: AITextArgs): Prom
     // Claude accepts JPEG/PNG/GIF/WebP. iOS sends JPEG today (ScanViewModel);
     // the HEIC value on the wire enum is a future path Claude cannot serve.
     if (!SUPPORTED_IMAGE_TYPES.has(img.mimeType)) {
-      throw new AITextError(415, '', 'unsupported_media_type', `Claude cannot read ${img.mimeType}`);
+      throw new AITextError(
+        415,
+        '',
+        'unsupported_media_type',
+        `Claude cannot read ${img.mimeType}`,
+      );
     }
     content.push({
       type: 'image',
@@ -141,7 +151,9 @@ export async function claudeGenerate(model: ClaudeModel, args: AITextArgs): Prom
 
   const params: Anthropic.MessageCreateParamsNonStreaming = {
     model,
-    max_tokens: depth.thinking?.type === 'adaptive' ? answerCap + THINKING_HEADROOM_TOKENS : answerCap,
+    max_tokens: depth.thinking?.type === 'adaptive'
+      ? answerCap + THINKING_HEADROOM_TOKENS
+      : answerCap,
     system: args.systemInstruction,
     messages: [{ role: 'user', content }],
     ...(depth.thinking ? { thinking: depth.thinking } : {}),
@@ -162,30 +174,42 @@ export async function claudeGenerate(model: ClaudeModel, args: AITextArgs): Prom
   }
   const latencyMs = Math.round(performance.now() - startedAt);
 
-  if (response.stop_reason === 'refusal') {
-    // Category only — the explanation can paraphrase prompt content, which
-    // carries household data (ADR 0009 privacy posture).
-    throw new AITextError(422, '', 'refusal', `Claude refused (category=${response.stop_details?.category ?? 'none'})`);
+  const usage = response.usage;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const measured: AITextUsage = {
+    // Anthropic excludes cache reads and writes from input_tokens.
+    inputTokens: usage.input_tokens + cacheRead + cacheWrite,
+    cachedInputTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+    outputTokens: usage.output_tokens,
+    imageInputTokens: 0,
+    latencyMs,
+  };
+
+  if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
+    // No partial text escapes. A 422 is terminal for the handlers' >=500
+    // retry policy: repeating a truncated request at the same cap wastes
+    // another paid call. Keep billed usage for their failure accounting.
+    throw new AITextError(
+      422,
+      '',
+      response.stop_reason,
+      response.stop_reason === 'refusal'
+        ? 'Claude refused'
+        : 'Claude output reached its token limit',
+      measured,
+    );
   }
 
   const text = response.content
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join('');
-  const usage = response.usage;
-  const cacheRead = usage.cache_read_input_tokens ?? 0;
-  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
 
   return {
     text,
     finishReason: response.stop_reason ?? 'unknown',
-    // `input_tokens` excludes cache reads and writes; log the full prompt size.
-    inputTokens: usage.input_tokens + cacheRead + cacheWrite,
-    cachedInputTokens: cacheRead,
-    cacheWriteTokens: cacheWrite,
-    outputTokens: usage.output_tokens,
-    // Claude bills image tokens as ordinary input tokens.
-    imageInputTokens: 0,
-    latencyMs,
+    ...measured,
     promptVersion: args.promptVersion,
   };
 }
@@ -205,5 +229,10 @@ function toAITextError(err: unknown): AITextError {
     const type = typeof body?.error?.type === 'string' ? body.error.type : undefined;
     return new AITextError(err.status ?? 502, '', type, `Claude error: ${err.status ?? 'unknown'}`);
   }
-  return new AITextError(502, '', undefined, `Claude call failed: ${(err as Error)?.name ?? 'unknown'}`);
+  return new AITextError(
+    502,
+    '',
+    undefined,
+    `Claude call failed: ${(err as Error)?.name ?? 'unknown'}`,
+  );
 }

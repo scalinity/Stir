@@ -46,6 +46,8 @@ function validBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     original_ingredient: 'all-purpose flour',
     substitute_ingredient: '1 cup of finely crushed tortilla chips',
     recipe_title: 'Quick Flatbread',
+    dietary_rules: [],
+    available_equipment: ['stovetop'],
     ...overrides,
   };
 }
@@ -207,8 +209,8 @@ Deno.test('recipe-step-rewrite: VAL-01 on malformed JSON body', async () => {
 // substitution's body and iOS would decode it as a RecipeStepRewriteResponse
 // (missing `rewritten_text`) and the rewrite would never land.
 //
-// This test seeds the cache with a fake substitution-shaped body under the
-// bare sub_event_id, then calls recipe-step-rewrite with that sub_event_id.
+// This test seeds the cache with a fake substitution-shaped body under substitution's safety-versioned
+// key, then calls recipe-step-rewrite with that sub_event_id.
 // If the handler is correctly namespaced, the readCache miss falls through
 // to the Gemini call (which we don't mock — but the response shape, not the
 // content, is what we assert: rewritten_text vs substitution_text).
@@ -217,12 +219,12 @@ Deno.test(
   async () => {
     const boot = await quickBootstrap({ installation_id: testInstallId() });
     const subEventId = crypto.randomUUID();
-    // Seed the cache with a substitution-shaped body under the BARE
-    // sub_event_id (mimicking what /v1/ai/substitution would write).
+    // Seed the current substitution cache namespace; rewrite must use
+    // its own key even though both requests share sub_event_id.
     const sb = serviceClient();
     const { error: seedErr } = await sb.from('ai_response_cache').insert({
       canonical_user_key: boot.canonical_user_key,
-      request_id: subEventId,
+      request_id: subEventId + ':safety-v2',
       response_body: {
         sub_event_id: subEventId,
         substitution_text: 'POISON: should not surface as rewritten_text',

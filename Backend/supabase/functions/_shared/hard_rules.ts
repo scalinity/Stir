@@ -232,6 +232,39 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
     'gianduja',
   ],
   peanut: ['peanut', 'groundnut'],
+  dairy: ['dairy', ...DAIRY_KEYWORDS],
+  egg: [...EGG_KEYWORDS, 'albumen', 'ovalbumin', 'mayonnaise', 'meringue'],
+  gluten: [
+    'gluten',
+    'wheat',
+    'barley',
+    'rye',
+    'malt',
+    'spelt',
+    'semolina',
+    'farro',
+    'bulgur',
+    'couscous',
+    'seitan',
+    'soy sauce',
+  ],
+  fish: [
+    'fish',
+    'salmon',
+    'tuna',
+    'cod',
+    'halibut',
+    'trout',
+    'mackerel',
+    'sardine',
+    'anchovy',
+    'anchovies',
+    'haddock',
+    'tilapia',
+    'pollock',
+    'bonito',
+  ],
+  sesame: ['sesame', 'tahini', 'benne', 'gingelly'],
   // soy: covers tofu / tempeh / edamame / miso / soy sauce that don't
   // contain "soy" as a substring on their own.
   soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso'],
@@ -256,7 +289,7 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
 };
 
 /** Allergen rawValue → keywords (rawValue itself if no expansion). */
-function allergyKeywordsFor(allergenValue: string): string[] {
+export function allergyKeywordsFor(allergenValue: string): string[] {
   return ALLERGEN_KEYWORD_EXPANSION[allergenValue] ?? [allergenValue];
 }
 
@@ -400,10 +433,11 @@ function containsDietKeyword(
   displayName: string,
   ingredientText: string,
   needles: string[],
+  amountText = '',
 ): string | null {
   const trimmedDisplay = displayName.toLowerCase().trim();
-  if (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay)) return null;
-  const lower = ingredientText.toLowerCase();
+  const lower = (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay) ? amountText : ingredientText)
+    .toLowerCase();
   for (const n of needles) {
     if (matchesNeedleDiet(lower, n)) return n;
   }
@@ -411,7 +445,7 @@ function containsDietKeyword(
 }
 
 function ingredientText(ing: DishIngredient): string {
-  return `${ing.display_name} ${ing.canonical_slug ?? ''}`;
+  return `${ing.display_name} ${ing.canonical_slug ?? ''} ${ing.amount_text ?? ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +490,7 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
       if (rule.kind === 'diet') {
         const keywords = dietKeywordsFor(value);
         if (keywords) {
-          const hit = containsDietKeyword(ing.display_name, text, keywords);
+          const hit = containsDietKeyword(ing.display_name, text, keywords, ing.amount_text);
           if (hit) {
             issues.push({
               kind: 'diet_violation',
@@ -479,20 +513,16 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
     });
   }
 
-  // 3. Unavailable / avoid equipment implied by step text.
-  const unavailable = new Set<string>();
-  for (const eqKey of Object.keys(EQUIPMENT_IMPLICATION)) {
-    if (!ctx.availableEquipment.includes(eqKey)) unavailable.add(eqKey);
-  }
-  for (const avoid of ctx.avoidEquipment ?? []) {
-    unavailable.add(avoid);
-  }
-  const stepText = dish.recipe_plan.steps.map((s) => s.instruction_text).join(' ').toLowerCase();
-  for (const eqKey of unavailable) {
-    const needles = EQUIPMENT_IMPLICATION[eqKey];
-    if (!needles) continue;
-    const hit = containsAnyStrict(stepText, needles);
-    if (hit) issues.push({ kind: 'unavailable_equipment_implied', keyword: hit });
+  // 3. Instructions are actionable output too. Scan each step against
+  // dietary and equipment constraints, even when its ingredient was
+  // omitted from the structured list.
+  for (const step of dish.recipe_plan.steps) {
+    issues.push(
+      ...validateSubstitution(
+        { substitution_text: step.instruction_text, reasoning: '', constraint_safe: false },
+        ctx,
+      ).issues,
+    );
   }
 
   // 4. Model falsely claimed hard_constraint_pass.
@@ -514,11 +544,9 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
 //
 // Same safety bias: allergies run on plain-substring match, diets run with
 // word-boundary + exceptions. The suggestion TEXT is free-form, so we have
-// no "display_name" to check against MULTI_WORD_DIET_EXCEPTIONS (that
-// exception list filters by exact lowercased display_name match — no
-// substring safe anchor exists in a suggestion blob). In practice the
-// substitution suggestions are short and narrow — "use cashew milk" not
-// "a milk thistle infusion" — so the ambiguity window is tiny.
+// no structured display_name. Remove only complete known plant-name
+// phrases for diet checks; the remainder is still checked, and allergies
+// always scan the unmodified text.
 //
 // Equipment check: if the model proposed a workaround that mentions
 // equipment the household doesn't have (available_equipment list), flag.
@@ -561,6 +589,11 @@ export function validateSubstitution(
     sub.reasoning,
     sub.amount_conversion ?? '',
   ].join(' ').toLowerCase();
+  let dietText = combined;
+  for (const name of MULTI_WORD_DIET_EXCEPTIONS) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    dietText = dietText.replace(new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'g'), '');
+  }
 
   // 1. Allergy + hard dislike + diet: keyword match on the combined text.
   // Allergy uses plain substring (safety first); dislike likewise;
@@ -598,7 +631,7 @@ export function validateSubstitution(
       const keywords = dietKeywordsFor(value);
       if (keywords) {
         for (const n of keywords) {
-          if (matchesNeedleDiet(combined, n)) {
+          if (matchesNeedleDiet(dietText, n)) {
             issues.push({
               kind: 'diet_violation',
               diet: rule.value,
@@ -673,6 +706,34 @@ export function validateSubstitution(
   }
 
   return { valid: issues.length === 0, issues };
+}
+
+/** A rewrite is new actionable output; upstream substitution safety does not cover it. */
+export function validateStepRewrite(
+  rewrittenText: string,
+  originalIngredient: string,
+  substituteIngredient: string,
+  ctx: SubstitutionContext,
+): ValidationResult {
+  const result = validateSubstitution(
+    { substitution_text: rewrittenText, reasoning: '', constraint_safe: false },
+    ctx,
+  );
+  // Permit the original word inside the accepted replacement (e.g. milk →
+  // oat milk), but reject a separate retained reference to the old item.
+  const normalize = (text: string) =>
+    text.toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const original = normalize(originalIngredient);
+  const substitute = normalize(substituteIngredient);
+  const remaining = normalize(rewrittenText).split(substitute).join('');
+  if (original && containsAnyStrict(remaining, [original])) {
+    result.issues.push({
+      kind: 'dislike_hard',
+      value: originalIngredient,
+      ingredient: rewrittenText,
+    });
+  }
+  return { valid: result.issues.length === 0, issues: result.issues };
 }
 
 // SCA-431: phrasings the model uses when claiming an ingredient is

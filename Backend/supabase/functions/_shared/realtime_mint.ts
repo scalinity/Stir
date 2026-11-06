@@ -2,8 +2,9 @@
 //
 // Called from realtime-session to produce a short-lived client secret the
 // iOS client uses to open a direct WebSocket to OpenAI Realtime. The main
-// OPENAI_API_KEY never leaves Supabase — the secret only opens a session,
-// and only within its expiry window.
+// OPENAI_API_KEY never leaves Supabase. The client secret can open multiple
+// sessions within its expiry window; established sessions may outlive it.
+// Mint quotas do not enforce downstream connection count or spend (ADR 0041).
 //
 // Wire facts (OpenAI docs, retrieved 2026-11-06; sources in ADR 0038):
 //   - POST https://api.openai.com/v1/realtime/client_secrets with
@@ -12,7 +13,7 @@
 //   - iOS connects to wss://api.openai.com/v1/realtime?model=<model> with
 //     `Authorization: Bearer <value>`.
 //   - Audio is PCM16 mono 24 kHz in both directions.
-//   - The session config baked here is what the session runs with; the
+//   - The attached session config is a default the connection may override; the
 //     setup frame iOS sends first (`session.update`) carries only the
 //     truncation policy, and its `session.updated` reply is iOS's
 //     handshake acknowledgement.
@@ -30,7 +31,8 @@ export const REALTIME_SECRET_TTL_SEC = 120;
 
 const WS_BASE = 'wss://api.openai.com/v1/realtime';
 
-/** ADR 0010 / north-star #8: a bounded output cap exists. 400 output tokens
+/** ADR 0010/0041: supported-client output default, mutable by the connection.
+ * 400 output tokens
  * ≈ 18 s of speech at OpenAI's 20 audio tokens/s plus the transcript text. */
 export const REALTIME_MAX_OUTPUT_TOKENS = 400;
 
@@ -274,8 +276,14 @@ export async function mintRealtimeSession(config: RealtimeMintConfig): Promise<R
     throw err;
   }
 
-  if (!secret.value) {
+  if (typeof secret.value !== 'string' || !secret.value.trim()) {
     throw new RealtimeMintError(500, 'client_secrets response missing value');
+  }
+  if (
+    !Number.isFinite(secret.expires_at) ||
+    secret.expires_at <= Date.now() / 1000
+  ) {
+    throw new RealtimeMintError(500, 'client_secrets response has invalid expiry');
   }
 
   return {
