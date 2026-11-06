@@ -46,7 +46,7 @@ iPhone app for the weeknight moment: stand in the kitchen with ingredients, no p
 | Persistence / Sync | Core Data + `NSPersistentCloudKitContainer` / CloudKit private DB |
 | Backend | Supabase (Postgres + Edge Functions + Auth + pgmq/pg_cron) |
 | Payments / Analytics / Errors / Push | RevenueCat over StoreKit 2 / PostHog / Sentry / APNs direct |
-| Text AI | `claude-haiku-5-5` via `@anthropic-ai/sdk` (scan, solve, substitution, step rewrite, cook-turn fallback, recipe import, grocery). Fallback behind `AI_TEXT_PROVIDER=gemini`: `gemini-3-flash-preview` / `gemini-3.1-flash-lite` |
+| Text AI | `claude-haiku-5-5` via `@anthropic-ai/sdk` (scan, solve, step rewrite, cook-turn fallback, recipe import, grocery); `claude-sonnet-5-5` for substitution. Fallback behind `AI_TEXT_PROVIDER=gemini`: `gemini-3-flash-preview` / `gemini-3.1-flash-lite` |
 | Voice AI | `gpt-realtime-2.1-mini` via OpenAI Realtime WebSocket, reasoning effort `minimal` |
 | On-device | Vision (OCR, barcode), Speech + AVSpeechSynthesizer (voice fallback only) |
 
@@ -98,9 +98,9 @@ Text models resolve per feature through `textModelFor(feature)` in `_shared/ai_t
 | Pantry scan parse | `/v1/ai/pantry-parse` | haiku 5.5 | no | schema + confidence threshold |
 | Dinner solve | `/v1/ai/dinner-solve` | haiku 5.5 | yes (card-by-card) | hard-rule validator, retry. Optional on-device `feedback_summary` (ADR 0030); v2.0.0 prompt 5% canary via `pickStandardPrompt`, v1.0.0 default. `done` frame carries `model`. |
 | Cook voice turn | Realtime WS via `/v1/ai/realtime-session` | gpt-realtime-2.1-mini (minimal) | bidi audio | system prompt, max_output_tokens, truncation-bounded growth |
-| Cook substitution (voice) | Realtime function call → `/v1/ai/substitution` | haiku 5.5 | no | hard-rule validator |
+| Cook substitution (voice) | Realtime function call → `/v1/ai/substitution` | sonnet 5.5 | no | hard-rule validator |
 | Cook Q&A fallback | `/v1/ai/cook-turn` | haiku 5.5 | no | schema |
-| Substitution (sheet) | `/v1/ai/substitution` | haiku 5.5 | no | hard-rule validator |
+| Substitution (sheet) | `/v1/ai/substitution` | sonnet 5.5 | no | hard-rule validator; prompt v1.2.0 never names the replaced or excluded item, because the validator's keyword scan has no context ("instead of butter" fails like "use butter") |
 | Cook substitution rewrite | `/v1/ai/recipe-step-rewrite` | haiku 5.5 | no | schema; sub_event_id idempotency with `:rewrite` cache suffix to avoid colliding with the upstream substitution cache row (SCA-432) |
 | Recipe import | `/v1/ai/recipe-import` | haiku 5.5 | no | sanitize HTML, treat content as untrusted |
 | Grocery generate | `/v1/ai/grocery-generate` | haiku 5.5 | no | post-model dedupe |

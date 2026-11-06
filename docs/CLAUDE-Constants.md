@@ -18,13 +18,13 @@ Per-feature text models (`_shared/ai_text.ts`). The `AI_TEXT_PROVIDER` secret âˆ
 | --- | --- | --- |
 | `pantry_parse` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
 | `dinner_solve` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
-| `substitution` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
+| `substitution` | `claude-sonnet-5-5` | `gemini-3-flash-preview` |
 | `recipe_step_rewrite` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
 | `cook_turn` | `claude-haiku-5-5` | `gemini-3-flash-preview` |
 | `recipe_import` | `claude-haiku-5-5` | `gemini-3.1-flash-lite` |
 | `grocery_generate` | `claude-haiku-5-5` | `gemini-3.1-flash-lite` |
 
-`claude-sonnet-5-5` is the escalation model: a feature moves to it only when the parity check shows Haiku failing (ADR 0038). Claude calls use the official SDK with structured output through `output_config.format` (`json_schema`), no forced `tool_choice`, no prefill, no sampling parameters, SDK retries off; `stop_reason` is checked for `refusal` and `max_tokens` before content is read. Images: JPEG, PNG or WebP.
+`claude-sonnet-5-5` is the escalation model: a feature moves to it only when the parity check shows Haiku failing (ADR 0038). Substitution runs on it: on `eval_substitutions_v1` with prompt v1.2.0 Sonnet passes 48/50 against Haiku's 42â€“43/50. Claude calls use the official SDK with structured output through `output_config.format` (`json_schema`), no forced `tool_choice`, no prefill, no sampling parameters, SDK retries off; `stop_reason` is checked for `refusal` and `max_tokens` before content is read. Images: JPEG, PNG or WebP.
 
 Per 1M tokens, from `MODEL_PRICING` in `_shared/ai_request_log.ts` (sources and retrieval dates in ADR 0038):
 

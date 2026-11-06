@@ -70,7 +70,9 @@ export interface DishContext {
 }
 
 export type ValidationIssue =
-  | { kind: 'allergen'; value: string; ingredient: string }
+  // `keyword`: the matched needle (e.g. "milk" for a dairy rule); set by
+  // validateSubstitution for the amplified-retry summary.
+  | { kind: 'allergen'; value: string; ingredient: string; keyword?: string }
   | { kind: 'diet_violation'; diet: string; ingredient: string; keyword: string }
   | { kind: 'dislike_hard'; value: string; ingredient: string }
   | { kind: 'time_over_budget'; actual: number; max: number }
@@ -574,7 +576,12 @@ export function validateSubstitution(
       // miss what the dish validator catches.
       const hit = containsAnyStrict(combined, allergyKeywordsFor(value));
       if (hit) {
-        issues.push({ kind: 'allergen', value: rule.value, ingredient: sub.substitution_text });
+        issues.push({
+          kind: 'allergen',
+          value: rule.value,
+          ingredient: sub.substitution_text,
+          keyword: hit,
+        });
       }
       continue;
     }
@@ -689,7 +696,8 @@ const PANTRY_CLAIM_NEEDLES: readonly string[] = [
  * Compose a compact human-readable violation summary to amplify the retry
  * prompt. The model gets "RE-VIOLATED: <summary>" prepended to the system
  * prompt on retry, so it understands what to avoid without us re-sending
- * the entire ruleset. Emits PII-free labels — no user text quoted back.
+ * the entire ruleset. Quotes only rule values and matched keywords, never
+ * the model's answer or the user's free-text problem.
  */
 export function summarizeViolations(result: ValidationResult): string {
   if (result.valid) return '';
@@ -700,11 +708,27 @@ export function summarizeViolations(result: ValidationResult): string {
   // SCA-431: collect the forbidden phrasings the model used so the
   // retry prompt knows specifically what to avoid in the next attempt.
   const ungroundedPhrasings = new Set<string>();
+  // The exact words the keyword checks matched. The checks are substring
+  // and word-boundary matches with no notion of context, so "peanut-free"
+  // or "instead of butter" fails exactly like a suggestion of peanuts or
+  // butter. Naming the matched word lets the retry remove it; a label
+  // like "diets=vegan" does not say which word tripped the check (ADR 0038).
+  const bannedWords = new Set<string>();
   for (const issue of result.issues) {
     kinds.add(issue.kind);
-    if (issue.kind === 'allergen') allergens.add(issue.value);
-    if (issue.kind === 'diet_violation') diets.add(issue.diet);
-    if (issue.kind === 'unavailable_equipment_implied') equipment.add(issue.keyword);
+    if (issue.kind === 'allergen') {
+      allergens.add(issue.value);
+      bannedWords.add(issue.keyword ?? issue.value);
+    }
+    if (issue.kind === 'diet_violation') {
+      diets.add(issue.diet);
+      bannedWords.add(issue.keyword);
+    }
+    if (issue.kind === 'dislike_hard') bannedWords.add(issue.value);
+    if (issue.kind === 'unavailable_equipment_implied') {
+      equipment.add(issue.keyword);
+      bannedWords.add(issue.keyword);
+    }
     if (issue.kind === 'ungrounded_pantry_claim') ungroundedPhrasings.add(issue.phrasing);
   }
   const parts: string[] = [];
@@ -714,6 +738,7 @@ export function summarizeViolations(result: ValidationResult): string {
   if (ungroundedPhrasings.size) {
     parts.push(`ungrounded_pantry_claim=${[...ungroundedPhrasings].join('|')}`);
   }
+  if (bannedWords.size) parts.push(`banned_words=${[...bannedWords].join('|')}`);
   if (!parts.length) parts.push(`kinds=${[...kinds].join('|')}`);
   return parts.join('; ');
 }

@@ -522,7 +522,7 @@ function renderPromptForAttempt(
   return [
     'PREVIOUS ATTEMPT VIOLATED HARD RULES:',
     amplifyNote,
-    'This retry MUST NOT repeat that violation. If no safe substitution exists, return the canned safety message with constraint_safe=false.',
+    'This retry MUST NOT repeat that violation. None of the banned_words may appear anywhere in substitution_text, amount_conversion or reasoning, not even in a negation ("X-free", "without X"), a comparison ("like X") or a compound name ("oat X"; write "oat drink" instead of "oat milk"). If no safe substitution exists, return the canned safety message with constraint_safe=false.',
     '',
     base,
   ].join('\n');

@@ -18,7 +18,7 @@ Prod volume could not inform the choice: `ai_request_log` on `ktqajarcomzplnpbcz
 
 ## Decision
 
-1. **Text runs on the Claude API.** Default model `claude-haiku-5-5`; a feature moves to `claude-sonnet-5-5` only when the parity check (below) shows Haiku failing it. Calls go through the official SDK (`npm:@anthropic-ai/sdk`), structured output through `output_config.format` (`json_schema`), never forced `tool_choice` and never prefill. Every response is checked for `stop_reason: "refusal"` and `max_tokens` before its content is read.
+1. **Text runs on the Claude API.** Default model `claude-haiku-5-5`; a feature moves to `claude-sonnet-5-5` only when the parity check (below) shows Haiku failing it. Substitution is the one such feature (Notes: parity results). Calls go through the official SDK (`npm:@anthropic-ai/sdk`), structured output through `output_config.format` (`json_schema`), never forced `tool_choice` and never prefill. Every response is checked for `stop_reason: "refusal"` and `max_tokens` before its content is read.
 2. **One server-side selection, no per-request fallback.** The secret `AI_TEXT_PROVIDER` ∈ {`anthropic`, `gemini`} (default `anthropic`) picks the text provider for every endpoint. Gemini text stays callable behind it with the dead Lite ID replaced by `gemini-3.1-flash-lite` (shutdown 2027-05-07). There is no cross-vendor retry chain.
 3. **Voice runs on OpenAI Realtime, `gpt-realtime-2.1-mini`, over WebSocket.** The backend mints a short-lived client secret (`POST /v1/realtime/client_secrets`); iOS connects to `wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini` with it. Gemini Live is removed: its model shuts down on 2026-11-17 and keeping a second voice client on iOS is not worth an untested `gemini-3.8-live` port. `disable_cook_realtime` still routes voice to the C.3 on-device fallback with `AI-VOICE-01`.
 4. **Bounded growth uses server truncation, not refresh.** OpenAI Realtime caches the conversation prefix automatically (cached audio input $0.30/M on mini); a refresh opens a new session and discards that cache, which is the dominant voice cost lever. The session sets `truncation` with a `retention_ratio` and `token_limits.post_instructions`, and refresh is kept only as a reconnect for the session's maximum duration and transport recovery. The invariant from ADR 0014 — per-turn prompt tokens stay bounded — holds.
@@ -49,6 +49,8 @@ Prod volume could not inform the choice: `ai_request_log` on `ktqajarcomzplnpbcz
 - Voice margin depends on the cache hit rate, which OpenAI calls best-effort. It must be measured per turn (`response.done.usage.input_token_details.cached_tokens`) and watched.
 - `gpt-realtime-2.1-mini` scores slightly below Gemini 3.1 Flash Live on tool use (22.5% vs 26.2%). Device testing must cover every tool.
 - The evals cannot score five of six features; the parity check is weaker evidence than a corpus.
+- Substitution on Sonnet takes p50 2.0 s / p95 4.0 s per call. The voice `substitution_check` tool waits on it, so tool-call turns that use it will likely exceed the ADR 0012 tool-call TTFA gate (p95 < 1500 ms) unless the model speaks its preamble first. Measure on device.
+- Substitution prompt v1.2.x never names the replaced ingredient, even when nothing restricts it ("in its place", "the original"). The sheet shows the ingredient beside the suggestion, so the text stays clear, but it reads less naturally.
 
 ### Tradeoffs
 
@@ -83,7 +85,22 @@ When the credits run out, these rates are what Stir pays; voice on mini stays in
 
 ## Notes
 
-- The parity check, per feature: run Gemini and each Claude candidate on the same inputs, require schema-valid output and a clean hard-rule validator pass, compare outputs side by side, and score `eval:substitutions` (100% hard-rule pass required). Results and the per-feature model table are recorded here when the check runs.
+- The parity check, per feature: run Gemini and each Claude candidate on the same inputs, require schema-valid output and a clean hard-rule validator pass, compare outputs side by side, and score `eval:substitutions` (100% hard-rule pass required).
+- **Parity results, 2026-11-06 (local stack, `Backend/evals/parity`, 10 fixtures per feature).** No Gemini side was run: the local `GEMINI_API_KEY` is a placeholder and the prod key is rejected, so these are Claude-only results judged against the fixtures and validators. `eval_substitutions_v1` has no recorded Gemini baseline either; it was built when the local Gemini key was already a placeholder.
+
+  | Feature | Model | Result | Avg cost / call | p50 / p95 latency | Avg tokens in / out |
+  | --- | --- | --- | ---: | --- | --- |
+  | Pantry scan | Haiku 5.5 | not run: no photo corpus | — | — | — |
+  | Dinner solve | Haiku 5.5 | 10/10; 30/30 dishes pass hard rules; 2 solves needed one retry | $0.0021 | 13.2 s / 23.5 s | 3,087 / 3,680 |
+  | Substitution | **Sonnet 5.5** | `eval_substitutions_v1` 48/50 (prompt v1.2.1) | $0.0080 | 2.0 s / 4.0 s | 3,140 / 174 |
+  | Recipe-step rewrite | Haiku 5.5 | 10/10 | $0.00015 | 1.0 s / 2.4 s | 1,085 / 77 |
+  | Cook-turn fallback | Haiku 5.5 | 10/10; refuses peanuts under a peanut allergy, steers vegans off chicken stock, starts timers | $0.00019 | 1.0 s / 2.0 s | 1,512 / 79 |
+  | Recipe import | Haiku 5.5 | 10/10; plus a Safari share of a Wikibooks page in the simulator, parsed "high" | $0.00063 | 2.9 s / 4.5 s | 2,327 / 801 |
+  | Grocery | Haiku 5.5 | 10/10 | $0.00040 | 1.7 s / 3.3 s | 2,020 / 397 |
+
+  Dinner solve's latency is one non-streaming call for all three dishes; the SSE frames are replayed after validation, on `main` as here, so time to first card equals the whole call.
+- **Substitution.** On prompt v1.1.0, Haiku 5.5 passed 26/50. No unsafe suggestion reached the wire in any run; every failure was a safe suggestion the validator rejected and replaced with the canned message. Cause: `validateSubstitution` scans the answer for excluded words with no notion of context, so "instead of butter", "peanut-free" and "like grill char" fail exactly like suggesting them, and v1.1.0's own examples modelled that phrasing. Fixes, each measured on all 50 cases: prompt v1.2.0 (never name the original, an excluded item or missing equipment; name plant-based swaps without the excluded word, "oat drink"), the retry note naming the exact matched words (`summarizeViolations` → `banned_words`), prompt v1.2.1 (an item whose pantry name contains an excluded word may be suggested renamed, without a pantry claim, since v1.2.0's rename rule and the pantry-grounded rule otherwise contradict), and the eval matching `cream` as a whole word so the baking verb "creaming" is not a leak. Scores: Haiku `minimal` 34/50, Haiku `low` thinking 42–43/50, Sonnet 44/50 (v1.2.0) → 47/50 → 48/50 (v1.2.1, endpoint). The validator's keyword lists were not loosened. The remaining misses vary between runs: the verb "cream" ("cream the shortening with the sugar") matched as an ingredient, and an occasional safe withhold on a plant-milk case.
+- **Prompt rollout at 100%, not a 5% canary.** Substitution reads the single default prompt row (`readActivePrompt`); there is no canary split to use. v1.1.0 is measured-bad on the new default provider, and the provider switch is itself all-at-once, so the prompt ships with it. Rollback is one `UPDATE` (in the migration comments).
 - Measurement that keeps this decision honest: cache hit ratio on voice turns, tool-call success per tool, TTFA against the ADR 0012 gates.
 - **Text prompt caching is off.** Every text system prompt is a template rendered with household context, so it differs per user and a prefix cache would mostly write (Haiku cache writes cost 1.25× input) and rarely read; with one active user in the last 90 days the saving is zero. Revisit when traffic exists, by putting the static template prefix in its own cached block ahead of the rendered context.
 - **Wire additions, both backward-compatible:** the dinner-solve `done` SSE frame carries `model` (iOS reports it as `dinner_solve_completed.model` instead of a hard-coded literal); `/v1/ai/voice-turn-usage` turns accept optional `prompt_tokens_cached_audio`, because OpenAI prices cached audio and cached text differently. `config-bootstrap` reports `provider_model` from the live selection.

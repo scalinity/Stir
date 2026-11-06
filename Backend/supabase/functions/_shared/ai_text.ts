@@ -70,7 +70,10 @@ const MODELS: Readonly<Record<TextProvider, Readonly<Record<TextFeature, TextMod
   anthropic: {
     pantry_parse: ClaudeModel.Haiku,
     dinner_solve: ClaudeModel.Haiku,
-    substitution: ClaudeModel.Haiku,
+    // Sonnet: on eval_substitutions_v1 it passes 48/50 with prompt v1.2.0
+    // against Haiku's 42-43/50 (Haiku keeps naming the replaced
+    // ingredient, which the hard-rule scan rejects). ADR 0038.
+    substitution: ClaudeModel.Sonnet,
     recipe_step_rewrite: ClaudeModel.Haiku,
     cook_turn: ClaudeModel.Haiku,
     recipe_import: ClaudeModel.Haiku,

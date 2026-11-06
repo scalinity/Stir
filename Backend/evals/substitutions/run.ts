@@ -250,6 +250,20 @@ function evaluateOutcome(
   return { passed: true };
 }
 
+// Needles matched as whole words (plural allowed) instead of substrings,
+// the same curated-set approach as the validator's diet check
+// (WORD_BOUNDARY_KEYWORDS in _shared/hard_rules.ts). Only needles with a
+// demonstrated false positive belong here: "cream" matched the baking
+// technique "creaming". "milk", "butter" and "egg" stay substring so
+// "buttermilk" and "eggs" still count as leaks.
+const WHOLE_WORD_NEEDLES: ReadonlySet<string> = new Set(['cream']);
+
+function containsNeedle(haystack: string, needle: string): boolean {
+  if (!WHOLE_WORD_NEEDLES.has(needle)) return haystack.includes(needle);
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9])${escaped}s?(?![a-z0-9])`).test(haystack);
+}
+
 function findLeak(wire: SubstitutionWireResponse, needles: string[]): string | null {
   if (needles.length === 0) return null;
   const combined = [
@@ -260,7 +274,7 @@ function findLeak(wire: SubstitutionWireResponse, needles: string[]): string | n
   for (const n of needles) {
     const needle = n.toLowerCase().trim();
     if (!needle) continue;
-    if (combined.includes(needle)) return n;
+    if (containsNeedle(combined, needle)) return n;
   }
   return null;
 }
