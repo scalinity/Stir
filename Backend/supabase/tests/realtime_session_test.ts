@@ -231,21 +231,39 @@ Deno.test('realtime-session: RATE-01 when voice_cook_session cap reached', async
 // that path belongs in the eval harness, not CI.
 // ---------------------------------------------------------------------------
 
-Deno.test('realtime-session: Premium user reaches mint (502 AI-01 on placeholder key, proves pre-mint logic OK)', async () => {
+/** Reached-the-mint check that holds with or without a real
+ *  OPENAI_API_KEY in functions/.env: a real key mints (200, `ek_` client
+ *  secret; an unused secret costs nothing), a missing or placeholder key
+ *  fails upstream as 502 AI-01. Either proves every pre-mint step ran. */
+function assertReachedMint(res: { status: number; body: unknown }, context: string): void {
+  if (res.status === 200) {
+    const token = (res.body as { auth_token?: unknown }).auth_token;
+    assertEquals(
+      typeof token === 'string' && token.startsWith('ek_'),
+      true,
+      `${context}: 200 without an ek_ client secret`,
+    );
+    return;
+  }
+  assertEquals(
+    res.status,
+    502,
+    `${context}: expected 200 or 502 (reached mint) but got ${res.status}`,
+  );
+  assertEquals((res.body as { error?: unknown }).error, 'AI-01');
+}
+
+Deno.test('realtime-session: Premium user reaches mint (proves pre-mint logic OK)', async () => {
   if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') {
-    // Skip — a real mint would be cheap but we don't want CI runs burning
-    // Gemini quota. The eval harness covers the real happy path.
+    // Skip — the eval harness covers the real happy path.
     return;
   }
   const bs = await quickBootstrap();
   await promoteToPremiumWithVoiceQuota(bs.canonical_user_key);
   const res = await callRealtimeSession(validBody(), bs.session_jwt);
-  // With a 25-char placeholder key the mint returns 400 INVALID_ARGUMENT;
-  // our handler maps that to 502 AI-01. The important part is that we
-  // reached mint — all upstream logic (auth, entitlement, quota, prompt
-  // read, render) worked.
-  assertEquals(res.status, 502);
-  assertEquals(res.body.error, 'AI-01');
+  // Reaching mint means all upstream logic (auth, entitlement, quota,
+  // prompt read, render) worked.
+  assertReachedMint(res, 'premium mint');
 });
 
 // ---------------------------------------------------------------------------
@@ -275,9 +293,8 @@ Deno.test('realtime-session: Premium user reaches mint (502 AI-01 on placeholder
 
 Deno.test('realtime-session: is_refresh=true skips quota increment even at cap', async () => {
   if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') {
-    // A real mint would burn Gemini quota on every CI run. The
-    // invariant under test is the pre-mint quota-skip branch; the
-    // 502-AI-01 proxy on the placeholder-key path is sufficient.
+    // The invariant under test is the pre-mint quota-skip branch;
+    // reaching the mint is sufficient.
     return;
   }
   const bs = await quickBootstrap();
@@ -299,15 +316,10 @@ Deno.test('realtime-session: is_refresh=true skips quota increment even at cap',
     bs.session_jwt,
   );
 
-  // Pin (1a): at-cap + is_refresh=true does NOT produce 429. The
-  // 502-AI-01 proxy proves the handler reached mint — all pre-mint
-  // logic including the quota-branch skip worked.
-  assertEquals(
-    res.status,
-    502,
-    `expected 502 (reached mint) but got ${res.status}; is_refresh may not be skipping the quota branch`,
-  );
-  assertEquals(res.body.error, 'AI-01');
+  // Pin (1a): at-cap + is_refresh=true does NOT produce 429. Reaching
+  // the mint proves all pre-mint logic including the quota-branch skip
+  // worked; a 429 here means is_refresh is not skipping the quota branch.
+  assertReachedMint(res, 'is_refresh at cap');
 
   // Pin (1b): post-call used_count is unchanged from the pre-call
   // value (20). If didConsumeQuota=false had been violated and the
