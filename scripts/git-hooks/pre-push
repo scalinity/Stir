@@ -117,6 +117,7 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+DEVICE="${STIR_TEST_DEVICE:-iPhone 17 Pro Max}"
 
 # SCA-364: pre-warm the iPhone 17 Pro Max simulator before the first
 # xcodebuild test invocation. Two flake modes the SCA-208 retry path
@@ -138,20 +139,25 @@ cd "$REPO_ROOT"
 # from a script).
 if [ "${STIR_PREPUSH_SKIP_SIM_WARMUP:-0}" != "1" ]; then
     echo "[pre-push] pre-warming iPhone 17 Pro Max simulator…"
-    xcrun simctl shutdown all >/dev/null 2>&1 || true
-    xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
+    xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true
+    xcrun simctl boot "$DEVICE" >/dev/null 2>&1 || true
     sleep 4
 fi
 
 echo "[pre-push] running xcodebuild test on iPhone 17 Pro Max simulator (~17s)…"
 
-TMPLOG="$(mktemp -t stir-prepush-XXXXXX)"
-trap 'rm -f "$TMPLOG"' EXIT
+# Bind every summary to this invocation, never a shared DerivedData result.
+mkdir -p "$REPO_ROOT/.artifacts/pre-push"
+TEST_RUN_DIR="$(mktemp -d "$REPO_ROOT/.artifacts/pre-push/run.XXXXXX")"
+TMPLOG="$TEST_RUN_DIR/xcodebuild.log"
+CURRENT_XCRESULT="$TEST_RUN_DIR/attempt-1.xcresult"
+trap 'rm -rf "$TEST_RUN_DIR"' EXIT
 
 set +e
 xcodebuild test \
     -scheme Stir \
-    -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
+    -destination "platform=iOS Simulator,name=$DEVICE" \
+    -resultBundlePath "$CURRENT_XCRESULT" \
     -quiet \
     > "$TMPLOG" 2>&1
 EXIT="$?"
@@ -213,15 +219,17 @@ if [ -n "$SIM_FLAKE_REASON" ]; then
     # ~2s on top of the retry and is only on the failure branch, so
     # the latency hit is acceptable for the reliability win.
     echo "[pre-push] ⚠️  simulator flake detected ($SIM_FLAKE_REASON) — erasing sim and retrying once"
-    xcrun simctl shutdown all >/dev/null 2>&1 || true
-    xcrun simctl erase "iPhone 17 Pro Max" >/dev/null 2>&1 || true
-    xcrun simctl boot "iPhone 17 Pro Max" >/dev/null 2>&1 || true
+    xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true
+    xcrun simctl erase "$DEVICE" >/dev/null 2>&1 || true
+    xcrun simctl boot "$DEVICE" >/dev/null 2>&1 || true
     sleep 5
 
+    CURRENT_XCRESULT="$TEST_RUN_DIR/attempt-2.xcresult"
     set +e
     xcodebuild test \
         -scheme Stir \
-        -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
+        -destination "platform=iOS Simulator,name=$DEVICE" \
+        -resultBundlePath "$CURRENT_XCRESULT" \
         -quiet \
         > "$TMPLOG" 2>&1
     EXIT="$?"
@@ -229,23 +237,14 @@ if [ -n "$SIM_FLAKE_REASON" ]; then
     RETRIED_AFTER_SIM_FLAKE=1
 fi
 
-# SCA-208: locate the latest xcresult bundle and pull structured
-# pass/fail counts. Hoisted so both the success branch and the
-# existing SCA-187 failure-extraction path read the same DERIVED.
-DERIVED="$(xcodebuild -scheme Stir -showBuildSettings 2>/dev/null \
-            | awk -F' = ' '/^[[:space:]]*BUILD_DIR =/ {print $2; exit}' \
-            | sed 's|/Build/Products$||')"
-LATEST_XCRESULT=""
-if [ -n "$DERIVED" ] && [ -d "$DERIVED/Logs/Test" ]; then
-    LATEST_XCRESULT="$(ls -td "$DERIVED"/Logs/Test/*.xcresult/ 2>/dev/null | head -1)"
-fi
+# Read only the final attempt's explicitly selected result bundle.
 
 XC_RESULT=""
 XC_PASSED=0
 XC_FAILED=0
 XC_TOTAL=0
-if [ -n "$LATEST_XCRESULT" ] && [ -d "$LATEST_XCRESULT" ]; then
-    XC_JSON="$(xcrun xcresulttool get test-results summary --path "$LATEST_XCRESULT" 2>/dev/null || true)"
+if [ -n "$CURRENT_XCRESULT" ] && [ -d "$CURRENT_XCRESULT" ]; then
+    XC_JSON="$(xcrun xcresulttool get test-results summary --path "$CURRENT_XCRESULT" 2>/dev/null || true)"
     if [ -n "$XC_JSON" ]; then
         # Single python3 invocation — three roundtrips would parse the
         # same JSON three times. Output: 'result|passed|failed|total'.
@@ -269,10 +268,11 @@ except Exception:
     fi
 fi
 
-# Success requires both the xcresult `result` field AND a non-zero
-# total — the latter preserves SCA-185's broken-gate guard (a build
+# Success requires a zero exit, this attempt's passing summary and
+# a non-zero total — the latter preserves SCA-185's broken-gate guard (a build
 # that "passes" with zero tests is still a failure).
-if [ "$XC_RESULT" = "Passed" ] && [ "${XC_TOTAL:-0}" -gt 0 ]; then
+if [ "$EXIT" = "0" ] && [ "$XC_RESULT" = "Passed" ] \
+   && [ "${XC_TOTAL:-0}" -gt 0 ] && [ "${XC_FAILED:-0}" = "0" ]; then
     if [ "$RETRIED_AFTER_SIM_FLAKE" = "1" ]; then
         echo "[pre-push] ✅ retried after sim flake — iOS: $XC_PASSED/$XC_TOTAL tests passed"
     else
@@ -314,9 +314,7 @@ fi
 
 echo "[pre-push] running deno test against Backend/supabase/tests/ (~30s)…"
 
-DENOLOG="$(mktemp -t stir-prepush-deno-XXXXXX)"
-# Append the deno log to the existing iOS log cleanup trap.
-trap 'rm -f "$TMPLOG" "$DENOLOG"' EXIT
+DENOLOG="$TEST_RUN_DIR/deno.log"
 
 set +e
 # SCA-284: cwd must be Backend/supabase — telemetry_canonical_test.ts +
@@ -381,7 +379,7 @@ fi # end IOS_PASSED guard
 echo "[pre-push] ❌ push blocked"
 echo
 
-if [ -z "$LATEST_XCRESULT" ]; then
+if [ ! -d "$CURRENT_XCRESULT" ]; then
     # No xcresult means xcodebuild never produced one — typically a
     # compile error before testing started, or a sim-launch flake that
     # didn't match the SCA-208 substring (so retry didn't fire). The
@@ -397,10 +395,10 @@ elif [ "${XC_FAILED:-0}" -gt 0 ]; then
 
     # SCA-187 (review-CR-W2): -quiet strips per-`Test Case` lines, so
     # the in-log grep is empty for failed-test enumeration. The
-    # xcresult bundle has the structural data — DERIVED + LATEST_XCRESULT
+    # xcresult bundle has the structural data — DERIVED + CURRENT_XCRESULT
     # are already hoisted above.
     echo "--- failures (from xcresult) ---"
-    xcrun xcresulttool get test-results summary --path "$LATEST_XCRESULT" 2>/dev/null \
+    xcrun xcresulttool get test-results summary --path "$CURRENT_XCRESULT" 2>/dev/null \
         | python3 -c "
 import json, sys
 try:
@@ -426,7 +424,7 @@ echo "--- last 60 lines of test log ---"
 tail -n 60 "$TMPLOG"
 echo
 echo "Re-run locally with:"
-echo "  xcodebuild test -scheme Stir -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'"
+printf '  xcodebuild test -scheme Stir -destination "%s"\n' "platform=iOS Simulator,name=$DEVICE"
 echo
 echo "Emergency override (requires reason; documented in commit):"
 echo "  SKIP_PREPUSH_TESTS=1 SKIP_PREPUSH_REASON='…' git push"
