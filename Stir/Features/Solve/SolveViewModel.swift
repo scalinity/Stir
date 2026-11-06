@@ -282,7 +282,7 @@ final class SolveViewModel {
             if let idx = slots.firstIndex(where: { $0.rank == rank }) {
                 slots[idx].errorCode = code
             }
-        case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion):
+        case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion, let model):
             self.lastCostUSD = cost
             self.lastLatencyMS = Int(Date().timeIntervalSince(startedAt) * 1000)
             self.lastPromptVersion = promptVersion
@@ -293,14 +293,13 @@ final class SolveViewModel {
                 "prompt_version": promptVersion,
                 "total_latency_ms": lastLatencyMS ?? 0,
                 "any_hard_rule_violations": slots.contains { $0.errorCode != nil },
-                // Spec §15 required property — the Gemini model string
-                // that served the solve. Lets AI Ops dashboards split
-                // cost/latency by preview vs GA model version. Literal
-                // mirrors CLAUDE.md §Stack-snapshot (dinner-solve uses
-                // `gemini-3-flash-preview`); backend emits the same
-                // string on the paired `$ai_generation` event so the
-                // two dashboards reconcile.
-                "model": "gemini-3-flash-preview",
+                // Spec §15 required property — the model that served the
+                // solve, taken from the backend's `done` frame because the
+                // backend selects the provider (ADR 0038). It matches the
+                // paired `$ai_generation` event so the two dashboards
+                // reconcile. `unknown` only for solves replayed from a
+                // cache row written before the frame carried the model.
+                "model": model ?? "unknown",
             ])
             // Persist to CloudKit now that we have the full result.
             persistCompletedSolve()

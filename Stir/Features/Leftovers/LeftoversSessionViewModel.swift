@@ -277,7 +277,7 @@ final class LeftoversSessionViewModel: Identifiable {
                 case .slotError:
                     // A missing slot just means we render what we have.
                     continue
-                case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion):
+                case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion, _):
                     self.lastPromptVersion = promptVersion
                     analytics.capture(
                         .dinnerSolveCompleted,

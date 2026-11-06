@@ -704,6 +704,7 @@ func decodeSSEEvent(event: String, dataJSON: String) throws -> DinnerSolveEvent?
             dishesReturned: done.dishesReturned,
             retryCount: done.retryCount,
             promptVersion: done.promptVersion,
+            model: done.model,
         )
     default:
         Logger.aiDispatch.warning("unknown SSE event: \(event, privacy: .public)")

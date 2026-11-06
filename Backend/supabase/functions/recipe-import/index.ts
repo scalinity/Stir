@@ -31,7 +31,7 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import {
@@ -51,7 +51,7 @@ import { readCache, responseFromCache, writeCache } from '../_shared/idempotency
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 
 const FEATURE_KEY = 'recipe_import';
-const MODEL = GeminiModel.FlashLite;
+const MODEL = textModelFor('recipe_import');
 const DEFAULT_ASYNC_THRESHOLD_BYTES = 8192;
 const URL_FETCH_TIMEOUT_MS = 10_000;
 const URL_FETCH_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -374,7 +374,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: rendered,
         userText: 'Normalize the raw content into the structured recipe schema.',
@@ -400,14 +400,14 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt === 0) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        userLog.error('ai_call_failed', err);
         break;
       }
     }

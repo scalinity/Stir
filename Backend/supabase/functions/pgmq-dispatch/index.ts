@@ -29,7 +29,7 @@ import { createServiceClient } from '../_shared/db.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { writeCache } from '../_shared/idempotency.ts';
@@ -51,7 +51,7 @@ const MAX_ATTEMPTS = 3;
 const RETRY_BACKOFF_SECONDS = [60, 300]; // 1m, 5m
 const STUCK_JOB_TIMEOUT_MINUTES = 5; // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
-const MODEL = GeminiModel.FlashLite;
+const MODEL = textModelFor('recipe_import');
 
 // Shared-secret gate (SA2-Medium fix). Read once at module load.
 const PGMQ_DISPATCH_SECRET = Deno.env.get('STIR_PGMQ_DISPATCH_SECRET') ?? '';
@@ -438,7 +438,7 @@ async function processRecipeImportAsync(
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: rendered,
         userText: 'Normalize the raw content into the structured recipe schema.',
@@ -462,7 +462,7 @@ async function processRecipeImportAsync(
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
+      if (err instanceof AITextError && err.status >= 500) {
         if (attempt === 0) {
           retryCount++;
           continue;

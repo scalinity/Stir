@@ -20,7 +20,7 @@ import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -33,7 +33,7 @@ import {
 import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
 
 const FEATURE_KEY = 'grocery_generate';
-const MODEL = GeminiModel.FlashLite;
+const MODEL = textModelFor('grocery_generate');
 
 // -----------------------------------------------------------------------------
 // Gemini output schema (matches prompt v1.0.0 grocery_generate output)
@@ -247,7 +247,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: rendered,
         userText: 'Generate the grocery diff as structured JSON.',
@@ -272,14 +272,14 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt === 0) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        userLog.error('ai_call_failed', err);
         break;
       }
     }

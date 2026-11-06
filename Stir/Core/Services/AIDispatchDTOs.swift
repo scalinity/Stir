@@ -497,7 +497,7 @@ extension DishCard.RecipePlanWire.IngredientWire {
 enum DinnerSolveEvent: Sendable {
     case dish(DishCard)
     case slotError(rank: Int, code: ErrorCode)
-    case done(solveRequestID: UUID, totalCostUSD: Double, dishesReturned: Int, retryCount: Int, promptVersion: String)
+    case done(solveRequestID: UUID, totalCostUSD: Double, dishesReturned: Int, retryCount: Int, promptVersion: String, model: String?)
 }
 
 struct DinnerSolveDoneFrame: Decodable, Sendable {
@@ -506,6 +506,10 @@ struct DinnerSolveDoneFrame: Decodable, Sendable {
     let dishesReturned: Int
     let retryCount: Int
     let promptVersion: String
+    /// Model that served the solve (ADR 0038 — the backend selects the
+    /// provider, so iOS can't name it). Optional: solves cached before the
+    /// field existed replay without it.
+    let model: String?
 
     enum CodingKeys: String, CodingKey {
         case solveRequestID = "solve_request_id"
@@ -513,6 +517,7 @@ struct DinnerSolveDoneFrame: Decodable, Sendable {
         case dishesReturned = "dishes_returned"
         case retryCount = "retry_count"
         case promptVersion = "prompt_version"
+        case model
     }
 }
 

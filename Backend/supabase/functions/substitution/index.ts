@@ -32,7 +32,7 @@ import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -51,7 +51,7 @@ import {
 import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 
 const FEATURE_KEY = 'substitution';
-const MODEL = GeminiModel.Flash;
+const MODEL = textModelFor('substitution');
 
 // Canned safety message returned when no safe substitution can be produced
 // after one retry. Matches the prompt's fallback text so the model and the
@@ -250,7 +250,7 @@ Deno.serve(async (req) => {
   for (let attempt = 0; attempt < 2; attempt++) {
     const renderedPrompt = renderPromptForAttempt(activePrompt.template_blob, body, amplifyNote);
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText:
@@ -341,13 +341,13 @@ Deno.serve(async (req) => {
       break;
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500 && attempt === 0) {
+      if (err instanceof AITextError && err.status >= 500 && attempt === 0) {
         upstreamRetryCount++;
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         amplifyNote = null;
         continue;
       }
-      userLog.error('gemini_call_failed', err);
+      userLog.error('ai_call_failed', err);
       break;
     }
   }

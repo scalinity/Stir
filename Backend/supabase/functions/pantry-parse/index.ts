@@ -37,7 +37,7 @@ import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -52,7 +52,7 @@ import { readCache, responseFromCache, writeCache } from '../_shared/idempotency
 import { decodeAndValidateImage } from '../_shared/image_validation.ts';
 
 const FEATURE_KEY = 'pantry_parse';
-const MODEL = GeminiModel.Flash;
+const MODEL = textModelFor('pantry_parse');
 
 // Response JSON schema Gemini is asked to adhere to.
 const GEMINI_RESPONSE_SCHEMA: Record<string, unknown> = {
@@ -415,7 +415,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText,
@@ -451,14 +451,14 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt < maxAttempts - 1) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        userLog.error('ai_call_failed', err);
         break;
       }
     }

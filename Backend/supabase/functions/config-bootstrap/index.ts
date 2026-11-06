@@ -33,6 +33,7 @@ import {
 import type { QuotaWire } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
 import type { PromptWireRow } from '../_shared/prompt_versions.ts';
+import { isTextFeature, textModelFor } from '../_shared/ai_text.ts';
 
 Deno.serve(async (req) => {
   const requestId = requestIdFrom(req);
@@ -200,7 +201,11 @@ Deno.serve(async (req) => {
     }
 
     if (promptsResult.error) throw promptsResult.error;
-    const prompts = (promptsResult.data ?? []) as PromptWireRow[];
+    // ADR 0038: `provider_model` reports the model the AI_TEXT_PROVIDER
+    // switch selects, not the value stored when the prompt row was seeded.
+    const prompts = ((promptsResult.data ?? []) as PromptWireRow[]).map((p) =>
+      isTextFeature(p.feature_key) ? { ...p, provider_model: textModelFor(p.feature_key) } : p
+    );
 
     // Warn when an expected feature_key has no default prompt row — a bad
     // canary rollout can leave a feature silently without a prompt, and the

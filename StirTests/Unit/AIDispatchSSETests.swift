@@ -55,7 +55,7 @@ final class AIDispatchSSETests: XCTestCase {
         "dishes_returned":2,"retry_count":1,"prompt_version":"1.0.0"}
         """
         let evt = try decodeSSEEvent(event: "done", dataJSON: json)
-        guard case .done(let sid, let cost, let returned, let retry, let version) = evt else {
+        guard case .done(let sid, let cost, let returned, let retry, let version, let model) = evt else {
             XCTFail("expected .done event")
             return
         }
@@ -64,6 +64,8 @@ final class AIDispatchSSETests: XCTestCase {
         XCTAssertEqual(returned, 2)
         XCTAssertEqual(retry, 1)
         XCTAssertEqual(version, "1.0.0")
+        // Frames cached before ADR 0038 carry no `model`; they must still decode.
+        XCTAssertNil(model)
     }
 
     func test_unknownEvent_returnsNilForForwardCompat() throws {
