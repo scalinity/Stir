@@ -48,10 +48,13 @@ struct DishPreviewView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // Large title so long Gemini-generated dish names get the full
-        // bar width instead of competing with the trailing actions.
+        // The dish title is the content heading (`header`), where long
+        // Gemini-generated names wrap instead of truncating. The bar keeps
+        // back + cart + star; `navigationTitle` stays for VoiceOver and
+        // the back-button label of anything pushed on top.
         .navigationTitle(dish.title)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(HiddenBarTitle())
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -107,6 +110,11 @@ struct DishPreviewView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            Text(dish.title)
+                .stirFont(.displayLg)
+                .foregroundStyle(Color.Stir.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             HStack {
                 HStack(spacing: CGFloat.Stir.space1) {
                     Image.Stir.clock
@@ -313,5 +321,17 @@ struct DishPreviewView: View {
             dismiss()
         }
         .accessibilityHint("Opens Cook Mode step-by-step with optional timers.")
+    }
+}
+
+/// Removes the navigation-bar title on iOS 18+, where the dish title is
+/// already the screen's content heading. iOS 17 keeps the inline title.
+private struct HiddenBarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }

@@ -1,7 +1,8 @@
 // ScrollEdgeBar
 //
-// Pins a custom bar (a bottom action bar, a pinned filter row) to the top
-// or bottom edge of a screen as part of the system chrome layer.
+// Pins a custom bar (e.g. a bottom action bar) to an edge of a screen as
+// part of the system chrome layer. Avoid the top edge under a large title:
+// the extended scroll edge effect blurs the title.
 //
 // iOS 26+: `safeAreaBar` — the content insets the safe area like
 // `safeAreaInset`, and scroll views underneath extend their scroll edge

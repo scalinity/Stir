@@ -138,7 +138,16 @@ struct SavedMealsView: View {
     var body: some View {
         Group {
             if filteredRows.isEmpty {
-                emptyState
+                // The All / Favorites filter stays above the empty state so
+                // a Favorites-only filter that empties the list can be
+                // switched back.
+                VStack(spacing: 0) {
+                    filterPicker
+                        .padding(.horizontal, CGFloat.Stir.screenMargin)
+                        .padding(.vertical, CGFloat.Stir.space2)
+                    emptyState
+                        .frame(maxHeight: .infinity)
+                }
             } else {
                 list
             }
@@ -149,21 +158,17 @@ struct SavedMealsView: View {
         .background(Color.Stir.paper50)
         .navigationTitle("Saved meals")
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $searchQuery, prompt: "Search by title or ingredient")
+        .searchable(
+            text: $searchQuery,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search by title or ingredient",
+        )
         .textInputAutocapitalization(.sentences)
         .autocorrectionDisabled()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 sortMenu
             }
-        }
-        // The All / Favorites filter stays pinned (not in the list) so
-        // it remains reachable when a Favorites-only filter empties the
-        // list and the empty state replaces it.
-        .scrollEdgeBar(edge: .top) {
-            filterPicker
-                .padding(.horizontal, CGFloat.Stir.screenMargin)
-                .padding(.vertical, CGFloat.Stir.space2)
         }
         .task {
             await load()
@@ -293,47 +298,58 @@ struct SavedMealsView: View {
     // MARK: - List
 
     private var list: some View {
-        List(filteredRows) { row in
-            // `.center` so the star aligns with the vertical middle of
-            // the row regardless of how many lines the title wraps to.
-            // `.top` left it hugging the first title baseline, which
-            // looked off when the title spanned two lines.
-            HStack(alignment: .center, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
-                Button {
-                    if let plan = row.plan { cookAgainPlan = plan }
-                } label: {
-                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
-                        Text(row.title)
-                            .stirFont(.displaySm)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                        if let lastCooked = row.lastCookedAt {
-                            Text(lastCooked, format: .relative(presentation: .named))
-                                .stirFont(.bodySm)
-                                .foregroundStyle(Color.Stir.textTertiary)
+        List {
+            filterPicker
+                .listRowBackground(Color.Stir.paper50)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(
+                    top: CGFloat.Stir.space2,
+                    leading: CGFloat.Stir.screenMargin,
+                    bottom: CGFloat.Stir.space2,
+                    trailing: CGFloat.Stir.screenMargin,
+                ))
+            ForEach(filteredRows) { row in
+                // `.center` so the star aligns with the vertical middle of
+                // the row regardless of how many lines the title wraps to.
+                // `.top` left it hugging the first title baseline, which
+                // looked off when the title spanned two lines.
+                HStack(alignment: .center, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
+                    Button {
+                        if let plan = row.plan { cookAgainPlan = plan }
+                    } label: {
+                        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                            Text(row.title)
+                                .stirFont(.displaySm)
+                                .foregroundStyle(Color.Stir.textPrimary)
+                            if let lastCooked = row.lastCookedAt {
+                                Text(lastCooked, format: .relative(presentation: .named))
+                                    .stirFont(.bodySm)
+                                    .foregroundStyle(Color.Stir.textTertiary)
+                            }
+                            ratingLine(rating: row.rating)
                         }
-                        ratingLine(rating: row.rating)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Cook this again")
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Cook this again")
 
-                favoriteButton(for: row)
-            }
-            .padding(.vertical, CGFloat.Stir.space1)
-            .listRowBackground(Color.Stir.paper50)
-            .listRowSeparatorTint(Color.Stir.divider)
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    handleDeleteTap(row: row)
-                } label: {
-                    Label("Delete", systemImage: "trash")
+                    favoriteButton(for: row)
                 }
-                // ember700 is the deepest brand red-orange — destructive
-                // intent in the warm palette without the system .red
-                // pop, keeps the saved-tab surface continuous.
-                .tint(Color.Stir.ember700)
+                .padding(.vertical, CGFloat.Stir.space1)
+                .listRowBackground(Color.Stir.paper50)
+                .listRowSeparatorTint(Color.Stir.divider)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        handleDeleteTap(row: row)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    // ember700 is the deepest brand red-orange — destructive
+                    // intent in the warm palette without the system .red
+                    // pop, keeps the saved-tab surface continuous.
+                    .tint(Color.Stir.ember700)
+                }
             }
         }
         .listStyle(.plain)

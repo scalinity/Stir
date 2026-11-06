@@ -96,10 +96,14 @@ struct ScanReviewView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Edit ingredient", isPresented: editAlertBinding) {
+            // Captured when the alert's actions are built: the system
+            // flips `isPresented` to false (clearing `editTarget` via
+            // `editAlertBinding`) before a button's action runs.
+            let targetID = editTarget?.id
             TextField("Ingredient name", text: $editBuffer)
             Button("Save") {
-                if let target = editTarget {
-                    viewModel.editIngredient(id: target.id, newName: editBuffer)
+                if let targetID {
+                    viewModel.editIngredient(id: targetID, newName: editBuffer)
                 }
                 editTarget = nil
                 editBuffer = ""

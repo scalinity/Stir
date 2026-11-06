@@ -460,7 +460,8 @@ Chrome is system UI; Liquid Glass comes from the OS. Brand expression lives in c
 - **Toolbar actions** — Close (`xmark`) in `.cancellationAction`; Done / Save / Add / Import / Submit in `.confirmationAction`; icon actions in `.primaryAction`, labelled with the `Image.Stir.*` symbol.
 - **Search** — `.searchable`.
 - **Alerts / confirmations** — `.alert` (with `TextField` for inline prompts) and `.confirmationDialog` for destructive choices.
-- **Custom bars** — bottom action bars and pinned filter rows use `.scrollEdgeBar(edge:)` (`Stir/DesignSystem/Modifiers/ScrollEdgeBar.swift`): `safeAreaBar` on iOS 26+, `safeAreaInset` over `.bar` on iOS 17–25. No paper fill, no hairline.
+- **Custom bars** — bottom action bars use `.scrollEdgeBar(edge: .bottom)` (`Stir/DesignSystem/Modifiers/ScrollEdgeBar.swift`): `safeAreaBar` on iOS 26+, `safeAreaInset` over `.bar` on iOS 17–25. No paper fill, no hairline. Filter rows under a large title (Saved's All / Favorites) live in the content, not in a top bar — a top `safeAreaBar` extends the scroll edge effect over the large title and blurs it.
+- **Long titles** — when a screen's title is long, variable content (Dish Preview's AI-generated dish name), it is a serif content heading that wraps; the bar keeps only its actions (`toolbar(removing: .title)` on iOS 18+).
 - **Tint** — the asset-catalog `AccentColor` (ember) tints system controls; no per-site `.tint` needed.
 
 ---

@@ -22,7 +22,7 @@ Use the system components for all app chrome and let the OS render Liquid Glass:
 - **Search**: `.searchable`.
 - **Alerts and confirmations**: `.alert` (including `TextField` prompts) and `.confirmationDialog`.
 - **Sheets**: no opaque presentation backgrounds on partial-height detents, so the system sheet material shows.
-- **Custom bars that must stay** (bottom action bars, the Saved All/Favorites filter): `.scrollEdgeBar(edge:)`. It uses `safeAreaBar` on iOS 26+ (the scroll edge effect provides legibility, so there is no fill or hairline) and `safeAreaInset` over the `.bar` material on iOS 17–25.
+- **Custom bars that must stay** (bottom action bars): `.scrollEdgeBar(edge:)`. It uses `safeAreaBar` on iOS 26+ (the scroll edge effect provides legibility, so there is no fill or hairline) and `safeAreaInset` over the `.bar` material on iOS 17–25. Not for top-edge rows under a large title: the extended edge effect blurs the large title, so filters such as Saved's All/Favorites picker live in the content (first list row, and above the empty state).
 
 The iOS 17.0 deployment target is unchanged. The system components above adapt per OS version without availability checks; `scrollEdgeBar` is the only availability-gated code. The brand accent reaches system controls through the asset-catalog `AccentColor` (ember).
 
