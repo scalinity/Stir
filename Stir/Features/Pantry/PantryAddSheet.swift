@@ -11,10 +11,8 @@
 //   (DesignSystem/Components/InputField.swift). Raw
 //   `TextField(...).textFieldStyle(.roundedBorder)` would break the
 //   12pt-radius / paper.100 / ink.900 / ember-focus grammar.
-// - Title lives in the `.principal` toolbar slot so the navigation
-//   bar renders the screen title in `.displaySm` (Stir display
-//   serif) rather than the system fallback. Pattern set by
-//   `HouseholdPreferencesView` and `OtherOptionsRoot`.
+// - Chrome is the system navigation bar: title, Close in
+//   `.cancellationAction`, Add in `.confirmationAction` (ADR 0037).
 // - The `Picker(.segmented)` is the established Stir pattern for
 //   binary memory-state choices — there is no Stir-DS segmented
 //   control, and the system control reads cleanly against
@@ -48,24 +46,17 @@ struct PantryAddSheet: View {
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space4)
             .background(Color.Stir.paper50)
+            .navigationTitle("Add to pantry")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: drop the system toolbar (iOS 26 paints every
-            // ToolbarItem child with the Liquid Glass material) and
-            // render a custom top bar via .stirTopBar that lives outside
-            // the toolbar context.
-            .stirTopBar(
-                title: "Add to pantry",
-                leading: {
-                    StirTopBarCloseButton { onCancel() }
-                },
-                trailing: {
-                    StirTopBarTextButton(
-                        "Add",
-                        emphasis: .prominent,
-                        isEnabled: !name.pantryTrimmed.isEmpty,
-                    ) { commit() }
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { commit() }
+                        .disabled(name.pantryTrimmed.isEmpty)
+                }
+            }
             // Length caps at the input layer give immediate feedback
             // (review W10). Repository validation guards repeat the
             // check defense-in-depth so non-UI callers stay safe.

@@ -141,7 +141,7 @@ All sizes reference Dynamic Type; hard-coded point sizes are the `.default` toke
 | `body.md` | SF Pro | 15pt | 22 | Regular | `0` | Default body |
 | `body.sm` | SF Pro | 13pt | 18 | Regular | `0` | Captions, metadata |
 | `label.lg` | SF Pro | 15pt | 20 | Medium | `0` | Button labels, chip text |
-| `label.md` | SF Pro | 13pt | 18 | Medium | `0` | Small button labels, tab bar |
+| `label.md` | SF Pro | 13pt | 18 | Medium | `0` | Small button labels |
 | `label.eyebrow` | SF Pro | 11pt | 14 | Bold | `+0.14em` (tracking ≈ 1.54pt) | UPPERCASE section eyebrows ("PRO FEATURE", "YOU'VE USED TODAY'S 3") |
 | `label.microEyebrow` | SF Pro | 10pt | 13 | Bold | `+0.12em` | UPPERCASE tier labels ("MONTHLY", "ANNUAL") |
 | `mono.md` | SF Mono | 15pt | 22 | Regular | `0`, tabular | Timer countdown, measurements in recipe |
@@ -403,7 +403,7 @@ Standard iOS text fields with these overrides:
 
 ### 8.6 Sheets
 
-`.sheet` presentation style for any modal that's not the paywall. Default detent is `.medium`, user can drag to `.large`. Sheet uses `paper.100` background (vs screen `paper.50`) for layered feel. 24pt top corner radius (iOS default). Grab indicator visible (iOS default, don't hide).
+`.sheet` presentation style for any modal that's not the paywall. Default detent is `.medium`, user can drag to `.large`. Partial-height detents use the system sheet material (Liquid Glass on iOS 26+) — no `.presentationBackground` and no opaque fill on the sheet root. Full-height sheets keep the screen's page background as content. System corner radius and grab indicator (don't hide).
 
 **Substitution Sheet** is the prototypical sheet — ingredient picker + problem text field + submit → result card.
 
@@ -442,7 +442,7 @@ Tier comparison uses two stacked cards (Premium / Pro). Current tier (if any) sh
 
 ### 8.11 Settings primitives (SCA-95)
 
-Three small primitives that compose the grouped-list / form surfaces (Settings, Notifications, Household preferences, OutcomeFeedback, Tutorial replay). Lifted from five feature-local copies into `Stir/DesignSystem/` so future tweaks hit one site instead of drifting forks.
+Two small primitives that compose the grouped-list / form surfaces (Settings, Notifications, Household preferences, OutcomeFeedback, Tutorial replay). Lifted from five feature-local copies into `Stir/DesignSystem/` so future tweaks hit one site instead of drifting forks.
 
 - **`SectionEyebrow(_ text: String, tone: Tone = .standard)`** — `Stir/DesignSystem/Components/SectionEyebrow.swift`. Small uppercase eyebrow above a section. Two tones:
   - `.standard` — `textTertiary` ink + `space1` horizontal pad. Default. Used by Settings root, Household preferences, Notifications, Tutorial replay. Horizontal pad nudges the eyebrow inboard so it visually aligns with body text inside the adjacent `.stirCard()`, not the card edge.
@@ -450,7 +450,19 @@ Three small primitives that compose the grouped-list / form surfaces (Settings, 
 - **`StirRowDivider(insetMatchingTile: Bool = false)`** — `Stir/DesignSystem/Components/StirRowDivider.swift`. 1pt hairline (`Color.Stir.divider`) between rows inside a `.stirCard()` group.
   - `false` (default) — `space3Half` leading inset. Detail-page rows without a leading icon tile (Household, Notifications, Tutorial replay).
   - `true` — `space3Half + 32 + space3` leading inset. Settings tile-fronted rows where the divider must start at the title baseline so the hairline doesn't underrun the 32×32 ember tile (mockup 14). Exposes `StirRowDivider.iconTileSize = 32` so the consumer's tile + sync-dot framing can stay aligned.
-- **`.stirNavigationTitle(_ title: String)`** — `Stir/DesignSystem/Modifiers/StirNavigationTitle.swift`. View modifier that renders `title` in the Stir display serif via a `.principal` `ToolbarItem`, plus the matching paper50 toolbar background. Pairs with `.navigationBarTitleDisplayMode(.inline)` at the call site (Saved bypasses the bar entirely with `.safeAreaInset(.top)` so it doesn't use this modifier — that's intentional and matches the cross-tab catalog).
+
+### 8.12 System chrome (ADR 0037)
+
+Chrome is system UI; Liquid Glass comes from the OS. Brand expression lives in content (serif headings, paper surfaces, ember CTAs, cards), not in bars.
+
+- **Tab bar** — `TabView` + `.tabItem` (Tonight, Saved, Settings). Scroll content needs no manual bottom clearance.
+- **Navigation bar** — `.navigationTitle` in the system font: `.large` on the Saved and Settings tab roots, `.inline` everywhere else. System back button; no hidden bars or hand-built back chevrons.
+- **Toolbar actions** — Close (`xmark`) in `.cancellationAction`; Done / Save / Add / Import / Submit in `.confirmationAction`; icon actions in `.primaryAction`, labelled with the `Image.Stir.*` symbol.
+- **Search** — `.searchable`.
+- **Alerts / confirmations** — `.alert` (with `TextField` for inline prompts) and `.confirmationDialog` for destructive choices.
+- **Custom bars** — bottom action bars use `.scrollEdgeBar(edge: .bottom)` (`Stir/DesignSystem/Modifiers/ScrollEdgeBar.swift`): `safeAreaBar` on iOS 26+, `safeAreaInset` over `.bar` on iOS 17–25. No paper fill, no hairline. Filter rows under a large title (Saved's All / Favorites) live in the content, not in a top bar — a top `safeAreaBar` extends the scroll edge effect over the large title and blurs it.
+- **Long titles** — when a screen's title is long, variable content (Dish Preview's AI-generated dish name), it is a serif content heading that wraps; the bar keeps only its actions (`toolbar(removing: .title)` on iOS 18+).
+- **Tint** — the asset-catalog `AccentColor` (ember) tints system controls; no per-site `.tint` needed.
 
 ---
 

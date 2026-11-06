@@ -103,18 +103,16 @@ struct OutcomeFeedbackView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.Stir.paper50)
-            // .safeAreaInset is the right primitive here — it auto-insets
-            // the ScrollView content (no magic-number padding to drift
-            // against the bar's true height), reports the bar as part of
-            // the safe area so SwiftUI's cursor auto-scroll keeps the
+            // A safe-area bar (not ZStack-bottom + manual padding)
+            // auto-insets the ScrollView content, reports the bar as part
+            // of the safe area so SwiftUI's cursor auto-scroll keeps the
             // notes TextField visible above it, and slides up cleanly
-            // with the keyboard. The ZStack-bottom + manual-padding
-            // pattern misses all three.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            // with the keyboard.
+            .scrollEdgeBar(edge: .bottom) {
                 actionBar
             }
+            .navigationTitle("Rate this meal")
             .navigationBarTitleDisplayMode(.inline)
-            .stirNavigationTitle("Rate this meal")
         }
     }
 
@@ -278,24 +276,17 @@ struct OutcomeFeedbackView: View {
     // MARK: - Action bar
 
     private var actionBar: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.Stir.divider)
-                .frame(height: 1)
-            HStack(spacing: CGFloat.Stir.space3) {
-                SecondaryButton(title: "Skip", action: skipAndDismiss)
-                PrimaryButton(
-                    title: submitting ? "Saving…" : "Save",
-                    isBusy: submitting,
-                    isDisabled: rating == 0,
-                    action: { Task { await submit() } },
-                )
-            }
-            .padding(.horizontal, CGFloat.Stir.screenMargin)
-            .padding(.top, CGFloat.Stir.space3)
-            .padding(.bottom, CGFloat.Stir.space3)
+        HStack(spacing: CGFloat.Stir.space3) {
+            SecondaryButton(title: "Skip", action: skipAndDismiss)
+            PrimaryButton(
+                title: submitting ? "Saving…" : "Save",
+                isBusy: submitting,
+                isDisabled: rating == 0,
+                action: { Task { await submit() } },
+            )
         }
-        .background(Color.Stir.paper50)
+        .padding(.horizontal, CGFloat.Stir.screenMargin)
+        .padding(.vertical, CGFloat.Stir.space3)
     }
 
     // MARK: - Helpers

@@ -6,20 +6,16 @@
 // background, default serif-less section headers, and SF Symbol
 // multicolor renderings on `Label("…", systemImage:)` rows. The result
 // drifted visibly from Tonight + Saved (same warm paper50 surface,
-// New York display titles, ember-tinted glyph tiles in paper100 cards
-// with ink100 dividers) and clipped the bottom of the scroll under
-// the floating `StirCustomTabBar`.
+// ember-tinted glyph tiles in paper100 cards with ink100 dividers).
 //
 // Visual grammar (mirrors mockup `14_settings.html`):
-//   - paper50 screen background, principal-toolbar New York title
-//     matching Saved's pattern.
+//   - paper50 screen background under the system navigation bar
+//     (large "Settings" title, Liquid Glass on iOS 26+, ADR 0037).
 //   - Each section: small UPPERCASE labelEyebrow ink500 header + a
 //     paper100 card (`stirCard`) containing one or more rows.
 //   - Rows: 32×32 ember100 tile with an ember600 glyph, title in
 //     labelLg, optional bodySm subtitle, trailing chevron / value /
 //     toggle. Multi-row cards use 1pt ink100 internal dividers.
-//   - 64pt bottom padding to clear the −14pt-encroach `StirCustomTabBar`
-//     (same pattern Tonight uses, see RootView §StirCustomTabBar).
 //
 // Plan & Billing keeps its state-machine surface (free / trial / active
 // / grace / cancelled / expired) but renders through one unified
@@ -88,21 +84,12 @@ struct SettingsRootView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            // Match Tonight's clearance for the −14pt-encroach floating
-            // tab bar. The bar's measured frame is shorter than its
-            // visual extent, so the system-reserved bottom inset alone
-            // leaves the last row clipped (the original-bug screenshot).
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        // Principal-item title in the Stir display serif via the lifted
-        // `.stirNavigationTitle` modifier (SCA-95). Pairs with `.inline`
-        // above. The system `navigationTitle` chrome would fall back to
-        // SF Pro and break the cross-tab visual rhythm with Saved.
-        .stirNavigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
         .stirToast($restoreToast)
         // SCA-19 — full-screen Pantry Management tutorial. Mounts on
         // the Settings root so the cover slides up the first time the

@@ -53,19 +53,14 @@ struct LeftoversPromptView: View {
                 .padding(.top, 20)
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
-            .safeAreaInset(edge: .bottom) { footer }
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
+            .scrollEdgeBar(edge: .bottom) { footer }
             .navigationTitle("Leftovers")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Leftovers",
-                leading: {
-                    StirTopBarCloseButton(action: onDismiss)
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark", action: onDismiss)
+                }
+            }
         }
     }
 
@@ -161,7 +156,6 @@ struct LeftoversPromptView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)
-        .background(Color.Stir.paper50.ignoresSafeArea(.all, edges: .bottom))
     }
 
     private var selectedCountLabel: String {

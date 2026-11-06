@@ -97,19 +97,13 @@ struct OtherOptionsRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             content
-                // Keep `.navigationTitle` for the implicit back-chevron
-                // label deeper pushed screens (DishPreviewView) read,
-                // plus VoiceOver — visible chrome is `.stirTopBar`
-                // below.
                 .navigationTitle("Other options")
                 .navigationBarTitleDisplayMode(.inline)
-                // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-                .stirTopBar(
-                    title: "Other options",
-                    leading: {
-                        StirTopBarCloseButton(action: onDismiss)
-                    },
-                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", systemImage: "xmark", action: onDismiss)
+                    }
+                }
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case let .preview(dish):

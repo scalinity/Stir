@@ -138,52 +138,36 @@ struct SavedMealsView: View {
     var body: some View {
         Group {
             if filteredRows.isEmpty {
-                emptyState
+                // The All / Favorites filter stays above the empty state so
+                // a Favorites-only filter that empties the list can be
+                // switched back.
+                VStack(spacing: 0) {
+                    filterPicker
+                        .padding(.horizontal, CGFloat.Stir.screenMargin)
+                        .padding(.vertical, CGFloat.Stir.space2)
+                    emptyState
+                        .frame(maxHeight: .infinity)
+                }
             } else {
                 list
             }
         }
-        // Page bg + nav bar tinted paper50 keeps the saved-tab surface
-        // continuous with Tonight (matches mockup 10 §Saved Library).
-        //
-        // Nav bar is hidden so we can render the serif title inline in
-        // the safeAreaInset header — the `.principal` ToolbarItem
-        // approach grew the bar unpredictably with a non-default font
-        // and left a wide dead-air gap below the title. The inline
-        // `Text("Saved meals")` carries the `.isHeader` accessibility
-        // trait, so VoiceOver still announces a header for the screen.
+        // Page bg paper50 keeps the saved-tab surface continuous with
+        // Tonight (matches mockup 10 §Saved Library).
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
-        // Propagates to descendants — any future navigationDestination
-        // pushed from this view must restore its own toolbar.
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top) {
-            // Single source of truth for title vertical rhythm. Above-
-            // title padding and title-to-filterBar VStack spacing are
-            // wired to the same value so the "Saved meals" band stays
-            // symmetric — bumping one without the other would silently
-            // un-center the title within its header strip.
-            let titleVerticalPadding = CGFloat.Stir.space5
-            VStack(spacing: titleVerticalPadding) {
-                Text("Saved meals")
-                    .stirFont(.displaySm)
-                    .foregroundStyle(Color.Stir.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.top, titleVerticalPadding)
-                filterBar
-            }
-            .padding(.horizontal, CGFloat.Stir.screenMargin)
-            .padding(.bottom, CGFloat.Stir.space2)
-            .background(Color.Stir.paper50)
-            // Hairline seam — header inset is sticky, so when list
-            // rows scroll behind it the divider keeps the boundary
-            // legible. Subtle on paper50 (ink100 vs #FAF7F2) but
-            // present.
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.Stir.divider)
-                    .frame(height: 1)
+        .navigationTitle("Saved meals")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(
+            text: $searchQuery,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search by title or ingredient",
+        )
+        .textInputAutocapitalization(.sentences)
+        .autocorrectionDisabled()
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                sortMenu
             }
         }
         .task {
@@ -278,112 +262,94 @@ struct SavedMealsView: View {
         }
     }
 
-    // MARK: - Filter bar
+    // MARK: - Filter + sort
 
-    private var filterBar: some View {
-        VStack(spacing: CGFloat.Stir.space2) {
-            HStack {
-                Picker("Filter", selection: Binding(
-                    get: { showFavoritesOnly },
-                    set: { newValue in
-                        // Free tier can't view favorites-only; tap → paywall.
-                        if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
-                            coordinator.presentPaywall(.savedFavoritesGate)
-                            return
-                        }
-                        showFavoritesOnly = newValue
-                    },
-                )) {
-                    Text("All").tag(false)
-                    Text("Favorites").tag(true)
+    private var filterPicker: some View {
+        Picker("Filter", selection: Binding(
+            get: { showFavoritesOnly },
+            set: { newValue in
+                // Free tier can't view favorites-only; tap → paywall.
+                if newValue, case .blockedByTier = entitlements.canAccess(.savedFavorites) {
+                    coordinator.presentPaywall(.savedFavoritesGate)
+                    return
                 }
-                .pickerStyle(.segmented)
-
-                Menu {
-                    Picker("Sort", selection: $sortOption) {
-                        ForEach(SortOption.allCases, id: \.self) { opt in
-                            Text(opt.rawValue).tag(opt)
-                        }
-                    }
-                } label: {
-                    Image.Stir.sort
-                        .foregroundStyle(Color.Stir.ink700)
-                        .minTapTarget()
-                }
-                .accessibilityLabel("Sort — \(sortOption.rawValue)")
-            }
-
-            HStack(spacing: CGFloat.Stir.space2) {
-                Image.Stir.search
-                    .foregroundStyle(Color.Stir.ink500)
-                    .accessibilityHidden(true)
-                TextField("Search by title or ingredient", text: $searchQuery)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled()
-                    .foregroundStyle(Color.Stir.ink900)
-                if !searchQuery.isEmpty {
-                    Button { searchQuery = "" } label: {
-                        Image.Stir.clearField
-                            .foregroundStyle(Color.Stir.ink300)
-                            .minTapTarget()
-                    }
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .frame(minHeight: 44)
-            .padding(.horizontal, CGFloat.Stir.space3)
-            .padding(.vertical, CGFloat.Stir.space2)
-            .stirCard(
-                borderColor: Color.Stir.ink100,
-                radius: CGFloat.Stir.radiusMd,
-            )
+                showFavoritesOnly = newValue
+            },
+        )) {
+            Text("All").tag(false)
+            Text("Favorites").tag(true)
         }
+        .pickerStyle(.segmented)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort", selection: $sortOption) {
+                ForEach(SortOption.allCases, id: \.self) { opt in
+                    Text(opt.rawValue).tag(opt)
+                }
+            }
+        } label: {
+            Label { Text("Sort") } icon: { Image.Stir.sort }
+        }
+        .accessibilityLabel("Sort — \(sortOption.rawValue)")
     }
 
     // MARK: - List
 
     private var list: some View {
-        List(filteredRows) { row in
-            // `.center` so the star aligns with the vertical middle of
-            // the row regardless of how many lines the title wraps to.
-            // `.top` left it hugging the first title baseline, which
-            // looked off when the title spanned two lines.
-            HStack(alignment: .center, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
-                Button {
-                    if let plan = row.plan { cookAgainPlan = plan }
-                } label: {
-                    VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
-                        Text(row.title)
-                            .stirFont(.displaySm)
-                            .foregroundStyle(Color.Stir.textPrimary)
-                        if let lastCooked = row.lastCookedAt {
-                            Text(lastCooked, format: .relative(presentation: .named))
-                                .stirFont(.bodySm)
-                                .foregroundStyle(Color.Stir.textTertiary)
+        List {
+            filterPicker
+                .listRowBackground(Color.Stir.paper50)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(
+                    top: CGFloat.Stir.space2,
+                    leading: CGFloat.Stir.screenMargin,
+                    bottom: CGFloat.Stir.space2,
+                    trailing: CGFloat.Stir.screenMargin,
+                ))
+            ForEach(filteredRows) { row in
+                // `.center` so the star aligns with the vertical middle of
+                // the row regardless of how many lines the title wraps to.
+                // `.top` left it hugging the first title baseline, which
+                // looked off when the title spanned two lines.
+                HStack(alignment: .center, spacing: CGFloat.Stir.space3 + 2) { // 14pt — tight but legible
+                    Button {
+                        if let plan = row.plan { cookAgainPlan = plan }
+                    } label: {
+                        VStack(alignment: .leading, spacing: CGFloat.Stir.space1) {
+                            Text(row.title)
+                                .stirFont(.displaySm)
+                                .foregroundStyle(Color.Stir.textPrimary)
+                            if let lastCooked = row.lastCookedAt {
+                                Text(lastCooked, format: .relative(presentation: .named))
+                                    .stirFont(.bodySm)
+                                    .foregroundStyle(Color.Stir.textTertiary)
+                            }
+                            ratingLine(rating: row.rating)
                         }
-                        ratingLine(rating: row.rating)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Cook this again")
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Cook this again")
 
-                favoriteButton(for: row)
-            }
-            .padding(.vertical, CGFloat.Stir.space1)
-            .listRowBackground(Color.Stir.paper50)
-            .listRowSeparatorTint(Color.Stir.divider)
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    handleDeleteTap(row: row)
-                } label: {
-                    Label("Delete", systemImage: "trash")
+                    favoriteButton(for: row)
                 }
-                // ember700 is the deepest brand red-orange — destructive
-                // intent in the warm palette without the system .red
-                // pop, keeps the saved-tab surface continuous.
-                .tint(Color.Stir.ember700)
+                .padding(.vertical, CGFloat.Stir.space1)
+                .listRowBackground(Color.Stir.paper50)
+                .listRowSeparatorTint(Color.Stir.divider)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        handleDeleteTap(row: row)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    // ember700 is the deepest brand red-orange — destructive
+                    // intent in the warm palette without the system .red
+                    // pop, keeps the saved-tab surface continuous.
+                    .tint(Color.Stir.ember700)
+                }
             }
         }
         .listStyle(.plain)

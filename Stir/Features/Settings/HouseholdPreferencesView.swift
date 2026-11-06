@@ -14,7 +14,7 @@
 //     settings-edit reuse, iOS convention is auto-save-on-change.
 //   - The `Form` body inherited iOS's grey grouped background and
 //     SF Pro section headers, drifting from `SettingsRootView`'s
-//     paper50 + serif principal title + `stirCard()` rows.
+//     paper50 + `stirCard()` rows.
 //
 // Rebuild posture:
 //   - Auto-save on every binding change. `OnboardingViewModel`'s
@@ -25,8 +25,7 @@
 //   - Drop the `Done` toolbar button entirely. The back chevron is
 //     the only dismissal affordance, matching iOS Settings convention.
 //   - Apply the `SettingsRootView` design system: ScrollView + grouped
-//     `stirCard()` rows, principal-toolbar New York title, paper50
-//     toolbar background, 64pt bottom inset for the floating tab bar.
+//     `stirCard()` rows on paper50 under the system navigation bar.
 //   - Picker sub-screens (Allergies / Diet / Goals / Equipment) get
 //     the same DS treatment so the back-stack reads as one continuous
 //     surface, not "Settings → Settings → iOS-default-list".
@@ -64,15 +63,6 @@ struct HouseholdPreferencesView: View {
         }
         .navigationTitle("Household preferences")
         .navigationBarTitleDisplayMode(.inline)
-        // Principal-item title in the Stir display serif via the lifted
-        // `.stirNavigationTitle` modifier (SCA-95). Pairs with the
-        // `.inline` display mode above; both are required because the
-        // system bar renders the navigationTitle text and we then layer
-        // a serif-styled principal item on top to match `SettingsRootView`
-        // and Saved. Removing the trailing `Done` button (auto-save
-        // replaces it) frees the bar's full width so this title no
-        // longer truncates.
-        .stirNavigationTitle("Household preferences")
         .task {
             guard viewModel == nil else { return }
             if let profile = householdStore.profile {
@@ -89,15 +79,17 @@ struct HouseholdPreferencesView: View {
                 )
             }
         }
-        .stirDialog(
+        .alert(
+            "Couldn't save",
             isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } },
             ),
-            title: "Couldn't save",
-            message: errorMessage ?? "",
-            buttons: [.primary("OK") { errorMessage = nil }],
-        )
+        ) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     // MARK: - Main content
@@ -113,11 +105,7 @@ struct HouseholdPreferencesView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            // Match `SettingsRootView` clearance for the −14pt-encroach
-            // floating `StirCustomTabBar`. This view is pushed inside
-            // the Settings tab's NavigationStack, so the floating bar
-            // is still visible behind it.
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4) // 64pt
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
@@ -304,13 +292,12 @@ struct HouseholdPreferencesView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space3)
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4)
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .stirNavigationTitle(title)
     }
 
     private func pickerRow(

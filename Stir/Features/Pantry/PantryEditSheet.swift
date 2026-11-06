@@ -92,22 +92,17 @@ struct PantryEditSheet: View {
             .padding(.top, CGFloat.Stir.space4)
             .padding(.bottom, CGFloat.Stir.space4)
             .background(Color.Stir.paper50)
+            .navigationTitle("Edit item")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: drop the system toolbar — iOS 26 wraps every
-            // ToolbarItem child in Liquid Glass; custom top bar avoids it.
-            .stirTopBar(
-                title: "Edit item",
-                leading: {
-                    StirTopBarCloseButton { onCancel() }
-                },
-                trailing: {
-                    StirTopBarTextButton(
-                        "Save",
-                        emphasis: .prominent,
-                        isEnabled: !name.pantryTrimmed.isEmpty,
-                    ) { commit() }
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { commit() }
+                        .disabled(name.pantryTrimmed.isEmpty)
+                }
+            }
             // Length caps applied at the input layer for immediate
             // user feedback — repository validation guards repeat the
             // check defense-in-depth (review W10).

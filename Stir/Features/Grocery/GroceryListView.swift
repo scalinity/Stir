@@ -7,7 +7,7 @@
 //
 // Visual grammar (mockup 12):
 //   - paper50 background
-//   - Header row: back button + "Grocery" title + share (Reminders) CTA
+//   - System navigation bar: "Grocery" title + Close
 //   - Hero stat row: big serif count + "items to buy · N already in pantry"
 //   - Aisle sections: ember uppercase label + count + hairline divider
 //   - Row: 22pt round checkbox (ink.300 outline → sage.600 fill checked),
@@ -59,18 +59,13 @@ struct GroceryListView: View {
                 }
             }
             .background(Color.Stir.paper50.ignoresSafeArea())
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
             .navigationTitle("Grocery")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Grocery",
-                leading: {
-                    StirTopBarCloseButton(action: onDismiss)
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark", action: onDismiss)
+                }
+            }
             .task {
                 if viewModel.stage == .generating {
                     await viewModel.generate()
@@ -99,7 +94,7 @@ struct GroceryListView: View {
             .padding(.horizontal, 20)
             .padding(.top, 12)
         }
-        .safeAreaInset(edge: .bottom) { footer }
+        .scrollEdgeBar(edge: .bottom) { footer }
         .overlay(alignment: .top) {
             if remindersDeniedToast {
                 RemindersDeniedToast(onDismiss: { remindersDeniedToast = false })
@@ -160,7 +155,6 @@ struct GroceryListView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)
-        .background(Color.Stir.paper50.ignoresSafeArea(.all, edges: .bottom))
     }
 }
 

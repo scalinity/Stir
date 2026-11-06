@@ -83,15 +83,10 @@ struct SolveAgainRoot: View {
                 .navigationDestination(for: ScanFlowRoot.Route.self) { route in
                     switch route {
                     case .options:
-                        // Cancel handling moved into DinnerOptionsView's
-                        // custom `.safeAreaInset(.top)` header (SCA-456)
-                        // because iOS 26 paints toolbar Buttons with
-                        // Liquid Glass material we can't suppress per-
-                        // button. Passing `onCancel` here tells the
-                        // header to render a "Cancel" text button in
-                        // the leading slot; without it, the header
-                        // shows a Stir back-chevron instead (the
-                        // ScanFlowRoot case).
+                        // Passing `onCancel` swaps the system back
+                        // button (which would pop to the hidden
+                        // placeholder root) for a Close toolbar button
+                        // that drops the whole cover.
                         DinnerOptionsView(
                             viewModel: solveViewModel,
                             onTune: { showConstraintsSheet = true },

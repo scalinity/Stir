@@ -48,20 +48,29 @@ struct DishPreviewView: View {
             .padding(.vertical, CGFloat.Stir.space4)
         }
         .background(Color.Stir.paper50)
-        // SCA-436: the system toolbar route was the only place
-        // DishPreview rendered iOS 26 Liquid Glass material (back
-        // chevron + cart + star). Drop it entirely and render a custom
-        // header in `.safeAreaInset(.top)` below. We keep
-        // `.navigationTitle` for the implicit back-chevron label that
-        // ANY caller pushing onto a deeper screen reads, plus
-        // VoiceOver. The system back button is hidden — our custom
-        // back round-icon calls `dismiss()` directly.
+        // The dish title is the content heading (`header`), where long
+        // Gemini-generated names wrap instead of truncating. The bar keeps
+        // back + cart + star; `navigationTitle` stays for VoiceOver and
+        // the back-button label of anything pushed on top.
         .navigationTitle(dish.title)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            stirTopBar
+        .modifier(HiddenBarTitle())
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    presentGrocery()
+                } label: {
+                    Label { Text("Add to grocery") } icon: { Image.Stir.cart }
+                }
+                Button {
+                    handleFavoriteTap()
+                } label: {
+                    Label(
+                        localFavorite ? "Remove from favorites" : "Save to favorites",
+                        systemImage: localFavorite ? "star.fill" : "star",
+                    )
+                }
+            }
         }
         .fullScreenCover(isPresented: $showGrocery) {
             if let plan = viewModel.persistedRecipePlan(for: dish),
@@ -77,23 +86,10 @@ struct DishPreviewView: View {
                 )
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Solid paper50 + hairline divider matches the
-            // OutcomeFeedbackView / Cook Mode action-bar grammar. The
-            // previous `.bar` material rendered translucent and let
-            // scroll content bleed through under the button, which read
-            // as the CTA "floating" mid-air instead of anchored to the
-            // bottom edge.
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.Stir.divider)
-                    .frame(height: 1)
-                startCookingBar
-                    .padding(.horizontal, CGFloat.Stir.screenMargin)
-                    .padding(.top, CGFloat.Stir.space3)
-                    .padding(.bottom, CGFloat.Stir.space3)
-            }
-            .background(Color.Stir.paper50)
+        .scrollEdgeBar(edge: .bottom) {
+            startCookingBar
+                .padding(.horizontal, CGFloat.Stir.screenMargin)
+                .padding(.vertical, CGFloat.Stir.space3)
         }
         .stirToast($errorToast)
         .tutorial(key: .dishPreview) { DishPreviewTutorial() }
@@ -110,60 +106,15 @@ struct DishPreviewView: View {
         }
     }
 
-    // MARK: - Custom top bar (SCA-436)
-
-    /// `.safeAreaInset(.top)` replacement for the previous system
-    /// toolbar. Renders the back chevron, full-width serif title, and
-    /// cart + favorite icon-buttons in Stir's round-icon grammar
-    /// (`StirCircleIconButton`). The title gets the entire row's
-    /// remaining width plus two-line wrap before scale-down, which is
-    /// why "Grilled Salmon with Pesto Penne" no longer mid-word
-    /// truncates — the previous one-line + competing-trailing-items
-    /// layout left only ~150pt for the title text.
-    private var stirTopBar: some View {
-        HStack(alignment: .center, spacing: CGFloat.Stir.space2) {
-            StirCircleIconButton(
-                icon: Image(systemName: "chevron.left"),
-                accessibilityLabel: "Back",
-                action: { dismiss() },
-            )
-
-            Text(dish.title)
-                .stirFont(.displaySm)
-                .foregroundStyle(Color.Stir.textPrimary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-
-            HStack(spacing: CGFloat.Stir.space1) {
-                StirCircleIconButton(
-                    icon: Image.Stir.cart,
-                    accessibilityLabel: "Add to grocery",
-                    action: { presentGrocery() },
-                )
-                StirCircleIconButton(
-                    icon: Image(systemName: localFavorite ? "star.fill" : "star"),
-                    accessibilityLabel: localFavorite ? "Remove from favorites" : "Save to favorites",
-                    foreground: localFavorite ? Color.Stir.ember600 : Color.Stir.ink700,
-                    action: { handleFavoriteTap() },
-                )
-            }
-        }
-        .padding(.horizontal, CGFloat.Stir.space3)
-        .padding(.vertical, CGFloat.Stir.space2)
-        .background(Color.Stir.paper50)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.Stir.divider)
-                .frame(height: 1)
-        }
-    }
-
     // MARK: - Sections
 
     private var header: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
+            Text(dish.title)
+                .stirFont(.displayLg)
+                .foregroundStyle(Color.Stir.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             HStack {
                 HStack(spacing: CGFloat.Stir.space1) {
                     Image.Stir.clock
@@ -370,5 +321,17 @@ struct DishPreviewView: View {
             dismiss()
         }
         .accessibilityHint("Opens Cook Mode step-by-step with optional timers.")
+    }
+}
+
+/// Removes the navigation-bar title on iOS 18+, where the dish title is
+/// already the screen's content heading. iOS 17 keeps the inline title.
+private struct HiddenBarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }

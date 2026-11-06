@@ -1,16 +1,15 @@
 // StepRail
 //
 // Cook Mode tap-mode progress rail. Replaces the page-dot indicator
-// (`StepDots`) inside the top bar with a horizontal-scroll strip of
+// (`StepDots`) with a horizontal-scroll strip of
 // numbered chips that show completed / current / upcoming state and
 // route taps through `viewModel.jumpToStep(_:advancedBy:)`.
 //
 // Shipped under SCA-433 as part of the empty-middle redesign — dots
 // gave progress signal but no journey context; the rail keeps the
 // at-a-glance progress read AND lets the user peek at what's coming
-// (and jump back to a step they want to re-check). Each chip is
-// 36pt circle + optional 60pt label column, matching the close-button
-// grammar in the top bar.
+// (and jump back to a step they want to re-check). Each chip is a
+// 36pt circle + optional 60pt label column.
 //
 // State legend per chip:
 //   - Completed:  ember100 circle, ember600 check, ink500 label.

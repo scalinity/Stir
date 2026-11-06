@@ -63,7 +63,6 @@ struct OnboardingRoot: View {
                 case .setupPreferences:
                     SetupPreferencesView(
                         viewModel: viewModel,
-                        onBack: { path.removeLast() },
                         onContinue: {
                             guard !isAdvancing else { return }
                             isAdvancing = true
@@ -108,7 +107,6 @@ struct OnboardingRoot: View {
                 case .setupKitchen:
                     SetupKitchenView(
                         viewModel: viewModel,
-                        onBack: { path.removeLast() },
                         onComplete: {
                             guard !isAdvancing else { return }
                             isAdvancing = true
@@ -160,14 +158,16 @@ struct OnboardingRoot: View {
                 }
             }
         }
-        .stirDialog(
+        .alert(
+            "Something went wrong",
             isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } },
             ),
-            title: "Something went wrong",
-            message: errorMessage ?? "",
-            buttons: [.primary("OK") { errorMessage = nil }],
-        )
+        ) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 }

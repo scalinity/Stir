@@ -65,37 +65,47 @@ struct StepCardView: View {
             content: { VoiceModeTutorial() },
             shouldPresent: viewModel.isVoiceActive,
         )
-        .stirDialog(
+        // SCA-428: the single exit-confirm presentation for both tap
+        // and voice modes. Do not bind another presentation to
+        // `exitConfirmRequested` on a descendant — duplicates race.
+        .confirmationDialog(
+            "Leave Cook Mode?",
             isPresented: $viewModel.exitConfirmRequested,
-            title: "Leave Cook Mode?",
-            message: "Your progress is saved. You can resume from Tonight Home.",
-            buttons: [
-                .secondary("Pause and resume later") {
-                    Task { await viewModel.exit(markAbandoned: false) }
-                },
-                .destructive("Abandon session") {
-                    Task { await viewModel.exit(markAbandoned: true) }
-                },
-                .cancel("Keep cooking"),
-            ],
-        )
+            titleVisibility: .visible,
+        ) {
+            Button("Pause and resume later") {
+                Task { await viewModel.exit(markAbandoned: false) }
+            }
+            Button("Abandon session", role: .destructive) {
+                Task { await viewModel.exit(markAbandoned: true) }
+            }
+            Button("Keep cooking", role: .cancel) {}
+        } message: {
+            Text("Your progress is saved. You can resume from Tonight Home.")
+        }
+        .navigationTitle("Cook Mode")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Exit Cook Mode", systemImage: "xmark") {
+                    viewModel.requestExitConfirm()
+                }
+            }
+        }
     }
 
-    /// The original Cook Mode body — full chrome with topBar, instruction
+    /// The original Cook Mode body — step rail, recipe strip, instruction
     /// scroll, timer card, and the voice/ask/prev/next bottom rows.
     /// Rendered when no voice session is active. The voice-mode path
     /// uses `VoiceActiveStepView` instead, which has its own simpler
     /// layout per the 2026-04-25 mockup.
     private var tapModeBody: some View {
         VStack(spacing: 0) {
-            topBar
-            // SCA-433: step rail replaces the in-topBar `StepDots`. The
-            // dots gave a progress signal but no journey context — the
-            // rail keeps the at-a-glance progress read AND lets the
-            // user peek at upcoming steps + jump back to a step they
-            // want to re-check. Sits between the topBar and recipeStrip
-            // so it shares the top-chrome region rather than competing
-            // with the instruction body.
+            // SCA-433: the step rail keeps the at-a-glance progress read
+            // AND lets the user peek at upcoming steps + jump back to a
+            // step they want to re-check. Sits above the recipeStrip so
+            // it shares the top region rather than competing with the
+            // instruction body.
             railRow
             recipeStrip
             ScrollView {
@@ -108,7 +118,7 @@ struct StepCardView: View {
                 .padding(.horizontal, CGFloat.Stir.screenMarginHero)
                 .padding(.top, CGFloat.Stir.space5)
                 // SCA-454 / SCA-460: no manual bottom padding. The
-                // `safeAreaInset(edge: .bottom)` below extends the
+                // `scrollEdgeBar(edge: .bottom)` below extends the
                 // ScrollView's safe area by the bottomBar height,
                 // and SwiftUI uses that inset natively to position
                 // scroll content. The pre-fix 140pt → 220pt manual
@@ -124,91 +134,22 @@ struct StepCardView: View {
             // deployment minimum).
             .scrollBounceBehavior(.basedOnSize)
         }
-        .safeAreaInset(edge: .bottom) {
+        .scrollEdgeBar(edge: .bottom) {
             // SCA-460: the SCA-433 up-next preview card was pulled
             // after device review (it didn't earn its real estate;
             // the step rail already conveys the journey). Only the
             // voice / ask / prev-next stack lives in the bottom
-            // inset now. If a future iteration brings back a
+            // bar now. If a future iteration brings back a
             // "what's coming" affordance, prefer a peek sheet over
             // a permanent card so users opt-in.
             bottomBar
-            // FD1-1 fix: paper50 + 1pt hairline divider matches the
-            // app-wide bottom-bar grammar (Settings, Saved, Tonight,
-            // RootView's StirCustomTabBar). Replaces `.background(.bar)`
-            // translucent material that left Cook Mode visually
-            // distinct from every other surface.
-            .background(Color.Stir.paper50)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.Stir.divider)
-                    .frame(height: 1)
-            }
         }
-        // SCA-428: exit-confirm `.stirDialog` lives on `body`'s outer
-        // Group, not here. Two modifiers sharing
+        // SCA-428: the exit-confirm `.confirmationDialog` lives on
+        // `body`'s outer Group, not here. Two presentations sharing
         // `$viewModel.exitConfirmRequested` raced each other.
     }
 
-    // MARK: - Top bar
-
-    /// Cook Mode top bar — three-column layout per
-    /// `stir-app-design/project/DesignMockups/06_cook_mode_tap.html:70-77`.
-    /// LEFT: 36pt rounded close button. CENTER: uppercase "Cook mode ·
-    /// Tap" eyebrow. RIGHT: 36pt rounded eye button (recipe-detail
-    /// peek — semantics deferred, see SCA-93 ticket).
-    ///
-    /// SCA-422: ZStack-overlay centering anchors the eyebrow against
-    /// the full bar width regardless of what flanks it, so the hidden
-    /// eye button doesn't shift the centerline.
-    ///
-    /// SCA-433: `StepDots` no longer lives here — the new `StepRail`
-    /// (rendered between topBar and recipeStrip) carries the progress
-    /// signal and adds journey context the dots couldn't.
-    private var topBar: some View {
-        ZStack {
-            Text("Cook mode · Tap")
-                .stirFont(.labelEyebrow)
-                .foregroundStyle(Color.Stir.ink500)
-                .accessibilityElement(children: .combine)
-
-            HStack(spacing: CGFloat.Stir.space3) {
-                StirCircleIconButton(
-                    icon: Image.Stir.close,
-                    accessibilityLabel: "Exit Cook Mode",
-                    action: { viewModel.requestExitConfirm() },
-                )
-
-                Spacer()
-
-                // Eye-button affordance — the mockup's recipe-detail peek
-                // surface. Wiring the destination (modal sheet of the full
-                // recipe) is out of scope for SCA-93 per ticket: "Semantics
-                // TBD — recommend recipe-detail peek (modal sheet) since
-                // that's a pattern users will want anyway. Confirm with
-                // Daniel before wiring."
-                //
-                // SCA-311 S4: hidden under `if false` until the peek-sheet
-                // design lands. A `.disabled(true)` no-op reads as broken
-                // to beta testers; the affordance is suppressed entirely
-                // rather than dimmed. Re-enable by flipping `if false` to
-                // `if true` (or gating on a feature flag) when wiring the
-                // destination.
-                if false {
-                    StirCircleIconButton(
-                        icon: Image(systemName: "eye"),
-                        accessibilityLabel: "Recipe overview",
-                        action: {},
-                    )
-                    .disabled(true)
-                }
-            }
-        }
-        .padding(.horizontal, CGFloat.Stir.space4)
-        .padding(.vertical, CGFloat.Stir.space2)
-    }
-
-    /// Recipe strip — sits between the top bar and the scrollable
+    /// Recipe strip — sits between the step rail and the scrollable
     /// instruction body. Two-line layout:
     ///
     ///     <recipe title (semibold, up to 2 lines)>

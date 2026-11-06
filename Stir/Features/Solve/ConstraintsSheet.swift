@@ -59,18 +59,13 @@ struct ConstraintsSheet: View {
                 .padding(.bottom, CGFloat.Stir.space5)
             }
             .background(Color.Stir.paper50)
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
             .navigationTitle("Tonight's constraints")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Tonight's constraints",
-                leading: {
-                    StirTopBarCloseButton { dismiss() }
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                }
+            }
         }
     }
 

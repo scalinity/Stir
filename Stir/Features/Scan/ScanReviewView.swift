@@ -95,47 +95,33 @@ struct ScanReviewView: View {
         .background(Color.Stir.paper50.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .stirDialog(
-            isPresented: editAlertBinding,
-            title: "Edit ingredient",
-            buttons: [
-                .primary("Save") {
-                    if let target = editTarget {
-                        viewModel.editIngredient(id: target.id, newName: editBuffer)
-                    }
-                    editTarget = nil
-                    editBuffer = ""
-                },
-                .cancel("Cancel") {
-                    editTarget = nil
-                    editBuffer = ""
-                },
-            ],
-        ) {
-            InputField(
-                placeholder: "Ingredient name",
-                text: $editBuffer,
-                autoFocusOnAppear: true,
-            )
+        .alert("Edit ingredient", isPresented: editAlertBinding) {
+            // Captured when the alert's actions are built: the system
+            // flips `isPresented` to false (clearing `editTarget` via
+            // `editAlertBinding`) before a button's action runs.
+            let targetID = editTarget?.id
+            TextField("Ingredient name", text: $editBuffer)
+            Button("Save") {
+                if let targetID {
+                    viewModel.editIngredient(id: targetID, newName: editBuffer)
+                }
+                editTarget = nil
+                editBuffer = ""
+            }
+            Button("Cancel", role: .cancel) {
+                editTarget = nil
+                editBuffer = ""
+            }
         }
-        .stirDialog(
-            isPresented: $showAddAlert,
-            title: "Add ingredient",
-            buttons: [
-                .primary("Add") {
-                    viewModel.addIngredientManually(addBuffer)
-                    addBuffer = ""
-                },
-                .cancel("Cancel") {
-                    addBuffer = ""
-                },
-            ],
-        ) {
-            InputField(
-                placeholder: "Ingredient name",
-                text: $addBuffer,
-                autoFocusOnAppear: true,
-            )
+        .alert("Add ingredient", isPresented: $showAddAlert) {
+            TextField("Ingredient name", text: $addBuffer)
+            Button("Add") {
+                viewModel.addIngredientManually(addBuffer)
+                addBuffer = ""
+            }
+            Button("Cancel", role: .cancel) {
+                addBuffer = ""
+            }
         }
         // SCA-19 — full-screen scan-review tutorial. Suppressed during
         // the initial parse phase + before any ingredients have

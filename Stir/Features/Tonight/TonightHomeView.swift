@@ -106,16 +106,7 @@ struct TonightHomeView: View {
             }
             .padding(.horizontal, CGFloat.Stir.screenMargin)
             .padding(.top, CGFloat.Stir.space2)
-            // Generous bottom padding so the last row (Rescan / Solve
-            // again secondary tiles) clears the floating tab bar with
-            // headroom even at max scroll. Earlier 24pt was just barely
-            // sufficient when the bar used a positive bottom inset, but
-            // the bar's current −12pt encroach into the home-indicator
-            // strip means the safe-area-reserved height is smaller than
-            // its visual extent — the ScrollView reserves the smaller
-            // measurement, leaving the visual fill to clip the bottom
-            // of scroll content. 64pt fully clears it.
-            .padding(.bottom, CGFloat.Stir.space7 + CGFloat.Stir.space4)  // 64pt
+            .padding(.bottom, CGFloat.Stir.space5)
         }
         .background(Color.Stir.paper50)
         .overlay(alignment: .top) { toastOverlay }

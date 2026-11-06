@@ -28,18 +28,13 @@ struct ProComparisonSheet: View {
             }
             .background(Color.Stir.backgroundPrimary)
             .tint(Color.Stir.ember600)
-            // Keep `.navigationTitle` for the implicit back-chevron
-            // label any deeper pushed screen reads, plus VoiceOver —
-            // visible chrome is `.stirTopBar` below.
             .navigationTitle("Compare plans")
             .navigationBarTitleDisplayMode(.inline)
-            // SCA-457: custom top bar escapes iOS 26 Liquid Glass.
-            .stirTopBar(
-                title: "Compare plans",
-                trailing: {
-                    StirTopBarTextButton("Done") { dismiss() }
-                },
-            )
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 

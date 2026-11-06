@@ -8,10 +8,10 @@
 // / .error).
 //
 // Layout (matches Daniel's 2026-04-25 voice-mode mockup):
-//   - Top bar:
-//       X close (left, 36×36 paper200 rounded square)
-//       VOICE · PREMIUM pill (center, voice100 bg + voice600 ink)
-//       "N / total" step counter (right, ink500 plain text)
+//   - System navigation bar: "Cook Mode" title + Close (owned by
+//     StepCardView, shared with tap mode)
+//   - Status row: VOICE · PREMIUM pill (voice100 bg + voice600 ink)
+//     and "N / total" step counter (ink500 plain text)
 //   - STEP N small-caps eyebrow (voice600)
 //   - Recipe instruction text (displayMd, ink900, serif)
 //   - YOU SAID / STIR transcript card (only when transcript present)
@@ -37,7 +37,7 @@ struct VoiceActiveStepView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
+            statusRow
             ScrollView {
                 VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
                     stepEyebrow
@@ -66,8 +66,9 @@ struct VoiceActiveStepView: View {
             .padding(.bottom, CGFloat.Stir.space3)
             .padding(.top, CGFloat.Stir.space2)
         }
-        // SCA-428: exit-confirm `.stirDialog` lives on the parent
-        // StepCardView's outer Group, not here. Two modifiers sharing
+        // SCA-428: the exit-confirm `.confirmationDialog` and the Close
+        // toolbar button live on the parent StepCardView's outer Group,
+        // not here. Two presentations sharing
         // `$viewModel.exitConfirmRequested` raced each other.
     }
 
@@ -117,38 +118,18 @@ struct VoiceActiveStepView: View {
         }
     }
 
-    // MARK: - Top bar
+    // MARK: - Status row
 
-    private var topBar: some View {
+    /// Voice-mode status under the system navigation bar: the Premium
+    /// voice pill and the "N / total" step counter. Exit lives in the
+    /// toolbar (StepCardView).
+    private var statusRow: some View {
         HStack(spacing: CGFloat.Stir.space2) {
-            // SCA-428: confirm dialog is owned by the parent
-            // StepCardView's outer Group. Do not co-locate one here.
-            Button {
-                viewModel.requestExitConfirm()
-            } label: {
-                Image.Stir.close
-                    .stirFont(.labelMd).fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.ink700)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        RoundedRectangle(cornerRadius: CGFloat.Stir.radiusMd, style: .continuous)
-                            .fill(Color.Stir.paper200),
-                    )
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Exit Cook Mode")
-            .frame(maxWidth: .infinity, alignment: .leading)
-
             voicePremiumPill
-                .layoutPriority(1)
-
-            // Step counter "N / total" — mirrored width via leading-spacer
-            // pattern keeps the pill centered against the X button on
-            // the left without a third reserved slot. Aligned trailing.
+            Spacer(minLength: 0)
             Text("\(viewModel.currentStepIndex + 1) / \(viewModel.totalSteps)")
                 .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.ink500)
-                .frame(maxWidth: .infinity, alignment: .trailing)
                 .accessibilityLabel("Step \(viewModel.currentStepIndex + 1) of \(viewModel.totalSteps)")
         }
         .padding(.horizontal, CGFloat.Stir.space3)
