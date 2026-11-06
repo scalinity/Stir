@@ -33,7 +33,9 @@ if (!GEMINI_API_KEY) {
 
 export enum GeminiModel {
   Flash = 'gemini-3-flash-preview',
-  FlashLite = 'gemini-3.1-flash-lite-preview',
+  // GA replacement for `gemini-3.1-flash-lite-preview` (shut down 2026-05-25;
+  // ADR 0038). Google lists its shutdown as 2027-05-07.
+  FlashLite = 'gemini-3.1-flash-lite',
   FlashLivePreview = 'gemini-3.1-flash-live-preview',
 }
 

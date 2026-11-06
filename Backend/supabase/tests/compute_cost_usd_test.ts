@@ -6,8 +6,9 @@
 // Covers:
 //   - Baseline case (voice turn, no caching) matches the spike-validated
 //     $0.006/turn figure from CLAUDE.md §Cost model
-//   - cachedInputTokens discounts the cached portion at 25% of textInPer1M
-//     and leaves non-text inputs untouched
+//   - cachedInputTokens discounts the cached portion at the vendor's
+//     published cached rate (Gemini Flash 10%) and leaves non-text inputs untouched
+//   - cacheWriteInputTokens bills the Claude cache-write rate on its share
 //   - Defensive clamp: `cachedInputTokens > textInputTokens` doesn't
 //     produce a negative uncached-text portion
 //   - FlashLivePreview with cached=0 (the ADR 0015 locked-in steady state)
@@ -17,6 +18,7 @@
 import { assertEquals } from '@std/assert';
 import { computeCostUSD } from '../functions/_shared/ai_request_log.ts';
 import { GeminiModel } from '../functions/_shared/gemini.ts';
+import { ClaudeModel } from '../functions/_shared/claude.ts';
 
 Deno.test('computeCostUSD baseline voice turn matches $0.006', () => {
   // CLAUDE.md §Cost model baseline: 1000 text sys prompt + 1150 audio in +
@@ -50,24 +52,24 @@ Deno.test('computeCostUSD with cachedInputTokens=0 is identical to omitting the 
   assertEquals(without, 0.006);
 });
 
-Deno.test('computeCostUSD discounts cached text portion at 25% rate (Flash)', () => {
-  // Flash textInPer1M = $0.50, cachedInPer1M = $0.125.
+Deno.test('computeCostUSD discounts cached text portion at 10% rate (Flash)', () => {
+  // Flash textInPer1M = $0.50, cachedInPer1M = $0.05 (verified 2026-11-06).
   // 2000 text in total, 1000 of which are cached:
   //   uncached: 1000 * $0.50  / 1e6 = $0.000500
-  //   cached:   1000 * $0.125 / 1e6 = $0.000125
+  //   cached:   1000 * $0.05  / 1e6 = $0.000050
   //   out:       500 * $3.00  / 1e6 = $0.001500
-  //   total                         = $0.002125
+  //   total                         = $0.002050
   const cost = computeCostUSD(GeminiModel.Flash, {
     textInputTokens: 2000,
     cachedInputTokens: 1000,
     textOutputTokens: 500,
   });
-  assertEquals(cost, 0.002125);
+  assertEquals(cost, 0.00205);
 });
 
-Deno.test('computeCostUSD with all text cached costs 25% of the fully-uncached case', () => {
+Deno.test('computeCostUSD with all text cached costs 10% of the fully-uncached case', () => {
   // Full cache hit on a pure-text Flash call — cost should collapse to
-  // exactly 25% of the uncached cost (input tier only; output is identical).
+  // exactly 10% of the uncached cost (input tier only; output is identical).
   const full = computeCostUSD(GeminiModel.Flash, {
     textInputTokens: 10_000,
     textOutputTokens: 0,
@@ -78,11 +80,11 @@ Deno.test('computeCostUSD with all text cached costs 25% of the fully-uncached c
     textOutputTokens: 0,
   });
   //   full:       10000 * $0.50  / 1e6 = $0.005000
-  //   allCached:  10000 * $0.125 / 1e6 = $0.001250
-  //   ratio = 0.25
+  //   allCached:  10000 * $0.05  / 1e6 = $0.000500
+  //   ratio = 0.10
   assertEquals(full, 0.005);
-  assertEquals(allCached, 0.00125);
-  assertEquals(Math.round((allCached / full) * 100) / 100, 0.25);
+  assertEquals(allCached, 0.0005);
+  assertEquals(Math.round((allCached / full) * 100) / 100, 0.1);
 });
 
 Deno.test('computeCostUSD clamps cachedInputTokens ≤ textInputTokens', () => {
@@ -101,8 +103,8 @@ Deno.test('computeCostUSD clamps cachedInputTokens ≤ textInputTokens', () => {
     textOutputTokens: 0,
   });
   //   clamped cached = 8000, uncached = 0
-  //   total = 8000 * $0.125 / 1e6 = $0.001000
-  assertEquals(cost, 0.001);
+  //   total = 8000 * $0.05 / 1e6 = $0.000400
+  assertEquals(cost, 0.0004);
 });
 
 Deno.test('computeCostUSD FlashLivePreview with cached=0 matches pre-discount math (ADR 0015 steady state)', () => {
@@ -205,4 +207,21 @@ Deno.test('computeCostUSD discounts cached text on Live when non-zero (hypotheti
   //   audio out:      125 * $12.00  / 1e6 = $0.001500
   //   total                               = $0.004875
   assertEquals(cost, 0.004875);
+});
+
+Deno.test('computeCostUSD splits Claude input into uncached, cache-read and cache-write (Haiku 5.5)', () => {
+  // Haiku 5.5: input $0.10, cache read $0.01, cache write $0.125, output $0.50.
+  // 10000 input total = 6000 uncached + 3000 cache read + 1000 cache write:
+  //   uncached:   6000 * $0.10  / 1e6 = $0.000600
+  //   read:       3000 * $0.01  / 1e6 = $0.000030
+  //   write:      1000 * $0.125 / 1e6 = $0.000125
+  //   out:        2000 * $0.50  / 1e6 = $0.001000
+  //   total                           = $0.001755
+  const cost = computeCostUSD(ClaudeModel.Haiku, {
+    textInputTokens: 10_000,
+    cachedInputTokens: 3000,
+    cacheWriteInputTokens: 1000,
+    textOutputTokens: 2000,
+  });
+  assertEquals(cost, 0.001755);
 });
