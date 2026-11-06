@@ -1073,12 +1073,12 @@ struct CookTurnResponse: Decodable, Sendable {
     }
 }
 
-// MARK: - Realtime Session (step 6 C.2 — Gemini Live mint)
+// MARK: - Realtime Session (step 6 C.2 — OpenAI Realtime mint)
 //
 // Wire-format for /v1/ai/realtime-session. Called by RealtimeSession
 // actor at Cook Mode entry on the Premium+ voice path. Backend mints a
-// single-use ephemeral Gemini Live token and returns a ready-to-open
-// WebSocket URL (access_token query param already embedded).
+// short-lived OpenAI client secret and returns the WebSocket URL to
+// open with it as a bearer token.
 //
 // Contract pinned here so a backend drift is a build break, not a
 // runtime surprise. See Backend/supabase/functions/realtime-session/.
@@ -1090,8 +1090,8 @@ struct RealtimeSessionRequest: Encodable, Sendable {
     let currentStepNumber: Int
     let recipeContext: RealtimeRecipeContext
     let householdContext: RealtimeHouseholdContext
-    /// Optional ~200-300 token compact recap of the last 3 voice turns +
-    /// timer state. Backend appends to systemInstruction for continuity
+    /// Optional compact recap (step position). Backend appends it to the
+    /// session instructions for continuity
     /// across session refresh handoffs (ADR 0014). Absent on initial mint.
     let recap: String?
     /// True when this mint is a silent refresh within an already-active
@@ -1499,25 +1499,28 @@ struct VoiceTurnUsageRequest: Encodable, Sendable, Equatable {
         let turnIndex: Int
         let promptTokensText: Int
         let promptTokensAudio: Int
-        /// Gemini's raw `promptTokenCount` summed across generation
-        /// passes. May exceed `text + audio` by the AUDIO-mode per-pass
-        /// overhead (CLAUDE.md sharp-edge #15) which Gemini doesn't
-        /// bucket into `promptTokensDetails`. Backend uses this for
-        /// `ai_request_log.input_tokens` (accurate dashboards) and
-        /// prices the uncategorized remainder at audio rate.
+        /// The provider's raw `input_tokens` summed across the turn's
+        /// responses. May exceed `text + audio` if the provider reports
+        /// tokens it doesn't bucket into `input_token_details`. Backend
+        /// uses this for `ai_request_log.input_tokens` (accurate
+        /// dashboards) and prices any uncategorized remainder at audio
+        /// rate.
         let promptTokensTotal: Int
-        /// Gemini Live `cachedContentTokenCount` — portion of
-        /// `promptTokensTotal` served from implicit context cache. Nil
-        /// when the accumulator was zero (caching didn't fire) — sent
+        /// Cached TEXT input tokens (`cached_tokens_details.text_tokens`)
+        /// — portion of `promptTokensTotal` served from the prompt cache.
+        /// Nil when the accumulator was zero (caching didn't fire) — sent
         /// only when > 0 so the wire stays tight on the common path.
         /// Powers `ai_request_log.prompt_cached_tokens` + PostHog
-        /// `$ai_cache_read_input_tokens`. The spec §9 cap-reversal
-        /// trigger measures caching via this field.
+        /// `$ai_cache_read_input_tokens`.
         let promptTokensCached: Int?
+        /// Cached AUDIO input tokens (`cached_tokens_details.audio_tokens`),
+        /// priced at a different cached rate than text. Omitted from the
+        /// wire when nil (synthesized `Encodable` uses `encodeIfPresent`).
+        let promptTokensCachedAudio: Int?
         let responseTokensText: Int
         let responseTokensAudio: Int
-        /// Gemini's raw `responseTokenCount` summed across generation
-        /// passes. Same contract as `promptTokensTotal` on the response
+        /// The provider's raw `output_tokens` summed across the turn's
+        /// responses. Same contract as `promptTokensTotal` on the response
         /// side — remainder priced at audio-out rate.
         let responseTokensTotal: Int
         let latencyMS: Int
@@ -1532,6 +1535,7 @@ struct VoiceTurnUsageRequest: Encodable, Sendable, Equatable {
             case promptTokensAudio = "prompt_tokens_audio"
             case promptTokensTotal = "prompt_tokens_total"
             case promptTokensCached = "prompt_tokens_cached"
+            case promptTokensCachedAudio = "prompt_tokens_cached_audio"
             case responseTokensText = "response_tokens_text"
             case responseTokensAudio = "response_tokens_audio"
             case responseTokensTotal = "response_tokens_total"
@@ -1544,7 +1548,7 @@ struct VoiceTurnUsageRequest: Encodable, Sendable, Equatable {
 
         /// Turn outcome from iOS's perspective. Mirrors the server enum.
         /// `turnComplete` is the normal happy-path exit; `toolResponse`
-        /// marks a turn that ended on a Gemini tool call (substitution,
+        /// marks a turn that ended on a model tool call (substitution,
         /// advance_step, start_timer); `error` marks an upstream WS
         /// failure; `interrupted` marks a user barge-in.
         enum EndedReason: String, Encodable, Sendable {
@@ -1568,29 +1572,29 @@ struct VoiceTurnUsageRequest: Encodable, Sendable, Equatable {
 }
 
 struct RealtimeSessionResponse: Decodable, Sendable {
-    /// `auth_tokens/<hex>` — opaque value iOS passes unchanged as the
-    /// WebSocket `access_token` query param. NOT an OAuth token.
+    /// OpenAI ephemeral client secret (`ek_...`) — opaque value iOS sends
+    /// unchanged as the WebSocket `Authorization: Bearer` header. NOT an
+    /// OAuth token, and never logged.
     let authToken: String
-    /// ISO-8601 hard session deadline (35 min past mint). The WebSocket
-    /// MUST be closed and a new one opened before this expires.
+    /// ISO-8601 time after which the client secret can no longer open a
+    /// connection (120 s past mint). It does not bound the session once
+    /// connected — OpenAI's 60-minute session cap does. Pre-mint
+    /// freshness is judged against this.
     let expiresAt: String
     /// Server-minted correlation id for telemetry. Matches
     /// ai_request_log.id on the backend for this mint.
     let sessionID: String
-    /// Full WebSocket URL ready to open. Already has
-    /// `?access_token=<auth_token>` embedded.
+    /// Full WebSocket URL ready to open
+    /// (`wss://api.openai.com/v1/realtime?model=...`). Carries no
+    /// credential; the host is pinned by the transport.
     let wsURL: String
     /// Prompt version baked into the session (spec §15 telemetry tag).
     let promptVersion: String
-    /// Pre-serialized `{"setup": {...}}` JSON blob that MUST be sent as
-    /// the first WebSocket message after `ws.open`. Without it the
-    /// server never emits `setupComplete` — even though the
-    /// `bidiGenerateContentSetup` config was baked into the ephemeral
-    /// token at mint time. Verified against the official
-    /// google-gemini/gemini-live-api-examples reference app
-    /// (2026-04-20): client still sends `sendInitialSetupMessages()` on
-    /// the ephemeral-token path. iOS parses this blob via
-    /// JSONSerialization and forwards it verbatim.
+    /// Pre-serialized `{"type":"session.update","session":{...}}` JSON
+    /// blob that MUST be sent as the first WebSocket message after
+    /// `ws.open`. The server answers it with `session.updated`, which is
+    /// the handshake-complete signal. iOS forwards it verbatim, without
+    /// parsing it.
     let setupFrameJSON: String
 
     enum CodingKeys: String, CodingKey {

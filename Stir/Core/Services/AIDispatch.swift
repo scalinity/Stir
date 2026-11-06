@@ -205,21 +205,20 @@ actor AIDispatch {
         return response
     }
 
-    // MARK: - Realtime Session mint (step 6 C.2 — Gemini Live)
+    // MARK: - Realtime Session mint (step 6 C.2 — OpenAI Realtime)
 
-    /// POST /v1/ai/realtime-session. Mints a single-use Gemini Live
-    /// ephemeral token for one Cook Session. Backend handles the actual
-    /// mint to Google's `/v1alpha/auth_tokens` using the paid-tier
-    /// GEMINI_API_KEY (never leaves Supabase). Response includes a
-    /// ready-to-open `ws_url` with `access_token` pre-embedded.
+    /// POST /v1/ai/realtime-session. Mints a short-lived OpenAI client
+    /// secret for one Cook Session. Backend handles the actual mint
+    /// using the OpenAI API key (never leaves Supabase). Response includes
+    /// the `ws_url` to open and the secret to authenticate it with.
     ///
     /// Timeout is 15s — slightly tighter than cook-turn because mint
-    /// p95 measured ~1.2s against paid tier, and a mid-session refresh
-    /// hanging 15s would leak audibly past the seamless-handoff budget.
+    /// p95 measured ~1.2s, and a mid-session refresh hanging 15s would
+    /// leak audibly past the seamless-handoff budget.
     ///
-    /// Throws `StirError.server(code: .aiVoice01)` on upstream Gemini
-    /// outage (backend maps mint 5xx to AI-VOICE-01) so iOS can trigger
-    /// the fall-back to C.3 path cleanly.
+    /// Throws `StirError.server(code: .aiVoice01)` on upstream outage
+    /// (backend maps mint 5xx to AI-VOICE-01) so iOS can trigger the
+    /// fall-back to C.3 path cleanly.
     func realtimeSession(request body: RealtimeSessionRequest) async throws -> RealtimeSessionResponse {
         let url = config.supabase.url.appendingPathComponent("/functions/v1/realtime-session")
         var request = URLRequest(url: url)

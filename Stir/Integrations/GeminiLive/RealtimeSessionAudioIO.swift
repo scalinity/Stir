@@ -3,7 +3,7 @@
 // SCA-79 — extracted from RealtimeSession.swift. Owns:
 //
 //   - **Outbound mic forwarding**: PCM16 → base64 →
-//     `realtimeInput.audio` frames pushed onto the live transport,
+//     `input_audio_buffer.append` frames pushed onto the live transport,
 //     with the half-duplex mute window during model speech / playback
 //     drain / refresh handoff.
 //   - **AVAudioSession event handling**: interruption, route change,
@@ -103,7 +103,7 @@ extension RealtimeSession {
     /// fallback-to-C.3 flow (via `.error` state) handle the user-facing
     /// recovery. Attempting an in-place refresh on `.interruptionEnded`
     /// is risky — the OS may be mid-interruption on the AVAudioSession
-    /// even after announcing end, and forcing Gemini Live audio through
+    /// even after announcing end, and forcing Realtime audio through
     /// a half-valid session produces worse UX than a clean "tap again
     /// to re-start voice" cue.
     private func handleAudioInterruption(_ event: AudioInterruptionObserver.Event) {
@@ -291,7 +291,7 @@ extension RealtimeSession {
                     // pushing bytes. If this log never appears while
                     // user is obviously speaking, the AVAudioEngine
                     // tap callback isn't firing and the whole
-                    // "silence from Gemini" problem is on iOS side.
+                    // "silence from the model" problem is on iOS side.
                     if framesSent >= nextLogAtFrame {
                         VoiceSessionLog.log("mic.sent", [
                             "frames": framesSent,

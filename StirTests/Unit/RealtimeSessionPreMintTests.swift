@@ -156,7 +156,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
     // MARK: - P1-P.2 — ready-before-refresh
 
     /// Happy path: a pre-mint task has completed successfully BEFORE
-    /// consume is called, within the 45 s staleness budget. Consume
+    /// consume is called, within the staleness budget. Consume
     /// must return the ready task; the caller awaits `.value` and
     /// receives the pre-minted `RealtimeSessionResponse`. Post-consume
     /// the slot must be cleared via the consumer's defer (state
@@ -178,7 +178,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         session._testSetPreMintTask(ready, startedAt: Date())
         XCTAssertTrue(session._testPendingPreMintIsSet, "precondition: slot set")
 
-        // Act: consume well within the 45 s budget — consumer should
+        // Act: consume well within the staleness budget — consumer should
         // return the ready task via the fresh branch.
         let consumed = session._testConsumePreMintedTaskIfFresh()
         let result = try await XCTUnwrap(consumed).value
@@ -208,7 +208,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
 
     // MARK: - P1-P.3 — staleness boundary (both sides)
 
-    /// Fresh side of the 45 s staleness boundary. A task with a
+    /// Fresh side of the staleness boundary. A task with a
     /// `startedAt` timestamp 1 s INSIDE the budget must be returned by
     /// consume (fresh branch). Paired with the stale-side test below:
     /// together they catch a refactor that flips the comparison
@@ -219,8 +219,8 @@ final class RealtimeSessionPreMintTests: XCTestCase {
     ///
     /// Uses `LiveSessionBudget.preMintStalenessSec` directly so the
     /// tests survive a future bump of the constant — the 1 s margin
-    /// is relative to whatever the budget is, not to the hard-coded
-    /// 45 s.
+    /// is relative to whatever the budget is, not to a hard-coded
+    /// value.
     func test_preMintTask_justUnderStalenessBoundary_returnsTask() async throws {
         let session = makeDriver()
         let stubSessionID = UUID().uuidString
@@ -252,13 +252,14 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         )
     }
 
-    /// Stale side of the 45 s staleness boundary. A task with a
+    /// Stale side of the staleness boundary (`preMintStalenessSec`, 90 s
+    /// against the 120 s client-secret connect window). A task with a
     /// `startedAt` timestamp 1 s OUTSIDE the budget must be cancelled
     /// AND the consumer must return nil. The cancel is load-bearing:
     /// if stale tasks leak, the backend mint completes in the
-    /// background, wastes a mint request, and holds a Gemini
-    /// auth_tokens resource until it naturally expires.
-    func test_preMintTask_stalenessBeyond45s_returnsNilAndCancels() async throws {
+    /// background, wastes a mint request, and leaves a client secret
+    /// unused until it naturally expires.
+    func test_preMintTask_stalenessBeyondBudget_returnsNilAndCancels() async throws {
         let session = makeDriver()
         let sentinel = Task<RealtimeSessionResponse, Error> {
             try await Task.sleep(for: .seconds(60))
@@ -287,7 +288,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
 
         // Assert the task was cancelled — NOT leaked-running. If this
         // fails, the backend mint will still complete and waste a
-        // Gemini auth_tokens resource.
+        // client secret.
         do {
             _ = try await sentinel.value
             XCTFail("staleness branch must cancel the task, not leak it")
@@ -436,12 +437,12 @@ final class RealtimeSessionPreMintTests: XCTestCase {
 
             let body = """
             {
-                "auth_token": "auth_tokens/seam-test",
+                "auth_token": "ek_seam_test",
                 "expires_at": "2027-01-01T00:00:00Z",
                 "session_id": "\(stubSessionID)",
                 "ws_url": "wss://test.invalid",
                 "prompt_version": "1.0.0",
-                "setup_frame_json": "{\\"setup\\":{}}"
+                "setup_frame_json": "{\\"type\\":\\"session.update\\",\\"session\\":{}}"
             }
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
@@ -499,7 +500,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         transport.yield(.setupComplete)
         try await waiter.value
 
-        try await transport.send(.setupRawJSON("{\"setup\":{}}"))
+        try await transport.send(.setupRawJSON("{\"type\":\"session.update\",\"session\":{}}"))
         XCTAssertEqual(transport.sentFrames.count, 1, "mock transport must capture outbound frames")
         transport.close()
         XCTAssertTrue(transport.isClosed, "mock transport must record close state")
@@ -518,7 +519,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         let transport = MockLiveTransport()
         transport.openError = OpenStubError()
         XCTAssertThrowsError(
-            try transport.open(url: URL(string: "wss://test.invalid")!),
+            try transport.open(url: URL(string: "wss://test.invalid")!, authToken: "ek_test"),
         ) { error in
             XCTAssertTrue(error is OpenStubError, "openError must propagate verbatim")
         }
@@ -530,7 +531,7 @@ final class RealtimeSessionPreMintTests: XCTestCase {
         let transport = MockLiveTransport()
         transport.sendError = SendStubError()
         do {
-            try await transport.send(.setupRawJSON("{\"setup\":{}}"))
+            try await transport.send(.setupRawJSON("{\"type\":\"session.update\",\"session\":{}}"))
             XCTFail("send(_:) must throw when sendError is set")
         } catch is SendStubError {
             // expected

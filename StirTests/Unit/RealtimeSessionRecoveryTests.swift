@@ -3,10 +3,11 @@
 // Pins the two critical-path recovery behaviors added in the 2026-04-23
 // review remediation:
 //
-//   P0-L: `turnStuckWatchdogFired` — Gemini Live drops `turnComplete`
-//         on multi-pass tool-call turns (CLAUDE.md §sharp-edge #20).
-//         The watchdog synthesizes a turnComplete after 15 s of silence
-//         on `.modelSpeaking`; the VoiceTurn row MUST persist with
+//   P0-L: `turnStuckWatchdogFired` — the turn-completing server event
+//         can go missing (observed on multi-pass tool-call turns on the
+//         previous provider, and the client still owns every transition
+//         on OpenAI). The watchdog synthesizes a turnComplete after 15 s
+//         of silence on `.modelSpeaking`; the VoiceTurn row MUST persist with
 //         `resultType=.error, errorCode="turnComplete_timeout"` so
 //         ADR 0015's cap-reversal trigger query can count these.
 //
@@ -126,7 +127,8 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
         await driver._testInjectFrame(.toolCall(toolCall))
 
         // Transition to .modelSpeaking (toolCalling → modelSpeaking is
-        // the production path when Gemini resumes audio after toolResponse).
+        // the production path when the model resumes audio after the
+        // tool output + response.create).
         driver._testAdvance(to: .modelSpeaking)
 
         driver._testFireTurnStuckWatchdog()
@@ -298,14 +300,7 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
             sentry: NoOpSentryReporter(),
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
-        let mint = RealtimeSessionResponse(
-            authToken: "auth_tokens/test",
-            expiresAt: "2027-01-01T00:00:00Z",
-            sessionID: UUID().uuidString,
-            wsURL: "wss://test.invalid",
-            promptVersion: "1.0.0",
-            setupFrameJSON: "{\"setup\":{}}",
-        )
+        let mint = MockMintResponse.make(wsURL: "wss://test.invalid")
         return RealtimeSession(
             testingOnlyMintResponse: mint,
             aiDispatch: aiDispatch,

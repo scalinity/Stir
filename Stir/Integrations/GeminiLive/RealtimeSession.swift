@@ -1,40 +1,40 @@
 // RealtimeSession
 //
-// Gemini Live (3.1 Flash Live Preview) driver. Conforms to
+// OpenAI Realtime (gpt-realtime-2.1-mini) driver. Conforms to
 // VoiceSessionDriver so CookModeViewModel can hold `any VoiceSessionDriver`
 // without branching on path type — telemetry keys off `pathLabel`.
 //
 // Lifecycle mirrors SpeechFallbackService:
-//   preWarm  → mint token (via /v1/ai/realtime-session) + open WS +
-//              wait for setupComplete + prepare AudioPipeline.
-//              Throws on mint failure or setup timeout — VM downgrades
-//              to C.3 on any preWarm error.
-//   beginTurn → start mic capture, frames stream to WS as realtimeInput.
-//   endTurn   → flush mic, wait for serverContent turnComplete + any
-//               toolCall round-trip, persist VoiceTurn, return result.
+//   preWarm  → mint client secret (via /v1/ai/realtime-session) + open WS +
+//              send session.update + wait for session.updated + prepare
+//              AudioPipeline. Throws on mint failure or setup timeout — VM
+//              downgrades to C.3 on any preWarm error.
+//   beginTurn → start mic capture, frames stream to WS as
+//               input_audio_buffer.append.
+//   endTurn   → flush mic, wait for the turn-completing response.done + any
+//               tool-call round-trip, persist VoiceTurn, return result.
 //   speak     → no-op on Live (audio already streamed during endTurn).
 //   cancelSpeaking → stop audio player; user is about to begin a new turn.
 //   close     → tear down WS + audio + audio session. Idempotent.
 //
-// Session refresh (ADR 0014): triggered on `turnCount - lastRefreshedAtTurn
-// >= 4` OR `sumPromptTokens > 10_000`. Silent swap via `refreshSession()`
-// with pre-mint one turn earlier on the cadence path. The older drafts
-// documented "pruning via sessionUpdate" and a "FillerClipPlayer"; both
-// were superseded — pruning is the session-refresh swap itself
-// (Gemini Live's protocol has no mid-session truncation frame), and the
-// filler-clip design was never wired (we rely on model-emitted preambles
-// + the natural ~1 s tool-dispatch latency for UX cover).
+// Session refresh (ADR 0014, ADR 0038 decision 4): triggered when the
+// current WebSocket has been open ≥ `LiveSessionBudget.refreshAtSessionAgeSec`
+// (OpenAI caps a session at 60 minutes), with a pre-mint one turn boundary
+// earlier. Per-turn context growth is bounded server-side by truncation,
+// so there is no turn-count or token trigger: a refresh discards the
+// provider's prompt cache, which is the main voice cost lever, and is
+// worth paying only to outrun the session cap. The same machinery serves
+// transport-error recovery.
 
 import AVFoundation
 import Foundation
 import OSLog
 import UIKit
 
-/// Numeric budgets for the Live driver. Mirrored from CLAUDE.md's
-/// `LiveSessionLimits` spec. Keeping them here (scoped to the Live
-/// path) rather than in a global struct because every value is
+/// Numeric budgets for the Live driver. Keeping them here (scoped to the
+/// Live path) rather than in a global struct because every value is
 /// Live-specific. Values tuned from device measurements + the
-/// ADR 0010 / 0012 / 0014 / 0015 trigger re-checks documented inline.
+/// ADR 0010 / 0012 / 0014 / 0038 trigger re-checks documented inline.
 ///
 /// P2-G (2026-04-23): `@MainActor` annotation dropped — the enum holds
 /// only `Sendable` primitive `static let` values and needs no isolation.
@@ -43,44 +43,34 @@ import UIKit
 /// to read a pure constant, which is a footgun for future
 /// Swift 6 strict-concurrency cleanups.
 enum LiveSessionBudget {
-    /// Seconds to wait for the server's `setupComplete` handshake
+    /// Seconds to wait for the server's `session.updated` handshake
     /// before failing `preWarm()`. Observed p95 is ~300 ms; 5 s is a
     /// generous upper bound.
     static let setupHandshakeSec: Double = 5
-    /// Seconds to wait for the server's `turnComplete` frame after
-    /// user audio closes. 2× Gemini's observed ~15 s p95 for a long
+    /// Seconds to wait for the turn-completing `response.done` after
+    /// user audio closes. 2× the observed ~15 s p95 for a long
     /// multi-sentence response.
     static let turnCompleteSec: Double = 30
-    /// Turn count at which we trigger a session refresh (CLAUDE.md
-    /// §Gemini Live constants `refreshAtTurnCount`). Trajectory:
-    /// 15 → 10 AM (ADR 0014), 10 → 7 PM, 7 → 2 PM (second pass), and
-    /// finally 2 → 4 PM (third pass, after device test showed 2-turn
-    /// cadence was too handoff-heavy — user perceived the 3s refresh
-    /// as "too much latency"). Analysis: cost-per-turn is LINEAR in N
-    /// (each extra turn in the window adds ~$0.0014 to average), but
-    /// refresh-count-per-session is HYPERBOLIC (30/N). The knee in
-    /// savings-per-added-refresh sits at N=3-5; below that, each
-    /// additional refresh saves very little cost for a guaranteed 3s
-    /// handoff. N=4 pins worst-case per-turn prompt tokens at ~4,300
-    /// (fast perceived latency, every turn feels ~similar), cuts
-    /// N=7's per-turn cost by ~35%, and keeps refreshes to ~7 per
-    /// 30-turn session (one every ~20s of actual conversation).
-    /// ADR 0014 third-pass PM amendment.
-    static let refreshAtTurnCount: Int = 4
-    /// Hard cap on per-turn prompt tokens. Any turn that exceeds this
-    /// triggers an immediate refresh at turn completion — guards against
-    /// a long single turn (long user utterance + long model reply +
-    /// tool-call round-trip) pushing us past the soft cap before turn
-    /// count naturally rolls. Lowered 15k → 10k on 2026-04-22 PM in
-    /// lockstep with the turn-count drop; same "latency over prior
-    /// context" tradeoff.
-    static let refreshAtPromptTokenCount: Int = 10_000
+    /// Age of the current WebSocket at which the next turn boundary
+    /// triggers a session refresh. OpenAI's session maximum is 60
+    /// minutes; 55 leaves five minutes for the refresh to land at a turn
+    /// boundary (a long turn or a pause can delay it) before the server
+    /// closes the socket. This is the only proactive refresh trigger
+    /// (ADR 0038 decision 4): the earlier turn-count and prompt-token
+    /// triggers existed to bound per-turn context growth, which
+    /// server-side truncation now does, and each refresh throws away the
+    /// provider's prompt cache.
+    static let refreshAtSessionAgeSec: TimeInterval = 55 * 60
+    /// Age at which a turn boundary kicks off the refresh's token mint in
+    /// the background, one minute ahead of `refreshAtSessionAgeSec`, so
+    /// the handoff doesn't pay the ~1.5-1.9 s mint round-trip.
+    static let preMintAtSessionAgeSec: TimeInterval = 54 * 60
     /// Upper bound on how long we wait for `usageMetadata` to arrive
     /// after `turnComplete` before firing the voice-turn-usage POST
-    /// with whatever tokens we have (zero if nothing arrived). Tuned
-    /// conservatively: Gemini's trailing-usage frames land within
-    /// ~200 ms in practice; 2 s gives slow cellular plenty of headroom
-    /// without delaying dashboards long enough to confuse ops.
+    /// with whatever tokens we have (zero if nothing arrived). Usage
+    /// rides in the same `response.done` as the turn completion and is
+    /// emitted ahead of it, so this is a defensive backstop; 2 s keeps
+    /// dashboards from lagging if a response ever ends without usage.
     static let pendingReportTimeoutSec: Double = 2
 
     /// P2-F (2026-04-23): consolidated the three per-class tunable
@@ -92,69 +82,72 @@ enum LiveSessionBudget {
     /// How long a turn may sit in `.modelSpeaking` with no inbound
     /// audio chunks before the watchdog force-advances. Raised from
     /// 8 s → 15 s on 2026-04-23 (P1-E) because the 8 s threshold
-    /// fired on legitimate multi-pass tool-call gaps (Gemini
+    /// fired on legitimate multi-pass tool-call gaps (the model
     /// preparing the next audio pass after a tool response —
-    /// measured ~11 s worst case).
+    /// measured ~11 s worst case). Still needed on OpenAI: the client
+    /// owns every transition the server is supposed to drive, so a
+    /// dropped or failed `response.done` must not pin `.modelSpeaking`.
     static let turnStuckWatchdogSec: TimeInterval = 15
     /// AEC + room-reverb cooldown after playback ends, before we
     /// re-open the mic. Tuned from a 2026-04-22 observation that
     /// server-side VAD fired on a -30 dB residual inside the
     /// cooldown window.
     static let echoCooldownSec: TimeInterval = 0.5
-    /// Pre-mint Task staleness window. Backend's
-    /// `new_session_expire_time` is 60 s from mint; we discard
-    /// pre-mints older than this to leave headroom for WS open +
-    /// setup handshake on the refresh side. Typical pre-mint →
-    /// refresh gap is 8-20 s, so 45 s virtually never triggers in
-    /// practice but is the backstop against a deferred refresh
-    /// consuming a dead token.
-    static let preMintStalenessSec: TimeInterval = 45
+    /// Pre-mint Task staleness window, judged from when the mint was
+    /// kicked off because the response (and its `expires_at`) isn't
+    /// visible until the Task resolves. The client secret can open a
+    /// connection for 120 s after mint; 90 s leaves 30 s of headroom for
+    /// the WS open and setup handshake on the refresh side. Unlike the
+    /// previous 60 s provider window, a pre-mint made at the 54-minute
+    /// mark routinely survives to the refresh at 55 minutes unless the
+    /// user is silent in between. A resolved pre-mint is additionally
+    /// checked against its own `expires_at` (see `clientSecretMinRemainingSec`).
+    static let preMintStalenessSec: TimeInterval = 90
+    /// Minimum time a minted client secret must have left before
+    /// `expires_at` for refresh to use it. Covers the WS open; the secret
+    /// is only needed to open the connection.
+    static let clientSecretMinRemainingSec: TimeInterval = 15
 }
 
-/// Running totals of `usageMetadata` observed during a single turn.
-/// Gemini Live streams usage as per-chunk deltas — empirically
-/// observed 2026-04-22:
-///   - first frame of a turn: `promptTokenCount=N` (real input count,
-///     e.g. 3482), `responseTokenCount=0`
-///   - every subsequent audio chunk: `promptTokenCount=0`,
-///     `responseTokenCount=K` (per-chunk delta, typically 1–10)
-///   - turnComplete envelope: `usageMetadata: {}` (all zeros)
+/// Running totals of usage observed during a single turn. OpenAI reports
+/// usage once per response, in `response.done`. A turn that calls a tool
+/// has TWO responses (the tool call, then the spoken reply), each billed
+/// separately, so the turn's usage is the sum of the frames.
 ///
-/// An earlier version stored the LAST frame's usage, which meant the
-/// empty turnComplete envelope wiped out every per-chunk delta, so
-/// every voice-turn-usage POST reported 0 tokens (40+ zero-token
-/// events in prod before the fix). Accumulating preserves the real
-/// totals across the turn.
+/// An earlier version (written for a provider that streamed usage as
+/// per-chunk deltas plus an empty trailing frame) stored the LAST frame's
+/// usage and reported 0 tokens on every turn (40+ zero-token events in
+/// prod before the fix). Accumulating is correct for both shapes.
 struct TurnUsageAccumulator: Sendable, Equatable {
-    /// SUM across frames — each non-zero `promptTokenCount` frame
-    /// represents a SEPARATE generation pass billed by Gemini. A
-    /// tool-call turn produces TWO such frames (first pass = tool
-    /// call, second pass = spoken reply after tool return); both
-    /// must be summed to capture true input cost. Per-chunk deltas
-    /// have `promptTokenCount=0`, so summing them is a no-op.
+    /// SUM across frames — each frame is a SEPARATE response billed on
+    /// its own. A tool-call turn produces TWO such frames (first
+    /// response = tool call, second = spoken reply after the tool
+    /// result); both must be summed to capture true input cost.
     ///
     /// An earlier version used `max()` which under-reported tool-call
-    /// turns by the first-pass prompt token count (~3640 tokens per
-    /// tool-call turn, ~$0.011 at audio-in pricing).
+    /// turns by the first response's prompt token count.
     var sumPromptTokens: Int = 0
-    /// SUM across frames — response count arrives as per-chunk deltas.
+    /// SUM across frames, same reasoning as `sumPromptTokens`.
     var sumResponseTokens: Int = 0
     /// Per-modality breakdown — both prompt AND response take SUM.
     /// Prompt-side sum matches the reasoning for `sumPromptTokens`
-    /// (each non-zero frame is a fresh generation pass).
+    /// (each frame is a fresh response).
     var sumPromptAudioTokens: Int = 0
     var sumPromptTextTokens: Int = 0
     var sumResponseAudioTokens: Int = 0
     var sumResponseTextTokens: Int = 0
-    /// Tokens served from Gemini's content cache (discounted billing).
-    /// Sum across generation passes for the same reason as prompt:
-    /// each pass incurs its own cache lookup. Forwarded to backend so
-    /// ops can track cache-hit ratio as a cost lever.
+    /// Cached TEXT input tokens (discounted billing). Sum across
+    /// responses for the same reason as prompt: each response incurs its
+    /// own cache lookup. Forwarded to backend so ops can track cache-hit
+    /// ratio as a cost lever.
     var sumCachedContentTokens: Int = 0
+    /// Cached AUDIO input tokens. Tracked apart from text because the
+    /// two are cached at different rates.
+    var sumCachedAudioTokens: Int = 0
     /// True once any non-zero usage frame has been observed. Drives
     /// the finalizeTurn short-circuit path and the nil/populated
     /// distinction that dashboards use to differentiate "this turn's
-    /// Gemini bill" from "this turn had no usage data at all".
+    /// bill" from "this turn had no usage data at all".
     var hasAnyData: Bool = false
 
     mutating func accumulate(_ usage: LiveUsageMetadata) {
@@ -174,6 +167,9 @@ struct TurnUsageAccumulator: Sendable, Equatable {
         }
         if let cached = usage.cachedContentTokenCount {
             sumCachedContentTokens += cached
+        }
+        if let cachedAudio = usage.cachedAudioTokens {
+            sumCachedAudioTokens += cachedAudio
         }
         if usage.promptTokenCount > 0 || usage.responseTokenCount > 0 {
             hasAnyData = true
@@ -199,6 +195,7 @@ struct TurnUsageAccumulator: Sendable, Equatable {
             responseAudioTokens: sumResponseAudioTokens > 0 ? sumResponseAudioTokens : nil,
             responseTextTokens: sumResponseTextTokens > 0 ? sumResponseTextTokens : nil,
             cachedContentTokenCount: sumCachedContentTokens > 0 ? sumCachedContentTokens : nil,
+            cachedAudioTokens: sumCachedAudioTokens > 0 ? sumCachedAudioTokens : nil,
         )
     }
 }
@@ -208,12 +205,11 @@ struct TurnUsageAccumulator: Sendable, Equatable {
 /// Carries the same token counts iOS POSTed to /v1/ai/voice-turn-usage —
 /// so the VM's aggregated totals match backend ai_request_log SUMs.
 ///
-/// `promptTokensTotal` / `responseTokensTotal` are Gemini's raw
-/// `promptTokenCount` / `responseTokenCount` (summed across generation
-/// passes). They may EXCEED `text + audio` by the AUDIO-mode per-pass
-/// overhead (~200 tokens/pass, CLAUDE.md sharp-edge #15) which Gemini
-/// does not attribute to either modality in `promptTokensDetails`.
-/// Dashboards join on totals; cost math uses the breakdown plus the
+/// `promptTokensTotal` / `responseTokensTotal` are the provider's raw
+/// `input_tokens` / `output_tokens` (summed across the turn's responses).
+/// They can EXCEED `text + audio` if the provider reports tokens it does
+/// not attribute to either modality (image tokens, in principle).
+/// Dashboards join on totals; cost math uses the breakdown plus any
 /// remainder priced at audio rate (backend voice-turn-usage handler).
 struct LiveTurnSummary: Sendable, Equatable {
     let turnIndex: Int
@@ -235,10 +231,10 @@ struct LiveTurnSummary: Sendable, Equatable {
     /// or session start for turn 1) to `turnComplete` server frame.
     /// Surfaces as `cook_turn_resolved.latency_total_ms`.
     let latencyMs: Int
-    /// Time-to-first-audio: from server's `inputTranscription.finished`
-    /// to the first model audio chunk. Zero when either anchor was
-    /// missing for this turn (tool-call-only turns, or server races
-    /// audio ahead of transcription-finished). Surfaces as
+    /// Time-to-first-audio: from the server's
+    /// `input_audio_buffer.speech_stopped` to the first model audio
+    /// chunk. Zero when either anchor was missing for this turn
+    /// (tool-call-only turns, or no speech-stopped event). Surfaces as
     /// `cook_turn_resolved.latency_ttfa_ms` and gates ADR 0012's split
     /// validation (amended 2026-04-22 PM): normal-turn p95 < 500 ms,
     /// tool_call-turn p95 < 1500 ms. Dashboard filters zeros so
@@ -258,13 +254,14 @@ struct LiveTurnSummary: Sendable, Equatable {
 /// alongside `LiveTurnSummary` on `turnComplete`. Used by the voice-
 /// active Cook Mode UI to render the YOU SAID / STIR transcript card.
 ///
-/// `userText`  — concatenation of every server-side `inputTranscription`
-///                delta delivered during the turn. Empty when the server
-///                emitted no transcription frames (very short utterances
-///                or transcription-disabled mints).
-/// `modelText` — concatenation of every `outputTranscription` /
-///                `inlineText` delta. Empty for tool-call-only turns
-///                where the model produced no spoken response.
+/// `userText`  — the server-side input transcript(s) for the turn (full
+///                utterances, joined with a space). Empty when the server
+///                emitted no transcription before the turn finalized (the
+///                transcript arrives asynchronously and can lag the
+///                response) or transcription is disabled.
+/// `modelText` — concatenation of every output transcript delta. Empty
+///                for tool-call-only turns where the model produced no
+///                spoken response.
 ///
 /// Either field can be empty independently; the consumer decides
 /// whether to render with one-sided content. Distinct from
@@ -394,8 +391,10 @@ final class RealtimeSession: VoiceSessionDriver {
     // turns (which never re-enter beginTurn) get clean slate per turn.
     var currentTurnInlineText: String?
     /// Per-turn accumulator for what the SERVER heard the user say —
-    /// concatenation of every `inputTranscription.text` delta delivered
-    /// during the turn. Reset alongside `currentTurnInlineText`. Drained
+    /// the full-utterance input transcript(s) delivered during the turn,
+    /// space-joined. They arrive asynchronously and can land after the
+    /// turn has finalized, in which case they are attributed to the next
+    /// turn. Reset alongside `currentTurnInlineText`. Drained
     /// into the `onTurnTranscriptFinalized` callback when the turn
     /// finalizes; UI uses it to render the YOU SAID side of the
     /// voice-active transcript card.
@@ -403,18 +402,16 @@ final class RealtimeSession: VoiceSessionDriver {
     var turnCompleteContinuation: CheckedContinuation<Void, Error>?  // SCA-159 non-private: nil-clear BEFORE resume — double-resume of CheckedContinuation crashes
     /// Accumulates per-chunk `usageMetadata` deltas across the current
     /// turn. Reset at `flushPendingReport()`. See `TurnUsageAccumulator`
-    /// docstring for the Gemini Live streaming-delta shape.
+    /// docstring for why usage is summed across a turn's responses.
     var turnUsageAccumulator = TurnUsageAccumulator()
     // `lastUsageMetadata` was replaced by `turnUsageAccumulator` above —
-    // the single-value design overwrote real token counts every time
-    // Gemini sent its empty `usageMetadata: {}` turnComplete envelope.
-    // See the TurnUsageAccumulator docstring for the streaming-delta
-    // shape and the 2026-04-22 prod regression.
+    // the single-value design overwrote real token counts. See the
+    // TurnUsageAccumulator docstring and the 2026-04-22 prod regression.
     /// Wall-clock when the CURRENT turn began processing server-side.
     /// Set at beginTurn (first turn) and at each `finalizeTurn()` (next
     /// turn starts implicitly after previous finalizes). Used to stamp
-    /// backendLatencyMs in the CookTurnResult — approximate since iOS
-    /// can't detect the server's speech-start VAD event in hands-free.
+    /// backendLatencyMs in the CookTurnResult — approximate; the
+    /// server's speech-start VAD event is not used to anchor turns.
     var turnStartedAt: Date?
     /// Snapshot of the most recently finalized turn. Published by
     /// `finalizeTurn()` so `endTurn()` (when the VM's tap-to-end path
@@ -422,16 +419,16 @@ final class RealtimeSession: VoiceSessionDriver {
     /// has something concrete to return. Nil before the first turn
     /// completes.
     var lastTurnResult: CookTurnResult?
-    /// Wall-clock when the server's input-transcription finalized for
-    /// the CURRENT turn (i.e., server VAD detected end-of-utterance and
-    /// emitted `inputTranscription.finished = true`). Paired with
-    /// `firstModelAudioAt` below to compute per-turn TTFA — time from
+    /// Wall-clock of the server's `input_audio_buffer.speech_stopped` for
+    /// the CURRENT turn (server VAD detected end-of-utterance). Paired
+    /// with `firstModelAudioAt` below to compute per-turn TTFA — time from
     /// "user stopped talking" to "model started responding with audio".
-    /// Reset on every `finalizeTurn()`. Nil for turns where the server
-    /// never emitted a finished transcription (non-audio tool-call
-    /// turns, or very short utterances where the server races past
-    /// transcription) — TTFA is zeroed in that case and the turn shows
-    /// up on the dashboard as "unmeasurable" rather than a fake 0 s.
+    /// This is the ONLY anchor: the input transcript arrives later and
+    /// asynchronously, so anchoring on it would under-report TTFA.
+    /// Reset on every `finalizeTurn()`. Nil for turns with no
+    /// speech-stopped event (e.g. text-injected turns) — TTFA is zeroed
+    /// in that case and the turn shows up on the dashboard as
+    /// "unmeasurable" rather than a fake 0 s.
     var userTurnEndAt: Date?
     /// Wall-clock of the first non-empty `audioChunks` arrival within
     /// the current turn. Set once per turn (subsequent chunks don't
@@ -449,9 +446,10 @@ final class RealtimeSession: VoiceSessionDriver {
     /// ("start_timer", "advance_step", "substitution_check", "set_step",
     /// "restart_timer"). Set by `handleToolCall`; latched into the
     /// stuck-watchdog PostHog payload so ops can correlate incidence
-    /// rate with tool-call type. 3.1 Flash Live is synchronous one-in-
-    /// flight (CLAUDE.md §sharp-edge #12), so "most recent" = "only one
-    /// this turn" in practice. Reset on every `finalizeTurn()` + close.
+    /// rate with tool-call type. Tool calls are handled one at a time
+    /// and Stir's prompt calls one tool per turn, so "most recent" =
+    /// "only one this turn" in practice. Reset on every
+    /// `finalizeTurn()` + close.
     var lastToolCallName: String?
 
     /// True when the current `finalizeTurn()` is running as a watchdog
@@ -490,16 +488,19 @@ final class RealtimeSession: VoiceSessionDriver {
         /// Refresh failed AFTER the transport swap committed (setup
         /// handshake or later step threw). State has been advanced to
         /// `.error` by this method and the old transport has been
-        /// closed (P0-B: prior code leaked it until Gemini's 35-min TTL).
+        /// closed (P0-B: prior code leaked it until the server's session cap).
         case postCommitFailure
     }
 
-    /// Watchdog Task that force-advances state when Gemini Live drops
-    /// a `turnComplete` frame. Observed 2026-04-23 device test: on a
-    /// multi-pass tool-call turn (start_timer with post-tool narration),
-    /// Gemini emitted `generationComplete` after the second narration
-    /// but never sent `turnComplete`. State machine stayed pinned in
-    /// `.modelSpeaking` for 35+s until the user manually tapped to close.
+    /// Watchdog Task that force-advances state when the turn-completing
+    /// server event never arrives. Observed 2026-04-23 device test (on
+    /// the previous provider): on a multi-pass tool-call turn
+    /// (start_timer with post-tool narration) the server finished
+    /// speaking but never sent `turnComplete`, pinning the state machine
+    /// in `.modelSpeaking` for 35+s until the user manually tapped to
+    /// close. Kept on OpenAI because the client still owns every
+    /// transition the server is supposed to drive (a failed or dropped
+    /// `response.done`, a lost `response.create` after a tool result).
     ///
     /// Contract:
     ///   - Armed on transition INTO `.modelSpeaking` and rearmed on every
@@ -510,40 +511,39 @@ final class RealtimeSession: VoiceSessionDriver {
     ///     happy-path, refresh handoff, user interruption, close).
     ///   - On fire: synthesizes turnComplete behavior (advance to
     ///     .ready + finalizeTurn) with a warning log so ops can track
-    ///     how often Gemini drops turnComplete. Uses a dedicated
+    ///     how often turnComplete goes missing. Uses a dedicated
     ///     `ended_reason: .watchdog` downstream.
     var turnStuckWatchdog: Task<Void, Never>?
     // turnStuckWatchdogSec moved to LiveSessionBudget.turnStuckWatchdogSec (P2-F).
-    /// Turn index at which the most recent successful session refresh
-    /// completed. Refresh triggers off `turnCount - lastRefreshedAtTurn
-    /// >= LiveSessionBudget.refreshAtTurnCount`, so the threshold fires
-    /// every N turns across the session lifetime rather than exactly once.
-    /// Starts at 0; the first refresh at turn 10 sets this to 10, after
-    /// which the next fires at turn 20, and so on. ADR 0014.
-    var lastRefreshedAtTurn: Int = 0
+    /// Wall-clock when the CURRENT transport's WebSocket was opened:
+    /// set in `preWarm` and again at each successful refresh swap. The
+    /// refresh trigger in `finalizeTurn` compares its age against
+    /// `LiveSessionBudget.refreshAtSessionAgeSec` /
+    /// `preMintAtSessionAgeSec`, because OpenAI caps a session at 60
+    /// minutes from connection. Nil before the first open.
+    var transportOpenedAt: Date?
     /// True while a refresh is in flight (mint → new WS open → handshake
     /// → swap → old close). Guards re-entry — mid-refresh turn boundaries
     /// shouldn't trigger a second refresh. Cleared in the refresh path's
     /// defer block so a failed refresh doesn't wedge the session.
     var isRefreshing: Bool = false  // SCA-159 non-private: read by AudioIO mic-mute gate, StateMachine refresh trigger, finalizeTurn
 
-    /// Pre-minted refresh token, kicked off one turn before the refresh
-    /// cadence fires (at `turnsSinceRefresh == refreshAtTurnCount - 1`).
-    /// When refresh actually triggers on the next turn, this Task is
-    /// awaited instead of kicking off a fresh mint — saving the ~1.5-1.9s
-    /// mint round-trip on the handoff's critical path. If the Task has
+    /// Pre-minted refresh token, kicked off at the first turn boundary
+    /// past `preMintAtSessionAgeSec`. When refresh triggers at a later
+    /// turn boundary, this Task is awaited instead of kicking off a
+    /// fresh mint — saving the ~1.5-1.9s mint round-trip on the
+    /// handoff's critical path. If the Task has
     /// already completed, `.value` returns instantly. If still running
     /// (rare — user talked fast), we await the same in-flight work we
     /// would have started anyway. If it fails, we fall back to sync
     /// mint. Cleared after consumption or after staleness (see
     /// `pendingPreMintStartedAt`).
     var pendingPreMintTask: Task<RealtimeSessionResponse, Error>?
-    /// Wall-clock when `pendingPreMintTask` was kicked off. Backend's
-    /// `new_session_expire_time` is 60s from mint (sharp-edge #5), so a
-    /// pre-minted token older than ~45s (leaving 15s of handshake
-    /// headroom) is discarded in favor of a fresh sync mint. Typical
-    /// gap between pre-mint (turn N-1 finalize) and refresh (turn N
-    /// finalize) is 8-20s of conversation — well within the budget.
+    /// Wall-clock when `pendingPreMintTask` was kicked off. The client
+    /// secret's connect window is 120s from mint, so a pre-minted token
+    /// older than `preMintStalenessSec` is discarded in favor of a fresh
+    /// sync mint. Typical gap between pre-mint and refresh is one to a
+    /// few turns, i.e. well under a minute.
     var pendingPreMintStartedAt: Date?
     // Conversation-history ring buffers REMOVED 2026-04-22 PM.
     // Rationale: Daniel observed the model isn't referencing prior-turn
@@ -562,14 +562,13 @@ final class RealtimeSession: VoiceSessionDriver {
     /// timer expiry (defensive fallback — fires with zero tokens,
     /// possibly an empty accumulator).
     ///
-    /// Why the delay exists: Gemini Live's `usageMetadata` can arrive
-    /// in (1) the same envelope as `serverContent{turnComplete}`,
-    /// (2) an envelope BEFORE turnComplete, or (3) an envelope AFTER
-    /// turnComplete. Only (1) and (2) are handled by the parseAll
-    /// ordering fix; (3) requires waiting. Observed 2026-04-22: 40+
-    /// prod events with $ai_input_tokens=0 despite parseAll fix,
-    /// indicating Gemini routinely uses path (3) on audio-mode
-    /// sessions.
+    /// Why the delay exists: with OpenAI, usage rides in the same
+    /// `response.done` as the turn completion and `parseAll` emits it
+    /// first, so the common case flushes immediately in `finalizeTurn`.
+    /// The deferred path is the backstop for a usage frame that arrives
+    /// after `turnComplete` (the previous provider did this routinely:
+    /// 40+ prod events with $ai_input_tokens=0 on 2026-04-22) and for a
+    /// response that ends with no usage at all.
     struct PendingTurnReport: Sendable {
         let turnIndex: Int
         let latencyMs: Int
@@ -683,11 +682,11 @@ final class RealtimeSession: VoiceSessionDriver {
     ///                      post-swap cleanup)
     ///
     /// refreshReason values align with spec §15:
-    ///   "turns"            — crossed `refreshAtTurnCount`
-    ///   "minutes"          — crossed `refreshAtElapsedSec` (not yet wired)
-    ///   "tokens"           — hit token soft cap
-    ///   "goaway"           — server emitted a goAway frame
+    ///   "minutes"          — transport age crossed `refreshAtSessionAgeSec`
     ///   "transport_error"  — WS transport errored mid-session; refresh as recovery
+    /// ("turns", "tokens" and "goaway" are no longer emitted: the
+    /// cadence and token triggers were retired by ADR 0038 and OpenAI
+    /// has no goAway frame.)
     var onVoiceSessionRefreshResolved:
         (@MainActor (_ reason: String, _ turnsAtRefresh: Int, _ sessionID: String, _ success: Bool) -> Void)?
 
@@ -750,7 +749,7 @@ final class RealtimeSession: VoiceSessionDriver {
     ///                        the funnel cleanly.
     ///   missingIngredient  — the ingredient name the model identified
     ///                        as missing (free-form string from the
-    ///                        Gemini tool call, e.g. "dried pasta").
+    ///                        tool call, e.g. "dried pasta").
     ///                        Host resolves to a RecipeIngredient by
     ///                        case-insensitive displayName match; falls
     ///                        through to a free-text SubstitutionEvent
@@ -769,13 +768,13 @@ final class RealtimeSession: VoiceSessionDriver {
     ) -> Void)?
 
     /// Fires when the stuck-modelSpeaking watchdog force-advances after
-    /// Gemini Live drops a `turnComplete` (observed 2026-04-23 on
-    /// multi-pass tool-call turns). VM emits the PostHog
+    /// the turn-completing server event goes missing (observed
+    /// 2026-04-23 on multi-pass tool-call turns). VM emits the PostHog
     /// `voice_turn_stuck_watchdog_fired` event so ops can track the
-    /// incidence rate of the underlying Live-API protocol bug.
+    /// incidence rate of the underlying protocol problem.
     ///
     /// Payload:
-    ///   sessionID          — Gemini Live session id (current mint). In
+    ///   sessionID          — voice session id (current mint). In
     ///                        practice always a real session id — watchdog
     ///                        only arms on `.modelSpeaking` which implies
     ///                        setup completed and `mintResponse` is populated.
@@ -916,7 +915,8 @@ final class RealtimeSession: VoiceSessionDriver {
             ])
             #endif
 
-            // 2. Open WebSocket
+            // 2. Open WebSocket. The client secret authenticates it as a
+            //    bearer header; the transport pins scheme + host.
             guard let wsURL = URL(string: response.wsURL) else {
                 #if DEBUG
                 VoiceSessionLog.log("mint.invalid_ws_url")
@@ -925,7 +925,10 @@ final class RealtimeSession: VoiceSessionDriver {
             }
             let transport = LiveWebSocketTransport()
             self.transport = transport
-            try transport.open(url: wsURL)
+            try transport.open(url: wsURL, authToken: response.authToken)
+            // OpenAI's 60-minute session cap runs from connection, so
+            // this is the clock the refresh trigger measures against.
+            transportOpenedAt = now()
             #if DEBUG
             VoiceSessionLog.log("ws.open")
             #endif
@@ -941,26 +944,18 @@ final class RealtimeSession: VoiceSessionDriver {
             // 4. Start inbound receive dispatcher
             startReceiveDispatcher()
 
-            // 5. Send the `{"setup": {...}}` frame that unblocks
-            //    `setupComplete`. Required even though the ephemeral
-            //    token bakes in a `bidiGenerateContentSetup` — the
-            //    Constrained method treats the baked-in config as the
-            //    authorization ceiling, and the server still waits for
-            //    the client to explicitly begin the session by sending
-            //    the setup frame. Verified 2026-04-20 against the
-            //    google-gemini reference app
-            //    (gemini-live-ephemeral-tokens-websocket/frontend/
-            //    geminilive.js → sendInitialSetupMessages()). Without
-            //    this send, `awaitSetupComplete` times out at 5s and
-            //    preWarm falls through to C.3.
+            // 5. Send the `session.update` frame that configures the
+            //    session. The server first sends `session.created`
+            //    (ignored by the parser) and emits `session.updated`
+            //    — our `.setupComplete` — only after it receives this.
+            //    Without this send, `awaitSetupComplete` times out at 5s
+            //    and preWarm falls through to C.3.
             //
             //    Backend pre-serializes the payload so iOS forwards a
             //    single JSON blob — no shape drift possible between
-            //    what the token authorizes and what the client sends.
-            //
-            //    P3-D (2026-04-23): send via `setupRawJSON` so the
-            //    transport skips the JSONSerialization round-trip
-            //    (~10 ms/preWarm saved on 4-8 KiB setup frames).
+            //    what the client secret was minted for and what the
+            //    client sends. Sent via `setupRawJSON` so the transport
+            //    skips the JSONSerialization round-trip.
             try await transport.send(.setupRawJSON(response.setupFrameJSON))
             #if DEBUG
             VoiceSessionLog.log("ws.setup_sent")
@@ -968,9 +963,7 @@ final class RealtimeSession: VoiceSessionDriver {
 
             // 6. Wait for setupComplete (budget named in
             //    LiveSessionBudget — server normally emits this within
-            //    200-400 ms after receiving our setup frame). Any
-            //    inbound frame before setupComplete is a protocol
-            //    violation and throws.
+            //    200-400 ms after receiving our setup frame).
             try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
             #if DEBUG
             VoiceSessionLog.log("ws.setup_complete")
@@ -1074,32 +1067,29 @@ final class RealtimeSession: VoiceSessionDriver {
             throw RealtimeSessionError.busy(state: stateMachine.state)
         }
         // Hands-free model: mic stays hot continuously across the
-        // session. VAD (server-side, `automaticActivityDetection` is
-        // enabled in the mint) drives turn boundaries — iOS never
-        // stops the mic mid-session and never signals "audio stream
-        // done" to the server.
+        // session. VAD (server-side, configured in the setup frame)
+        // drives turn boundaries — iOS never stops the mic mid-session
+        // and never commits the input buffer itself.
         //
-        // Lessons from the two prior attempts:
-        //   1. Abruptly stopping the mic on tap-to-end (original
-        //      code) leaves VAD with no trailing silence — it sits
-        //      waiting for more audio and `turnComplete` never
-        //      arrives (30s `turnDrained` observed 2026-04-20).
-        //   2. Sending `realtimeInput.audioStreamEnd` as a "done"
-        //      signal CLOSES the WebSocket (TransportError
-        //      `connectionDropped` with "Socket is not connected"
-        //      observed immediately after the send). That frame is
-        //      a session-terminal signal, not a turn-end signal —
+        // Lessons from the earlier attempts (on the previous provider,
+        // but the reasoning carries):
+        //   1. Abruptly stopping the mic on tap-to-end leaves VAD with no
+        //      trailing silence — it sits waiting for more audio and the
+        //      turn never completes (30s `turnDrained` observed
+        //      2026-04-20).
+        //   2. Signalling "audio stream done" to the server is a
+        //      session-terminal signal there, not a turn-end signal —
         //      not usable for a multi-turn cook session.
         //
         // So: endTurn's job is just UI/state coordination. Advance
         // state to `.thinking` ONLY if we're still in .userSpeaking —
         // VAD may already have auto-advanced us through
         // .modelSpeaking (via handleServerContent). Mic stays hot
-        // either way. Then await the server-driven `turnComplete`.
+        // either way. Then await the server-driven turn completion.
         // If the user is still talking past the tap, VAD processes
         // their audio normally and closes the turn on natural silence.
         // If the user stopped before tapping, VAD already saw the
-        // silence and `turnComplete` may be near instant.
+        // silence and the turn may complete near-instantly.
         if stateMachine.state == .userSpeaking {
             stateMachine.advance(to: .thinking)
         }
@@ -1107,7 +1097,7 @@ final class RealtimeSession: VoiceSessionDriver {
         VoiceSessionLog.log("turn.end_submitted", ["turn": turnCount + 1])
         #endif
 
-        // Wait for serverContent turnComplete — handleServerContent
+        // Wait for the turn-completing response.done — handleServerContent
         // advances state AND calls `finalizeTurn()` before resuming
         // the continuation, so when we wake up the snapshot is ready.
         do {
@@ -1211,8 +1201,8 @@ final class RealtimeSession: VoiceSessionDriver {
         // Cancel any in-flight pre-mint Task. Its result would be a
         // minted ephemeral token we're never going to use now that the
         // session is closing — leaving it running wastes backend work
-        // and (harmlessly) holds a Gemini auth_tokens resource until the
-        // token expires. Extracted to `cancelAndClearPreMintSlot()` so
+        // and (harmlessly) leaves a client secret unused until it
+        // expires. Extracted to `cancelAndClearPreMintSlot()` so
         // the P1-P `_testTearDownPreMintSlot` hook exercises the same
         // production symbol, not a test-only copy.
         cancelAndClearPreMintSlot()

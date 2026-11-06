@@ -27,6 +27,7 @@ final class VoiceTurnUsageDTOTests: XCTestCase {
                     promptTokensAudio: 1150,
                     promptTokensTotal: 2350,
                     promptTokensCached: nil,
+                    promptTokensCachedAudio: nil,
                     responseTokensText: 0,
                     responseTokensAudio: 150,
                     responseTokensTotal: 160,
@@ -61,13 +62,16 @@ final class VoiceTurnUsageDTOTests: XCTestCase {
             str.contains("\"prompt_tokens_cached\""),
             "nil cached-tokens must be omitted from wire, got: \(str)",
         )
+        XCTAssertFalse(
+            str.contains("\"prompt_tokens_cached_audio\""),
+            "nil cached-audio-tokens must be omitted from wire, got: \(str)",
+        )
     }
 
     func test_voiceTurnUsage_whenCachingFired_encodesPromptTokensCached() throws {
-        // Gemini Live implicit caching status is the gating measurement
-        // for the spec §9 cap-reversal trigger. If this field doesn't
-        // encode when non-nil, the backend can't persist it and dashboards
-        // can't compute cachedContentTokenCount / promptTokenCount ratio.
+        // Prompt-cache hit rate is the main voice cost lever. If this
+        // field doesn't encode when non-nil, the backend can't persist it
+        // and dashboards can't compute the cached / prompt ratio.
         let endedAt = Date(timeIntervalSince1970: 1_713_800_000)
         let body = VoiceTurnUsageRequest(
             sessionID: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!,
@@ -78,6 +82,7 @@ final class VoiceTurnUsageDTOTests: XCTestCase {
                     promptTokensAudio: 1150,
                     promptTokensTotal: 2350,
                     promptTokensCached: 1_800,
+                    promptTokensCachedAudio: nil,
                     responseTokensText: 0,
                     responseTokensAudio: 150,
                     responseTokensTotal: 160,
@@ -95,6 +100,36 @@ final class VoiceTurnUsageDTOTests: XCTestCase {
             str.contains("\"prompt_tokens_cached\":1800"),
             "non-nil cached-tokens must encode as snake_case; got: \(str)",
         )
+    }
+
+    func test_voiceTurnUsage_whenAudioCachingFired_encodesCachedTextAndAudioSeparately() throws {
+        // Cached text and cached audio tokens are billed at different
+        // rates, so they travel as two fields. `prompt_tokens_cached` is
+        // TEXT only.
+        let body = VoiceTurnUsageRequest(
+            sessionID: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!,
+            turns: [
+                .init(
+                    turnIndex: 3,
+                    promptTokensText: 300,
+                    promptTokensAudio: 500,
+                    promptTokensTotal: 800,
+                    promptTokensCached: 120,
+                    promptTokensCachedAudio: 80,
+                    responseTokensText: 20,
+                    responseTokensAudio: 130,
+                    responseTokensTotal: 150,
+                    latencyMS: 900,
+                    endedReason: .turnComplete,
+                    promptVersion: "2.0.0",
+                    path: .liveAPI,
+                    endedAt: Date(timeIntervalSince1970: 1_713_800_000),
+                ),
+            ],
+        )
+        let str = String(decoding: try encoder.encode(body), as: UTF8.self)
+        XCTAssertTrue(str.contains("\"prompt_tokens_cached\":120"), "got: \(str)")
+        XCTAssertTrue(str.contains("\"prompt_tokens_cached_audio\":80"), "got: \(str)")
     }
 
     func test_endedReason_enumRawValues_matchBackendZodValues() {
