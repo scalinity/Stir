@@ -47,7 +47,36 @@ enum AVAudioSessionConfigurator {
     /// Configure the shared `AVAudioSession` for Cook Mode voice. Call once
     /// on Cook Mode entry (before pre-warming STT/TTS). Safe to re-call;
     /// `setCategory` is a no-op when values are unchanged.
+    ///
+    /// Blocks the calling thread for as long as the OS takes to activate
+    /// the session. Prefer `activateForCookModeOffMain()` from async code.
     static func activateForCookMode() throws {
+        try configureSessionForCookMode()
+        isActiveForCookMode = true
+    }
+
+    /// Same configuration as `activateForCookMode()`, but the blocking
+    /// `setCategory` / `setActive(true)` / speaker-override calls run on a
+    /// background thread and the main actor only awaits the result.
+    ///
+    /// Apple documents session activation as a synchronous, potentially
+    /// slow call and recommends keeping it off the main thread. With the
+    /// `.videoChat` mode (Voice Processing IO) it can take seconds,
+    /// especially on the simulator, and doing it on the main actor at Cook
+    /// Mode entry lined up with a fully-blocked App Hang in Sentry
+    /// (STIR-H, Nov 6 2026: sheet presented, then a 3.6-4.4 s freeze).
+    /// AVAudioSession is thread-safe, so only the hop changes; the calls,
+    /// their order and their options are identical.
+    static func activateForCookModeOffMain() async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try AVAudioSessionConfigurator.configureSessionForCookMode()
+        }.value
+        isActiveForCookMode = true
+    }
+
+    /// The actual session configuration. `nonisolated` so it can run on a
+    /// background thread; touches no main-actor state.
+    nonisolated private static func configureSessionForCookMode() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
             .playAndRecord,
@@ -71,7 +100,6 @@ enum AVAudioSessionConfigurator {
                 "av_session_speaker_override_failed: \(error.localizedDescription, privacy: .public)",
             )
         }
-        isActiveForCookMode = true
         Logger.voice.info(
             "av_session_activated category=playAndRecord mode=videoChat sampleRate=\(session.sampleRate, privacy: .public) speaker_override=ok",
         )

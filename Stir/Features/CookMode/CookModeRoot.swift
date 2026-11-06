@@ -791,7 +791,17 @@ struct CookModeRoot: View {
 
         if canVoice && !killSwitch {
             do {
-                try AVAudioSessionConfigurator.activateForCookMode()
+                // Off-main: session activation blocks for seconds under
+                // `.videoChat` (Voice Processing IO) and froze the UI at
+                // Cook Mode entry when it ran on the main actor.
+                try await AVAudioSessionConfigurator.activateForCookModeOffMain()
+                // Sheet dismissed while the session was activating: undo it
+                // here, because CookModeRoot.onDisappear's deactivate() ran
+                // before the activation finished and was a no-op.
+                if Task.isCancelled {
+                    AVAudioSessionConfigurator.deactivate()
+                    return nil
+                }
                 let liveDriver = RealtimeSession(
                     aiDispatch: aiDispatch,
                     voiceTurnRepository: coordinator.voiceTurnRepository,
@@ -971,7 +981,11 @@ struct CookModeRoot: View {
             cookingSession: session,
         )
         do {
-            try AVAudioSessionConfigurator.activateForCookMode()
+            try await AVAudioSessionConfigurator.activateForCookModeOffMain()
+            if Task.isCancelled {
+                AVAudioSessionConfigurator.deactivate()
+                return nil
+            }
             try await driver.preWarm()
             self.driverTeardown = { [driver] in driver.close() }
             return driver
