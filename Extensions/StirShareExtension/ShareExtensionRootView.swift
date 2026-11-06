@@ -120,7 +120,7 @@ struct ShareExtensionRootView: View {
                 Text("Send to Stir")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                     .background(

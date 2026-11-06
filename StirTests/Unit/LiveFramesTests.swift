@@ -400,25 +400,25 @@ final class LiveFramesTests: XCTestCase {
 
     // MARK: - Inbound: error / unknown / malformed
 
-    func test_inbound_error_event_becomes_unknown_keyed_by_code() throws {
+    func test_inbound_error_event_is_typed_without_message() throws {
         let parsed = try frames("""
         {"type":"error","event_id":"e","error":{"type":"invalid_request_error",
          "code":"conversation_already_has_active_response",
          "message":"Conversation already has an active response in progress: resp_123."}}
         """)
         XCTAssertEqual(parsed.count, 1)
-        guard case let .unknown(key) = parsed[0] else {
-            XCTFail("expected .unknown, got \(parsed[0])"); return
+        guard case let .responseError(code) = parsed[0] else {
+            XCTFail("expected .responseError, got \(parsed[0])"); return
         }
-        XCTAssertEqual(key, "error:conversation_already_has_active_response")
+        XCTAssertEqual(code, "conversation_already_has_active_response")
     }
 
-    func test_inbound_error_event_without_code_is_still_unknown_not_fatal() throws {
+    func test_inbound_error_event_without_code_preserves_typed_error() throws {
         let parsed = try frames(#"{"type":"error","error":{"type":"server_error","message":"boom"}}"#)
-        guard case let .unknown(key) = try XCTUnwrap(parsed.first) else {
-            XCTFail("expected .unknown"); return
+        guard case let .responseError(code) = try XCTUnwrap(parsed.first) else {
+            XCTFail("expected .responseError"); return
         }
-        XCTAssertEqual(key, "error:unknown")
+        XCTAssertEqual(code, "unknown")
     }
 
     func test_inbound_unknown_type_returns_unknown_case() throws {

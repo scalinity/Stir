@@ -239,7 +239,7 @@ private struct SavedFilterMiniature: View {
                 .stirFont(.bodySm)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(sort == option ? Color.white : Color.Stir.ink700)
+                .foregroundStyle(sort == option ? Color.Stir.onAccent : Color.Stir.ink700)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
@@ -340,7 +340,7 @@ private struct CookAgainMiniature: View {
                 Text("Cook again")
                     .stirFont(.bodyMd)
             }
-            .foregroundStyle(Color.white)
+            .foregroundStyle(Color.Stir.onAccent)
             .padding(.horizontal, 22)
             .padding(.vertical, 11)
             .background(

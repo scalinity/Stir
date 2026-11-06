@@ -1,7 +1,7 @@
 // CurrentHouseholdStore
 //
 // Holds the pre-created HouseholdProfile for the current user. RootCoordinator
-// calls `set(_:)` once on launch after HouseholdProfileRepository.ensureHouseholdProfile.
+// selects it at bootstrap and after reconciliation of CloudKit imports.
 // SettingsRootView → HouseholdPreferencesView consumes it.
 
 import CoreData

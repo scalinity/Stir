@@ -188,6 +188,58 @@ final class SolveViewModelPaywallTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func test_partialDinnerStreamsResolveEachVisibleRankToItsOwnRecipe() async throws {
+        for ranks in [[2, 3], [1, 3], [3], [1, 2, 3]] {
+            func dishJSON(rank: Int) -> [String: Any] {
+                [
+                    "rank": rank, "title": "Dinner \(rank)", "total_time_minutes": 20,
+                    "why_it_fits": "Fits", "missing_ingredient_count": 0,
+                    "fit_label_primary": "best_fit", "hard_constraint_pass": true,
+                    "reasoning_summary": "Safe",
+                    "recipe_plan": [
+                        "servings": 2, "difficulty": 1,
+                        "ingredients": [["display_name": "ingredient \(rank)", "amount_text": "1"]],
+                        "steps": [["step_number": 1, "instruction_text": "Cook dinner \(rank)"]],
+                    ],
+                ]
+            }
+            func event(_ name: String, _ value: [String: Any]) throws -> String {
+                let json = try JSONSerialization.data(withJSONObject: value)
+                return "event: \(name)\ndata: \(String(decoding: json, as: UTF8.self))\n\n"
+            }
+            var frames = try ranks.map { try event("dish", dishJSON(rank: $0)) }.joined()
+            frames += try event("done", [
+                "solve_request_id": UUID().uuidString, "total_cost_usd": 0,
+                "dishes_returned": ranks.count, "retry_count": 0, "prompt_version": "test",
+            ])
+            let data = Data(frames.utf8)
+            MockURLProtocol.handler = { request in
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                               headerFields: ["Content-Type": "text/event-stream"])!
+                return (response, data)
+            }
+            let vm = makeViewModel()
+            vm.prepare(with: [.init(displayName: "pantry", canonicalSlug: nil, amountText: nil)])
+            vm.startSolve()
+            let deadline = Date().addingTimeInterval(3)
+            while vm.persistedSolveID == nil, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertNotNil(vm.persistedSolveID, "stream ranks \(ranks), phase \(vm.phase)")
+            XCTAssertEqual(Set(vm.persistedSuggestedDishIDsByRank.keys), Set(ranks))
+            for rank in 1 ... 3 {
+                let card = try JSONDecoder.stir.decode(DishCard.self, from: JSONSerialization.data(withJSONObject: dishJSON(rank: rank)))
+                let plan = vm.persistedRecipePlan(for: card)
+                if ranks.contains(rank) {
+                    XCTAssertEqual(plan?.title, "Dinner \(rank)")
+                    XCTAssertEqual(plan?.ingredientArray.first?.displayName, "ingredient \(rank)")
+                } else {
+                    XCTAssertNil(plan, "failed rank \(rank) must not resolve another card")
+                }
+            }
+        }
+    }
+
     private func makeViewModel(
         presentPaywall: ((PaywallTrigger) -> Void)? = nil,
     ) -> SolveViewModel {

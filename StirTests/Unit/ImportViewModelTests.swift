@@ -174,3 +174,106 @@ private extension AIDispatch {
         return AIDispatch(session: session, config: config)
     }
 }
+
+@MainActor
+final class ImportRecoverySafetyTests: XCTestCase {
+    func test_highConfidenceStepAllergenBlocksSaveAndChecksCurrentRules() async throws {
+        let fixture = try makeFixture()
+        await fixture.vm.submitPastedText("rice recipe")
+        XCTAssertEqual(fixture.vm.stageKind, .queued)
+        await fixture.vm.resume(importID: fixture.id)
+        XCTAssertEqual(fixture.vm.stageKind, .review)
+        XCTAssertTrue(fixture.vm.dietaryConflicts.isEmpty)
+        let rule = DietaryRule(context: fixture.controller.viewContext)
+        rule.id = UUID(); rule.household = fixture.household
+        rule.value = "peanut"; rule.typedKind = .allergy
+        rule.typedSeverity = .hard; rule.isActive = true
+        XCTAssertFalse(fixture.vm.dietaryConflicts.isEmpty)
+        await fixture.vm.confirmAndSave()
+        XCTAssertEqual(fixture.vm.stageKind, .review)
+        let plans = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
+        XCTAssertEqual(try fixture.controller.viewContext.count(for: plans), 0)
+    }
+
+    func test_relaunchResultRecoverySavesExactlyOnePlanAndRepeatedNotificationOpensIt() async throws {
+        let fixture = try makeFixture()
+        await fixture.vm.submitPastedText("rice recipe")
+        let reopened = makeVM(controller: fixture.controller, household: fixture.household, id: fixture.id)
+        await reopened.resume()
+        XCTAssertEqual(reopened.stageKind, .review)
+        await reopened.confirmAndSave()
+        await reopened.confirmAndSave()
+        let tapped = makeVM(controller: fixture.controller, household: fixture.household, id: fixture.id)
+        await tapped.resume(importID: fixture.id)
+        XCTAssertEqual(tapped.stageKind, .saved)
+        let plans = NSFetchRequest<RecipePlan>(entityName: "RecipePlan")
+        XCTAssertEqual(try fixture.controller.viewContext.count(for: plans), 1)
+    }
+
+    func test_importDeepLinkAndDeniedNotificationsDoNotAffectRecovery() async throws {
+        let fixture = try makeFixture()
+        let url = URL(string: "stir://import/\(fixture.id)")!
+        XCTAssertEqual(StirDeepLink.parse(url), .importResult(importID: fixture.id))
+        let delegate = StirNotificationDelegate(telemetry: PostHogClient(testingOnly: true))
+        delegate.routeImportCompletion(userInfo: ["deep_link": url.absoluteString])
+        XCTAssertEqual(delegate.consumePendingImportID(), fixture.id)
+        XCTAssertNil(delegate.consumePendingImportID())
+        // No notification permission or delegate is needed for foreground/reopen.
+        await fixture.vm.submitPastedText("rice recipe")
+        await fixture.vm.resume(importID: fixture.id)
+        XCTAssertEqual(fixture.vm.stageKind, .review)
+    }
+
+    func test_expiredResultIsExplicitAndDoesNotSubmitAgain() async throws {
+        let fixture = try makeFixture()
+        await fixture.vm.submitPastedText("rice recipe")
+        let reopened = ImportViewModel(
+            household: fixture.household, aiDispatch: .stub,
+            importRepo: RecipeImportRepository(controller: fixture.controller), controller: fixture.controller,
+            resultLoader: { id in
+                RecipeImportResponse(importID: id, status: .expired, recipe: nil, retryCount: 0, promptVersion: "1", asyncJobID: nil)
+            },
+            submitter: { _ in XCTFail("Recovery must not resubmit"); throw CancellationError() }
+        )
+        await reopened.resume()
+        XCTAssertEqual(reopened.stageKind, .error)
+    }
+
+    private struct Fixture {
+        let vm: ImportViewModel
+        let controller: PersistenceController
+        let household: HouseholdProfile
+        let initialID: UUID
+        @MainActor var id: UUID {
+            (try? RecipeImportRepository(controller: controller).recent(for: household).first?.id) ?? initialID
+        }
+    }
+
+    private func makeFixture() throws -> Fixture {
+        let controller = PersistenceController(inMemory: true)
+        let household = HouseholdProfile(context: controller.viewContext)
+        household.id = UUID(); household.createdAt = Date(); household.servingsDefault = 2
+        try controller.save()
+        let id = UUID()
+        return Fixture(vm: makeVM(controller: controller, household: household, id: id), controller: controller, household: household, initialID: id)
+    }
+
+    private func makeVM(controller: PersistenceController, household: HouseholdProfile, id: UUID) -> ImportViewModel {
+        ImportViewModel(
+            household: household, aiDispatch: .stub,
+            importRepo: RecipeImportRepository(controller: controller), controller: controller,
+            resultLoader: { importID in
+                let recipe = RecipeImportResponse.ImportedRecipe(
+                    title: "Rice", servings: 2, estimatedMinutes: 10,
+                    ingredients: [.init(displayName: "rice", canonicalSlug: "rice", amountText: "1 cup", group: nil)],
+                    steps: [.init(stepNumber: 1, instructionText: "Top with crushed peanuts.", timerSeconds: nil, cautionTags: nil)],
+                    parseQuality: .high, editHints: nil
+                )
+                return RecipeImportResponse(importID: importID, status: .completed, recipe: recipe, retryCount: 0, promptVersion: "1", asyncJobID: nil)
+            },
+            submitter: { request in
+                RecipeImportResponse(importID: request.importID, status: .queued, recipe: nil, retryCount: 0, promptVersion: "1", asyncJobID: id.uuidString)
+            }
+        )
+    }
+}

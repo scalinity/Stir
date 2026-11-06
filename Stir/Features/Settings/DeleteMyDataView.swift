@@ -66,17 +66,17 @@ struct DeleteMyDataView: View {
 
     private var explanationCard: some View {
         VStack(alignment: .leading, spacing: CGFloat.Stir.space3) {
-            Text("This deletes your account and all data Stir holds about you.")
+            Text("This removes this household from the device and requests deletion of the data Stir holds about you.")
                 .stirFont(.bodyLg)
                 .foregroundStyle(Color.Stir.textPrimary)
 
             VStack(alignment: .leading, spacing: CGFloat.Stir.space2) {
-                bulletRow("Pantry, recipes, cooking history, and ratings (CloudKit)")
+                bulletRow("Pantry, recipes, cooking history, and ratings (local removal, then iCloud sync)")
                 bulletRow("Subscription record, quotas, and AI request logs (Stir backend)")
                 bulletRow("Analytics, support tickets, and crash reports linked to you")
             }
 
-            Text("Deletion completes within 30 days. Subscription auto-renew is canceled — manage refunds via the App Store.")
+            Text("Backend deletion may take up to 30 days. iCloud removal syncs when connected. This does not cancel your subscription; manage renewal and refunds in the App Store.")
                 .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.textSecondary)
         }
@@ -142,10 +142,10 @@ struct DeleteMyDataView: View {
                     .stirFont(.labelLg)
                     .foregroundStyle(Color.Stir.textPrimary)
             }
-            Text("We'll email a confirmation when deletion is complete — within 30 days at the email tied to your subscription. Subscription auto-renew has been canceled.")
+            Text("The backend deletion request was accepted. Local removal and iCloud sync are handled separately. This does not cancel an App Store subscription.")
                 .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.textSecondary)
-            Text("Need to retract this request, or have a question? Email privacy@getstir.app within the 30-day window.")
+            Text("Local deletion cannot be undone. For questions about the pending backend request, contact privacy@getstir.app.")
                 .stirFont(.bodySm)
                 .foregroundStyle(Color.Stir.textSecondary)
             Button {

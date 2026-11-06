@@ -138,7 +138,7 @@ final class PantryListViewModelTests: XCTestCase {
             amountText: "2 bottles",
             memoryState: .remembered,
         )
-        XCTAssertTrue(ok)
+        XCTAssertEqual(ok, .saved)
         XCTAssertEqual(row.displayName, "extra-virgin olive oil")
         XCTAssertEqual(row.amountText, "2 bottles")
     }
@@ -158,7 +158,7 @@ final class PantryListViewModelTests: XCTestCase {
             amountText: nil,
             memoryState: nil,
         )
-        XCTAssertTrue(ok)
+        XCTAssertEqual(ok, .saved)
         XCTAssertEqual(row.typedMemoryState, .expired, "untouched picker preserves original state")
         XCTAssertEqual(row.displayName, "stale flour (renamed)")
     }
@@ -172,12 +172,32 @@ final class PantryListViewModelTests: XCTestCase {
             amountText: nil,
             memoryState: .remembered,
         )
-        XCTAssertFalse(ok)
+        XCTAssertEqual(ok, .failed)
         XCTAssertNotNil(vm.errorMessage)
         XCTAssertNotNil(vm.errorEvent)
     }
 
     // MARK: - deleteItem
+
+    func test_editItem_atCapRejectsPromotionButAllowsRememberedEdits() throws {
+        for i in 0 ..< 25 { try seedManual("standing-\(i)") }
+        let today = try seedManual("basil", memoryState: .ephemeral)
+        let vm = makeVM()
+
+        XCTAssertEqual(vm.editItem(today, displayName: "basil", amountText: nil, memoryState: .remembered), .capReached)
+        XCTAssertEqual(today.typedMemoryState, .ephemeral)
+        let standing = try XCTUnwrap(repo.fetchAll(for: household).first { $0.typedMemoryState == .remembered })
+        XCTAssertEqual(vm.editItem(standing, displayName: standing.displayName!, amountText: "2", memoryState: .remembered), .saved)
+        XCTAssertEqual(try repo.countRemembered(for: household), 25)
+    }
+
+    func test_addItem_atCapRejectsPromotionOfExistingTodayItem() throws {
+        for i in 0 ..< 25 { try seedManual("standing-\(i)") }
+        let today = try seedManual("basil", memoryState: .ephemeral)
+        XCTAssertEqual(makeVM().addItem(displayName: "basil", amountText: nil, memoryState: .remembered), .capReached)
+        XCTAssertEqual(today.typedMemoryState, .ephemeral)
+        XCTAssertEqual(try repo.countRemembered(for: household), 25)
+    }
 
     func test_deleteItem_softDeletesAndReloads() async throws {
         let row = try seedManual("olive oil")

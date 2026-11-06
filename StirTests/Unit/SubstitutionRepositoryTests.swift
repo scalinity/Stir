@@ -180,6 +180,23 @@ final class SubstitutionRepositoryTests: XCTestCase {
 
     // MARK: - applyStepRewrite (SCA-432)
 
+    func test_acceptValidatedSwap_savesDecisionIngredientAndStepTogether() throws {
+        let ingredient = try XCTUnwrap(recipePlan.ingredientArray.first { $0.displayName == "dried pasta" })
+        ingredient.amountText = "12 oz"
+        ingredient.canonicalIngredientSlug = "dried-pasta"
+        let step = try makeStep(on: recipePlan, number: 1, instructionText: "Boil the dried pasta.")
+        let event = try persistPickerEvent(on: ingredient)
+        try repo.acceptValidatedSwap(event, substitutionText: "rice noodles", amountConversion: "8 oz",
+                                     step: step, rewrittenText: "  Boil the rice noodles.  ")
+        XCTAssertEqual(event.acceptedBool, true)
+        XCTAssertEqual(event.acceptedAlternativeText, "rice noodles")
+        XCTAssertEqual(ingredient.displayName, "rice noodles")
+        XCTAssertEqual(ingredient.amountText, "8 oz")
+        XCTAssertNil(ingredient.canonicalIngredientSlug)
+        XCTAssertEqual(step.instructionText, "Boil the rice noodles.")
+        XCTAssertFalse(controller.viewContext.hasChanges)
+    }
+
     func test_applyStepRewrite_replacesInstructionText() throws {
         let step = try makeStep(
             on: recipePlan,

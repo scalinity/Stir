@@ -28,12 +28,8 @@
 // spaces model different concepts (user-chosen vs system-assigned)
 // and the visual languages are materially different. Both stay.
 //
-// WCAG AA-Large 3:1 compliance: selected chips use .bold (weight 700)
-// at 15pt (labelLg). ember.600-on-ember.100 and crimson.600-on-
-// crimson.100 only hit ~3.67:1 body contrast; 15pt bold qualifies as
-// "large" under AA so 3:1 is the applicable threshold (finding C5).
-// Idle chips stay at .medium on neutral paper.100 where body contrast
-// passes comfortably.
+// Selected and idle chip labels meet the normal-text 4.5:1 contrast
+// minimum in both appearances, including at the default 15pt size.
 
 import SwiftUI
 
@@ -69,8 +65,7 @@ struct SelectableChip: View {
                     .stirFont(.labelLg)
                     .fontWeight(isSelected ? .bold : .medium)
                     .foregroundStyle(foregroundColor)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, CGFloat.Stir.space3Half) // 14pt
             .padding(.vertical, CGFloat.Stir.space2 + 1)   // 9pt

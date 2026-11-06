@@ -221,6 +221,7 @@ final class MockLiveTransport: LiveTransporting {
 
     var openError: Error?
     var sendError: Error?
+    var onSend: ((LiveOutboundFrame) async throws -> Void)?
 
     init() {
         let pair = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
@@ -256,6 +257,7 @@ final class MockLiveTransport: LiveTransporting {
     func send(_ frame: LiveOutboundFrame) async throws {
         if let sendError { throw sendError }
         sentFrames.append(frame)
+        try await onSend?(frame)
     }
 
     func yield(_ frame: LiveInboundFrame) {

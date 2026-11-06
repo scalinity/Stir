@@ -196,33 +196,27 @@ private struct ProgressBar: View {
     let track: Color
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let progress = Self.progress(
-                fireDate: fireDate,
-                pausedRemainingSec: pausedRemainingSec,
-                totalDurationSec: totalDurationSec,
-            )
-            ZStack(alignment: .leading) {
-                Capsule().fill(track)
-                Capsule().fill(tint).frame(width: max(0, min(width, width * progress)))
+        Group {
+            if let pausedRemainingSec {
+                ProgressView(value: pausedProgress(remaining: pausedRemainingSec))
+            } else if totalDurationSec > 0 {
+                // The system advances date-relative progress while the
+                // activity extension is suspended, just like TimerNumbers.
+                ProgressView(
+                    timerInterval: fireDate.addingTimeInterval(-TimeInterval(totalDurationSec))...fireDate,
+                    countsDown: false,
+                )
+            } else {
+                ProgressView(value: 0)
             }
         }
+        .labelsHidden()
+        .tint(tint)
+        .background(track, in: Capsule())
     }
 
-    static func progress(
-        fireDate: Date,
-        pausedRemainingSec: Int?,
-        totalDurationSec: Int,
-    ) -> Double {
+    private func pausedProgress(remaining: Int) -> Double {
         guard totalDurationSec > 0 else { return 0 }
-        let remaining: Int
-        if let paused = pausedRemainingSec {
-            remaining = paused
-        } else {
-            remaining = max(0, Int(fireDate.timeIntervalSinceNow.rounded()))
-        }
-        let elapsed = max(0, totalDurationSec - remaining)
-        return Double(elapsed) / Double(totalDurationSec)
+        return min(1, max(0, Double(totalDurationSec - remaining) / Double(totalDurationSec)))
     }
 }

@@ -73,9 +73,9 @@ final class PantryItemRepository {
         on household: HouseholdProfile,
         usedRemembered: Int = 0,
         cap: Int? = nil,
+        now: Date = Date(),
     ) throws -> ScanUpsertOutcome {
         let context = controller.viewContext
-        let now = Date()
         var results: [PantryItem] = []
         var liveUsed = usedRemembered
         var truncated = 0
@@ -91,6 +91,11 @@ final class PantryItemRepository {
             if let existing = match {
                 existing.lastSeenAt = now
                 existing.updatedAt = now
+                if existing.typedMemoryState == .ephemeral {
+                    existing.expiresAt = Self.expiresAtForEphemeral(now: now)
+                } else if existing.typedMemoryState == .remembered {
+                    existing.expiresAt = nil
+                }
                 existing.userConfirmed = true
                 existing.confidence = max(existing.confidence, ing.confidence)
                 // SCA-23: re-scan amount refresh. Previously this only
@@ -557,9 +562,9 @@ final class PantryItemRepository {
         on household: HouseholdProfile,
         usedRemembered: Int? = nil,
         cap: Int? = nil,
+        now: Date = Date(),
     ) throws -> InsertManualOutcome {
         let context = controller.viewContext
-        let now = Date()
         let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             throw StirError.validation(
@@ -593,11 +598,16 @@ final class PantryItemRepository {
             on: household,
             context: context,
         ) {
+            if memoryState == .remembered, existing.typedMemoryState != .remembered,
+               let used = usedRemembered, let cap, used >= cap {
+                return .capReached
+            }
             existing.lastSeenAt = now
             existing.updatedAt = now
             existing.userConfirmed = true
             existing.confidence = 1.0
             existing.typedMemoryState = memoryState
+            existing.expiresAt = memoryState == .ephemeral ? Self.expiresAtForEphemeral(now: now) : nil
             if let trimmedAmount, !trimmedAmount.isEmpty {
                 existing.amountText = trimmedAmount
             }
@@ -605,7 +615,7 @@ final class PantryItemRepository {
             return .upserted(existing)
         }
 
-        // New-row branch — apply cap only here. `.ephemeral` /
+        // New-row branch. `.ephemeral` /
         // `.expired` / `.unknown` rows skip the cap entirely (only
         // `.remembered` counts against the standing-cap, mirroring
         // `countRemembered`).
@@ -1077,13 +1087,22 @@ final class PantryItemRepository {
         )
     }
 
-    /// Edit a `PantryItem` in place with validation. Throws on
+    enum UpdateOutcome: Equatable {
+        case updated
+        case capReached
+    }
+
+    /// Validate and edit a pantry row, enforcing the cap only on promotion.
+    @discardableResult
     func update(
         _ item: PantryItem,
         displayName: String,
         amountText: String?,
         memoryState: PantryItem.MemoryState,
-    ) throws {
+        usedRemembered: Int? = nil,
+        cap: Int? = nil,
+        now: Date = Date(),
+    ) throws -> UpdateOutcome {
         guard item.deletedAt == nil else {
             throw StirError.validation(
                 fieldErrors: [FieldError(field: "deletedAt", issue: "cannot edit a soft-deleted item")],
@@ -1116,11 +1135,26 @@ final class PantryItemRepository {
                 message: "amountText too long",
             )
         }
+        if memoryState == .remembered, item.typedMemoryState != .remembered,
+           let used = usedRemembered, let cap, used >= cap {
+            return .capReached
+        }
+        if item.displayName?.pantryMatchTokens() != trimmedName.pantryMatchTokens() {
+            item.canonicalIngredientSlug = nil
+        }
         item.displayName = trimmedName
         item.amountText = (trimmedAmount?.isEmpty ?? true) ? nil : trimmedAmount
+        if memoryState == .ephemeral {
+            if item.typedMemoryState != .ephemeral || item.expiresAt == nil {
+                item.expiresAt = Self.expiresAtForEphemeral(now: now)
+            }
+        } else {
+            item.expiresAt = nil
+        }
         item.typedMemoryState = memoryState
-        item.updatedAt = Date()
+        item.updatedAt = now
         try controller.save()
+        return .updated
     }
 
     // MARK: - Private

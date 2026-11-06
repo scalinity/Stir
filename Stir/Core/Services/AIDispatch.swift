@@ -301,6 +301,18 @@ actor AIDispatch {
     /// The backend applies its own ai_response_cache idempotency on
     /// `import_id`, so a retry with the same id replays the cached
     /// response instead of burning another Gemini call.
+    /// Read an accepted import; this route never submits content or consumes quota.
+    func recipeImportResult(importID: UUID) async throws -> RecipeImportResponse {
+        let url = config.supabase.url.appendingPathComponent("/functions/v1/recipe-import")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "import_id", value: importID.uuidString.lowercased())]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.addValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = 10
+        return try await session.performAuthenticated(request)
+    }
+
     func recipeImport(request body: RecipeImportRequest) async throws -> RecipeImportResponse {
         let url = config.supabase.url.appendingPathComponent("/functions/v1/recipe-import")
         var request = URLRequest(url: url)

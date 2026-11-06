@@ -254,10 +254,10 @@ private struct StartCookTile: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.2))
+                    .fill(Color.Stir.onAccent.opacity(0.2))
                 Image(systemName: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(Color.Stir.onAccent)
             }
             .frame(width: 32, height: 32)
 
@@ -265,7 +265,7 @@ private struct StartCookTile: View {
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.2)
                 .textCase(.uppercase)
-                .foregroundStyle(Color.white)
+                .foregroundStyle(Color.Stir.onAccent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(

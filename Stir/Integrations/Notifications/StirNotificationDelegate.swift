@@ -37,6 +37,19 @@ import UserNotifications
 @MainActor
 final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = StirNotificationDelegate()
+    private(set) var pendingImportID: UUID?
+
+    func consumePendingImportID() -> UUID? {
+        defer { pendingImportID = nil }
+        return pendingImportID
+    }
+
+    func routeImportCompletion(userInfo: [AnyHashable: Any]) {
+        guard let raw = userInfo["deep_link"] as? String, let url = URL(string: raw),
+              case .importResult(let importID) = StirDeepLink.parse(url) else { return }
+        pendingImportID = importID
+        NotificationCenter.default.post(name: .stirImportResultTapped, object: nil)
+    }
 
     /// SystemSoundID for the foreground timer chime. 1057 is iOS's
     /// "Tink" — a single-note soft chime that's audible without being
@@ -125,6 +138,7 @@ final class StirNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         // SCA-375: same atomic dedupe pattern as willPresent.
         MainActor.assumeIsolated {
             Self.shared.emitTelemetryIfNeeded(response.notification)
+            Self.shared.routeImportCompletion(userInfo: response.notification.request.content.userInfo)
         }
         completionHandler()
     }
@@ -200,4 +214,9 @@ enum NotificationKind: String, CaseIterable, Sendable {
         guard let raw = userInfo[Self.userInfoKey] as? String else { return nil }
         return NotificationKind(rawValue: raw)
     }
+}
+
+// Retain the identifier until a ready root consumes it, including cold launch.
+extension Notification.Name {
+    static let stirImportResultTapped = Notification.Name("stirImportResultTapped")
 }

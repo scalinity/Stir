@@ -32,6 +32,12 @@ enum PantryAddResult: Equatable {
     case failed
 }
 
+enum PantryEditResult: Equatable {
+    case saved
+    case capReached
+    case failed
+}
+
 @MainActor
 @Observable
 final class PantryListViewModel {
@@ -273,24 +279,29 @@ final class PantryListViewModel {
         displayName: String,
         amountText: String?,
         memoryState: PantryItem.MemoryState?,
-    ) -> Bool {
+    ) -> PantryEditResult {
         clearError()
         let stateToPersist = memoryState ?? item.typedMemoryState
         do {
-            try repo.update(
+            let used = stateToPersist == .remembered && item.typedMemoryState != .remembered
+                ? try repo.countRemembered(for: household) : nil
+            let outcome = try repo.update(
                 item,
                 displayName: displayName,
                 amountText: amountText,
                 memoryState: stateToPersist,
+                usedRemembered: used,
+                cap: entitlements.rememberedPantryCap,
             )
+            guard outcome == .updated else { return .capReached }
             load()
-            return true
+            return .saved
         } catch {
             Logger.coreData.error(
                 "editItem failed: \(error.localizedDescription, privacy: .private)",
             )
             surfaceError("Couldn't save this change. Try again.")
-            return false
+            return .failed
         }
     }
 

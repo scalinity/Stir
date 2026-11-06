@@ -1,7 +1,7 @@
 // HouseholdPreferencesView
 //
 // Settings → Household preferences. Edits the same three sections as
-// onboarding (allergens/diets/goals + equipment + servings/units),
+// onboarding (allergens/diets/dislikes/goals + equipment + servings/units),
 // rebuilt 2026-04-28 onto the custom Stir design system to match
 // `SettingsRootView`'s grouped-card grammar.
 //
@@ -35,6 +35,7 @@ import SwiftUI
 
 struct HouseholdPreferencesView: View {
     @Environment(CurrentHouseholdStore.self) private var householdStore
+    @Environment(RootCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
     @State private var viewModel: OnboardingViewModel?
@@ -63,11 +64,12 @@ struct HouseholdPreferencesView: View {
         }
         .navigationTitle("Household preferences")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            guard viewModel == nil else { return }
+        .task(id: householdStore.profile?.objectID) {
             if let profile = householdStore.profile {
-                viewModel = OnboardingViewModel(profile: profile)
+                viewModel = coordinator.makeOnboardingViewModel(for: profile)
+                initError = nil
             } else {
+                viewModel = nil
                 initError = "Couldn't load your preferences. Please try again."
                 Logger.ui.error("HouseholdPreferencesView: householdStore.profile unexpectedly nil")
                 SentryReporter.shared.captureError(
@@ -119,6 +121,8 @@ struct HouseholdPreferencesView: View {
         // writes.
         .onChange(of: bindable.selectedAllergens) { _, _ in saveAll(viewModel) }
         .onChange(of: bindable.selectedDiets) { _, _ in saveAll(viewModel) }
+        .onChange(of: bindable.selectedDislikes) { _, _ in saveAll(viewModel) }
+        .onChange(of: bindable.customDislikes) { _, _ in saveAll(viewModel) }
         .onChange(of: bindable.selectedGoals) { _, _ in saveAll(viewModel) }
         .onChange(of: bindable.selectedEquipment) { _, _ in saveAll(viewModel) }
         .onChange(of: bindable.servingsDefault) { _, _ in saveAll(viewModel) }
@@ -171,6 +175,12 @@ struct HouseholdPreferencesView: View {
                             label: { $0.displayName },
                         )
                     },
+                )
+                StirRowDivider()
+                navigationValueRow(
+                    title: "Dislikes",
+                    value: countLabel(bindable.selectedDislikes.count + bindable.customDislikes.count),
+                    destination: { dislikesScreen(viewModel: viewModel) },
                 )
                 StirRowDivider()
                 navigationValueRow(
@@ -297,6 +307,46 @@ struct HouseholdPreferencesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.Stir.paper50)
         .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func dislikesScreen(viewModel: OnboardingViewModel) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: CGFloat.Stir.space5) {
+                VStack(spacing: 0) {
+                    ForEach(Array(DislikeOption.allCases.enumerated()), id: \.element) { index, option in
+                        if index > 0 { StirRowDivider() }
+                        pickerRow(
+                            label: option.displayName,
+                            isSelected: viewModel.selectedDislikes.contains(option),
+                        ) {
+                            if viewModel.selectedDislikes.contains(option) {
+                                viewModel.selectedDislikes.remove(option)
+                            } else {
+                                viewModel.selectedDislikes.insert(option)
+                            }
+                        }
+                    }
+                }
+                .stirCard()
+
+                if !viewModel.customDislikes.isEmpty {
+                    ChipFlowLayout(spacing: CGFloat.Stir.space2) {
+                        ForEach(viewModel.customDislikes.sorted(), id: \.self) { dislike in
+                            SelectableChip(label: dislike, tone: .danger, isSelected: true) {
+                                viewModel.customDislikes.remove(dislike)
+                            }
+                            .accessibilityHint("Remove this dislike")
+                        }
+                    }
+                }
+                AddDislikePill(viewModel: viewModel)
+            }
+            .padding(.horizontal, CGFloat.Stir.screenMargin)
+            .padding(.vertical, CGFloat.Stir.space3)
+        }
+        .background(Color.Stir.paper50)
+        .navigationTitle("Dislikes")
         .navigationBarTitleDisplayMode(.inline)
     }
 

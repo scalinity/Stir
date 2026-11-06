@@ -83,6 +83,12 @@ final class ImportViewModel {
     /// through to the `edit_required` property when we persist.
     var didEdit: Bool = false
 
+    /// Recomputed from current rules at review and immediately before saving.
+    var dietaryConflicts: [String] {
+        guard case .review(let recipe, _) = stage else { return [] }
+        return ImportDietaryConflicts.check(recipe, household: household)
+    }
+
     let household: HouseholdProfile
 
     private let aiDispatch: AIDispatch
@@ -90,6 +96,8 @@ final class ImportViewModel {
     private let controller: PersistenceController
     private let analytics: PostHogClient
     private let ocrService: OCRService
+    private let resultLoader: (UUID) async throws -> RecipeImportResponse
+    private let submitter: (RecipeImportRequest) async throws -> RecipeImportResponse
 
     init(
         household: HouseholdProfile,
@@ -98,6 +106,8 @@ final class ImportViewModel {
         controller: PersistenceController,
         analytics: PostHogClient = .shared,
         ocrService: OCRService = OCRService(),
+        resultLoader: ((UUID) async throws -> RecipeImportResponse)? = nil,
+        submitter: ((RecipeImportRequest) async throws -> RecipeImportResponse)? = nil,
     ) {
         self.household = household
         self.aiDispatch = aiDispatch
@@ -105,6 +115,8 @@ final class ImportViewModel {
         self.controller = controller
         self.analytics = analytics
         self.ocrService = ocrService
+        self.resultLoader = resultLoader ?? { try await aiDispatch.recipeImportResult(importID: $0) }
+        self.submitter = submitter ?? { try await aiDispatch.recipeImport(request: $0) }
     }
 
     // MARK: - URL import
@@ -280,23 +292,83 @@ final class ImportViewModel {
             payload: payload,
         )
         do {
-            let response = try await aiDispatch.recipeImport(request: request)
-            switch response.status {
-            case .completed:
-                guard let recipe = response.recipe else {
-                    stage = .error(code: "IMPORT-01", message: "The import came back empty.")
-                    markFailed(importRow, errorCode: "IMPORT-01")
-                    emitImportCompleted(parseQuality: "failed")
-                    return
-                }
-                stage = .review(recipe: recipe, parseQuality: recipe.parseQuality.rawValue)
-            case .queued:
-                stage = .queued(jobID: response.asyncJobID ?? importID.uuidString)
-            }
+            let response = try await submitter(request)
+            apply(response, to: importRow)
         } catch {
-            Logger.ui.error("recipe import failed: \(error.localizedDescription, privacy: .public)")
-            stage = .error(code: "IMPORT-01", message: "We couldn't read that recipe. Try again or paste the text.")
-            markFailed(importRow, errorCode: "IMPORT-01")
+            Logger.ui.error("recipe import request unavailable")
+            if let typed = error as? StirError, typed.presentableCode != .net01 {
+                stage = .error(code: typed.presentableCode.rawValue, message: ErrorPresenter.present(typed).message)
+                markFailed(importRow, errorCode: typed.presentableCode.rawValue)
+                emitImportCompleted(parseQuality: "failed")
+            } else {
+                stage = .queued(jobID: importID.uuidString)
+            }
+        }
+    }
+
+    // MARK: - Accepted result recovery
+
+    /// Reopening or a notification resumes the existing local row. A saved row
+    /// opens the same plan; recovering the result can never create a new import.
+    func resume(importID: UUID? = nil) async {
+        guard !isBusy else { return }
+        do {
+            let row: RecipeImport?
+            if let importID { row = try importRepo.find(importID: importID, for: household) }
+            else { row = try importRepo.latestProcessing(for: household) }
+            guard let row, let id = row.id else { return }
+            activeImportRow = row
+            activeSource = row.source
+            if let planID = row.recipePlanId {
+                stage = .saved(recipePlanID: planID)
+                return
+            }
+            stage = .queued(jobID: id.uuidString)
+            try await refreshQueuedResult()
+        } catch {
+            // Keep processing state for the next foreground/reopen attempt.
+            Logger.ui.warning("import result recovery unavailable")
+        }
+    }
+
+    func refreshQueuedResult() async throws {
+        guard case .queued = stage, let row = activeImportRow, let id = row.id else { return }
+        let response = try await resultLoader(id)
+        try Task.checkCancellation()
+        guard activeImportRow?.id == id, case .queued = stage else { return }
+        apply(response, to: row)
+    }
+
+    /// View-owned task is cancelled when dismissed/backgrounded. Stop after
+    /// two minutes; a reopen/foreground or Check again starts another read.
+    func pollQueuedResult() async {
+        for _ in 0..<60 {
+            guard case .queued = stage, !Task.isCancelled else { return }
+            do { try await refreshQueuedResult() } catch is CancellationError { return }
+            catch { /* A later read can recover; never resubmit the recipe. */ }
+            guard case .queued = stage else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
+    }
+
+    private func apply(_ response: RecipeImportResponse, to row: RecipeImport) {
+        guard response.importID == row.id else {
+            stage = .error(code: "IMPORT-01", message: "The import response did not match this recipe.")
+            return
+        }
+        switch response.status {
+        case .completed:
+            guard let recipe = response.recipe else {
+                stage = .error(code: "IMPORT-01", message: "The import came back empty.")
+                markFailed(row, errorCode: "IMPORT-01")
+                return
+            }
+            stage = .review(recipe: recipe, parseQuality: recipe.parseQuality.rawValue)
+        case .queued:
+            stage = .queued(jobID: response.asyncJobID ?? response.importID.uuidString)
+        case .failed, .expired:
+            stage = .error(code: "IMPORT-01", message: response.message ?? "This import is no longer available. Import the recipe again.")
+            markFailed(row, errorCode: "IMPORT-01")
             emitImportCompleted(parseQuality: "failed")
         }
     }
@@ -315,6 +387,11 @@ final class ImportViewModel {
     func confirmAndSave() async {
         guard case .review(let recipe, let quality) = stage else { return }
         guard let importRow = activeImportRow else { return }
+        guard ImportDietaryConflicts.check(recipe, household: household).isEmpty else { return }
+        if let planID = importRow.recipePlanId {
+            stage = .saved(recipePlanID: planID)
+            return
+        }
         stage = .saving
 
         do {

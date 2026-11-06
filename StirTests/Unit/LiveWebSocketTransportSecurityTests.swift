@@ -91,4 +91,39 @@ final class LiveWebSocketTransportSecurityTests: XCTestCase {
         XCTAssertTrue(scrubbed.contains("REDACTED"), "redaction marker must appear")
         XCTAssertTrue(scrubbed.contains("wss://api.openai.com/v1/realtime"), "non-secret text must be left alone")
     }
+
+    func test_closeDuringToolOutputSendPreventsLateResponseCreate() async throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let transport = LiveWebSocketTransport(sharedSession: session)
+        let task = session.webSocketTask(with: URL(string: "wss://test.invalid")!)
+        transport._testInstallSocket(task)
+        let firstMessage = expectation(description: "function output send suspended")
+        var sendContinuation: CheckedContinuation<Void, Never>?
+        var sentTypes: [String] = []
+        transport.testingMessageSender = { message in
+            guard case let .string(text) = message else { return }
+            let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+            sentTypes.append(object?["type"] as? String ?? "unknown")
+            await withCheckedContinuation { continuation in
+                sendContinuation = continuation
+                firstMessage.fulfill()
+            }
+        }
+        let sending = Task { @MainActor in
+            try await transport.send(.toolResponse(functionResponseId: "tool", name: "advance_step", response: ["ok": true]))
+        }
+        await fulfillment(of: [firstMessage], timeout: 1)
+        let continuation = try XCTUnwrap(sendContinuation)
+        transport.close()
+        continuation.resume()
+        do {
+            try await sending.value
+            XCTFail("closed tool send must fail before response.create")
+        } catch {
+            XCTAssertEqual(error as? LiveWebSocketTransport.TransportError, .sendAfterClose)
+        }
+        XCTAssertEqual(sentTypes, ["conversation.item.create"])
+    }
+
 }

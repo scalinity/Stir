@@ -262,22 +262,9 @@ extension RealtimeSession {
                         ])
                     }
                     #endif
-                    // P3-C (2026-04-23): brief sleep instead of tight
-                    // read-and-drop during mute. Without the sleep, the
-                    // forwarder wakes on every 20 ms mic frame (50 Hz)
-                    // and burns MainActor contention while the user
-                    // hears 5-15 s of model speech. With the sleep we
-                    // release the MainActor for SwiftUI/other work and
-                    // re-check gate conditions on the next tick. 100 ms
-                    // is a balance: short enough that post-mute mic
-                    // resumption doesn't perceptibly lag (user has to
-                    // react to model finishing speaking anyway — their
-                    // utterance starts well after the 100 ms window),
-                    // long enough to materially reduce wake-ups during
-                    // a ~10 s model turn (~100 wakes vs ~500 without).
-                    try? await Task.sleep(for: .milliseconds(100))
                     continue
                 }
+                guard pipeline.captureGate.accepts(frame.captureEpoch) else { continue }
                 do {
                     try await transport.send(.realtimeInputAudio(
                         base64: frame.base64,

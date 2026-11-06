@@ -77,6 +77,17 @@ extension RealtimeSession {
     /// downgrades to C.3. Rare path; logs allow post-hoc triage.
     @discardableResult
     func refreshSession(reason: String) async -> RefreshOutcome {
+        guard refreshTask == nil, !Task.isCancelled else { return .skipped }
+        let task = Task { @MainActor [weak self] in
+            await self?.performRefresh(reason: reason) ?? .skipped
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return await task.value
+    }
+
+    private func performRefresh(reason: String) async -> RefreshOutcome {
+        let generation = lifecycleGeneration
         guard !isRefreshing else {
             #if DEBUG
             VoiceSessionLog.log("refresh.skipped_already_in_flight")
@@ -129,8 +140,11 @@ extension RealtimeSession {
         // if refresh fires in a state where we somehow have no transport
         // (defensive — shouldn't happen with the state guards above).
         let oldTransport = self.transport
+        var replacementTransport: (any LiveTransporting)?
+        var didSwapTransport = false
 
         do {
+            try checkLifecycle(generation)
             // 2. Build minimal recap (step position only, ADR 0014 PM amendment).
             let recap = buildRecap()
 
@@ -146,6 +160,7 @@ extension RealtimeSession {
             var preMinted: RealtimeSessionResponse?
             if let preMintTask = consumePreMintedTaskIfFresh() {
                 let candidate = try await preMintTask.value
+                try checkLifecycle(generation)
                 if clientSecretHasTimeToConnect(candidate) {
                     preMinted = candidate
                 } else {
@@ -158,6 +173,7 @@ extension RealtimeSession {
             } else {
                 let mintRequest = try buildMintRequest(recap: recap, isRefresh: true)
                 newResponse = try await aiDispatch.realtimeSession(request: mintRequest)
+                try checkLifecycle(generation)
             }
             destinationSessionID = newResponse.sessionID
             #if DEBUG
@@ -171,7 +187,8 @@ extension RealtimeSession {
             guard let wsURL = URL(string: newResponse.wsURL) else {
                 throw RealtimeSessionError.openFailed(message: "invalid ws_url from refresh mint")
             }
-            let newTransport = LiveWebSocketTransport()
+            let newTransport = makeTransport()
+            replacementTransport = newTransport
             // Session age is measured from when the socket opens, so
             // stamp it here but only adopt it at the swap: a failure
             // between now and the swap leaves the old transport (and its
@@ -199,6 +216,7 @@ extension RealtimeSession {
 
             // 6. Swap owned references to new transport + response.
             self.transport = newTransport
+            didSwapTransport = true
             self.mintResponse = newResponse
             self.transportOpenedAt = newTransportOpenedAt
 
@@ -212,10 +230,12 @@ extension RealtimeSession {
             // P3-D (2026-04-23): send pre-serialized JSON directly;
             // avoids triple JSON round-trip on every refresh.
             try await newTransport.send(.setupRawJSON(newResponse.setupFrameJSON))
+            try checkLifecycle(generation)
 
             // 9. Wait for setupComplete on the new session. Shared
             //    continuation — new dispatcher will resume it.
             try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
+            try checkLifecycle(generation)
 
             // 10. (Mic forwarding stays alive across the refresh — no
             //     restart needed. The forwarder reads `self.transport`
@@ -283,6 +303,13 @@ extension RealtimeSession {
             }
             return .success
         } catch {
+            guard generation == lifecycleGeneration, currentState != .closed, !Task.isCancelled else {
+                replacementTransport?.close()
+                // After the swap, close() only sees the replacement. This
+                // refresh still owns the captured old connection until handoff.
+                if didSwapTransport { oldTransport?.close() }
+                return .skipped
+            }
             let latencyMs = Int(now().timeIntervalSince(startedAt) * 1000)
             Logger.voice.error(
                 "live_session_refresh_failed error=\(error.localizedDescription, privacy: .private) latency_ms=\(latencyMs, privacy: .public)",
@@ -320,6 +347,13 @@ extension RealtimeSession {
                 // accumulating per failed refresh, which at beta user
                 // cadence compounds meaningfully.
                 oldTransport?.close()
+                replacementTransport?.close()
+                dispatcherGeneration += 1
+                receiveDispatcherTask?.cancel()
+                receiveDispatcherTask = nil
+                transport = nil
+                audioPipeline?.tearDown()
+                audioPipeline = nil
                 // CA2-6 fix: also tear down the mic forwarder. After the
                 // swap commit, micForwardTask reads `self.transport` per
                 // iteration and is now writing PCM frames to the broken
@@ -408,7 +442,8 @@ extension RealtimeSession {
     /// `turnComplete` could have arrived between the Task.sleep wake
     /// and the fire handler (rare but possible).
     func turnStuckWatchdogFired() {
-        guard stateMachine.state == .modelSpeaking else { return }
+        guard stateMachine.state == .modelSpeaking || stateMachine.state == .toolCalling else { return }
+        let failedToolResponse = stateMachine.state == .toolCalling
         let currentDate = now()
         let elapsedStuckMs: Int = {
             guard let last = lastInboundAudioAt else { return 0 }
@@ -457,13 +492,20 @@ extension RealtimeSession {
         // finalizeTurn after the persist lands.
         finalizeWasWatchdogFire = true
 
-        // Mirror the state-transition path that `content.turnComplete`
-        // takes in `handleServerContent`: modelSpeaking → ready. Not
-        // handling thinking/toolCalling/userSpeaking here because the
-        // watchdog only runs when we're in modelSpeaking (enforced by
-        // the guard above).
-        stateMachine.advance(to: .ready)
+        // A stalled tool send also blocks the receive dispatcher and may own
+        // the outbound send lock. End that connection rather than reopening
+        // the mic on a socket whose tool response can still complete later.
+        stateMachine.advance(to: failedToolResponse ? .error : .ready)
+        cancelTurnStuckWatchdog()
         finalizeTurn()
+        if let cont = turnCompleteContinuation {
+            turnCompleteContinuation = nil
+            cont.resume(throwing: RealtimeSessionError.turnDrained)
+        }
+        if failedToolResponse {
+            onVoiceFallbackRequired?("turnComplete_timeout")
+            close()
+        }
     }
 
     // MARK: - Pre-mint slot
@@ -846,7 +888,8 @@ extension RealtimeSession {
         // here, at a turn boundary: a refresh never interrupts a turn.
         // Guard `isRefreshing` prevents a second refresh kicking off while
         // one is in flight — trigger recheck happens on the next turn.
-        if !isRefreshing, turnCount > 0, let openedAt = transportOpenedAt {
+        if !isRefreshing, currentState != .closed, currentState != .error,
+           turnCount > 0, let openedAt = transportOpenedAt {
             let transportAge = currentDate.timeIntervalSince(openedAt)
             if transportAge >= LiveSessionBudget.refreshAtSessionAgeSec {
                 // DO NOT set `isRefreshing = true` here. `refreshSession()`
@@ -1137,6 +1180,7 @@ extension RealtimeSession {
         }
         switch frame {
         case .setupComplete:
+            setupAcknowledgedGeneration = dispatcherGeneration
             // Nil-clear BEFORE resume so a re-entrant resume (shouldn't
             // happen, but defense-in-depth against the server sending two
             // session.updated events) doesn't double-resume.
@@ -1188,6 +1232,9 @@ extension RealtimeSession {
             if firstModelAudioAt == nil {
                 userTurnEndAt = now()
             }
+
+        case .responseError:
+            if currentState == .toolCalling { turnStuckWatchdogFired() }
 
         case let .unknown(key):
             #if DEBUG

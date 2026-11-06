@@ -51,8 +51,7 @@ extension HouseholdProfile {
     ///
     /// Single filter rule: pantry item is included iff it is
     /// `userConfirmed`, NOT soft-deleted, AND has a non-empty
-    /// `displayName`. Dietary rules are included verbatim (all are
-    /// user-confirmed at onboarding/settings time). Equipment is
+    /// `displayName`. Only active dietary rules are included. Equipment is
     /// filtered by the stored `isAvailable` flag.
     ///
     /// The returned value is a small value-type seam; DTOs map from
@@ -64,8 +63,8 @@ extension HouseholdProfile {
     /// now consume the same predicate; any future code that re-
     /// inlines `.filter { $0.deletedAt == nil && $0.userConfirmed }`
     /// is reintroducing the same drift class SCA-424 caught.
-    func voiceContextSnapshot() -> VoiceContextSnapshot {
-        let rules: [VoiceContextSnapshot.DietaryRule] = dietaryRuleArray.map {
+    func voiceContextSnapshot(recipe: RecipePlan? = nil) -> VoiceContextSnapshot {
+        let rules: [VoiceContextSnapshot.DietaryRule] = dietaryRuleArray.filter(\.isActive).map {
             VoiceContextSnapshot.DietaryRule(
                 kind: $0.kind ?? "",
                 value: $0.value ?? "",
@@ -75,7 +74,7 @@ extension HouseholdProfile {
         let equipment: [String] = kitchenEquipmentArray
             .filter { $0.isAvailable }
             .compactMap { $0.code }
-        let pantry: [VoiceContextSnapshot.PantryItem] = confirmedActivePantry()
+        let pantry: [VoiceContextSnapshot.PantryItem] = aiPantryItems(limit: 200, recipe: recipe)
             .compactMap { item in
                 guard let display = item.displayName, !display.isEmpty else { return nil }
                 return VoiceContextSnapshot.PantryItem(
@@ -83,12 +82,42 @@ extension HouseholdProfile {
                     canonicalSlug: item.canonicalIngredientSlug,
                 )
             }
-            .sorted { $0.displayName < $1.displayName }
         return VoiceContextSnapshot(
             dietaryRules: rules,
             availableEquipment: equipment,
             pantry: pantry,
         )
+    }
+
+    /// Keep endpoint context within its pantry bound without dropping known
+    /// recipe matches. Recency and stable row identity make selection independent
+    /// of Core Data's unordered relationship iteration.
+    func aiPantryItems(limit: Int, recipe: RecipePlan? = nil) -> [PantryItem] {
+        let ingredients = recipe?.ingredientArray ?? []
+        let slugs = Set(ingredients.compactMap { ingredient -> String? in
+            guard let slug = ingredient.canonicalIngredientSlug, !slug.isEmpty else { return nil }
+            return slug
+        })
+        let names = Set(ingredients.compactMap { $0.displayName?.pantryMatchTokens() })
+        let candidates = confirmedActivePantry().filter {
+            !($0.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+        func matchesRecipe(_ item: PantryItem) -> Bool {
+            if let slug = item.canonicalIngredientSlug, slugs.contains(slug) { return true }
+            return names.contains(item.displayName?.pantryMatchTokens() ?? [])
+        }
+        let sorted = candidates.sorted { lhs, rhs in
+            let leftMatch = matchesRecipe(lhs)
+            let rightMatch = matchesRecipe(rhs)
+            if leftMatch != rightMatch { return leftMatch }
+            let leftSeen = lhs.lastSeenAt ?? .distantPast
+            let rightSeen = rhs.lastSeenAt ?? .distantPast
+            if leftSeen != rightSeen { return leftSeen > rightSeen }
+            let leftID = lhs.id?.uuidString ?? lhs.objectID.uriRepresentation().absoluteString
+            let rightID = rhs.id?.uuidString ?? rhs.objectID.uriRepresentation().absoluteString
+            return leftID < rightID
+        }
+        return Array(sorted.prefix(max(0, limit)))
     }
 
     /// Canonical pantry filter — SCA-424 + SCA-431. Returns only

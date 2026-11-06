@@ -168,7 +168,7 @@ private struct AdvanceMiniature: View {
         Button(action: action) {
             Text(label)
                 .stirFont(.bodyMd)
-                .foregroundStyle(filled ? Color.white : Color.Stir.ink900)
+                .foregroundStyle(filled ? Color.Stir.onAccent : Color.Stir.ink900)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 9)
                 .background(

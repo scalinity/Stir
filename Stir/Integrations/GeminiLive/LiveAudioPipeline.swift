@@ -30,6 +30,55 @@ import Foundation
 import os
 import OSLog
 
+/// Shared by capture, playback completion and the session actor. Epochs reject
+/// audio queued before a mute/playback transition, even after the gate reopens.
+final class MicCaptureGate: @unchecked Sendable {
+    private struct State {
+        var muted = false
+        var playbackCount = 0
+        var allowAfter: TimeInterval = 0
+        var epoch: UInt64 = 0
+    }
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+
+    func setMuted(_ muted: Bool) {
+        lock.withLock { state in
+            if state.muted != muted { state.epoch &+= 1 }
+            state.muted = muted
+        }
+    }
+
+    func playbackStarted() {
+        lock.withLock { $0.playbackCount += 1; $0.epoch &+= 1 }
+    }
+
+    func playbackEnded(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            $0.playbackCount = max(0, $0.playbackCount - 1)
+            if $0.playbackCount == 0 { $0.allowAfter = time + LiveSessionBudget.echoCooldownSec }
+        }
+    }
+
+    func resetPlayback(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            $0.playbackCount = 0
+            $0.allowAfter = time + LiveSessionBudget.echoCooldownSec
+            $0.epoch &+= 1
+        }
+    }
+
+    func captureToken(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> UInt64? {
+        lock.withLock {
+            guard !$0.muted, $0.playbackCount == 0, time >= $0.allowAfter else { return nil }
+            return $0.epoch
+        }
+    }
+
+    func accepts(_ epoch: UInt64, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        captureToken(at: time) == epoch
+    }
+}
+
 @MainActor
 final class LiveAudioPipeline {
     /// Stream of base64-encoded PCM16 @ 24 kHz mic frames. The session
@@ -37,9 +86,12 @@ final class LiveAudioPipeline {
     /// `input_audio_buffer.append`. ~20 ms per frame (480 samples × 2 bytes).
     private(set) var micFrames: AsyncStream<LiveAudioPipeline.MicFrame>!
     private var micContinuation: AsyncStream<MicFrame>.Continuation!
+    let captureGate = MicCaptureGate()
+    static let micBufferLimit = 5  // About 100 ms at the 20 ms capture cadence.
 
     struct MicFrame: Sendable {
         let base64: String
+        let captureEpoch: UInt64
         /// Always "audio/pcm;rate=24000" for outbound mic frames.
         let mimeType: String
     }
@@ -207,7 +259,7 @@ final class LiveAudioPipeline {
             Self.playbackGain <= Self.playbackGainMax,
             "playbackGain (\(Self.playbackGain)) exceeds documented ceiling \(Self.playbackGainMax). Update the ceiling AND the rationale comment together.",
         )
-        let (stream, continuation) = AsyncStream.makeStream(of: MicFrame.self)
+        let (stream, continuation) = AsyncStream.makeStream(of: MicFrame.self, bufferingPolicy: .bufferingNewest(Self.micBufferLimit))
         self.micFrames = stream
         self.micContinuation = continuation
 
@@ -306,6 +358,7 @@ final class LiveAudioPipeline {
         // ever run it from a single audio thread.
         let target = self.targetInputFormat
         let continuation = self.micContinuation
+        let captureGate = self.captureGate
         // Hoist the level lock into a local so the audio-thread closure
         // doesn't capture `self` (the class is @MainActor and the tap
         // closure is non-isolated). `OSAllocatedUnfairLock` is a value-
@@ -365,11 +418,13 @@ final class LiveAudioPipeline {
                     "mic_tap_fired count=\(counter.total, privacy: .public) frames=\(fl, privacy: .public) peak=\(peak, privacy: .public)",
                 )
             }
+            guard let captureEpoch = captureGate.captureToken() else { return }
             Self.convertAndYield(
                 buffer,
                 converter: converter,
                 target: target,
                 continuation: continuation,
+                captureEpoch: captureEpoch,
             )
         }
 
@@ -530,12 +585,14 @@ final class LiveAudioPipeline {
         // `self.pendingPlaybackBuffers` / `self.outputLevelLock`) AND
         // avoids `self` capture into the audio-render-thread completion
         // callback that fires the closure.
+        captureGate.playbackStarted()
         playerNode.scheduleBuffer(
             pcmBuffer,
             at: nil,
             options: [],
             completionCallbackType: .dataPlayedBack,
-        ) { [pendingPlaybackBuffers, outputLevelLock] _ in
+        ) { [pendingPlaybackBuffers, outputLevelLock, captureGate] _ in
+            captureGate.playbackEnded()
             let remaining = pendingPlaybackBuffers.withLock { count -> Int in
                 count = max(0, count - 1)
                 return count
@@ -561,6 +618,7 @@ final class LiveAudioPipeline {
         }
         playerNode.reset()
         pendingPlaybackBuffers.withLock { $0 = 0 }
+        captureGate.resetPlayback()
         // Drop the output meter so the UI's waveform settles to flat
         // immediately on stop, instead of holding the last chunk's peak
         // until a fresh playback starts.
@@ -601,6 +659,7 @@ final class LiveAudioPipeline {
         converter: AVAudioConverter,
         target: AVAudioFormat,
         continuation: AsyncStream<MicFrame>.Continuation?,
+        captureEpoch: UInt64,
     ) {
         // Output buffer capacity: target rate × buffer duration. We
         // overallocate slightly (2x) so the converter always has room
@@ -681,7 +740,7 @@ final class LiveAudioPipeline {
             return view.base64EncodedString()
         }
         continuation?.yield(
-            MicFrame(base64: base64, mimeType: "audio/pcm;rate=24000"),
+            MicFrame(base64: base64, captureEpoch: captureEpoch, mimeType: "audio/pcm;rate=24000"),
         )
     }
 

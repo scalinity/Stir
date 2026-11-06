@@ -27,9 +27,8 @@ final class SubstitutionSheetViewModel {
         /// SCA-432: brief in-sheet state shown after Accept while the
         /// recipe-step-rewrite call is in flight (~1s). Distinct from
         /// `.requesting` so the copy reads "Rewriting step…" instead
-        /// of "Checking for a safe swap…". On both success and failure
-        /// the sheet dismisses; the step card carries the rewrite (or
-        /// the original prose if dispatch failed).
+        /// of "Checking for a safe swap…". Failure keeps the recipe
+        /// unchanged and the sheet open for another attempt.
         case rewriting
     }
 
@@ -121,6 +120,9 @@ final class SubstitutionSheetViewModel {
     // MARK: - Accept / Reject
 
     func accept() async {
+        // Check before the state guard: an in-flight rewrite changes
+        // `.safe` to `.rewriting`, and a second tap must not dismiss it.
+        if isAccepting { return }
         guard case let .safe(text, amountConversion, _, _, _) = state,
               let event = persistedEvent
         else {
@@ -130,8 +132,8 @@ final class SubstitutionSheetViewModel {
         // Re-entrancy guard — see `isAccepting` doc. The first tap wins;
         // any concurrent re-entry exits silently. No onFinished() here:
         // the in-flight first call owns the dismiss.
-        if isAccepting { return }
         isAccepting = true
+        defer { isAccepting = false }
         // Snapshot the original ingredient label BEFORE applyAcceptedSwap
         // mutates the linked RecipeIngredient.displayName — the rewrite
         // call needs the pre-swap name to locate references in the prose.
@@ -139,45 +141,29 @@ final class SubstitutionSheetViewModel {
         // at persist time) so this is safe to read before OR after the
         // swap, but we capture it here to keep the data-flow obvious.
         let originalIngredient = event.missingLabel
-        // Order matters: record the decision BEFORE mutating the recipe so
-        // an applyAcceptedSwap failure (Core Data save) leaves a recorded
-        // accept=true with acceptedAlternativeText for telemetry/audit even
-        // if the in-place ingredient mutation fails. The user sees the
-        // sheet close either way; downstream consumers (picker, voice
-        // context) only see the swapped name when applyAcceptedSwap also
-        // succeeded.
+        // Validate newly generated step prose before changing any recipe
+        // or decision. A rejected rewrite leaves the original recipe intact.
         do {
-            try repository.recordDecision(event, accepted: true, acceptedAlternativeText: text)
-        } catch {
-            Logger.coreData.error("accept substitution failed: \(error.localizedDescription, privacy: .public)")
-        }
-        do {
-            try repository.applyAcceptedSwap(
+            let rewrittenText = try await rewriteCurrentStep(
+                originalIngredient: originalIngredient,
+                substituteText: text,
+                amountConversion: amountConversion,
+            )
+            try repository.acceptValidatedSwap(
                 event,
                 substitutionText: text,
                 amountConversion: amountConversion,
+                step: currentStep,
+                rewrittenText: rewrittenText,
             )
+            if rewrittenText != nil { onStepRewritten() }
         } catch {
             Logger.coreData.error(
-                "applyAcceptedSwap failed: \(error.localizedDescription, privacy: .public)",
+                "accept substitution failed sub_event_id=\(self.subEventID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private)",
             )
+            state = .error(message: "The step could not be updated safely. Your recipe is unchanged. Try the substitution again.")
+            return
         }
-        // SCA-432: rewrite the current step's prose so it references the
-        // substitute instead of the original ingredient. Replaces the
-        // pre-SCA-432 swap-badge banner. Failure modes are non-fatal:
-        // - no currentStep: nothing to rewrite (free-text substitution
-        //   on a step-less surface — shouldn't happen from Cook Mode
-        //   but the sheet is callable from other invocation paths)
-        // - empty step prose: nothing to rewrite
-        // - empty originalIngredient: rewrite would have no anchor
-        // - dispatch throws: log + continue; step stays as-is. The user
-        //   has already accepted; the swap is recorded; the ingredient
-        //   list is mutated. Only the prose update is lost.
-        await rewriteCurrentStep(
-            originalIngredient: originalIngredient,
-            substituteText: text,
-            amountConversion: amountConversion,
-        )
         // SCA-24: signal pantry that the swap-in ingredient was just
         // used. Recency improves voice-prompt prioritization. Failure-
         // tolerant: substitution acceptance is the user's primary
@@ -192,8 +178,9 @@ final class SubstitutionSheetViewModel {
                     on: household,
                 )
             } catch {
+                let diagnostic = error as NSError
                 Logger.coreData.error(
-                    "pantry bumpLastSeenAt failed for swap=\(trimmedSwap, privacy: .public): \(error.localizedDescription, privacy: .public)",
+                    "pantry bumpLastSeenAt failed sub_event_id=\(self.subEventID.uuidString, privacy: .public) domain=\(diagnostic.domain, privacy: .public) code=\(diagnostic.code, privacy: .public)",
                 )
             }
         }
@@ -234,7 +221,7 @@ final class SubstitutionSheetViewModel {
         do {
             try repository.recordDecision(event, accepted: false, acceptedAlternativeText: nil)
         } catch {
-            Logger.coreData.error("reject substitution failed: \(error.localizedDescription, privacy: .public)")
+            Logger.coreData.error("reject substitution failed: \(error.localizedDescription, privacy: .private)")
         }
         let priorSubEventIDString = subEventID.uuidString
         Logger.telemetry.info(
@@ -327,7 +314,7 @@ final class SubstitutionSheetViewModel {
             let result = try await aiDispatch.substitution(request: body)
             await applyResult(result, pickedIngredient: pickedIngredient, freeTextLabel: missingIngredient.displayName)
         } catch {
-            Logger.aiDispatch.error("substitution dispatch failed: \(error.localizedDescription, privacy: .public)")
+            Logger.aiDispatch.error("substitution dispatch failed: \(error.localizedDescription, privacy: .private)")
             let stirError = (error as? StirError) ?? .networkUnreachable(underlying: error)
             state = .error(message: ErrorPresenter.present(stirError).message)
         }
@@ -367,7 +354,7 @@ final class SubstitutionSheetViewModel {
                     promptVersion: promptVersion,
                 )
             } catch {
-                Logger.coreData.error("persist SubstitutionEvent (safe) failed: \(error.localizedDescription, privacy: .public)")
+                Logger.coreData.error("persist SubstitutionEvent (safe) failed: \(error.localizedDescription, privacy: .private)")
                 state = .error(message: ErrorPresenter.present(.val01).message)
             }
 
@@ -386,7 +373,7 @@ final class SubstitutionSheetViewModel {
                 persistedEvent = event
                 state = .unsafe(message: message, reason: reason, promptVersion: promptVersion)
             } catch {
-                Logger.coreData.error("persist SubstitutionEvent (unsafe) failed: \(error.localizedDescription, privacy: .public)")
+                Logger.coreData.error("persist SubstitutionEvent (unsafe) failed: \(error.localizedDescription, privacy: .private)")
                 // Unsafe results still matter for user safety — render the
                 // copy even if we couldn't persist, but log the divergence.
                 state = .unsafe(message: message, reason: reason, promptVersion: promptVersion)
@@ -432,11 +419,11 @@ final class SubstitutionSheetViewModel {
 
         // SCA-424 / SCA-431: consume the canonical pantry filter
         // (`deletedAt == nil && userConfirmed`) from
-        // `HouseholdProfile.confirmedActivePantry()`. Pre-SCA-431 this
+        // `HouseholdProfile.aiPantryItems(limit:recipe:)`. Pre-SCA-431 this
         // site had its own inline `.filter` and drifted from the voice
         // path; centralising prevents the same drift class recurring.
         let pantry: [SubstitutionRequest.HouseholdContext.PantrySnapshotItem] =
-            household.confirmedActivePantry()
+            household.aiPantryItems(limit: 200, recipe: recipePlan)
                 .compactMap { item in
                     guard let name = item.displayName, !name.isEmpty else { return nil }
                     return SubstitutionRequest.HouseholdContext.PantrySnapshotItem(
@@ -482,11 +469,9 @@ final class SubstitutionSheetViewModel {
 
     // MARK: - Step rewrite (SCA-432)
 
-    /// Calls `/v1/ai/recipe-step-rewrite` with the current step's prose and
-    /// persists the rewrite on success. Non-fatal: any failure (missing
-    /// step / empty prose / dispatch throw) is logged and the method
-    /// returns without changing state. Caller is responsible for the
-    /// rest of the accept flow (pantry bump, telemetry, dismiss).
+    /// Fetch a validated rewrite without changing the recipe or decision.
+    /// The caller commits both only after this succeeds. A step-less
+    /// invocation has no instruction to rewrite and returns nil.
     ///
     /// Reuses the upstream `subEventID` so the server-side idempotency
     /// cache collapses a fast double-tap into one Gemini call.
@@ -494,19 +479,19 @@ final class SubstitutionSheetViewModel {
         originalIngredient: String,
         substituteText: String,
         amountConversion: String?,
-    ) async {
-        guard let step = currentStep else { return }
+    ) async throws -> String? {
+        guard let step = currentStep else { return nil }
         let stepText = (step.instructionText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedOriginal = originalIngredient.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSubstitute = substituteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !stepText.isEmpty, !trimmedOriginal.isEmpty, !trimmedSubstitute.isEmpty else {
-            return
+            throw StirError.malformedResponse(description: "The step is missing rewrite context.")
         }
         // Transition to the rewriting state so the sheet shows the
-        // "Rewriting step…" indicator. The sheet dismisses after this
-        // method returns, regardless of outcome.
+        // "Rewriting step…" indicator. Failure leaves the sheet open.
         state = .rewriting
 
+        let householdContext = buildHouseholdContext()
         let request = RecipeStepRewriteRequest(
             subEventID: subEventID,
             stepInstructionText: stepText,
@@ -514,28 +499,15 @@ final class SubstitutionSheetViewModel {
             substituteIngredient: trimmedSubstitute,
             amountConversion: amountConversion,
             recipeTitle: recipePlan.title,
+            dietaryRules: householdContext.dietaryRules,
+            availableEquipment: householdContext.availableEquipment,
         )
-        do {
-            let response = try await dispatchRewrite(request)
-            do {
-                try repository.applyStepRewrite(step: step, rewrittenText: response.rewrittenText)
-                // Signal the host (CookModeViewModel.didRewriteStep) that
-                // the NSManagedObject's instructionText just changed. The
-                // step card's Text view reads this attribute live, but
-                // @Observable doesn't track Core Data mutations on its
-                // own — without this signal the rewritten prose stays
-                // hidden until the user navigates to another step.
-                onStepRewritten()
-            } catch {
-                Logger.coreData.error(
-                    "applyStepRewrite failed: \(error.localizedDescription, privacy: .public)",
-                )
-            }
-        } catch {
-            Logger.aiDispatch.error(
-                "recipe_step_rewrite dispatch failed: \(error.localizedDescription, privacy: .public)",
-            )
+        let response = try await dispatchRewrite(request)
+        let rewritten = response.rewrittenText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard response.subEventID == subEventID, !rewritten.isEmpty else {
+            throw StirError.malformedResponse(description: "The step rewrite is incomplete.")
         }
+        return rewritten
     }
 
     #if DEBUG

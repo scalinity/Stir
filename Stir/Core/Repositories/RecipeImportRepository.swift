@@ -128,6 +128,25 @@ final class RecipeImportRepository {
         return try controller.viewContext.fetch(fetch).first
     }
 
+    /// Owner-scoped lookup for resuming a queued import after relaunch.
+    func find(importID: UUID, for household: HouseholdProfile) throws -> RecipeImport? {
+        let fetch = NSFetchRequest<RecipeImport>(entityName: "RecipeImport")
+        fetch.predicate = NSPredicate(format: "id == %@ AND household == %@", importID as CVarArg, household)
+        fetch.fetchLimit = 1
+        return try controller.viewContext.fetch(fetch).first
+    }
+
+    func latestProcessing(for household: HouseholdProfile) throws -> RecipeImport? {
+        let fetch = NSFetchRequest<RecipeImport>(entityName: "RecipeImport")
+        fetch.predicate = NSPredicate(
+            format: "household == %@ AND status IN %@", household,
+            [RecipeImportStatus.pending.rawValue, RecipeImportStatus.processing.rawValue]
+        )
+        fetch.sortDescriptors = [NSSortDescriptor(key: "submittedAt", ascending: false)]
+        fetch.fetchLimit = 1
+        return try controller.viewContext.fetch(fetch).first
+    }
+
     /// Recent imports for the Saved tab's "recent activity" section.
     /// Sort: submittedAt desc. Limit defaults to 25.
     func recent(for household: HouseholdProfile, limit: Int = 25) throws -> [RecipeImport] {
@@ -142,7 +161,7 @@ final class RecipeImportRepository {
     /// older than the retention window. Safe to run from a periodic
     /// task at app launch; idempotent.
     @discardableResult
-    func purgeExpired(olderThan days: Int = 30, now: Date = Date()) throws -> Int {
+    func purgeExpired(olderThan days: Int = 30, for household: HouseholdProfile? = nil, now: Date = Date()) throws -> Int {
         let cutoff = now.addingTimeInterval(-TimeInterval(days) * 86_400)
         let fetch: NSFetchRequest<RecipeImport> = NSFetchRequest(entityName: "RecipeImport")
         fetch.predicate = NSPredicate(
@@ -150,6 +169,11 @@ final class RecipeImportRepository {
             RecipeImportStatus.completed.rawValue,
             cutoff as NSDate,
         )
+        if let household {
+            fetch.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                fetch.predicate!, NSPredicate(format: "household == %@", household),
+            ])
+        }
         let rows = try controller.viewContext.fetch(fetch)
         for row in rows { controller.viewContext.delete(row) }
         if !rows.isEmpty { try controller.save() }

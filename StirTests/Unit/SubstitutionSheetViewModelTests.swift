@@ -93,11 +93,8 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
 
     // MARK: - SCA-432: accept() rewrite graceful-degrade
 
-    /// When the rewrite dispatch fails (here: test.invalid AIDispatch),
-    /// accept() must still finish — applyAcceptedSwap on the ingredient
-    /// list runs first, telemetry fires, onFinished is invoked. Only the
-    /// step prose update is dropped. The step's instructionText stays
-    /// unchanged (no half-written state).
+    /// A rejected rewrite keeps the original recipe and pending decision
+    /// together, with an explicit retry state and no dismissal.
     func test_accept_dispatchFailure_leavesStepTextUntouched() async throws {
         // Wire a step with original prose. accept() will fire the rewrite
         // call which will fail against test.invalid — the step text must
@@ -116,18 +113,26 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
             modelSuggestionText: "tortilla chips",
             hardConstraintCheckPassed: true,
         ))
-        let expect = expectation(description: "onFinished called")
-        let vm = makeVM(currentStep: step, onFinished: { expect.fulfill() })
+        let originalName = pasta.displayName
+        var didFinish = false
+        var didRewrite = false
+        let vm = makeVM(currentStep: step, onFinished: { didFinish = true }, onStepRewritten: { didRewrite = true })
+        vm._testingSetRewriteHandler { _ in
+            throw StirError.malformedResponse(description: "Unsafe rewrite rejected.")
+        }
         // Drive the view-model into .safe state with the persisted event
         // so accept() takes the full rewrite path. Uses the test-only
         // seeder to bypass AIDispatch.submit().
         vm._testingSeedSafeState(event: event, text: "tortilla chips", amountConversion: nil)
         await vm.accept()
-        await fulfillment(of: [expect], timeout: 5.0)
         XCTAssertEqual(step.instructionText, "Mix flour and water.",
                        "dispatch failure must not corrupt the step prose")
-        XCTAssertEqual(event.acceptedBool, true,
-                       "accept telemetry must still record acceptance on rewrite failure")
+        XCTAssertEqual(pasta.displayName, originalName)
+        XCTAssertNil(event.acceptedBool)
+        XCTAssertNil(event.acceptedAlternativeText)
+        XCTAssertFalse(didFinish)
+        XCTAssertFalse(didRewrite)
+        guard case .error = vm.state else { return XCTFail("rewrite failure must offer retry") }
     }
 
     /// Happy-path counterpart to test_accept_dispatchFailure_leavesStepTextUntouched:
@@ -165,6 +170,8 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
         var capturedRequest: RecipeStepRewriteRequest?
         let cannedRewrite = "Mix the crushed tortilla chips with water until the dough holds."
         vm._testingSetRewriteHandler { request in
+            XCTAssertNil(event.acceptedBool, "the rewrite must precede acceptance")
+            XCTAssertEqual(pasta.displayName, "heavy cream", "the ingredient must stay unchanged during rewrite")
             capturedRequest = request
             return RecipeStepRewriteResponse(
                 subEventID: request.subEventID,
@@ -188,6 +195,62 @@ final class SubstitutionSheetViewModelTests: XCTestCase {
         XCTAssertEqual(req.substituteIngredient, "tortilla chips")
         XCTAssertEqual(req.stepInstructionText, "Mix flour and water.")
         XCTAssertEqual(req.recipeTitle, recipePlan.title)
+        XCTAssertEqual(req.dietaryRules.count, 0)
+        XCTAssertEqual(req.availableEquipment.count, 0)
+    }
+
+    func test_accept_rewriteCarriesCurrentHardAllergy() async throws {
+        let rule = DietaryRule(context: controller.viewContext)
+        rule.id = UUID()
+        rule.household = household
+        rule.value = "peanut"
+        rule.typedKind = .allergy
+        rule.typedSeverity = .hard
+        rule.isActive = true
+        let step = try makeStep(on: recipePlan, number: 1, instructionText: "Stir in heavy cream.")
+        let ingredient = try XCTUnwrap(recipePlan.ingredientArray.first)
+        let event = try SubstitutionRepository(controller: controller).persist(.init(
+            subEventId: UUID(), session: session, ingredient: ingredient, freeTextName: nil, step: step,
+            userProblemText: "out of cream", modelSuggestionText: "oat milk", hardConstraintCheckPassed: true,
+        ))
+        let vm = makeVM(currentStep: step)
+        vm._testingSeedSafeState(event: event, text: "oat milk", amountConversion: nil)
+        vm._testingSetRewriteHandler { request in
+            XCTAssertEqual(request.dietaryRules.map(\.value), ["peanut"])
+            XCTAssertEqual(request.dietaryRules.map(\.severity), ["hard"])
+            let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+            XCTAssertEqual((json?["dietary_rules"] as? [[String: String]])?.first?["value"], "peanut")
+            throw StirError.malformedResponse(description: "Unsafe rewrite rejected.")
+        }
+        await vm.accept()
+        XCTAssertEqual(ingredient.displayName, "heavy cream")
+        XCTAssertEqual(step.instructionText, "Stir in heavy cream.")
+        XCTAssertNil(event.acceptedBool)
+    }
+
+    func test_accept_secondTapDuringRewriteDoesNotDismissOrCommit() async throws {
+        let step = try makeStep(on: recipePlan, number: 1, instructionText: "Stir in heavy cream.")
+        let ingredient = try XCTUnwrap(recipePlan.ingredientArray.first)
+        let event = try SubstitutionRepository(controller: controller).persist(.init(
+            subEventId: UUID(), session: session, ingredient: ingredient, freeTextName: nil, step: step,
+            userProblemText: "out of cream", modelSuggestionText: "oat milk", hardConstraintCheckPassed: true,
+        ))
+        var finishes = 0
+        let vm = makeVM(currentStep: step, onFinished: { finishes += 1 })
+        vm._testingSeedSafeState(event: event, text: "oat milk", amountConversion: nil)
+        vm._testingSetRewriteHandler { [weak vm] request in
+            await vm?.accept()
+            XCTAssertEqual(finishes, 0)
+            XCTAssertNil(event.acceptedBool)
+            XCTAssertEqual(ingredient.displayName, "heavy cream")
+            return RecipeStepRewriteResponse(subEventID: request.subEventID, rewrittenText: "Stir in oat milk.",
+                                             promptVersion: "test-1", latencyMS: 1, retryCount: 0)
+        }
+        await vm.accept()
+        XCTAssertEqual(finishes, 1)
+        XCTAssertEqual(event.acceptedBool, true)
+        XCTAssertEqual(ingredient.displayName, "oat milk")
+        XCTAssertEqual(step.instructionText, "Stir in oat milk.")
     }
 
     // MARK: - Analytics emission (pre-dispatch)

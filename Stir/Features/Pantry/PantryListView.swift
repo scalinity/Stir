@@ -390,8 +390,15 @@ struct PantryListView: View {
             PantryEditSheet(
                 item: item,
                 onSave: { name, amount, state in
-                    vm.editItem(item, displayName: name, amountText: amount, memoryState: state)
-                    editingItem = nil
+                    switch vm.editItem(item, displayName: name, amountText: amount, memoryState: state) {
+                    case .saved:
+                        editingItem = nil
+                    case .capReached:
+                        editingItem = nil
+                        coordinator.presentPaywall(.pantryCapReached)
+                    case .failed:
+                        break
+                    }
                 },
                 onDelete: {
                     vm.deleteItem(item)

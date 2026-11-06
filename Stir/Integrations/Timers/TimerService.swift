@@ -5,11 +5,8 @@
 //     date so a backgrounded app still fires the "Step X done" chime.
 //   - Records state transitions through CookTimerRepository so
 //     CloudKit cross-device sync sees the authoritative Timer row.
-//   - Maintains in-memory pause bookkeeping (the spec §4.13 state enum
-//     covers pause via a transition; the in-memory log tracks HOW LONG
-//     the timer has been paused so resume can advance startedAt by
-//     that amount, keeping `startedAt + durationSec == fireDate` the
-//     single source of truth).
+//   - Resumes from persisted paused-remaining seconds, so leaving Cook
+//     Mode or relaunching does not consume time while the timer is paused.
 //
 // Not in step 4 (deferred to step 7 with Widget Extension per Daniel's
 // scope confirmation): ActivityKit Live Activities. Without a Widget
@@ -44,14 +41,10 @@ final class TimerService {
     /// silently no-op, leaving the Lock Screen activity stuck on the
     /// original countdown (observed device-side 2026-05-03).
     private let liveActivityManager: LiveActivityManager?
+    private let now: () -> Date
 
-    /// In-memory map of timerId → pauseStartedAt. Populated on pause,
-    /// drained on resume. Not persisted — the state machine on disk
-    /// captures the WHAT; this captures the pending WHEN needed to
-    /// recompute startedAt on resume. Survives the app's active
-    /// lifetime; on cold launch, a paused timer just stays paused
-    /// (its `startedAt` is the pre-pause baseline, which is the safe
-    /// fallback).
+    /// Compatibility fallback for legacy paused rows without a persisted
+    /// remaining-time snapshot. Current rows always use the saved seconds.
     private var pauseStartedAt: [UUID: Date] = [:]
 
     /// `liveActivityManager` is REQUIRED (no default value). CA2-9 fix:
@@ -75,19 +68,22 @@ final class TimerService {
         sessionRepository: CookingSessionRepository,
         notificationCenter: UNUserNotificationCenterClient = DefaultUNUserNotificationCenter(),
         liveActivityManager: LiveActivityManager?,
+        now: @escaping () -> Date = Date.init,
     ) {
         self.repository = repository
         self.sessionRepository = sessionRepository
         self.notificationCenter = notificationCenter
         self.liveActivityManager = liveActivityManager
+        self.now = now
     }
 
-    /// Read-only accessor for the in-memory pause timestamp. Used by
-    /// `TimerCountdownView` to render a STATIC paused-remaining value
-    /// instead of one that keeps ticking down (the CookTimer.fireDate
-    /// itself doesn't shift on pause — only the in-memory delta does).
-    /// Returns nil when the timer isn't currently paused.
+    /// Frozen reference date for the existing countdown view. Derive it
+    /// from the persisted snapshot so it remains valid after recreation.
     func pauseStartedAt(for timer: CookTimer) -> Date? {
+        guard timer.typedState == .paused else { return nil }
+        if let remaining = timer.pausedRemainingSeconds, let fireDate = timer.fireDate {
+            return fireDate.addingTimeInterval(-TimeInterval(remaining))
+        }
         guard let id = timer.id else { return nil }
         return pauseStartedAt[id]
     }
@@ -120,39 +116,34 @@ final class TimerService {
 
     // MARK: - Timer lifecycle
 
-    /// Start a pending CookTimer. Transitions to running, schedules a
-    /// local notification at startedAt + durationSec, and registers the
-    /// notification id on the parent CookingSession.
-    ///
-    /// On schedule failure, roll the timer back to `.cancelled` so the
-    /// UI doesn't show a running countdown without a backing notification
-    /// (CA2-R2: user-visible timer that silently won't fire in background).
-    /// Re-throws so the caller can surface an error to the user.
+    /// Start a pending timer. Persist running state and its notification
+    /// identifier together, after the alarm has been accepted.
     func start(_ timer: CookTimer, on session: CookingSession) async throws {
-        let now = Date()
-        try repository.start(timer, at: now)
+        let startedAt = now()
+        let fireDate = startedAt.addingTimeInterval(TimeInterval(timer.durationSec))
         do {
-            try await scheduleNotification(for: timer, on: session)
+            try await scheduleNotification(for: timer, on: session, fireDate: fireDate) {
+                try repository.start(timer, at: startedAt)
+            }
         } catch {
-            try? repository.cancel(timer, at: now)
+            // Scheduling/save failure never leaves a running timer without
+            // an alarm. A failed cancellation save leaves the original
+            // pending state because the running transition was not committed.
+            try? repository.cancel(timer, at: startedAt)
             throw error
         }
     }
 
-    /// Pause a running timer. Cancels the scheduled notification (we'll
-    /// re-schedule on resume with a new fire date). Records pause start
-    /// in memory so `resume` can compute the pause duration. Flushes
-    /// the paused-remaining snapshot to the Live Activity so Lock
-    /// Screen shows the static "2:14" not a ticking negative.
+    /// Persist the paused snapshot and identifier removal before removing
+    /// the alarm, so a failed save leaves the running timer's alarm intact.
     func pause(_ timer: CookTimer, on session: CookingSession) async throws {
         guard timer.typedState == .running, let timerId = timer.id else { return }
-        // Capture remaining BEFORE the repo state flip; once .paused,
-        // remainingSeconds returns 0 and the activity would show 00:00.
-        let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer)
-        pauseStartedAt[timerId] = Date()
-        await cancelScheduledNotification(for: timerId)
-        try repository.pause(timer, pausedRemainingSec: pausedRemaining)
+        let pausedAt = now()
+        let pausedRemaining = pausedRemainingSecondsSnapshot(for: timer, at: pausedAt)
         removeNotificationId(timerId, from: session)
+        try repository.pause(timer, pausedRemainingSec: pausedRemaining)
+        pauseStartedAt[timerId] = pausedAt
+        cancelScheduledNotification(for: timerId)
         if let fire = timer.fireDate {
             await liveActivityManager?.update(
                 timerId: timerId,
@@ -162,58 +153,57 @@ final class TimerService {
         }
     }
 
-    /// Resume a paused timer. Advances startedAt by the paused duration
-    /// so `startedAt + durationSec == fireDate` remains authoritative,
-    /// then re-schedules the local notification AND refreshes the
-    /// Live Activity with the new fire date (paused flag cleared).
+    /// Resume from the saved remaining time, including after Cook Mode or
+    /// the process has been recreated. Failed scheduling/save keeps paused
+    /// state and its remaining-time snapshot intact.
     func resume(_ timer: CookTimer, on session: CookingSession) async throws {
         guard timer.typedState == .paused, let timerId = timer.id else { return }
-        let resumedAt = Date()
-        let pausedFor: TimeInterval = pauseStartedAt[timerId].map { resumedAt.timeIntervalSince($0) } ?? 0
+        let resumedAt = now()
+        let remaining = timer.pausedRemainingSeconds ?? max(
+            0,
+            Int((timer.fireDate ?? resumedAt).timeIntervalSince(pauseStartedAt[timerId] ?? resumedAt).rounded()),
+        )
+        let fireDate = resumedAt.addingTimeInterval(TimeInterval(remaining))
+        let newStart = fireDate.addingTimeInterval(-TimeInterval(timer.durationSec))
+        try await scheduleNotification(for: timer, on: session, fireDate: fireDate) {
+            try repository.resume(timer, newStartedAt: newStart)
+        }
         pauseStartedAt.removeValue(forKey: timerId)
-
-        // Shift startedAt forward by pausedFor so the fire date moves
-        // forward by the same amount.
-        let originalStart = timer.startedAt ?? resumedAt
-        let newStart = originalStart.addingTimeInterval(pausedFor)
-        try repository.resume(timer, newStartedAt: newStart)
-        try await scheduleNotification(for: timer, on: session)
-        if let fire = timer.fireDate {
+        if timer.typedState == .completed {
+            await liveActivityManager?.end(timerId: timerId, reason: .completed)
+        } else {
             await liveActivityManager?.update(
                 timerId: timerId,
-                fireDate: fire,
+                fireDate: fireDate,
                 pausedRemainingSec: nil,
             )
         }
     }
 
-    /// Cancel (user-stopped). Removes scheduled notification, sets
-    /// state=cancelled + endedAt=now, ends the Live Activity with
-    /// reason .cancelled.
+    /// Cancel the persisted timer before removing its alarm. Notification
+    /// removal cannot throw; a failed save therefore preserves both.
     func cancel(_ timer: CookTimer, on session: CookingSession) async throws {
         if let timerId = timer.id {
-            await cancelScheduledNotification(for: timerId)
             removeNotificationId(timerId, from: session)
-            pauseStartedAt.removeValue(forKey: timerId)
         }
-        try repository.cancel(timer)
+        try repository.cancel(timer, at: now())
         if let timerId = timer.id {
+            cancelScheduledNotification(for: timerId)
+            pauseStartedAt.removeValue(forKey: timerId)
             await liveActivityManager?.end(timerId: timerId, reason: .cancelled)
         }
     }
 
-    /// Mark naturally complete (timer fired). Also removes any straggler
-    /// notification that hadn't fired yet, and ends the Live Activity
-    /// with reason .completed so the "Done" affordance can linger
-    /// briefly before dismissal.
+    /// Mark naturally complete and remove any straggling alarm only after
+    /// the state and identifier removal have been saved together.
     func markCompleted(_ timer: CookTimer, on session: CookingSession) async throws {
         if let timerId = timer.id {
-            await cancelScheduledNotification(for: timerId)
             removeNotificationId(timerId, from: session)
-            pauseStartedAt.removeValue(forKey: timerId)
         }
-        try repository.markCompleted(timer)
+        try repository.markCompleted(timer, at: now())
         if let timerId = timer.id {
+            cancelScheduledNotification(for: timerId)
+            pauseStartedAt.removeValue(forKey: timerId)
             await liveActivityManager?.end(timerId: timerId, reason: .completed)
         }
     }
@@ -226,37 +216,37 @@ final class TimerService {
     /// the view model can flash the "Timer done" indicator.
     @discardableResult
     func reconcileOnForeground(session: CookingSession) async throws -> [CookTimer] {
-        let now = Date()
+        let currentDate = now()
         var transitioned: [CookTimer] = []
         for timer in repository.timers(for: session) {
-            guard timer.typedState == .running, let fire = timer.fireDate, fire <= now else { continue }
+            guard timer.typedState == .running, let fire = timer.fireDate, fire <= currentDate else { continue }
+            if let timerId = timer.id { removeNotificationId(timerId, from: session) }
             try repository.markCompleted(timer, at: fire)
             transitioned.append(timer)
             if let timerId = timer.id {
-                removeNotificationId(timerId, from: session)
+                cancelScheduledNotification(for: timerId)
                 await liveActivityManager?.end(timerId: timerId, reason: .completed)
             }
-        }
-        if !transitioned.isEmpty {
-            // Flush the session's localNotificationIds edits from the
-            // removeNotificationId calls above. Use saveSession, not
-            // advanceStep — no step transition happened (CA2-R5).
-            try sessionRepository.saveSession(session)
         }
         return transitioned
     }
 
     // MARK: - Private — notifications
 
-    private func scheduleNotification(for timer: CookTimer, on session: CookingSession) async throws {
-        guard let timerId = timer.id, let fireDate = timer.fireDate else { return }
-        let delay = fireDate.timeIntervalSinceNow
+    private func scheduleNotification(
+        for timer: CookTimer,
+        on session: CookingSession,
+        fireDate: Date,
+        persistTransition: () throws -> Void,
+    ) async throws {
+        guard let timerId = timer.id else { return }
+        let delay = fireDate.timeIntervalSince(now())
         guard delay > 0 else {
-            // Already overdue at schedule time (pathological resume that
-            // pushed newStartedAt past the original fireDate). Mark
-            // complete immediately rather than leave `.running` dangling
-            // without a backing notification (CA2-R8).
+            // A timer paused at zero completes in one save, without ever
+            // committing a running state that has no backing alarm.
+            removeNotificationId(timerId, from: session)
             try repository.markCompleted(timer, at: fireDate)
+            cancelScheduledNotification(for: timerId)
             return
         }
         let label = timer.label ?? ""
@@ -277,18 +267,19 @@ final class TimerService {
         )
         do {
             try await notificationCenter.add(request)
+            addNotificationId(timerId, to: session)
+            // The repository saves both edits on the same context. On a
+            // save failure it rolls back to the pending/paused state and
+            // the original session identifiers; remove the inserted alarm.
+            try persistTransition()
         } catch {
-            Logger.ui.warning("TimerService schedule failed: \(error.localizedDescription, privacy: .public)")
+            cancelScheduledNotification(for: timerId)
+            Logger.ui.warning("TimerService schedule failed: \(error.localizedDescription, privacy: .private)")
             throw error
         }
-        addNotificationId(timerId, to: session)
-        // Persist the session's updated id list so a crash between here
-        // and the next user action doesn't leave us with a scheduled
-        // notification whose UUID isn't in the session's list (CA2-R6).
-        try sessionRepository.saveSession(session)
     }
 
-    private func cancelScheduledNotification(for timerId: UUID) async {
+    private func cancelScheduledNotification(for timerId: UUID) {
         notificationCenter.removePendingNotificationRequests(withIdentifiers: [timerId.uuidString])
     }
 
@@ -311,10 +302,10 @@ final class TimerService {
     /// Paused-remaining snapshot used by pause() to flush the static
     /// "2:14" into the Live Activity ContentState. Returns max(0, …)
     /// so a timer already past its fire date reads as 0, not negative.
-    private func pausedRemainingSecondsSnapshot(for timer: CookTimer) -> Int {
+    private func pausedRemainingSecondsSnapshot(for timer: CookTimer, at date: Date) -> Int {
         guard timer.typedState == .running,
               let fireDate = timer.fireDate else { return 0 }
-        return max(0, Int(fireDate.timeIntervalSinceNow.rounded()))
+        return max(0, Int(fireDate.timeIntervalSince(date).rounded()))
     }
 }
 

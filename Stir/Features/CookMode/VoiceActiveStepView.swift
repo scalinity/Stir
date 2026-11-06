@@ -550,6 +550,7 @@ private struct VoiceTimerPill: View {
 /// (no rings) so the user can tell at a glance whether voice is
 /// passive (between turns) vs active (mid-utterance / mid-reply).
 private struct MicCircleView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let state: VoiceSessionState?
 
     private var showRings: Bool {
@@ -558,7 +559,7 @@ private struct MicCircleView: View {
 
     var body: some View {
         ZStack {
-            if showRings {
+            if showRings && !reduceMotion {
                 pulseRing(scale: 1.5, delay: 0)
                 pulseRing(scale: 1.9, delay: 0.4)
             }
@@ -607,6 +608,7 @@ private struct MicCircleView: View {
 /// syllables. Smoothing state is held in a `@State` `Box` so SwiftUI
 /// view-recreation between frames doesn't reset it on every tick.
 private struct WaveformView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Read-only access — WaveformView pulls `currentVoiceAudioLevel`
     /// each TimelineView frame but doesn't mutate any VM state, so
     /// `@Bindable` (which is for `$binding` syntax on `@Observable`
@@ -633,15 +635,14 @@ private struct WaveformView: View {
     @State private var smoother = LevelSmoother()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active || reduceMotion)) { context in
             let elapsed = context.date.timeIntervalSinceReferenceDate
             // Pull and smooth the live level on every frame. The
             // TimelineView is ticking us at 30 Hz, so the smoother
             // sees the mic peak about every ~30 ms — fine-grained
             // enough that the asymmetric attack/decay produces a
             // natural-feeling response curve.
-            let rawLevel = viewModel.currentVoiceAudioLevel
-            let level = smoother.update(rawLevel)
+            let level = reduceMotion ? 0 : smoother.update(viewModel.currentVoiceAudioLevel)
             // Scale the audio response: typical speech peaks land
             // around 0.2-0.5, not 1.0. Map [0, 0.5] → [0, 1] so the
             // bars actually move at conversational volume. Clamp at
@@ -660,7 +661,7 @@ private struct WaveformView: View {
                     // to full extension. Sine modulation stays for the
                     // wavy stagger that the screenshot shows.
                     let oscillator = sin(phase * 2 * .pi) * 0.5 + 0.5
-                    let scale: CGFloat = active
+                    let scale: CGFloat = active && !reduceMotion
                         ? CGFloat(0.25 + (0.15 + 0.6 * Double(amplified)) * oscillator)
                         : 0.4
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)

@@ -59,7 +59,7 @@ final class SolveViewModel {
     private(set) var lastLatencyMS: Int?
     private(set) var lastPromptVersion: String?
     private(set) var persistedSolveID: UUID?
-    private(set) var persistedSuggestedDishIDs: [UUID] = []
+    private(set) var persistedSuggestedDishIDsByRank: [Int: UUID] = [:]
 
     var constraints = ConstraintsInput()
     private(set) var ingredientsForSolve: [DinnerSolveRequest.IngredientLite] = []
@@ -125,7 +125,7 @@ final class SolveViewModel {
         self.lastLatencyMS = nil
         self.lastPromptVersion = nil
         self.persistedSolveID = nil
-        self.persistedSuggestedDishIDs = []
+        self.persistedSuggestedDishIDsByRank = [:]
     }
 
     /// Prime the VM from already-persisted dishes (no AI spend, no
@@ -136,14 +136,8 @@ final class SolveViewModel {
     /// `.task(id:)` only auto-solves when phase is `.constraints`, so
     /// this seed cannot accidentally re-issue the dinner-solve request.
     ///
-    /// Rank alignment matters: `persistedRecipePlan(for:)` looks up the
-    /// dish-id by `dish.rank - 1` index. We pad both arrays to length 3
-    /// so a tap on a rank-3 card always resolves to the rank-3 UUID
-    /// even if rank-2 is missing (corner case: that dish's RecipePlan
-    /// was soft-deleted between persistence and seed). Empty slots
-    /// fill with a fresh placeholder UUID that resolves to `nil` via
-    /// `fetchRecipePlan` — tapping such a slot can't happen because
-    /// OtherOptionsRoot only renders cards that came in via `inputs`.
+    /// Sparse ranks retain their own persisted identifiers; missing cards have
+    /// no dictionary entry and cannot resolve to another recipe.
     func seedFromPersistedSolve(
         inputs: [(rank: Int, card: DishCard, dishId: UUID)],
     ) {
@@ -158,15 +152,7 @@ final class SolveViewModel {
         self.slots = ranks.map { rank in
             SlotState(rank: rank, dish: byRank[rank]?.card, errorCode: nil)
         }
-        self.persistedSuggestedDishIDs = ranks.map { rank in
-            // Placeholder UUID for missing ranks — preserves positional
-            // alignment so `persistedRecipePlan(for:)` (which indexes
-            // by `dish.rank - 1`) resolves correctly for the ranks
-            // that DID seed. The placeholder won't match any row in
-            // fetchRecipePlan; tap on a missing-rank slot becomes a
-            // silent no-op in DishPreviewView (already error-toasted).
-            byRank[rank]?.dishId ?? UUID()
-        }
+        self.persistedSuggestedDishIDsByRank = byRank.mapValues(\.dishId)
         // Single summary log per seed — gives triage signal (which
         // ranks landed, how many duplicates dropped) without spamming
         // one line per missing rank.
@@ -369,7 +355,7 @@ final class SolveViewModel {
                 aiRequestId: nil,
             )
             self.persistedSolveID = outcome.solveRequestId
-            self.persistedSuggestedDishIDs = outcome.suggestedDishIds
+            self.persistedSuggestedDishIDsByRank = outcome.suggestedDishIdsByRank
             writeTonightSnapshot(
                 solveId: outcome.solveRequestId,
                 suggestedDishIds: outcome.suggestedDishIds,
@@ -412,13 +398,12 @@ final class SolveViewModel {
     }
 
     /// Look up the persisted RecipePlan for a DishCard the user has seen
-    /// in the options grid. Uses the rank → persistedSuggestedDishIDs
-    /// mapping populated by persistCompletedSolve (sorted by rank). Nil
+    /// in the options grid. Rank keys remain intact when a solve returns
+    /// fewer than three valid dishes. Nil
     /// if persistence hasn't completed yet or the dish row is gone.
     func persistedRecipePlan(for dish: DishCard) -> RecipePlan? {
-        let idx = dish.rank - 1  // ranks are 1-based
-        guard idx >= 0, idx < persistedSuggestedDishIDs.count else { return nil }
-        return solveRepo.fetchRecipePlan(forSuggestedDishId: persistedSuggestedDishIDs[idx])
+        guard let id = persistedSuggestedDishIDsByRank[dish.rank] else { return nil }
+        return solveRepo.fetchRecipePlan(forSuggestedDishId: id)
     }
 
     /// Current household — exposed for Cook Mode entry which needs the

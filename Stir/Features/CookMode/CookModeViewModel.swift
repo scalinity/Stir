@@ -2311,7 +2311,7 @@ final class CookModeViewModel {
         // `deletedAt == nil && userConfirmed && !displayName.isEmpty`
         // set regardless of caller; prior inline projections had drift
         // (substitution accepted unconfirmed items).
-        return RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot())
+        return RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot(recipe: recipePlan))
     }
 
     /// SCA-80 forwarder for spec §15 `voice_affordance_tapped`.

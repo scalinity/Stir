@@ -91,6 +91,15 @@ final class LiveWebSocketTransport: LiveTransporting {
     /// path narrowly avoids today only because nobody shares yet.
     private let ownsSession: Bool
     private var wsTask: URLSessionWebSocketTask?
+    #if DEBUG
+    var testingMessageSender: ((URLSessionWebSocketTask.Message) async throws -> Void)?
+
+    /// Install an unresumed socket so tests exercise the real send loop
+    /// without a network connection. The injected sender owns each await.
+    func _testInstallSocket(_ task: URLSessionWebSocketTask) {
+        wsTask = task
+    }
+    #endif
     private var isClosed = false
     private var receiveLoopTask: Task<Void, Never>?
     /// P0-E (2026-04-23): periodic WebSocket ping task. Detects cellular
@@ -348,6 +357,9 @@ final class LiveWebSocketTransport: LiveTransporting {
         // this a realistic ordering hazard. Messages of one frame are
         // sent sequentially so their relative order is preserved.
         for message in messages {
+            guard !isClosed, wsTask === task, !Task.isCancelled else {
+                throw TransportError.sendAfterClose
+            }
             // Response gate: defer while a response is active or our last
             // create is unacknowledged.
             if message == Self.responseCreateMessage, !responseGate.requestCreate() {
@@ -355,13 +367,25 @@ final class LiveWebSocketTransport: LiveTransporting {
             }
             await sendLock.wait()
             do {
-                try await task.send(.string(message))
+                guard !isClosed, wsTask === task, !Task.isCancelled else {
+                    throw TransportError.sendAfterClose
+                }
+                try await sendMessage(.string(message), over: task)
                 await sendLock.signal()
             } catch {
                 await sendLock.signal()
                 throw error
             }
         }
+    }
+
+    private func sendMessage(
+        _ message: URLSessionWebSocketTask.Message, over task: URLSessionWebSocketTask
+    ) async throws {
+        #if DEBUG
+        if let testingMessageSender { try await testingMessageSender(message); return }
+        #endif
+        try await task.send(message)
     }
 
     // MARK: - Security helpers
@@ -583,7 +607,10 @@ final class LiveWebSocketTransport: LiveTransporting {
               let task = wsTask, !isClosed else { return }
         await sendLock.wait()
         do {
-            try await task.send(.string(Self.responseCreateMessage))
+            guard !isClosed, wsTask === task, !Task.isCancelled else {
+                throw TransportError.sendAfterClose
+            }
+            try await sendMessage(.string(Self.responseCreateMessage), over: task)
         } catch {
             responseGate.deferredCreateFailed()
             Logger.voice.warning(

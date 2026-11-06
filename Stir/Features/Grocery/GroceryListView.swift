@@ -130,7 +130,7 @@ struct GroceryListView: View {
         } label: {
             HStack(spacing: 8) {
                 if exportInFlight {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Color.Stir.onAccent)
                 }
                 Image(systemName: "checklist")
                     .font(.system(size: 14, weight: .semibold))
@@ -138,7 +138,7 @@ struct GroceryListView: View {
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.Stir.onAccent)
             .frame(maxWidth: .infinity)
             .frame(height: 52)
             .background(
@@ -302,7 +302,7 @@ private struct AllSetView: View {
                 Text("Done")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(width: 160, height: 48)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -341,7 +341,7 @@ private struct ExportedView: View {
                 Text("Done")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(width: 160, height: 48)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)

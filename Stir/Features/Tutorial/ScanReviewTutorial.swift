@@ -219,7 +219,7 @@ private struct SolveCTAMiniature: View {
                 Text("Solve dinner")
                     .stirFont(.bodyLg)
             }
-            .foregroundStyle(Color.white)
+            .foregroundStyle(Color.Stir.onAccent)
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .background(

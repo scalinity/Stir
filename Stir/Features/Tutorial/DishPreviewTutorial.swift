@@ -143,7 +143,7 @@ private struct StartCookingMiniature: View {
                 Text("Start cooking")
                     .stirFont(.bodyLg)
             }
-            .foregroundStyle(Color.white)
+            .foregroundStyle(Color.Stir.onAccent)
             .padding(.horizontal, 30)
             .padding(.vertical, 14)
             .background(

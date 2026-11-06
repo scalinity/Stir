@@ -18,9 +18,12 @@
 //     if <24h; else offline-mode flag + free-tier defaults
 //   - CloudKit account flip mid-session → re-resolve + update CloudKit store
 
+import CoreData
 import Foundation
 import Observation
 import OSLog
+import UserNotifications
+import WidgetKit
 
 @MainActor
 @Observable
@@ -31,6 +34,7 @@ final class RootCoordinator {
         case onboarding
         case ready
         case offlineFallback  // ran on cached entitlement snapshot
+        case dataDeleted
     }
 
     /// Tab key for the post-launch shell. Drives `StirTabRoot`'s
@@ -67,6 +71,30 @@ final class RootCoordinator {
     let cookTimerRepository: CookTimerRepository
     let substitutionRepository: SubstitutionRepository
     let voiceTurnRepository: VoiceTurnRepository
+    let recipeImportRepository: RecipeImportRepository
+    private let persistenceController: PersistenceController
+    let deletionService: HouseholdDataDeletionService
+    private let keychain: any KeychainStoring
+    private var deletionCanonicalKey: String?
+    private var hasResolvedHouseholdIdentity = false
+    private var householdReconciliationPending = false
+    private var activeHouseholdWorkflows = 0
+    @ObservationIgnored private var householdMergeObserver: NSObjectProtocol?
+
+    enum ImportPresentation: Identifiable {
+        case shared(PendingImport)
+        case recovery(UUID)
+
+        var id: UUID {
+            switch self {
+            case .shared(let pending): return pending.id
+            case .recovery(let id): return id
+            }
+        }
+    }
+
+    var activeImport: ImportPresentation?
+    private(set) var pendingRecipeImportID: UUID?
     /// SCA-87: Tonight Home reads widget nudge eligibility through the
     /// coordinator so tests can inject an isolated defaults-backed
     /// service and production avoids `.shared` drift.
@@ -356,6 +384,9 @@ final class RootCoordinator {
         cookTimerRepository: CookTimerRepository? = nil,
         substitutionRepository: SubstitutionRepository? = nil,
         voiceTurnRepository: VoiceTurnRepository? = nil,
+        recipeImportRepository: RecipeImportRepository? = nil,
+        deletionService: HouseholdDataDeletionService? = nil,
+        keychain: any KeychainStoring = KeychainStorage.shared,
         householdRepo: HouseholdProfileRepository? = nil,
         widgetNudgeService: WidgetNudgeService? = nil,
         pantryTombstoneReaper: PantryTombstoneReaper? = nil,
@@ -370,8 +401,12 @@ final class RootCoordinator {
         self.household = household
         self.sentry = sentry
         self.identityService = identityService
+        self.persistenceController = persistenceController
+        self.keychain = keychain
+        self.deletionService = deletionService ?? HouseholdDataDeletionService(controller: persistenceController)
         let client = sessionClient ?? SupabaseSessionClient(
             config: config,
+            keychain: keychain,
             sentry: sentry,
             cloudKitWebAuthTokenProvider: { apiToken in
                 await identityService.cloudKitWebAuthToken(apiToken: apiToken)
@@ -385,6 +420,7 @@ final class RootCoordinator {
         self.cookTimerRepository = cookTimerRepository ?? CookTimerRepository(controller: persistenceController)
         self.substitutionRepository = substitutionRepository ?? SubstitutionRepository(controller: persistenceController)
         self.voiceTurnRepository = voiceTurnRepository ?? VoiceTurnRepository(controller: persistenceController)
+        self.recipeImportRepository = recipeImportRepository ?? RecipeImportRepository(controller: persistenceController)
         self.widgetNudgeService = widgetNudgeService ?? WidgetNudgeService()
         self.householdRepo = householdRepo ?? HouseholdProfileRepository(controller: persistenceController)
         // SCA-97: reaper wraps `self.pantryItemRepository` (note: NOT
@@ -501,6 +537,8 @@ final class RootCoordinator {
     private func attemptFastPathLaunch() {
         guard case .hydrated(source: .cachedSnapshot) = entitlements.hydrationState else { return }
         guard let cachedKey = sharedStorage.readCanonicalUserKey(), !cachedKey.isEmpty else { return }
+        guard !deletionService.isAwaitingAcknowledgement(for: cachedKey),
+              deletionService.state(for: cachedKey) == nil else { return }
         // Reconstitute the typed identity from the cached string. A
         // malformed value (theoretically possible from a corrupted App
         // Group write or a forward/backward incompatible release) is
@@ -599,6 +637,7 @@ final class RootCoordinator {
         bootstrapTask = task
         await task.value
         bootstrapTask = nil
+        drainPendingImportsIfReady()
     }
 
     private func runBootstrap(fastPath: Bool = false) async {
@@ -626,6 +665,23 @@ final class RootCoordinator {
         let canonicalKey = await identityService.resolve()
         let installationID = await identityService.installationID()
         cloudKit.update(with: canonicalKey)
+        deletionService.setCurrentIdentity(canonicalKey.stringValue)
+        hasResolvedHouseholdIdentity = true
+        startAccountChangesObserver()
+        startHouseholdMergeObserver()
+        do {
+            try deletionService.resumeDeletion(for: canonicalKey.stringValue)
+            if deletionService.isAwaitingAcknowledgement(for: canonicalKey.stringValue) {
+                deletionCanonicalKey = canonicalKey.stringValue
+                try await clearDeletedHouseholdSession()
+                household.clear()
+                phase = .dataDeleted
+                return
+            }
+        } catch {
+            phase = .configurationError("Stir couldn't finish deleting local data. Please try again.")
+            return
+        }
         let keyHash = CanonicalKeyHash.hash(canonicalKey)
 
         // 2. Observability identify (before first capture).
@@ -724,10 +780,12 @@ final class RootCoordinator {
         // active user (CWE-345 defense against cross-iCloud-account
         // payload bleed). Written on every bootstrap so an account
         // switch after install re-syncs the shared surface.
-        sharedStorage.writeCanonicalUserKey(canonicalKeyString)
         do {
-            let profile = try householdRepo.ensureHouseholdProfile(for: canonicalKeyString)
-            household.set(profile)
+            let profile = try selectHousehold(
+                for: canonicalKeyString,
+                previousKey: previousKey,
+                installationID: installationID,
+            )
 
             // 5. Emit app_opened now that identity + profile are both resolved.
             emitAppOpenedTelemetry(
@@ -761,7 +819,7 @@ final class RootCoordinator {
                 // (cached profile said onboardingCompleted == true but
                 // server-side state diverged — e.g. user reinstalled with
                 // same iCloud while mid-onboarding on another device).
-                self.onboardingViewModel = OnboardingViewModel(profile: profile)
+                self.onboardingViewModel = makeOnboardingViewModel(for: profile)
                 PostHogClient.shared.capture(.onboardingStarted, properties: [
                     "canonical_user_key_hash": keyHash,
                     "is_cloudkit": canonicalKey.isCloudKit,
@@ -818,6 +876,7 @@ final class RootCoordinator {
 
         // 8. Observe CloudKit account changes for the life of the app.
         startAccountChangesObserver()
+        startHouseholdMergeObserver()
     }
 
     /// Apply the correct PostHog identity primitive for the observed
@@ -1163,6 +1222,7 @@ final class RootCoordinator {
     func handleOnboardingFinished() {
         self.onboardingViewModel = nil
         self.phase = .ready
+        drainPendingImportsIfReady()
     }
 
     /// Retry for the error-screen Retry button.
@@ -1179,7 +1239,174 @@ final class RootCoordinator {
     ///
     /// Surfaced from `DeleteMyDataView`.
     func submitDeletionRequest() async throws -> UsersDeleteRequestResponse {
-        try await aiDispatch.usersDeleteRequest()
+        guard let canonicalKey = household.profile?.canonicalUserKey,
+              canonicalKey == cloudKit.lastResolvedKey?.stringValue else {
+            throw StirError.auth(reason: .missing, message: "Resolve the current household before deleting data.")
+        }
+        let response = try await aiDispatch.usersDeleteRequest()
+        // The request was authenticated for the selected household. Persist the
+        // erase marker before clearing credentials so a failed save can retry
+        // on the next launch without creating a replacement household.
+        do {
+            try deletionService.erase(canonicalUserKey: canonicalKey)
+            if cloudKit.lastResolvedKey?.stringValue == canonicalKey {
+                deletionCanonicalKey = canonicalKey
+                try await clearDeletedHouseholdSession()
+                household.clear()
+                onboardingViewModel = nil
+                phase = .dataDeleted
+            }
+        } catch {
+            phase = .configurationError("The request was accepted, but Stir couldn't finish removing local data. Please try again.")
+            throw error
+        }
+        return response
+    }
+
+    var deletionState: HouseholdDataDeletionService.State? {
+        deletionCanonicalKey.flatMap { deletionService.state(for: $0) }
+    }
+
+    func startOverAfterDeletion() {
+        guard let key = deletionCanonicalKey else { return }
+        deletionService.acknowledgeDeletion(for: key)
+        guard !deletionService.isAwaitingAcknowledgement(for: key) else { return }
+        deletionCanonicalKey = nil
+        retry()
+    }
+
+    private func clearDeletedHouseholdSession() async throws {
+        sharedStorage.clearAll()
+        WidgetCenter.shared.reloadAllTimelines()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        activeImport = nil
+        pendingRecipeImportID = nil
+        activeCookLaunch = nil
+        await sessionClient.clearSession()
+        for key in [KeychainKey.sessionJWT, .entitlementSnapshotV3, .entitlementSnapshotV2, .entitlementSnapshotLegacyV1] {
+            try keychain.delete(key: key)
+        }
+        PostHogClient.shared.reset()
+    }
+
+    // MARK: - Household composition and imported changes
+
+    func makeOnboardingViewModel(for profile: HouseholdProfile) -> OnboardingViewModel {
+        OnboardingViewModel(
+            profile: profile,
+            dietaryRepo: DietaryRuleRepository(controller: persistenceController),
+            equipmentRepo: KitchenEquipmentRepository(controller: persistenceController),
+            profileRepo: householdRepo
+        )
+    }
+
+    func makeImportViewModel(for profile: HouseholdProfile) -> ImportViewModel {
+        ImportViewModel(
+            household: profile, aiDispatch: aiDispatch,
+            importRepo: recipeImportRepository, controller: persistenceController
+        )
+    }
+
+    @discardableResult
+    func selectHousehold(for key: String, previousKey: String?, installationID: String) throws -> HouseholdProfile {
+        let promotion = previousKey == "install:\(installationID)" && key.hasPrefix("ck:") ? previousKey : nil
+        let profile = try householdRepo.ensureHouseholdProfile(for: key, promotingInstallationKey: promotion)
+        household.set(profile)
+        hasResolvedHouseholdIdentity = true
+        sharedStorage.writeCanonicalUserKey(key)
+        runImportRetentionMaintenance()
+        return profile
+    }
+
+    func beginHouseholdWorkflow() { activeHouseholdWorkflows += 1 }
+
+    func endHouseholdWorkflow() {
+        activeHouseholdWorkflows = max(0, activeHouseholdWorkflows - 1)
+        reconcileImportedHouseholdsIfReady()
+    }
+
+    private func startHouseholdMergeObserver() {
+        guard householdMergeObserver == nil else { return }
+        householdMergeObserver = NotificationCenter.default.addObserver(
+            forName: NSManagedObjectContext.didMergeChangesObjectIDsNotification,
+            object: persistenceController.viewContext, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.householdReconciliationPending = true
+                self?.reconcileImportedHouseholdsIfReady()
+            }
+        }
+    }
+
+    func reconcileImportedHouseholdsIfReady() {
+        guard householdReconciliationPending, hasResolvedHouseholdIdentity,
+              activeHouseholdWorkflows == 0, activeCookLaunch == nil, activeImport == nil,
+              let key = cloudKit.lastResolvedKey?.stringValue else { return }
+        do {
+            try deletionService.resumeDeletion(for: key)
+            if deletionService.isAwaitingAcknowledgement(for: key) {
+                household.clear()
+                deletionCanonicalKey = key
+                phase = .dataDeleted
+            } else if let profile = try householdRepo.reconcileProfiles(for: key) {
+                household.set(profile)
+                if phase == .onboarding {
+                    if profile.onboardingCompleted { handleOnboardingFinished() }
+                    else { onboardingViewModel = makeOnboardingViewModel(for: profile) }
+                }
+            }
+            householdReconciliationPending = false
+        } catch {
+            let detail = error as NSError
+            Logger.coreData.error("household reconciliation failed domain=\(detail.domain, privacy: .public) code=\(detail.code, privacy: .public)")
+        }
+    }
+
+    /// No success timestamp is stored: a failed save retries next foreground.
+    func runImportRetentionMaintenance(now: Date = Date()) {
+        guard let profile = household.profile else { return }
+        do { try recipeImportRepository.purgeExpired(for: profile, now: now) }
+        catch {
+            let detail = error as NSError
+            Logger.coreData.error("import retention failed domain=\(detail.domain, privacy: .public) code=\(detail.code, privacy: .public)")
+        }
+    }
+
+    func requestImportResult(importID: UUID) {
+        pendingRecipeImportID = importID
+        drainPendingImportsIfReady()
+    }
+
+    /// Called on foreground and every transition to a usable household.
+    /// Consume only after readiness; one presentation retains the next share.
+    func drainPendingImportsIfReady() {
+        guard hasResolvedHouseholdIdentity,
+              phase == .ready || phase == .offlineFallback,
+              let profile = household.profile,
+              profile.canonicalUserKey == cloudKit.lastResolvedKey?.stringValue,
+              activeImport == nil, activeCookLaunch == nil, activePaywallTrigger == nil,
+              activeHouseholdWorkflows == 0 else { return }
+        if let importID = pendingRecipeImportID {
+            pendingRecipeImportID = nil
+            // Never recover another household's import from a notification.
+            if (try? recipeImportRepository.find(importID: importID, for: profile)) != nil {
+                activeImport = .recovery(importID)
+                return
+            }
+        }
+        if let pending = sharedStorage.consumePendingImport(currentUserKey: profile.canonicalUserKey) {
+            activeImport = .shared(pending)
+        } else if let processing = try? recipeImportRepository.latestProcessing(for: profile), let id = processing.id {
+            activeImport = .recovery(id)
+        }
+    }
+
+    func dismissImport() {
+        activeImport = nil
+        reconcileImportedHouseholdsIfReady()
+        // Don't reopen an intentionally dismissed queued import immediately;
+        // foreground, notification or a new explicit request can resume it.
     }
 
     // MARK: - Tutorial replay (SCA-5)
@@ -1269,6 +1496,8 @@ final class RootCoordinator {
     /// so the fullScreenCover drops.
     func dismissCookMode() {
         activeCookLaunch = nil
+        reconcileImportedHouseholdsIfReady()
+        drainPendingImportsIfReady()
     }
 
     // MARK: - Deep-link routing

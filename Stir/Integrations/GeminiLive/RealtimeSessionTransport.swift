@@ -144,7 +144,7 @@ extension RealtimeSession {
         }
         let ctx: RealtimeHouseholdContext
         if let household = cookingSession.household {
-            ctx = RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot())
+            ctx = RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot(recipe: cookingSession.recipePlan))
         } else {
             ctx = RealtimeHouseholdContext(snapshot: .empty)
         }
@@ -165,6 +165,7 @@ extension RealtimeSession {
     func startReceiveDispatcher() {
         guard let transport else { return }
         dispatcherGeneration += 1
+        setupAcknowledgedGeneration = nil
         let myGen = dispatcherGeneration
         // SCA-170 S14 (CA3): annotate the unstructured Task with `@MainActor`
         // so the catch-block read of `dispatcherGeneration` (MainActor-isolated)
@@ -182,7 +183,7 @@ extension RealtimeSession {
                     // frames; this guard cuts the loop earlier so any frame
                     // still queued in `transport.inbound` after a cancel
                     // doesn't trigger a needless dispatch.
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || myGen != self.dispatcherGeneration { return }
                     await self.handleInboundFrame(frame)
                 }
             } catch {
@@ -226,6 +227,10 @@ extension RealtimeSession {
     /// resumed and leaked. This version resolves the continuation
     /// explicitly from the timeout path, so neither side leaks.
     func awaitSetupComplete(timeoutSec: Double) async throws {
+        guard currentState != .closed && currentState != .error else {
+            throw RealtimeSessionError.notOpen
+        }
+        if setupAcknowledgedGeneration == dispatcherGeneration { return }
         setupCompleteGeneration += 1
         let gen = setupCompleteGeneration
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -301,15 +306,23 @@ extension RealtimeSession {
         // Each `function_call_arguments.done` event carries one call, so
         // the array has length 1; iterating in order is the right
         // contract if that ever changes.
+        let generation = lifecycleGeneration
+        let toolTurn = turnCount
         for call in toolCall.functionCalls {
             let response = await dispatchTool(call)
+            guard generation == lifecycleGeneration, toolTurn == turnCount,
+                  currentState == .toolCalling else { return }
+            // Bound the response send and first-audio wait without replaying the tool.
+            rearmTurnStuckWatchdog()
             let frame = LiveOutboundFrame.toolResponse(
                 functionResponseId: call.id,
                 name: call.name,
                 response: response,
             )
             do {
-                try await transport?.send(frame)
+                guard let transport else { throw RealtimeSessionError.notOpen }
+                try await transport.send(frame)
+                guard generation == lifecycleGeneration, toolTurn == turnCount else { return }
                 #if DEBUG
                 VoiceSessionLog.log("tool_response.sent", ["name": call.name])
                 #endif
@@ -320,6 +333,8 @@ extension RealtimeSession {
                 #if DEBUG
                 VoiceSessionLog.logError("tool_response.send_failed", error: error, ["name": call.name])
                 #endif
+                turnStuckWatchdogFired()
+                return
             }
         }
 
@@ -612,7 +627,7 @@ extension RealtimeSession {
         // items could leak into the substitution validator. Canonical
         // filter now applies uniformly.
         let householdContext = SubstitutionRequest.HouseholdContext(
-            snapshot: cookingSession.household?.voiceContextSnapshot() ?? .empty,
+            snapshot: cookingSession.household?.voiceContextSnapshot(recipe: cookingSession.recipePlan) ?? .empty,
         )
 
         let request = SubstitutionRequest(

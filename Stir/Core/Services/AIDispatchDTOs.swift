@@ -717,7 +717,7 @@ struct SubstitutionRequest: Encodable, Sendable {
 
         /// Mirror of backend `SubstitutionRecipeStep` (validation.ts) —
         /// `timer_seconds` is non-Optional Int because the backend
-        /// schema is `z.number().int().min(0).max(36000).nullable()`,
+        /// schema is `z.number().int().min(0).max(86400).nullable()`,
         /// meaning the key is REQUIRED but may be `null`. Pre-existing
         /// `RealtimeRecipeContext.StepDescription` uses Int with 0 =
         /// "no timer"; we keep the wire null-able here so a step with
@@ -813,7 +813,7 @@ enum SubstitutionResult: Sendable {
 /// call so the server's 10-min idempotency cache collapses a fast
 /// double-tap to one Gemini call. The cache row's PK is
 /// `(canonical_user_key, request_id)` — `feature_key` is NOT in the key
-/// (migration 20260418000024). The server appends a `:rewrite` suffix
+/// (migration 20260418000024). The server appends a `:rewrite:safety-v2` suffix
 /// (`REWRITE_CACHE_SUFFIX` in `recipe-step-rewrite/index.ts`) to the
 /// cache key so this lookup doesn't collide with the substitution
 /// body cached under the bare sub_event_id.
@@ -824,6 +824,8 @@ struct RecipeStepRewriteRequest: Encodable, Sendable {
     let substituteIngredient: String
     let amountConversion: String?
     let recipeTitle: String?
+    var dietaryRules: [DinnerSolveRequest.DietaryRuleLite] = []
+    var availableEquipment: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case subEventID = "sub_event_id"
@@ -832,6 +834,8 @@ struct RecipeStepRewriteRequest: Encodable, Sendable {
         case substituteIngredient = "substitute_ingredient"
         case amountConversion = "amount_conversion"
         case recipeTitle = "recipe_title"
+        case dietaryRules = "dietary_rules"
+        case availableEquipment = "available_equipment"
     }
 
     /// Skip encoding optional fields when blank. Backend Zod is
@@ -843,6 +847,8 @@ struct RecipeStepRewriteRequest: Encodable, Sendable {
         try c.encode(stepInstructionText, forKey: .stepInstructionText)
         try c.encode(originalIngredient, forKey: .originalIngredient)
         try c.encode(substituteIngredient, forKey: .substituteIngredient)
+        try c.encode(dietaryRules, forKey: .dietaryRules)
+        try c.encode(availableEquipment, forKey: .availableEquipment)
         if let amount = amountConversion?.trimmingCharacters(in: .whitespacesAndNewlines),
            !amount.isEmpty
         {
@@ -909,7 +915,7 @@ struct RealtimeRecipeContext: Encodable, Sendable {
     let currentStepText: String
     /// Seconds for the current step's timer; 0 = no timer. Must be
     /// present on every request — backend schema is
-    /// `z.number().int().min(0).max(36000).nullable()`, meaning the key
+    /// `z.number().int().min(0).max(86400).nullable()`, meaning the key
     /// is REQUIRED even when the step has no timer. Prior Optional<Int>
     /// shape caused JSONEncoder to omit the key on nil, tripping
     /// VAL-01 "Required" on the mint. Using non-Optional forces
@@ -938,7 +944,7 @@ struct RealtimeRecipeContext: Encodable, Sendable {
         let text: String
         /// Seconds for this step's timer; 0 = no timer. Non-Optional
         /// because the backend schema is
-        /// `z.number().int().min(0).max(36000).nullable()` — the key is
+        /// `z.number().int().min(0).max(86400).nullable()` — the key is
         /// REQUIRED on the wire even when there's no timer. Prior
         /// `Int?` shape caused JSONEncoder to omit the key on nil and
         /// tripped VAL-01 `timer_seconds=Required` on the mint. Same
@@ -1183,10 +1189,13 @@ struct RecipeImportResponse: Decodable, Sendable {
     let retryCount: Int
     let promptVersion: String
     let asyncJobID: String?
+    var message: String? = nil
 
     enum Status: String, Decodable, Sendable {
         case completed
         case queued
+        case failed
+        case expired
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1196,6 +1205,7 @@ struct RecipeImportResponse: Decodable, Sendable {
         case retryCount = "retry_count"
         case promptVersion = "prompt_version"
         case asyncJobID = "async_job_id"
+        case message
     }
 
     struct ImportedRecipe: Decodable, Sendable {

@@ -139,6 +139,7 @@ enum LiveInboundFrame {
     case serverContent(LiveServerContent)
     case toolCall(LiveToolCall)
     case usageMetadata(LiveUsageMetadata)
+    case responseError(code: String)
     /// `input_audio_buffer.speech_stopped` — server VAD decided the user
     /// finished speaking. The only anchor for time-to-first-audio: the
     /// input transcript arrives later and asynchronously, so anchoring on
@@ -235,7 +236,7 @@ enum LiveInboundFrame {
             Logger.voice.warning(
                 "live_ws_error_event type=\(errType, privacy: .public) code=\(errCode, privacy: .public)",
             )
-            return [.unknown(key: "error:\(errCode)")]
+            return [.responseError(code: errCode)]
 
         default:
             return isIgnored(type) ? [] : [.unknown(key: type)]

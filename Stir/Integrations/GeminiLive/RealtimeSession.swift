@@ -348,6 +348,27 @@ final class RealtimeSession: VoiceSessionDriver {
     /// race window where the flag could be cleared before the stale
     /// dispatcher's error handler ran (review 2026-04-22 Critical #2).
     /// Generation-based suppression is flag-state-independent. ADR 0014.
+    var lifecycleGeneration = 0
+    var refreshTask: Task<RefreshOutcome, Never>?
+    var setupAcknowledgedGeneration: Int?
+    #if DEBUG
+    var testingTransportFactory: (() -> any LiveTransporting)?
+    #endif
+
+    func makeTransport() -> any LiveTransporting {
+        #if DEBUG
+        if let testingTransportFactory { return testingTransportFactory() }
+        #endif
+        return LiveWebSocketTransport()
+    }
+
+    func checkLifecycle(_ generation: Int) throws {
+        guard generation == lifecycleGeneration, !Task.isCancelled,
+              currentState != .closed, currentState != .error else {
+            throw CancellationError()
+        }
+    }
+
     var dispatcherGeneration: Int = 0  // SCA-159 non-private: bumped by Transport.startReceiveDispatcher
 
     /// Wall-clock timestamp of the most recent inbound server audio
@@ -896,9 +917,13 @@ final class RealtimeSession: VoiceSessionDriver {
             } else if from == .modelSpeaking, to != .modelSpeaking {
                 self?.cancelTurnStuckWatchdog()
             }
+            self?.audioPipeline?.captureGate.setMuted(
+                to == .modelSpeaking || to == .refreshing || to == .closed || to == .error
+            )
             self?.onVoiceStateChange?(to)
         }
         stateMachine.advance(to: .connecting)
+        let generation = lifecycleGeneration
 
         do {
             // 1. Mint
@@ -907,6 +932,7 @@ final class RealtimeSession: VoiceSessionDriver {
             #endif
             let mintRequest = try buildMintRequest()
             let response = try await aiDispatch.realtimeSession(request: mintRequest)
+            try checkLifecycle(generation)
             self.mintResponse = response
             #if DEBUG
             VoiceSessionLog.log("mint.complete", [
@@ -923,7 +949,7 @@ final class RealtimeSession: VoiceSessionDriver {
                 #endif
                 throw RealtimeSessionError.openFailed(message: "invalid ws_url")
             }
-            let transport = LiveWebSocketTransport()
+            let transport = makeTransport()
             self.transport = transport
             try transport.open(url: wsURL, authToken: response.authToken)
             // OpenAI's 60-minute session cap runs from connection, so
@@ -957,6 +983,7 @@ final class RealtimeSession: VoiceSessionDriver {
             //    client sends. Sent via `setupRawJSON` so the transport
             //    skips the JSONSerialization round-trip.
             try await transport.send(.setupRawJSON(response.setupFrameJSON))
+            try checkLifecycle(generation)
             #if DEBUG
             VoiceSessionLog.log("ws.setup_sent")
             #endif
@@ -965,6 +992,7 @@ final class RealtimeSession: VoiceSessionDriver {
             //    LiveSessionBudget — server normally emits this within
             //    200-400 ms after receiving our setup frame).
             try await awaitSetupComplete(timeoutSec: LiveSessionBudget.setupHandshakeSec)
+            try checkLifecycle(generation)
             #if DEBUG
             VoiceSessionLog.log("ws.setup_complete")
             #endif
@@ -985,7 +1013,7 @@ final class RealtimeSession: VoiceSessionDriver {
             #if DEBUG
             VoiceSessionLog.logError("prewarm.failed", error: error)
             #endif
-            stateMachine.advance(to: .error)
+            if currentState != .closed { stateMachine.advance(to: .error) }
             close()
             throw error
         }
@@ -1187,6 +1215,11 @@ final class RealtimeSession: VoiceSessionDriver {
     /// add an explicit `if isClosed { return }` flag instead so the
     /// SCA-76 contract holds at the entry boundary.
     func close() {
+        lifecycleGeneration += 1
+        dispatcherGeneration += 1
+        setupAcknowledgedGeneration = nil
+        refreshTask?.cancel()
+        refreshTask = nil
         #if DEBUG
         VoiceSessionLog.log("close.begin", ["turn_count": turnCount])
         #endif

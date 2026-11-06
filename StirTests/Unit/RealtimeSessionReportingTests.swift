@@ -386,6 +386,8 @@ final class RealtimeSessionReportingTests: XCTestCase {
 
     func test_containedToolCall_trueWhenToolFrameSeen() async throws {
         let driver = makeDriver()
+        driver._testInstallLiveTransport(MockLiveTransport())
+        defer { driver.close() }
         var captured: [LiveTurnSummary] = []
         driver.onTurnFinalized = { captured.append($0) }
 
@@ -424,6 +426,8 @@ final class RealtimeSessionReportingTests: XCTestCase {
         // the prior turn's classification and every event post-tool
         // gets mistagged as tool_call.
         let driver = makeDriver()
+        driver._testInstallLiveTransport(MockLiveTransport())
+        defer { driver.close() }
         var captured: [LiveTurnSummary] = []
         driver.onTurnFinalized = { captured.append($0) }
 
@@ -538,6 +542,8 @@ final class RealtimeSessionReportingTests: XCTestCase {
 
     func test_toolCallTurn_sumsBothResponses_andCompletesOnlyOnTheSecond() async throws {
         let driver = makeDriver()
+        driver._testInstallLiveTransport(MockLiveTransport())
+        defer { driver.close() }
         var captured: [LiveTurnSummary] = []
         driver.onTurnFinalized = { captured.append($0) }
         driver._testAdvance(to: .ready)

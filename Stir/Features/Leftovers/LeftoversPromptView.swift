@@ -138,7 +138,7 @@ struct LeftoversPromptView: View {
                 Text(selectedCountLabel)
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(

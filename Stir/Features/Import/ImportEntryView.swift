@@ -161,12 +161,12 @@ struct ImportEntryView: View {
         } label: {
             HStack(spacing: 8) {
                 if viewModel.isBusy {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Color.Stir.onAccent)
                 }
                 Text(viewModel.isBusy ? "Importing…" : "Import link")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 52)

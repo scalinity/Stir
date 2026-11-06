@@ -30,6 +30,7 @@ import OSLog
 import UIKit
 
 enum StirDeepLink: Equatable {
+    case importResult(importID: UUID)
     case scanStart
     case solve(solveID: UUID)
     case dishPreview(solveID: UUID, dishID: UUID)
@@ -69,6 +70,9 @@ enum StirDeepLink: Equatable {
         let segments = components.path.split(separator: "/").map(String.init)
 
         switch (host, segments) {
+        case ("import", let parts) where parts.count == 1:
+            guard let id = UUID(uuidString: parts[0]) else { return .unknown(raw: url.absoluteString) }
+            return .importResult(importID: id)
         case ("scan", ["start"]):
             return .scanStart
         case ("paywall", ["widget"]):
@@ -132,6 +136,7 @@ enum StirDeepLink: Equatable {
     /// activation from cold-launch activation.
     var breadcrumbCategory: String {
         switch self {
+        case .importResult: return "notification.import_completion"
         case .scanStart:       return "widget.scan"
         case .solve:           return "widget.solve"
         case .dishPreview:     return "widget.dish"
@@ -165,6 +170,8 @@ enum StirDeepLinkHandler {
             WidgetNudgeService.shared.recordWidgetTap()
         }
         switch destination {
+        case .importResult(let importID):
+            coordinator.requestImportResult(importID: importID)
         case .paywallWidget:
             // Highest-intent conversion tap per spec §9 — widget shows
             // "Widgets unlock with Premium" and the user taps through.

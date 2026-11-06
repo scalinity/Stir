@@ -10,9 +10,22 @@ import Foundation
 @MainActor
 final class CookTimerRepository {
     private let controller: PersistenceController
+    private let persist: @MainActor () throws -> Void
 
-    init(controller: PersistenceController) {
+    init(controller: PersistenceController, save: (@MainActor () throws -> Void)? = nil) {
         self.controller = controller
+        self.persist = save ?? controller.save
+    }
+
+    /// Keep failed transitions and session notification identifiers out of
+    /// later saves. The injectable save operation exercises failure paths.
+    private func save() throws {
+        do {
+            try persist()
+        } catch {
+            controller.viewContext.rollback()
+            throw error
+        }
     }
 
     @discardableResult
@@ -30,56 +43,47 @@ final class CookTimerRepository {
         timer.label = label
         timer.durationSec = Int32(max(0, durationSec))
         timer.typedState = .pending
-        try controller.save()
+        try save()
         return timer
     }
 
     func start(_ timer: CookTimer, at date: Date = Date()) throws {
         timer.startedAt = date
         timer.endedAt = nil
+        timer.pausedRemainingSec = -1
         timer.typedState = .running
-        try controller.save()
+        try save()
     }
 
-    /// Persist a PAUSE transition. The "elapsed so far" math lives in
-    /// TimerService's in-memory state — when the user resumes, Service
-    /// calls `resume(timer:pausedDuration:)` with the adjusted start time
-    /// so `startedAt + durationSec` remains the authoritative fire date.
-    ///
-    /// `pausedRemainingSec` is also persisted (DB1-1 fix) so cold-launch
-    /// reconcile in CookModeViewModel can show the correct Lock Screen
-    /// remaining time without consulting the in-memory pauseStartedAt
-    /// map (process-scoped, gone after force-quit). Callers pass the
-    /// snapshot computed at pause time; nil means the column stays clear.
+    /// Save the remaining seconds with paused state. Resume and the
+    /// countdown view both use this snapshot after service recreation.
     func pause(_ timer: CookTimer, pausedRemainingSec: Int) throws {
         timer.typedState = .paused
         timer.pausedRemainingSec = Int32(max(0, pausedRemainingSec))
-        try controller.save()
+        try save()
     }
 
-    /// Resume a paused timer with a recomputed startedAt so the fire
-    /// date moves forward by the paused duration. `newStartedAt` should
-    /// be `originalStartedAt + pausedDuration`. Clears the persisted
-    /// pausedRemainingSec sentinel.
+    /// Resume with startedAt derived from resumedAt + saved remaining
+    /// seconds - durationSec. Clear the snapshot in the same save.
     func resume(_ timer: CookTimer, newStartedAt: Date) throws {
         timer.startedAt = newStartedAt
         timer.typedState = .running
         timer.pausedRemainingSec = -1
-        try controller.save()
+        try save()
     }
 
     func markCompleted(_ timer: CookTimer, at date: Date = Date()) throws {
         timer.endedAt = date
         timer.typedState = .completed
         timer.pausedRemainingSec = -1
-        try controller.save()
+        try save()
     }
 
     func cancel(_ timer: CookTimer, at date: Date = Date()) throws {
         timer.endedAt = date
         timer.typedState = .cancelled
         timer.pausedRemainingSec = -1
-        try controller.save()
+        try save()
     }
 
     /// All timers for a session, sorted by startedAt (nil-last). Used
