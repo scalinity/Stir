@@ -177,6 +177,7 @@ final class RootCoordinatorIdentityTransitionTests: XCTestCase {
                 config: config,
                 keychain: MockKeychain(),
             ),
+            persistenceController: PersistenceController(inMemory: true),
         )
     }
 }

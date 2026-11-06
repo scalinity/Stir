@@ -771,12 +771,30 @@ final class RootCoordinator {
 
             Logger.coordinator.info("bootstrap complete phase=\(String(describing: self.phase), privacy: .public)")
         } catch {
+            // `ensureHouseholdProfile` already throws
+            // `StirError.coreData(underlying:)`. Wrapping it a second time
+            // hid the real Core Data NSError behind "Stir.StirError error
+            // 10" in Sentry (STIR-F), so unwrap once and tag the inner
+            // domain + code. domain/code only in the log line, per the
+            // SCA-98 rule that Core Data descriptions can embed user values.
+            let underlying: any Error
+            if case StirError.coreData(let inner) = error {
+                underlying = inner
+            } else {
+                underlying = error
+            }
+            let nserror = underlying as NSError
             Logger.coordinator.error(
-                "core data pre-create failed: \(error.localizedDescription, privacy: .public)",
+                "core data pre-create failed: domain=\(nserror.domain, privacy: .public) code=\(nserror.code, privacy: .public)",
             )
             sentry.captureError(
-                StirError.coreData(underlying: error),
-                context: ["phase": "ensure_profile", "canonical_key_hash": keyHash],
+                StirError.coreData(underlying: underlying),
+                context: [
+                    "phase": "ensure_profile",
+                    "canonical_key_hash": keyHash,
+                    "core_data_domain": nserror.domain,
+                    "core_data_code": String(nserror.code),
+                ],
             )
             // Fast-path: cached household is already set on `self.household`.
             // Don't unmount the UI for a Core Data fetch failure on a key

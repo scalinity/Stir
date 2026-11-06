@@ -23,9 +23,47 @@ struct StirApp: App {
     private let configResult: Result<AppConfig, Error>
     @State private var coordinator: RootCoordinator?
 
+    /// True when this process is the host app for the `StirTests` unit-test
+    /// bundle (`TEST_HOST` in project.yml), not a real launch.
+    ///
+    /// Why it matters: XCTest boots the full app before injecting the test
+    /// bundle, so without this guard every `xcodebuild test` run (including
+    /// the pre-push hook) started the live Sentry + PostHog SDKs, ran the
+    /// real RootCoordinator bootstrap against the configured backend, and
+    /// shared `PersistenceController.shared` with the tests. Sentry then
+    /// recorded the tests' stubbed 5xx responses (test.supabase.co /
+    /// test.invalid hosts) as HTTPClientError issues, tests that block the
+    /// main thread as App Hangs, the runner's teardown kill as a Fatal App
+    /// Hang, and launch-path Core Data failures from the shared store, all
+    /// under the `development` environment as if a user hit them (Sentry
+    /// STIR-G, STIR-J, STIR-K, STIR-F and the 18 s STIR-H event, all
+    /// lining up with test runs on Nov 6 2026).
+    ///
+    /// DEBUG-only so a Release build can never take the inert path. UI
+    /// tests are unaffected: XCUIApplication launches the app as a normal
+    /// process without the XCTest configuration environment.
+    static var isHostingUnitTests: Bool {
+        #if DEBUG
+        let env = ProcessInfo.processInfo.environment
+        return env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || env["XCTestSessionIdentifier"] != nil
+        #else
+        return false
+        #endif
+    }
+
     init() {
         let result = Result { try AppConfig.load() }
         self.configResult = result
+
+        // Unit-test host: stay inert. Tests build every dependency they
+        // need themselves (in-memory PersistenceController, StubSentry,
+        // MockURLProtocol sessions), so nothing below should run here.
+        if Self.isHostingUnitTests {
+            Logger.app.info("StirApp init skipped: hosting unit tests")
+            return
+        }
 
         if case .success(let config) = result {
             if let sentryConfig = config.sentry {
@@ -107,22 +145,31 @@ struct StirApp: App {
 
     var body: some Scene {
         WindowGroup {
-            switch configResult {
-            case .success:
-                if let coordinator {
-                    RootView(coordinator: coordinator)
-                } else {
-                    ConfigurationErrorView(
-                        message: "Stir couldn't start. Please relaunch.",
-                        onRetry: nil,
-                    )
-                }
-            case .failure(let error):
+            if Self.isHostingUnitTests {
+                Color.clear
+            } else {
+                rootContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        switch configResult {
+        case .success:
+            if let coordinator {
+                RootView(coordinator: coordinator)
+            } else {
                 ConfigurationErrorView(
-                    message: String(describing: error),
+                    message: "Stir couldn't start. Please relaunch.",
                     onRetry: nil,
                 )
             }
+        case .failure(let error):
+            ConfigurationErrorView(
+                message: String(describing: error),
+                onRetry: nil,
+            )
         }
     }
 }
