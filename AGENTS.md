@@ -28,12 +28,12 @@ iPhone app for the weeknight moment: stand in the kitchen with ingredients, no p
 
 1. **One AI vendor per job (ADR 0038).** Text runs on the Claude API (`claude-haiku-5-5` for every text feature; `claude-sonnet-5-5` only where the parity check demands it). Voice runs on OpenAI Realtime (`gpt-realtime-2.1-mini`). The `AI_TEXT_PROVIDER` secret (`anthropic` default, `gemini`) selects the text provider for every endpoint at once; Gemini text (`gemini-3-flash-preview`, `gemini-3.1-flash-lite`) stays callable only behind it. No per-request cross-vendor fallback.
 2. **No provider API keys in the iOS bundle, ever.** Cook Mode voice uses a short-lived client secret (`ek_…`) minted server-side. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `GEMINI_API_KEY` live in Supabase Edge Function secrets only.
-3. **User content lives in CloudKit, not Supabase.** Postgres holds operational metadata only (quotas, entitlements, prompt versions, AI request logs).
+3. **Saved user content lives in CloudKit.** Postgres holds operational metadata plus the explicit transient exceptions in ADR 0042: queued import text with a 10-minute processing deadline and terminal scrub, and parsed responses with a 10-minute replay/read lifetime. Scheduled physical cleanup can lag expiry. Do not build a server content library or mirror household history.
 4. **RLS on every ops table in Supabase.** All rows keyed on `canonical_user_key`. No exceptions, no bypasses.
 5. **Hard-rule validator runs on every substitution output,** regardless of invocation path.
 6. **Voice is Premium+ only.** Free → unlimited tap-based Cook Mode; voice affordance triggers `ENT-VOICE-01` paywall. Caps: free 0 / premium 13 / pro 27 sessions/month (ADR 0015). `effectiveVoiceEnabled()`'s `ENTITLEMENT_OVERRIDE_VOICE_FREE` env hatch is dev/staging only — production must keep it unset (verify `supabase secrets list --project-ref ktqajarcomzplnpbczfo` before any cap-related deploy). ADR 0008 Superseded.
 7. **Voice per-turn prompt growth stays bounded — by server truncation, not refresh.** The setup frame sets `truncation: {type: retention_ratio, retention_ratio: 0.8, token_limits: {post_instructions: 8000}}`. `refreshSession()` runs only near OpenAI's 60-minute session limit (55 min; pre-mint at 54) and for transport recovery, because a refresh opens a new session and discards the prompt cache that carries voice economics. ADR 0038.
-8. **Voice session `max_output_tokens: 400`** (ADR 0010). Baked into the mint. Invariant is "bounded cap exists" — value tunable. 400 ≈ 18 s of speech at OpenAI's 20 audio tokens/s plus transcript text.
+8. **Supported voice client configures `max_output_tokens: 400`** (ADR 0010/0041). This is a mutable session default, not an enforced downstream spend limit. OpenAI client secrets can open multiple sessions within their 120-second connection window; server quotas enforce mint admission only. 400 ≈ 18 s of speech at OpenAI's 20 audio tokens/s plus transcript text.
 
 ---
 
@@ -59,7 +59,7 @@ iPhone app for the weeknight moment: stand in the kitchen with ingredients, no p
 Quick highlights load-bearing for everyday work:
 
 - Production models: `claude-haiku-5-5` (every text feature), `gpt-realtime-2.1-mini` (voice, reasoning effort `minimal`). Realtime audio: user speech 10 tokens/s, model speech 20 tokens/s. **Prompt caching is automatic on Realtime** (cached audio $0.30/M, cached text $0.06/M); the cache hit rate is the voice cost signal (ADR 0038).
-- Voice caps: free 0 / premium 13 / pro 27 sessions per month (ADR 0015). `max_output_tokens: 400` baked into mint (ADR 0010).
+- Voice caps: free 0 / premium 13 / pro 27 sessions per month (ADR 0015). `max_output_tokens: 400` attached as a mutable default (ADR 0010/0041).
 - StoreKit SKUs: `stir.premium.monthly` $9.99 · `stir.premium.annual.trial7` $69.99 (no trial; `.trial7` suffix is historical, see SCA-294) · `stir.pro.monthly` $14.99 · `stir.pro.annual` $139.99 (PRIMARY paywall CTA, 7-day trial). Family Sharing off, group `stir.subscriptions`.
 - Canonical user key: `ck:<userRecordName>` if CloudKit available, else `install:<keychainInstallId>`. Always alias forward.
 - `usage_counters.cap_count` SNAPSHOTTED at row-creation; never refreshed on tier upgrade. Atomic check via `UPDATE ... WHERE used_count < cap_count RETURNING ...`.
@@ -114,7 +114,7 @@ Voice runs on `gpt-realtime-2.1-mini` over WebSocket (ADR 0038). The iOS client 
 1. **Caching is automatic and carries the economics.** The conversation prefix caches (cached audio $0.30/M vs $10/M uncached; cached text $0.06/M). A refresh opens a new session and discards the cache — never refresh to prune. Watch `cached_tokens` per turn (`ai_request_log.prompt_cached_tokens`).
 2. **Bounded growth is server truncation.** `setup_frame_json` is a `session.update` setting `truncation: {type: retention_ratio, retention_ratio: 0.8, token_limits: {post_instructions: 8000}}`. Refresh runs only near the 60-minute session limit (55 min, pre-mint at 54) and for transport recovery.
 3. **WebSocket, not WebRTC.** `URLSessionWebSocketTask` to `wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini` with `Authorization: Bearer <ek_…>`; host pinned to exactly `api.openai.com`. OpenAI recommends WebRTC for mobile; it needs a third-party framework, so it is not adopted.
-4. **Client secret, not a session token.** `POST /v1/realtime/client_secrets` (server-side, `OPENAI_API_KEY`, `OpenAI-Safety-Identifier` = hashed canonical key) returns `ek_…` with a 120-second connect window. The session config (model, instructions, tools, audio, VAD, voice, output cap, reasoning effort) is baked at mint.
+4. **Client secret, not a session token.** `POST /v1/realtime/client_secrets` (server-side, `OPENAI_API_KEY`, `OpenAI-Safety-Identifier` = hashed canonical key) returns `ek_…` with a 120-second connect window. The session config (model, instructions, tools, audio, VAD, voice, output cap, reasoning effort) is attached at mint and may be overridden by the connection. Direct voice is retained with this accepted boundary (ADR 0041).
 5. **Handshake.** The server sends `session.created` (ignored); iOS sends `setup_frame_json`; `session.updated` is the ack. Keep the handshake timeout.
 6. **Tool results need `response.create`.** Send the result as `conversation.item.create` (`type: function_call_output`, matching `call_id`, `output` as a JSON string), then an explicit `response.create`. The model does not continue on its own.
 7. **A `response.done` that contains a `function_call` item is not end-of-turn.** The turn ends with the response that follows the tool result. Usage arrives per response; a tool-call turn has two.
@@ -122,11 +122,11 @@ Voice runs on `gpt-realtime-2.1-mini` over WebSocket (ADR 0038). The iOS client 
 9. **Audio is PCM16 mono 24 kHz both ways.** Billing: user speech 10 tokens/s, model speech 20 tokens/s; VAD drops silence.
 10. **TTFA anchor is `input_audio_buffer.speech_stopped`.** Input transcription (`gpt-transcribe`) arrives asynchronously, often after model audio starts — never anchor TTFA on it.
 11. **Turn detection** `semantic_vad` (`eagerness: auto`) with `interrupt_response: false` to match the half-duplex mic gate (ADR 0011); `server_vad` behind `voice_turn_detection_mode`.
-12. **`max_output_tokens: 400`** (ADR 0010) baked into the mint. "Bounded cap exists" is the invariant.
+12. **`max_output_tokens: 400`** (ADR 0010/0041) is the supported client's mutable output default. Mint quotas enforce starts and continuation authorization, not downstream connection count or spend.
 13. **Preambles.** The tool descriptions and prompt ask for a spoken filler before slow tools; re-validate the preamble-present rate on this model before relying on it (ADR 0012 item A trigger).
-14. **Defensive by default.** Every `await` on a server-initiated transition (session.updated, turn end, first audio chunk, pre-mint swap) MUST have a client-side timeout and graceful recovery. `turnStuckWatchdog` in `RealtimeSession.swift` (8 s, armed on `.modelSpeaking`, rearmed on inbound audio) synthesizes the turn end, persists VoiceTurn `resultType='error'/errorCode='turnComplete_timeout'`, emits `voice_turn_stuck_watchdog_fired`. Over 5% of tool-call turns in a 7-day window = revisit the voice vendor decision.
+14. **Defensive by default.** Every `await` on a server-initiated transition (session.updated, turn end, first audio chunk, pre-mint swap) MUST have a client-side timeout and graceful recovery. `turnStuckWatchdog` in `RealtimeSession.swift` (15 s, armed on `.modelSpeaking` and after tool dispatch before sending the result, rearmed on inbound audio) synthesizes the turn end, persists VoiceTurn `resultType='error'/errorCode='turnComplete_timeout'`, emits `voice_turn_stuck_watchdog_fired`. Over 5% of tool-call turns in a 7-day window = revisit the voice vendor decision.
 15. **Kill switch.** `disable_cook_realtime` routes Premium+ voice to the C.3 text fallback with `AI-VOICE-01` (`SpeechFallbackService`, unaffected by Realtime).
-16. **`error` events don't end the session.** Log `type` and `code` only (the message can echo request content).
+16. **`error` events use typed codes.** Log `type` and `code` only (the message can echo request content). During the post-tool response wait, an error resolves the turn through the existing watchdog recovery; otherwise it does not end the session.
 
 ---
 
@@ -442,7 +442,7 @@ Reach for these BEFORE introducing a protocol abstraction or rewriting productio
 
 **Wrong paths that look right until they bite:**
 
-- Don't put any provider API key in the iOS bundle, under any framing — iOS only ever holds the short-lived `ek_…` client secret. Don't write user content to Supabase Postgres (CloudKit-only).
+- Don't put any provider API key in the iOS bundle, under any framing — iOS only ever holds the short-lived `ek_…` client secret. Don't persist user content in Supabase outside ADR 0042's queued-import and response-retry copies; saved household content stays in CloudKit.
 - Don't refresh a Realtime session to prune context — it discards the prompt cache; truncation bounds growth. Don't send a `function_call_output` without the following `response.create`. Don't treat a `response.done` whose output holds a `function_call` as end-of-turn. Don't anchor TTFA on input transcription (it is asynchronous).
 - Don't call a model from a handler directly — text goes through `aiTextGenerate` (`_shared/ai_text.ts`), voice through `mintRealtimeSession`. Don't send `temperature`/`top_p`/`top_k`, forced `tool_choice`, or assistant prefill to Claude (400s on current models); structured output is `output_config.format`.
 - Don't use `@FetchRequest` in new code (use Repository + observed view model). Don't hardcode entitlement tier strings in views — go through `EntitlementService`. Don't derive `voice_enabled` on iOS (server-computed). Don't use object-keyed `quotas` (always array).
