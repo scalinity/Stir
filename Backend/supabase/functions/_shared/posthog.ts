@@ -145,7 +145,7 @@ export function capturePosthogEvent(
       // brown-out — EdgeRuntime.waitUntil keeps the promise alive until
       // completion OR timeout, but without AbortSignal a hung fetch
       // would block until platform termination. Sibling callers
-      // (`_shared/apns.ts`, `_shared/gemini.ts`, `_shared/live_mint.ts`)
+      // (`_shared/apns.ts`, `_shared/gemini.ts`)
       // use the same pattern. CA2-C1 (2026-04-24).
       const res = await fetch(`${POSTHOG_HOST}/i/v0/e/`, {
         method: 'POST',
@@ -230,5 +230,71 @@ export async function captureSafe(
       event: body.event,
       err: err instanceof Error ? err.message.slice(0, 200) : 'non_error_thrown',
     });
+  }
+}
+
+export interface PostHogDeletionResult {
+  requires_manual_action: true;
+  triggered_at: string;
+  submitted_at?: string;
+  error: string;
+}
+
+/** A 202 queues deletion; it does not prove erasure. Keep the follow-up in
+ * the surviving deletion audit record. Never use the public capture key here.
+ * https://posthog.com/docs/api/persons (persons/bulk_delete, person:write).
+ */
+export async function requestPostHogDeletion(
+  distinctId: string,
+  options: {
+    apiKey?: string;
+    projectId?: string;
+    host?: string;
+    fetchImpl?: typeof fetch;
+  } = {},
+): Promise<PostHogDeletionResult> {
+  const triggered_at = new Date().toISOString();
+  const manual = (error: string): PostHogDeletionResult => ({
+    requires_manual_action: true,
+    triggered_at,
+    error,
+  });
+  const apiKey = options.apiKey ?? Deno.env.get('POSTHOG_PERSONAL_API_KEY');
+  const projectId = options.projectId ?? Deno.env.get('POSTHOG_PROJECT_ID');
+  if (!apiKey || !projectId) return manual('posthog_deletion_credentials_unset');
+  const host = options.host ?? Deno.env.get('POSTHOG_API_HOST') ?? 'https://us.posthog.com';
+  if (!/^https:\/\/(us|eu)\.posthog\.com\/?$/.test(host) || !/^\d+$/.test(projectId)) {
+    return manual('posthog_deletion_configuration_invalid');
+  }
+  try {
+    const response = await (options.fetchImpl ?? fetch)(
+      host.replace(/\/$/, '') + '/api/projects/' + projectId + '/persons/bulk_delete/',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          distinct_ids: [distinctId],
+          delete_events: true,
+          delete_recordings: true,
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (response.status !== 202) return manual('posthog_deletion_http_' + response.status);
+    const body = await response.json();
+    if (
+      !Array.isArray(body.deletion_errors) || body.deletion_errors.length > 0 ||
+      body.events_queued_for_deletion !== true || body.recordings_queued_for_deletion !== true
+    ) {
+      return manual('posthog_deletion_not_confirmed_queued');
+    }
+    return {
+      ...manual('posthog_deletion_queued_verify_completion'),
+      submitted_at: new Date().toISOString(),
+    };
+  } catch {
+    // Do not retain provider bodies, request URLs, or credential-bearing errors.
+    return manual('posthog_deletion_request_failed');
   }
 }

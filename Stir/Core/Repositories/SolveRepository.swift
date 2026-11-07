@@ -66,6 +66,7 @@ final class SolveRepository {
     struct SolveOutcome: Sendable {
         let solveRequestId: UUID
         let suggestedDishIds: [UUID]
+        let suggestedDishIdsByRank: [Int: UUID]
     }
 
     // MARK: - Create
@@ -95,6 +96,7 @@ final class SolveRepository {
         solve.typedPantrySnapshot = pantrySnapshot
 
         var dishIds: [UUID] = []
+        var dishIdsByRank: [Int: UUID] = [:]
 
         for dish in dishes.sorted(by: { $0.rank < $1.rank }) {
             let recipe = RecipePlan(context: context)
@@ -142,6 +144,7 @@ final class SolveRepository {
             let suggested = SuggestedDish(context: context)
             let dishId = UUID()
             dishIds.append(dishId)
+            dishIdsByRank[dish.rank] = dishId
             suggested.id = dishId
             suggested.solveRequest = solve
             suggested.recipePlan = recipe
@@ -170,7 +173,11 @@ final class SolveRepository {
                 userInfo: [NSLocalizedDescriptionKey: "post-save solve.id is nil"],
             ))
         }
-        return SolveOutcome(solveRequestId: solveID, suggestedDishIds: dishIds)
+        return SolveOutcome(
+            solveRequestId: solveID,
+            suggestedDishIds: dishIds,
+            suggestedDishIdsByRank: dishIdsByRank,
+        )
     }
 
     /// Persist a leftovers-mode solve outcome: ONE picked dish, no pantry

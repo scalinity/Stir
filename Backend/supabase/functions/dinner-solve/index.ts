@@ -40,7 +40,7 @@ import {
 } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
 import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -58,7 +58,7 @@ import {
 import { effectiveTier, readEntitlement } from '../_shared/entitlements.ts';
 
 const FEATURE_KEY = 'dinner_solve';
-const MODEL = GeminiModel.Flash;
+const MODEL = textModelFor('dinner_solve');
 const DISH_EMIT_INTERVAL_MS = 150;
 
 // JSON schema Gemini adheres to. Same shape for initial 3-dish call
@@ -530,7 +530,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText: 'Produce exactly 3 ranked dinner options as JSON.options[] per the schema.',
@@ -584,8 +584,13 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', {
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatencyMs += err.usage.latencyMs;
+      }
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', {
           attempt: attempt + 1,
           status: err.status,
           upstream_status: err.upstreamStatus,
@@ -599,10 +604,10 @@ Deno.serve(async (req) => {
         // (`INVALID_ARGUMENT`, `RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`,
         // `FAILED_PRECONDITION`, etc.) so the failure class is visible
         // in logs without exposing Google's error body (which can echo
-        // rendered prompt content — see GeminiError.upstreamStatus doc).
-        userLog.error('gemini_call_failed', err, {
-          upstream_status: err instanceof GeminiError ? err.upstreamStatus : undefined,
-          http_status: err instanceof GeminiError ? err.status : undefined,
+        // rendered prompt content — see AITextError.upstreamStatus doc).
+        userLog.error('ai_call_failed', err, {
+          upstream_status: err instanceof AITextError ? err.upstreamStatus : undefined,
+          http_status: err instanceof AITextError ? err.status : undefined,
         });
         break;
       }
@@ -758,6 +763,8 @@ Deno.serve(async (req) => {
       dishes_returned: validDishes.length,
       retry_count: retryCount,
       prompt_version: activePrompt.version,
+      // ADR 0038: iOS emits this as `dinner_solve_completed.model`.
+      model: MODEL,
     },
   });
 
@@ -881,7 +888,7 @@ async function requestReplacementDish(
   const userText = buildReplacementUserText(failedRank, violations);
 
   try {
-    const result = await geminiGenerate({
+    const result = await aiTextGenerate({
       model: MODEL,
       systemInstruction: systemPrompt,
       userText,
@@ -934,8 +941,13 @@ async function requestReplacementDish(
       latencyMs: result.latencyMs,
     };
   } catch (err) {
-    if (err instanceof GeminiError) {
-      return { dish: null, tokensIn: 0, tokensOut: 0, latencyMs: 0 };
+    if (err instanceof AITextError) {
+      return {
+        dish: null,
+        tokensIn: err.usage?.inputTokens ?? 0,
+        tokensOut: err.usage?.outputTokens ?? 0,
+        latencyMs: err.usage?.latencyMs ?? 0,
+      };
     }
     throw err;
   }

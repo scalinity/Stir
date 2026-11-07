@@ -243,13 +243,14 @@ struct ScanCaptureView: View {
                     .frame(width: 36, height: 36)
                 Image(systemName: flashMode.sfSymbol)
                     // justification: 18pt symbol on a 36pt dark-circle gives
-                    // a comfortable tap target while reading clearly against
+                    // a clear visual size while reading clearly against
                     // the live preview; matches the shutter's white-on-dark
                     // contrast.
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .symbolRenderingMode(.hierarchical)
             }
+            .minTapTarget()
         }
         .buttonStyle(.plain)
         .disabled(shutterDisabled)
@@ -311,10 +312,10 @@ struct ScanCaptureView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, .black.opacity(0.6))
+                    .frame(width: 22, height: 22)
+                    .minTapTarget()
             }
             .buttonStyle(.plain)
-            .frame(width: 22, height: 22)
-            .offset(x: 6, y: -6)
             .accessibilityLabel("Remove this photo")
         }
     }

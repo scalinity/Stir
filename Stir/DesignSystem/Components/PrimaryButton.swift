@@ -15,7 +15,7 @@
 //     spec §8.1 48pt minimum for extra presence on hero CTAs)
 //   - `minHeight: 44` floor for HIG accessibility
 //   - `ember.600` fill at full opacity; `ink.300` on disabled/busy
-//   - `paper.50` label at `.labelLg` + semibold override
+//   - `onAccent` label at `.labelLg` + semibold override
 //   - `radius.md` (12pt) per spec §5.4 / §8.1
 //   - ProgressView inline when `isBusy`; Button disabled while busy
 //
@@ -54,18 +54,18 @@ struct PrimaryButton: View {
                 if isBusy {
                     ProgressView()
                         .progressViewStyle(.circular)
-                        .tint(Color.Stir.paper50)
+                        .tint(Color.Stir.onAccent)
                         .accessibilityHidden(true)
                 }
                 Text(title)
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Color.Stir.paper50)
+                    .foregroundStyle(Color.Stir.onAccent)
                 if let trailingIcon, !isBusy {
                     trailingIcon
                         // justification: 16pt trailing-icon glyph aligned with .labelLg cap-height; matches mockup-04 §Review CTA arrow proportions
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.Stir.paper50)
+                        .foregroundStyle(Color.Stir.onAccent)
                         .accessibilityHidden(true)
                 }
             }

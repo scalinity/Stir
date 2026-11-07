@@ -1,6 +1,6 @@
 # ADR 0012: Step 6 v1 accepted limitations — filler clip, pruning, session refresh, TTFA probe
 
-- **Status**: Accepted for items A (FillerClipPlayer) and D (TTFA probe). Items B (pruning deferral) and C (session refresh stub) **Superseded by ADR 0014** on the same day (2026-04-22) after a re-measurement of D.1 gate 4 found actual token growth ~680/turn (not ~100) and a fresh read of the Gemini Live API confirmed no client-side pruning frame type exists.
+- **Status**: Accepted for items A (FillerClipPlayer) and D (TTFA probe); item D's anchor amended by 0038 (2026-11-06) to `input_audio_buffer.speech_stopped` → first `response.output_audio.delta`, gates unchanged. Items B (pruning deferral) and C (session refresh stub) **Superseded by ADR 0014** on the same day (2026-04-22) after a re-measurement of D.1 gate 4 found actual token growth ~680/turn (not ~100) and a fresh read of the Gemini Live API confirmed no client-side pruning frame type exists.
 - **Date**: 2026-04-22
 - **Owner-step**: Step 6 (voice) closure gate — D.1 reopened by the partial supersession; remains open until the 30-turn physical-device refresh test measures clean per ADR 0014's trigger policy.
 - **Related**: CLAUDE.md §Voice validation plan, `Stir/Integrations/GeminiLive/RealtimeSession.swift`, ADR 0007 (C.3 before C.2), ADR 0010 (max_output_tokens), ADR 0011 (barge-in deferred), ADR 0013 (iOS/backend token accounting), ADR 0014 (session refresh is the pruning mechanism).

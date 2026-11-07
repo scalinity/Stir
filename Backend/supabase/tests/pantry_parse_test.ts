@@ -12,9 +12,8 @@ import { clearRateLimitBuckets, serviceClient } from './_helpers/pg.ts';
 /**
  * SCA-36 W17: helper for the happy-path multi-image test. Bootstraps
  * a Free user, upserts entitlement_snapshots → tier=pro, then re-
- * bootstraps so the returned JWT carries `tier: 'pro'`. The handler
- * resolves tier from the JWT, not from a per-request DB lookup, so
- * the re-bootstrap is required for the entitlement gate to see Pro.
+ * bootstraps so the returned JWT carries `tier: 'pro'`. The re-bootstrap makes this a fixture with a Pro JWT; separate transition
+ * tests below retain the initial token to exercise current snapshot gating.
  *
  * Bumps the rate-limit cap by clearing buckets via clearRateLimitBuckets()
  * — caller is expected to have done that at module load.
@@ -271,4 +270,27 @@ Deno.test('prompt_versions: exactly one is_default per feature_key (SCA-36 S18)'
       `feature_key='${feature}' has ${count} is_default=TRUE rows; expected exactly 1`,
     );
   }
+});
+
+Deno.test('pantry-parse: same Free JWT follows current Pro entitlement and subsequent expiry', async () => {
+  const bs = await quickBootstrap();
+  const client = serviceClient();
+  const body = {
+    client_request_id: crypto.randomUUID(),
+    images: [{ base64: 'A'.repeat(200), mime_type: 'image/jpeg' }, {
+      base64: 'A'.repeat(200),
+      mime_type: 'image/jpeg',
+    }],
+  };
+  await client.from('entitlement_snapshots').update({ tier: 'pro', billing_state: 'active' })
+    .eq('canonical_user_key', bs.canonical_user_key).throwOnError();
+  const upgraded = await callPantryParse(body, bs.session_jwt);
+  // Bad image bytes stop before the provider, after the multi-image gate.
+  assertEquals(upgraded.status, 400);
+  assertEquals(upgraded.body.error, 'VAL-01');
+  await client.from('entitlement_snapshots').update({ billing_state: 'expired' })
+    .eq('canonical_user_key', bs.canonical_user_key).throwOnError();
+  const expired = await callPantryParse(body, bs.session_jwt);
+  assertEquals(expired.status, 403);
+  assertEquals(expired.body.error, 'ENT-MULTI-IMAGE-01');
 });

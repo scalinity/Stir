@@ -1,10 +1,9 @@
 // LiveWebSocketTransport
 //
 // Thin wrapper around URLSessionWebSocketTask that:
-//   - opens the ws_url minted by /v1/ai/realtime-session (access_token
-//     query param already embedded — we do NOT add an Authorization
-//     header; CLAUDE.md §sharp-edge #13 + the constrained endpoint
-//     spec say the token travels exclusively in the URL for that path)
+//   - opens the ws_url minted by /v1/ai/realtime-session, authenticating
+//     with the minted OpenAI client secret as `Authorization: Bearer`
+//     (the URL carries no credential)
 //   - exposes a back-pressured AsyncThrowingStream of parsed inbound
 //     frames so the session actor can consume with `for try await`
 //   - serializes sends through the single task (URLSessionWebSocketTask
@@ -60,7 +59,7 @@ actor AsyncSemaphore {
 @MainActor
 protocol LiveTransporting: AnyObject {
     var inbound: AsyncThrowingStream<LiveInboundFrame, Error> { get }
-    func open(url: URL) throws
+    func open(url: URL, authToken: String) throws
     func close()
     func send(_ frame: LiveOutboundFrame) async throws
 }
@@ -68,13 +67,12 @@ protocol LiveTransporting: AnyObject {
 @MainActor
 final class LiveWebSocketTransport: LiveTransporting {
     #if DEBUG
-    /// Toggle to log every inbound envelope's top-level keys + full
-    /// JSON dump (audio base64 redacted) on turnComplete. Off by
-    /// default because it fires ~1–5 lines/second during a turn. Flip
-    /// to `true` when diagnosing Gemini wire-shape drift (e.g., token
-    /// reporting breaking after a Gemini API change). Used by
-    /// `handleInboundMessage` and gated via `#if DEBUG` so it's
-    /// stripped from release builds entirely.
+    /// Toggle for the per-event DEBUG log (event type + size, plus
+    /// status and usage on `response.done`). Off by default because audio
+    /// deltas fire ~10–50 lines/second during a turn. Flip to `true` when
+    /// diagnosing wire-shape drift (e.g., token reporting breaking after
+    /// an API change). Used by `handleInboundMessage` and gated via
+    /// `#if DEBUG` so it's stripped from release builds entirely.
     static var verboseFrameLogging: Bool = false
     #endif
 
@@ -93,6 +91,15 @@ final class LiveWebSocketTransport: LiveTransporting {
     /// path narrowly avoids today only because nobody shares yet.
     private let ownsSession: Bool
     private var wsTask: URLSessionWebSocketTask?
+    #if DEBUG
+    var testingMessageSender: ((URLSessionWebSocketTask.Message) async throws -> Void)?
+
+    /// Install an unresumed socket so tests exercise the real send loop
+    /// without a network connection. The injected sender owns each await.
+    func _testInstallSocket(_ task: URLSessionWebSocketTask) {
+        wsTask = task
+    }
+    #endif
     private var isClosed = false
     private var receiveLoopTask: Task<Void, Never>?
     /// P0-E (2026-04-23): periodic WebSocket ping task. Detects cellular
@@ -131,6 +138,21 @@ final class LiveWebSocketTransport: LiveTransporting {
     /// A single-slot AsyncSemaphore guarantees FIFO across callsites.
     private let sendLock = AsyncSemaphore(value: 1)
 
+    /// Response gate. Realtime runs one response at a time and rejects a
+    /// `response.create` sent while one is active
+    /// (`conversation_already_has_active_response`). A tool result can be
+    /// ready before the response that requested it has emitted
+    /// `response.done` — local tools like `start_timer` finish in
+    /// milliseconds — and a text injection can land while the model is
+    /// speaking. Either would lose its `response.create` and leave the turn
+    /// waiting for the stuck-turn watchdog. The transport therefore defers
+    /// any `response.create` until the active response is done.
+    ///
+    /// State lives in `ResponseGate` (below) so it is unit-testable
+    /// without a socket.
+    private var responseGate = ResponseGate()
+    private static let responseCreateMessage = #"{"type":"response.create"}"#
+
     /// Error bucket for typed transport failures. Transport-level errors
     /// are distinct from session-level errors (bad wire shape, protocol
     /// violations) so the session actor can decide between "fall back"
@@ -139,17 +161,20 @@ final class LiveWebSocketTransport: LiveTransporting {
         /// The URL couldn't be opened at all (DNS, TLS, unreachable).
         /// Session actor → fall back to C.3.
         case openFailed(message: String)
-        /// Connection closed by server unexpectedly (non-goAway).
+        /// Connection closed by server unexpectedly.
         /// Session actor → attempt refresh; if that fails, fall back.
         case connectionDropped(code: Int, reason: String?)
         /// Inbound payload wasn't valid JSON or was binary (unexpected
-        /// for Gemini Live — it's a JSON-over-WebSocket protocol).
+        /// for the Realtime API — it's a JSON-over-WebSocket protocol).
         case malformedInbound(message: String)
         /// Caller tried to send after `close()`. Indicates a shutdown
         /// race on the session actor's side; logged at info, not an
         /// assertion failure (pre-empt doesn't crash in production).
         case sendAfterClose
     }
+
+    /// The only host `ws_url` may point at.
+    static let pinnedHost = "api.openai.com"
 
     /// Default-init creates and OWNS a URLSession — `close()` will
     /// invalidate it. Use `init(sharedSession:)` for tests that inject
@@ -182,13 +207,15 @@ final class LiveWebSocketTransport: LiveTransporting {
     /// P3-I (2026-04-23): inbound frame stream buffer cap. Prior code
     /// used the default `.unbounded` policy; under MainActor stalls
     /// (long Core Data save, SwiftUI reconciliation spike) frames can
-    /// queue without limit while Gemini fires ~50 Hz audio. A 500 ms
-    /// MainActor stall queues ~75 frames; a longer stall is
-    /// unrecoverable regardless, so dropping oldest newest-first
-    /// (`.bufferingNewest`) is strictly safer than OOM. By the time we
-    /// hit this cap the session is already broken — the drop just
-    /// prevents memory growth while we unwind.
-    private static let inboundBufferMax: Int = 200
+    /// queue without limit while the server streams audio deltas. OpenAI
+    /// streams audio faster than real time, so a single response is a
+    /// burst of many small deltas; the cap is sized so a ~1 s stall can't
+    /// push the trailing `response.done` (usage + turnComplete) out of
+    /// the buffer. A longer stall is unrecoverable regardless, so
+    /// dropping oldest (`.bufferingNewest`) is strictly safer than OOM.
+    /// By the time we hit this cap the session is already broken — the
+    /// drop just prevents memory growth while we unwind.
+    private static let inboundBufferMax: Int = 1000
 
     // MARK: - Lifecycle
 
@@ -197,12 +224,12 @@ final class LiveWebSocketTransport: LiveTransporting {
     /// the session actor awaits that explicitly (don't front-run the
     /// handshake from here).
     ///
-    /// SECURITY: Validates scheme + host before opening. The URL
-    /// carries the Gemini ephemeral token as `?access_token=...`; a
-    /// compromised or MITM'd mint response could redirect it to an
-    /// attacker endpoint. Pinning scheme=`wss` + host=`*.googleapis.com`
+    /// SECURITY: Validates scheme + host before opening. The client
+    /// secret is sent as a bearer header to whatever host `ws_url` names;
+    /// a compromised or MITM'd mint response could redirect it to an
+    /// attacker endpoint. Pinning scheme=`wss` + host=`api.openai.com`
     /// prevents that silent exfiltration.
-    func open(url: URL) throws {
+    func open(url: URL, authToken: String) throws {
         guard wsTask == nil else {
             Logger.voice.warning("live_ws_open_called_twice")
             return
@@ -213,25 +240,24 @@ final class LiveWebSocketTransport: LiveTransporting {
         guard url.scheme == "wss" else {
             throw TransportError.openFailed(message: "non-wss scheme rejected")
         }
-        // Exact host pin — `hasSuffix("googleapis.com")` alone would
-        // allow `evilgoogleapis.com`. The Gemini Live constrained
-        // WebSocket endpoint lives exclusively on this host per the
-        // mint's `WS_BASE` constant; no legitimate response should
+        // Exact host pin — `hasSuffix("openai.com")` alone would allow
+        // `evilopenai.com`. The Realtime WebSocket endpoint lives
+        // exclusively on this host; no legitimate mint response should
         // point anywhere else.
         guard let host = url.host?.lowercased(),
-              host == "generativelanguage.googleapis.com" else {
-            throw TransportError.openFailed(message: "host not pinned to generativelanguage.googleapis.com")
+              host == Self.pinnedHost else {
+            throw TransportError.openFailed(message: "host not pinned to \(Self.pinnedHost)")
         }
         var request = URLRequest(url: url)
-        // Gemini Live's ephemeral-token path uses ?access_token=... in
-        // the URL; no Authorization header. Attaching one causes a 401
-        // in practice (pinned here so nobody "fixes" it by adding one).
+        // The client secret authenticates the socket. It is a header, not
+        // a query param, so it can't leak through URL logging.
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 10
         let task = urlSession.webSocketTask(with: request)
         // Cap inbound message size so a malicious/misbehaving endpoint
         // can't OOM the device with an unbounded payload. 512 KiB is
-        // well above the largest observed Gemini frame (~30 KiB audio
-        // chunks) with headroom for batched usageMetadata blocks.
+        // well above the largest expected event (audio deltas are a few
+        // tens of KiB) with headroom for `response.done` payloads.
         task.maximumMessageSize = 512 * 1024
         self.wsTask = task
         task.resume()
@@ -261,7 +287,9 @@ final class LiveWebSocketTransport: LiveTransporting {
 
     // MARK: - Send
 
-    /// Send an outbound frame as JSON over the socket. Serializes via
+    /// Send an outbound frame as JSON over the socket. A frame may expand
+    /// to several wire messages (a tool result is a conversation item plus
+    /// `response.create`); they are sent in order. Serializes via
     /// JSONSerialization (see LiveOutboundFrame for why we don't use
     /// JSONEncoder).
     func send(_ frame: LiveOutboundFrame) async throws {
@@ -269,60 +297,55 @@ final class LiveWebSocketTransport: LiveTransporting {
             throw TransportError.sendAfterClose
         }
 
-        // P3-D (2026-04-23): if the frame is already a serialized JSON
-        // string (`setupRawJSON`), skip the JSONSerialization encode/
-        // decode round-trip entirely. Backend pre-serializes the setup
-        // frame; iOS was paying ~4-8 KiB × 3 passes (parse → wrap →
-        // re-serialize → stringify) every preWarm + every refresh for
-        // a constant. Now: one string send.
-        let str: String
+        // If the frame is already a serialized JSON string
+        // (`setupRawJSON`), skip the JSONSerialization encode/decode
+        // round-trip entirely: the backend pre-serializes the setup frame,
+        // and re-parsing 4-8 KiB on every preWarm + refresh for a
+        // constant is pure cost.
+        var messages: [String] = []
         if let raw = frame.asJSONString() {
-            str = raw
+            messages = [raw]
         } else {
-            guard let obj = frame.asJSONObject() else {
-                // Defensive — only reachable if a new LiveOutboundFrame
-                // variant is added without updating either helper.
-                throw TransportError.malformedInbound(message: "outbound frame has no JSON representation")
-            }
-            // P3-E (2026-04-23): `isValidJSONObject` pre-flight is
-            // skipped for statically-shaped frame variants
-            // (realtimeInputAudio / realtimeInputText) — those
-            // construct `[String: String]` dictionaries whose types
-            // are Bridged-Foundation strings and cannot fail the
-            // validity check. Audio fires at 50 Hz during a turn and
-            // `isValidJSONObject` is an O(n) full-graph walk — paying
-            // it per-frame for a guaranteed-valid shape is pure cost.
-            // Untyped `toolResponse` / `sessionUpdate` payloads still
-            // get the pre-flight because they carry caller-provided
-            // `[String: Any]` where a Date/URL/NSNull could sneak in.
+            // `isValidJSONObject` is an O(n) full-graph walk. Audio fires
+            // at ~40-50 Hz and builds `[String: String]` shapes that
+            // cannot fail the check, so only the frame carrying a
+            // caller-provided `[String: Any]` payload pays for it
+            // (a Date/URL/NSNull could sneak into a session.update).
+            // Tool outputs are validated inside the frame encoder.
             let needsValidityCheck: Bool = {
                 switch frame {
-                case .realtimeInputAudio, .realtimeInputText, .setup:
-                    return false
-                case .setupRawJSON:
-                    return false  // already handled above; defensive
-                case .toolResponse, .sessionUpdate:
+                case .sessionUpdate:
                     return true
+                case .realtimeInputAudio, .realtimeInputText, .toolResponse, .setupRawJSON:
+                    return false
                 }
             }()
-            if needsValidityCheck {
-                guard JSONSerialization.isValidJSONObject(obj) else {
-                    throw TransportError.malformedInbound(message: "outbound frame not JSON-encodable")
+            let objects = frame.asJSONObjects()
+            guard !objects.isEmpty else {
+                // Defensive — only reachable if a new LiveOutboundFrame
+                // variant is added without updating the encoder.
+                throw TransportError.malformedInbound(message: "outbound frame has no JSON representation")
+            }
+            for obj in objects {
+                if needsValidityCheck {
+                    guard JSONSerialization.isValidJSONObject(obj) else {
+                        throw TransportError.malformedInbound(message: "outbound frame not JSON-encodable")
+                    }
                 }
+                let data: Data
+                do {
+                    data = try JSONSerialization.data(withJSONObject: obj, options: [])
+                } catch {
+                    throw TransportError.malformedInbound(message: "encode failed")
+                }
+                // Text frames (stringified JSON) for the control channel.
+                // Audio is still base64 inside that JSON — we never send
+                // binary frames.
+                guard let s = String(data: data, encoding: .utf8) else {
+                    throw TransportError.malformedInbound(message: "utf8 conversion failed")
+                }
+                messages.append(s)
             }
-            let data: Data
-            do {
-                data = try JSONSerialization.data(withJSONObject: obj, options: [])
-            } catch {
-                throw TransportError.malformedInbound(message: "encode failed")
-            }
-            // Gemini Live accepts text frames (stringified JSON) for the
-            // control channel. Audio is still base64 inside that JSON — we
-            // never send binary frames.
-            guard let s = String(data: data, encoding: .utf8) else {
-                throw TransportError.malformedInbound(message: "utf8 conversion failed")
-            }
-            str = s
         }
 
         // Serialize across concurrent callers. Without the semaphore,
@@ -330,47 +353,71 @@ final class LiveWebSocketTransport: LiveTransporting {
         // stall lets the next send-callsite race into
         // URLSessionWebSocketTask.send — which documents FIFO only
         // within a single call, not across concurrent ones. Mic frames
-        // at 20 ms cadence plus interleaved toolResponse frames made
-        // this a realistic ordering hazard.
-        await sendLock.wait()
-        do {
-            try await task.send(.string(str))
-            await sendLock.signal()
-        } catch {
-            await sendLock.signal()
-            throw error
+        // at 20 ms cadence plus interleaved tool-result frames made
+        // this a realistic ordering hazard. Messages of one frame are
+        // sent sequentially so their relative order is preserved.
+        for message in messages {
+            guard !isClosed, wsTask === task, !Task.isCancelled else {
+                throw TransportError.sendAfterClose
+            }
+            // Response gate: defer while a response is active or our last
+            // create is unacknowledged.
+            if message == Self.responseCreateMessage, !responseGate.requestCreate() {
+                continue
+            }
+            await sendLock.wait()
+            do {
+                guard !isClosed, wsTask === task, !Task.isCancelled else {
+                    throw TransportError.sendAfterClose
+                }
+                try await sendMessage(.string(message), over: task)
+                await sendLock.signal()
+            } catch {
+                await sendLock.signal()
+                throw error
+            }
         }
+    }
+
+    private func sendMessage(
+        _ message: URLSessionWebSocketTask.Message, over task: URLSessionWebSocketTask
+    ) async throws {
+        #if DEBUG
+        if let testingMessageSender { try await testingMessageSender(message); return }
+        #endif
+        try await task.send(message)
     }
 
     // MARK: - Security helpers
 
-    /// Redact the `access_token=...` query-param value from any string
-    /// that may contain the Gemini ephemeral token. Used before logging
-    /// or surfacing error descriptions that URLSession constructed from
-    /// the request URL.
+    /// Redact client secrets from any string that may contain one. The
+    /// secret rides in an `Authorization` header, which URLSession error
+    /// descriptions don't normally echo, but a stray header dump or a
+    /// pasted request description would carry it into Sentry breadcrumbs /
+    /// OSLog / a D.1 transcript. Matches the `ek_...` secret itself and
+    /// any `Bearer <value>`.
     ///
-    /// P3-J (2026-04-23): regex is pre-compiled once per process so
-    /// error paths that call this repeatedly (every receiveLoop catch,
-    /// every VoiceSessionLog.logError that carries a URL) don't pay
-    /// the compile cost per call.
-    static func scrubAccessToken(_ s: String) -> String {
-        guard let regex = accessTokenRedactionRegex else { return s }
+    /// The regex is pre-compiled once per process so error paths that call
+    /// this repeatedly (every receiveLoop catch, every
+    /// VoiceSessionLog.logError) don't pay the compile cost per call.
+    static func scrubClientSecret(_ s: String) -> String {
+        guard let regex = clientSecretRedactionRegex else { return s }
         let range = NSRange(s.startIndex..., in: s)
         return regex.stringByReplacingMatches(
             in: s,
             options: [],
             range: range,
-            withTemplate: "access_token=REDACTED",
+            withTemplate: "REDACTED",
         )
     }
 
-    /// Pre-compiled regex for `scrubAccessToken`. nil only if Foundation
+    /// Pre-compiled regex for `scrubClientSecret`. nil only if Foundation
     /// somehow refuses the pattern (doesn't happen — it's a literal);
     /// scrub degrades to identity in that case, preserving the
     /// no-crash contract even on a theoretical compile failure.
-    private static let accessTokenRedactionRegex: NSRegularExpression? = {
+    private static let clientSecretRedactionRegex: NSRegularExpression? = {
         try? NSRegularExpression(
-            pattern: #"access_token=[^&\s"]+"#,
+            pattern: #"ek_[A-Za-z0-9_\-]+|Bearer\s+[^\s"',;]+"#,
             options: [],
         )
     }()
@@ -488,13 +535,11 @@ final class LiveWebSocketTransport: LiveTransporting {
                 // Map NSURLErrorDomain to connectionDropped. The
                 // session actor decides whether to attempt refresh.
                 //
-                // SECURITY: strip `access_token=...` from the reason
-                // string — the ephemeral Gemini token rides in the
-                // URL query param and URLError.localizedDescription
-                // sometimes embeds the failing URL. We don't want the
-                // token flowing into Sentry breadcrumbs / OSLog.
+                // SECURITY: strip any client secret from the reason
+                // string so it can't flow into Sentry breadcrumbs /
+                // OSLog if an error description ever echoes the request.
                 let nsErr = error as NSError
-                let scrubbedReason = Self.scrubAccessToken(nsErr.localizedDescription)
+                let scrubbedReason = Self.scrubClientSecret(nsErr.localizedDescription)
                 // P2-B (2026-04-23): prepend a symbolic category to the
                 // reason string so dashboards can bucket without parsing
                 // localized-string contents. `offline | timeout | nccl |
@@ -553,16 +598,38 @@ final class LiveWebSocketTransport: LiveTransporting {
         }
     }
 
+    /// Feed the server's response lifecycle to the gate and send a
+    /// deferred `response.create` once the active response ends.
+    private func updateResponseGate(_ json: Any) async {
+        guard let dict = json as? [String: Any], let type = dict["type"] as? String else { return }
+        let errorCode = (dict["error"] as? [String: Any])?["code"] as? String
+        guard responseGate.observe(eventType: type, errorCode: errorCode),
+              let task = wsTask, !isClosed else { return }
+        await sendLock.wait()
+        do {
+            guard !isClosed, wsTask === task, !Task.isCancelled else {
+                throw TransportError.sendAfterClose
+            }
+            try await sendMessage(.string(Self.responseCreateMessage), over: task)
+        } catch {
+            responseGate.deferredCreateFailed()
+            Logger.voice.warning(
+                "live_deferred_response_create_failed error=\(error.localizedDescription, privacy: .private)",
+            )
+        }
+        await sendLock.signal()
+    }
+
     private func handleInboundMessage(_ message: URLSessionWebSocketTask.Message) async {
         let text: String
         switch message {
         case let .string(s):
             text = s
         case let .data(d):
-            // Unexpected binary — some Live variants might send binary
-            // audio directly, but Constrained is JSON-only. Try UTF-8
-            // decode as a best-effort; malformed binary surfaces as a
-            // typed error the session actor logs then drops.
+            // Unexpected binary — the Realtime WebSocket is JSON-only.
+            // Try UTF-8 decode as a best-effort; malformed binary
+            // surfaces as a typed error the session actor logs then
+            // drops.
             guard let s = String(data: d, encoding: .utf8) else {
                 inboundContinuation?.yield(with: .failure(TransportError.malformedInbound(
                     message: "unexpected binary frame, not utf8",
@@ -588,71 +655,102 @@ final class LiveWebSocketTransport: LiveTransporting {
         }
 
         #if DEBUG
-        // Diagnostic: dump every inbound envelope's top-level keys. If
-        // `usageMetadata` never appears in this stream, Gemini isn't
-        // emitting it (fix lives server-side or in setup config, not in
-        // parseAll). If it appears but under a different key, we see
-        // that key here. Kept DEBUG-only because the log volume is
-        // ~1–5 lines per second during an active turn.
-        if let dict = json as? [String: Any] {
-            let keys = Array(dict.keys).sorted().joined(separator: ",")
-            VoiceSessionLog.log("ws.inbound_keys", [
-                "keys": keys,
+        // Diagnostic: log every inbound event's type and size. On
+        // `response.done` also log the status and the raw `usage` object
+        // — if token counts look wrong downstream, this shows whether
+        // the server sent them and under which keys. Response output
+        // (transcript text) is deliberately not logged.
+        if Self.verboseFrameLogging, let dict = json as? [String: Any] {
+            VoiceSessionLog.log("ws.inbound", [
+                "type": dict["type"] as? String ?? "nil",
                 "size_bytes": data.count,
             ])
-            // Extra: on turnComplete, dump the FULL envelope (audio base64
-            // redacted) so we can see exactly what Gemini sends at the
-            // token-accounting boundary. This is the envelope where
-            // usageMetadata should appear — if it's not at top level,
-            // seeing the full shape tells us where it actually lives.
-            if let serverContent = dict["serverContent"] as? [String: Any],
-               (serverContent["turnComplete"] as? Bool) == true {
-                let redacted = redactAudioBase64(dict)
-                if let data = try? JSONSerialization.data(
-                    withJSONObject: redacted, options: [.sortedKeys],
-                ), let str = String(data: data, encoding: .utf8) {
-                    VoiceSessionLog.log("ws.turnComplete_envelope", ["json": str])
+            if (dict["type"] as? String) == "response.done",
+               let response = dict["response"] as? [String: Any] {
+                var summary: [String: Any] = ["status": response["status"] as? String ?? "nil"]
+                if let usage = response["usage"],
+                   let usageData = try? JSONSerialization.data(
+                       withJSONObject: usage, options: [.sortedKeys],
+                   ),
+                   let usageString = String(data: usageData, encoding: .utf8) {
+                    summary["usage"] = usageString
                 }
+                VoiceSessionLog.log("ws.response_done", summary)
             }
         }
         #endif
 
+        await updateResponseGate(json)
+
         let frames = LiveInboundFrame.parseAll(json)
         if frames.isEmpty {
-            Logger.voice.debug("live_ws_inbound_unparsed_shape")
+            // Most server events (response.created, rate_limits.updated,
+            // ...) are deliberately ignored; this is not an error.
             return
         }
-        // One Gemini Live envelope can carry multiple top-level frames
-        // (e.g., `{serverContent, usageMetadata}` on turn-complete). Yield
-        // each so the receive dispatcher handles them in order.
+        // One event can fan out to several frames (`response.done` →
+        // usage + turnComplete). Yield each so the receive dispatcher
+        // handles them in order.
         for frame in frames {
             inboundContinuation?.yield(frame)
         }
     }
+}
 
-    #if DEBUG
-    /// Recursively replaces `inlineData.data` base64 strings with a
-    /// `<audio_NN_bytes>` placeholder so we can log envelope shapes
-    /// without flooding the console with megabytes of base64 PCM.
-    /// Used by the diagnostic `ws.turnComplete_envelope` log.
-    private func redactAudioBase64(_ value: Any) -> Any {
-        if let dict = value as? [String: Any] {
-            var out: [String: Any] = [:]
-            for (k, v) in dict {
-                if k == "data",
-                   let s = v as? String,
-                   s.count > 1000 {
-                    out[k] = "<base64_\(s.count)_chars>"
-                } else {
-                    out[k] = redactAudioBase64(v)
-                }
-            }
-            return out
+/// One Realtime response at a time (see `LiveWebSocketTransport.responseGate`).
+/// Pure state so the deferral rules are testable without a socket.
+struct ResponseGate: Equatable {
+    /// Between `response.created` and `response.done`.
+    private(set) var inFlight = false
+    /// A `response.create` was sent and neither `response.created` nor an
+    /// `error` has arrived yet.
+    private(set) var unacknowledged = false
+    /// One deferred `response.create` to send at the next `response.done`.
+    /// One is enough: a single response answers every item added since the
+    /// last one.
+    private(set) var pending = false
+
+    /// Called before sending `response.create`. Returns true to send it now;
+    /// false means it was deferred.
+    mutating func requestCreate() -> Bool {
+        if inFlight || unacknowledged {
+            pending = true
+            return false
         }
-        if let arr = value as? [Any] {
-            return arr.map { redactAudioBase64($0) }
-        }
-        return value
+        unacknowledged = true
+        return true
     }
-    #endif
+
+    /// Called for every inbound event. Returns true when a deferred
+    /// `response.create` must be sent now (it is then counted as sent).
+    mutating func observe(eventType: String, errorCode: String?) -> Bool {
+        switch eventType {
+        case "response.created":
+            inFlight = true
+            unacknowledged = false
+        case "response.done":
+            inFlight = false
+            if pending {
+                pending = false
+                unacknowledged = true
+                return true
+            }
+        case "error":
+            unacknowledged = false
+            // Lost the race anyway: a response was already running.
+            // Retry at the next `response.done`.
+            if errorCode == "conversation_already_has_active_response" {
+                inFlight = true
+                pending = true
+            }
+        default:
+            break
+        }
+        return false
+    }
+
+    /// The deferred send threw; nothing is awaiting acknowledgement.
+    mutating func deferredCreateFailed() {
+        unacknowledged = false
+    }
 }

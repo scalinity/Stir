@@ -27,12 +27,12 @@
 // entry point; step 6's Live function-call handler wraps the same core
 // without mutating the contract.
 
-import { z, ZodError } from 'zod';
-import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
+import { ZodError } from 'zod';
+import { AuthError, requireActiveAccount, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -49,16 +49,15 @@ import {
   validateSubstitution,
 } from '../_shared/hard_rules.ts';
 import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
+import {
+  finalizeSubstitution,
+  type ParsedSubstitution,
+  SubstitutionOutput,
+  SubstitutionWireResponse,
+} from '../_shared/substitution_output.ts';
 
 const FEATURE_KEY = 'substitution';
-const MODEL = GeminiModel.Flash;
-
-// Canned safety message returned when no safe substitution can be produced
-// after one retry. Matches the prompt's fallback text so the model and the
-// server converge on the same copy when they agree. iOS maps this body to
-// the "red warning card, no Accept button" UI state.
-const CANNED_UNSAFE_MESSAGE =
-  "That substitution can't be made safely — skip this ingredient or pause to pick another recipe.";
+const MODEL = textModelFor('substitution');
 
 // Response JSON schema Gemini is asked to adhere to.
 const GEMINI_RESPONSE_SCHEMA: Record<string, unknown> = {
@@ -73,18 +72,6 @@ const GEMINI_RESPONSE_SCHEMA: Record<string, unknown> = {
   },
   required: ['substitution_text', 'constraint_safe', 'reasoning', 'confidence'],
 };
-
-// Zod schema for what we expect back from Gemini AFTER JSON.parse.
-const SubstitutionOutput = z.object({
-  substitution_text: z.string().min(1).max(400),
-  amount_conversion: z.string().max(400).nullable().optional(),
-  constraint_safe: z.boolean(),
-  constraint_violation_reason: z.string().max(400).nullable().optional(),
-  reasoning: z.string().min(1).max(400),
-  confidence: z.enum(['high', 'medium', 'low']),
-});
-
-type ParsedSubstitution = z.infer<typeof SubstitutionOutput>;
 
 interface WireResponse {
   sub_event_id: string;
@@ -172,15 +159,31 @@ Deno.serve(async (req) => {
   }
 
   const client = createServiceClient();
+  const account = await requireActiveAccount(client, claims.canonical_user_key, requestId);
+  if (account instanceof Response) return account;
+  // Do not replay pre-fix entries that could have reversed a model refusal.
+  const cacheKey = body.sub_event_id + ':safety-v2';
 
   // ---------------------------------------------------------------------
   // 3. Idempotency cache
   // ---------------------------------------------------------------------
   try {
-    const hit = await readCache(client, claims.canonical_user_key, body.sub_event_id);
+    const hit = await readCache(client, claims.canonical_user_key, cacheKey);
     if (hit) {
-      userLog.info('cache_replay', { age_seconds: hit.age_seconds });
-      return responseFromCache(hit, requestId);
+      const cached = SubstitutionWireResponse.safeParse(hit.response_body);
+      if (cached.success) {
+        const validation = validateSubstitution(cached.data, {
+          dietaryRules: body.household_context.dietary_rules,
+          availableEquipment: body.household_context.available_equipment,
+          pantrySnapshot: body.household_context.pantry_snapshot,
+        });
+        userLog.info('cache_replay', { age_seconds: hit.age_seconds });
+        return responseFromCache({
+          ...hit,
+          response_body: { ...cached.data, ...finalizeSubstitution(cached.data, validation.valid) },
+        }, requestId);
+      }
+      userLog.warn('cached_substitution_rejected');
     }
   } catch (err) {
     userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
@@ -250,7 +253,7 @@ Deno.serve(async (req) => {
   for (let attempt = 0; attempt < 2; attempt++) {
     const renderedPrompt = renderPromptForAttempt(activePrompt.template_blob, body, amplifyNote);
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText:
@@ -311,6 +314,12 @@ Deno.serve(async (req) => {
         },
       );
 
+      // An explicit model refusal is terminal, even with no keyword hit.
+      if (!candidate.constraint_safe) {
+        parsed = candidate;
+        break;
+      }
+
       if (validation.valid) {
         parsed = candidate;
         finalValidationValid = true;
@@ -341,13 +350,18 @@ Deno.serve(async (req) => {
       break;
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500 && attempt === 0) {
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatency += err.usage.latencyMs;
+      }
+      if (err instanceof AITextError && err.status >= 500 && attempt === 0) {
         upstreamRetryCount++;
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         amplifyNote = null;
         continue;
       }
-      userLog.error('gemini_call_failed', err);
+      userLog.error('ai_call_failed', err);
       break;
     }
   }
@@ -400,37 +414,13 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Override with canned-safe body if final validation failed. The model
-  // MAY have said constraint_safe=true while our validator disagreed —
-  // safety-first: validator wins.
-  const wire: WireResponse = finalValidationValid
-    ? {
-      sub_event_id: body.sub_event_id,
-      substitution_text: parsed.substitution_text,
-      amount_conversion: parsed.amount_conversion ?? null,
-      constraint_safe: true,
-      constraint_violation_reason: null,
-      reasoning: parsed.reasoning,
-      confidence: parsed.confidence,
-      prompt_version: activePrompt.version,
-      latency_ms: Math.round(performance.now() - started),
-      retry_count: totalRetries,
-    }
-    : {
-      sub_event_id: body.sub_event_id,
-      substitution_text: CANNED_UNSAFE_MESSAGE,
-      amount_conversion: null,
-      constraint_safe: false,
-      // Intentionally generic — avoids leaking rule specifics back to the
-      // client and keeps the iOS UX copy stable.
-      constraint_violation_reason: parsed.constraint_violation_reason ??
-        'Violates a hard dietary or equipment constraint.',
-      reasoning: "No substitution passed the household's hard rules.",
-      confidence: 'low',
-      prompt_version: activePrompt.version,
-      latency_ms: Math.round(performance.now() - started),
-      retry_count: totalRetries,
-    };
+  const wire: WireResponse = {
+    ...finalizeSubstitution(parsed, finalValidationValid),
+    sub_event_id: body.sub_event_id,
+    prompt_version: activePrompt.version,
+    latency_ms: Math.round(performance.now() - started),
+    retry_count: totalRetries,
+  };
 
   // Log cost + best-effort cache write.
   recordAIRequest(
@@ -456,7 +446,7 @@ Deno.serve(async (req) => {
   );
 
   try {
-    await writeCache(client, claims.canonical_user_key, body.sub_event_id, FEATURE_KEY, 200, wire);
+    await writeCache(client, claims.canonical_user_key, cacheKey, FEATURE_KEY, 200, wire);
   } catch (err) {
     userLog.warn('cache_write_failed', { err: sanitizeErrorForLog(err) });
   }
@@ -522,7 +512,7 @@ function renderPromptForAttempt(
   return [
     'PREVIOUS ATTEMPT VIOLATED HARD RULES:',
     amplifyNote,
-    'This retry MUST NOT repeat that violation. If no safe substitution exists, return the canned safety message with constraint_safe=false.',
+    'This retry MUST NOT repeat that violation. None of the banned_words may appear anywhere in substitution_text, amount_conversion or reasoning, not even in a negation ("X-free", "without X"), a comparison ("like X") or a compound name ("oat X"; write "oat drink" instead of "oat milk"). If no safe substitution exists, return the canned safety message with constraint_safe=false.',
     '',
     base,
   ].join('\n');

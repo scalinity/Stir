@@ -103,6 +103,33 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertEqual(vm.ingredients.first?.displayName, "basil")
     }
 
+    func test_editIngredientChangedNameClearsSlugInPantryAndSolvePayload() async throws {
+        for hasExistingLime in [false, true] {
+            if hasExistingLime {
+                _ = try PantryItemRepository(controller: controller).upsertFromScan([
+                    .init(displayName: "lime", canonicalSlug: "lime", amountText: nil, confidence: 1, parseConfidence: .confirmed),
+                ], on: household)
+            }
+            let vm = makeVM()
+            let id = UUID()
+            vm.__injectForTests(ingredients: [
+                .init(id: id, displayName: "lime", canonicalSlug: "lime", confidence: .needsReview),
+            ])
+            vm.editIngredient(id: id, newName: "lemon")
+            let result = await vm.confirmFromReview()
+            XCTAssertNil(result.ingredients.first?.canonicalSlug)
+            let pantry = try PantryItemRepository(controller: controller).fetchAll(for: household)
+            let lemon = try XCTUnwrap(pantry.first { $0.displayName == "lemon" })
+            // Scan insertion stores an absent canonical identity as "";
+            // either absent representation must contain no stale lime slug.
+            XCTAssertTrue(lemon.canonicalIngredientSlug?.isEmpty ?? true)
+            if hasExistingLime {
+                let lime = try XCTUnwrap(pantry.first { $0.displayName == "lime" && $0.canonicalIngredientSlug == "lime" })
+                XCTAssertNotEqual(lemon.id, lime.id)
+            }
+        }
+    }
+
     func test_addIngredientManually_appendsConfirmed() {
         let vm = makeVM()
         vm.addIngredientManually("olive oil")

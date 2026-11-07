@@ -31,13 +31,14 @@
 //   NOT safe on the default tier — would need a memory-tier upgrade.
 
 import { z, ZodError } from 'zod';
-import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
+import { AuthError, requireActiveAccount, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
+import { effectiveTier, readEntitlement } from '../_shared/entitlements.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
 import { INGREDIENT_ONTOLOGY_SLUGS } from '../_shared/ingredient_ontology.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom, sanitizeErrorForLog } from '../_shared/logger.ts';
@@ -52,7 +53,7 @@ import { readCache, responseFromCache, writeCache } from '../_shared/idempotency
 import { decodeAndValidateImage } from '../_shared/image_validation.ts';
 
 const FEATURE_KEY = 'pantry_parse';
-const MODEL = GeminiModel.Flash;
+const MODEL = textModelFor('pantry_parse');
 
 // Response JSON schema Gemini is asked to adhere to.
 const GEMINI_RESPONSE_SCHEMA: Record<string, unknown> = {
@@ -158,6 +159,23 @@ Deno.serve(async (req) => {
 
   const userLog = await createLogger(requestId, endpoint, claims.canonical_user_key);
 
+  const client = createServiceClient();
+  const accountError = await requireActiveAccount(client, claims.canonical_user_key, requestId);
+  if (accountError) return accountError;
+  let currentTier;
+  try {
+    const entitlement = await readEntitlement(client, claims.canonical_user_key);
+    if (!entitlement) {
+      return jsonError(ErrorCode.AUTH_01, 401, {
+        message: 'Entitlement missing; re-bootstrap.',
+        reason: 'user_stale',
+      }, requestId);
+    }
+    currentTier = effectiveTier(entitlement);
+  } catch {
+    return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+  }
+
   // ---------------------------------------------------------------------
   // 1a. Body-size pre-check (SCA-36 W2).
   //
@@ -176,12 +194,12 @@ Deno.serve(async (req) => {
   const contentLengthHeader = req.headers.get('content-length');
   const declaredContentLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : NaN;
   if (
-    claims.tier !== 'pro' &&
+    currentTier !== 'pro' &&
     Number.isFinite(declaredContentLength) &&
     declaredContentLength > NON_PRO_BODY_CAP
   ) {
     userLog.warn('non_pro_oversized_body', {
-      tier: claims.tier,
+      tier: currentTier,
       content_length: declaredContentLength,
     });
     return jsonError(
@@ -190,7 +208,7 @@ Deno.serve(async (req) => {
       {
         message: 'Multi-image scan is available on Pro.',
         required_tier: 'pro',
-        current_tier: claims.tier,
+        current_tier: currentTier,
       },
       requestId,
     );
@@ -229,7 +247,29 @@ Deno.serve(async (req) => {
     );
   }
 
-  const client = createServiceClient();
+  // ---------------------------------------------------------------------
+  // 5. Entitlement check: multi-image requires Pro
+  //
+  // SCA-35: derive image count from actual payload shape. `body.images` is
+  // the multi-image array (length 2..4, Zod-enforced); when absent, the
+  // request is single-image. The legacy `body.image_count` field is a
+  // checksum already validated against the actual count in Zod's
+  // superRefine, so we don't re-read it here.
+  // ---------------------------------------------------------------------
+  const imageCount = body.images?.length ?? 1;
+  if (imageCount > 1 && currentTier !== 'pro') {
+    userLog.warn('multi_image_denied', { tier: currentTier, image_count: imageCount });
+    return jsonError(
+      ErrorCode.ENT_MULTI_IMAGE_01,
+      403,
+      {
+        message: 'Multi-image scan is available on Pro.',
+        required_tier: 'pro',
+        current_tier: currentTier,
+      },
+      requestId,
+    );
+  }
 
   // ---------------------------------------------------------------------
   // 3. Idempotency cache
@@ -268,30 +308,6 @@ Deno.serve(async (req) => {
     // SCA-396: fail-open is intentional — see ADR 0036.
     // User-initiated camera shutter; failing during a brownout asks them
     // to re-shoot. Per-IP daily cap absorbs the abuse case.
-  }
-
-  // ---------------------------------------------------------------------
-  // 5. Entitlement check: multi-image requires Pro
-  //
-  // SCA-35: derive image count from actual payload shape. `body.images` is
-  // the multi-image array (length 2..4, Zod-enforced); when absent, the
-  // request is single-image. The legacy `body.image_count` field is a
-  // checksum already validated against the actual count in Zod's
-  // superRefine, so we don't re-read it here.
-  // ---------------------------------------------------------------------
-  const imageCount = body.images?.length ?? 1;
-  if (imageCount > 1 && claims.tier !== 'pro') {
-    userLog.warn('multi_image_denied', { tier: claims.tier, image_count: imageCount });
-    return jsonError(
-      ErrorCode.ENT_MULTI_IMAGE_01,
-      403,
-      {
-        message: 'Multi-image scan is available on Pro.',
-        required_tier: 'pro',
-        current_tier: claims.tier,
-      },
-      requestId,
-    );
   }
 
   // ---------------------------------------------------------------------
@@ -415,7 +431,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText,
@@ -450,15 +466,21 @@ Deno.serve(async (req) => {
         }
       }
     } catch (err) {
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalImageTokens += err.usage.imageInputTokens ?? 0;
+        totalLatency += err.usage.latencyMs;
+      }
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt < maxAttempts - 1) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        userLog.error('ai_call_failed', err);
         break;
       }
     }

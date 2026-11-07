@@ -140,7 +140,7 @@ final class GroceryViewModel {
         // `HouseholdProfile.confirmedActivePantry()`. Same drift class
         // as the substitution sheet (soft-deleted + unconfirmed rows
         // leaking to the model); centralising prevents recurrence.
-        let pantrySnapshot = household.confirmedActivePantry()
+        let pantrySnapshot = household.aiPantryItems(limit: 500, recipe: recipePlan)
             .compactMap { item -> GroceryGenerateRequest.PantryItemLite? in
                 guard let name = item.displayName, !name.isEmpty else { return nil }
                 return GroceryGenerateRequest.PantryItemLite(

@@ -29,10 +29,10 @@ import { createServiceClient } from '../_shared/db.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
-import { writeCache } from '../_shared/idempotency.ts';
+import { readCache } from '../_shared/idempotency.ts';
 import { processPushSend, validatePushEnvironment } from './push_send.ts';
 import type { APNsSender } from './push_send.ts';
 
@@ -51,7 +51,7 @@ const MAX_ATTEMPTS = 3;
 const RETRY_BACKOFF_SECONDS = [60, 300]; // 1m, 5m
 const STUCK_JOB_TIMEOUT_MINUTES = 5; // processing → pending re-queue threshold
 const RECIPE_IMPORT_FEATURE_KEY = 'recipe_import';
-const MODEL = GeminiModel.FlashLite;
+const MODEL = textModelFor('recipe_import');
 
 // Shared-secret gate (SA2-Medium fix). Read once at module load.
 const PGMQ_DISPATCH_SECRET = Deno.env.get('STIR_PGMQ_DISPATCH_SECRET') ?? '';
@@ -337,8 +337,8 @@ Deno.serve(async (req) => {
   for (const job of claimed) {
     try {
       if (job.kind === 'recipe_import_async') {
-        await processRecipeImportAsync(client, job, log);
-        results.push({ job_id: job.id, kind: job.kind, status: 'completed' });
+        const status = await processRecipeImportAsync(client, job, log);
+        results.push({ job_id: job.id, kind: job.kind, status });
       } else if (job.kind === 'push_send') {
         // SCA-314 S7: when an integration test has installed a
         // handler-level APNsSender override (STIR_TEST_MODE=1 +
@@ -402,7 +402,14 @@ async function processRecipeImportAsync(
   client: ReturnType<typeof createServiceClient>,
   job: ClaimedJob,
   log: Awaited<ReturnType<typeof createLogger>>,
-): Promise<void> {
+): Promise<'completed' | 'failed'> {
+  const { data: liveJob, error: liveError } = await client.from('notification_jobs')
+    .select('state,created_at').eq('id', job.id).single<{ state: string; created_at: string }>();
+  if (liveError) throw liveError;
+  if (liveJob.state !== 'processing' || Date.parse(liveJob.created_at) <= Date.now() - 600_000) {
+    await client.rpc('stir_expire_recipe_imports');
+    return 'failed';
+  }
   // SA1-Medium fix: Zod-validate the payload before it reaches the Gemini
   // prompt. Catches a malformed row inserted by a future writer; surfaces
   // a typed error in logs instead of crashing inside renderPrompt.
@@ -416,7 +423,17 @@ async function processRecipeImportAsync(
       'invalid recipe_import_async payload (see recipe_import_async_payload_invalid log)',
     );
   }
-  const payload: RecipeImportAsyncPayload = parsed.data;
+  const payload = parsed.data;
+
+  const existing = await readCache(client, job.canonical_user_key, payload.import_id);
+  if (existing) {
+    const { data, error } = await client.rpc('stir_complete_recipe_import', {
+      p_job_id: job.id,
+      p_response: existing.response_body,
+    });
+    if (error) throw error;
+    return data === 'completed' ? 'completed' : 'failed';
+  }
 
   const activePrompt = await readActivePrompt(client, RECIPE_IMPORT_FEATURE_KEY);
   if (!activePrompt) {
@@ -438,7 +455,7 @@ async function processRecipeImportAsync(
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: rendered,
         userText: 'Normalize the raw content into the structured recipe schema.',
@@ -462,7 +479,12 @@ async function processRecipeImportAsync(
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatencyMs += err.usage.latencyMs;
+      }
+      if (err instanceof AITextError && err.status >= 500) {
         if (attempt === 0) {
           retryCount++;
           continue;
@@ -508,7 +530,7 @@ async function processRecipeImportAsync(
       // PostHog error-rate filter `$ai_is_error = true AND $ai_error =
       // 'IMPORT-01'` sees both paths. Pre-2026-04-24 this field was
       // missing and async import failures dropped out of the filter.
-      error_code: !recipe ? ErrorCode.IMPORT_01 : undefined,
+      ...(!recipe ? { error_code: ErrorCode.IMPORT_01 } : {}),
     },
   );
 
@@ -529,35 +551,26 @@ async function processRecipeImportAsync(
     async_job_id: job.id,
   };
 
-  // Write to ai_response_cache — the iOS client's next POST with the same
-  // import_id will hit this cache and return instantly.
-  await writeCache(
-    client,
-    job.canonical_user_key,
-    payload.import_id,
-    RECIPE_IMPORT_FEATURE_KEY,
-    200,
-    responseBody,
+  // Publish result and terminal state atomically. A cleanup sweep or late
+  // worker cannot resurrect an expired operation or create a fresh cache.
+  const { data: completion, error: completionError } = await client.rpc(
+    'stir_complete_recipe_import',
+    {
+      p_job_id: job.id,
+      p_response: responseBody,
+    },
   );
+  if (completionError) throw completionError;
+  if (completion !== 'completed') return 'failed';
 
-  // Mark job completed.
-  const { error: markErr } = await client
-    .from('notification_jobs')
-    .update({
-      state: 'completed',
-      processed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', job.id);
-  if (markErr) {
-    log.warn('job_mark_complete_failed', { job_id: job.id, err: String(markErr) });
-    // Non-fatal — next tick will see state='processing' and may re-try. The
-    // idempotency cache write above means the user gets the correct result
-    // regardless.
+  // Push is a convenience: its failure cannot invalidate a completed result
+  // or replay a paid normalization. Foreground/result reads recover it too.
+  try {
+    await maybeSendImportCompletionPush(client, job.canonical_user_key, payload.import_id, log);
+  } catch {
+    log.warn('import_completion_push_unavailable', { job_id: job.id });
   }
-
-  // APNs push: check whether this install has opted into import_completion.
-  await maybeSendImportCompletionPush(client, job.canonical_user_key, payload.import_id, log);
+  return 'completed';
 }
 
 // -----------------------------------------------------------------------------
@@ -697,7 +710,7 @@ async function scheduleJobRetry(
       updated_at: new Date().toISOString(),
       error_message: errorMessage,
     })
-    .eq('id', jobId);
+    .eq('id', jobId).eq('state', 'processing');
 }
 
 // -----------------------------------------------------------------------------

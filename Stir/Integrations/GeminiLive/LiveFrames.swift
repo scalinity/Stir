@@ -1,308 +1,305 @@
 // LiveFrames
 //
-// Codable wire types for the Gemini Live BidiGenerateContentConstrained
-// WebSocket. This is the iOS side of what the backend mint baked in — we
-// don't send a setup frame (the ephemeral token already carried it) but
-// we do need to decode `serverContent`, `toolCall`, `usageMetadata`, and
-// the `setupComplete` handshake, and encode `realtimeInput.audio`,
-// `realtimeInput.text`, `toolResponse`, and `sessionUpdate`.
+// Typed frames for the Cook Mode voice WebSocket, as an adapter over the
+// OpenAI Realtime protocol. The session state machine, watchdogs, tool
+// dispatch and usage reporting were built around a small set of typed
+// frames; this file maps OpenAI's flat `{"type": ...}` events onto them
+// (inbound) and expands them into OpenAI client events (outbound), so none
+// of that tested logic had to move.
 //
 // Wire facts pinned here so a server-side drift shows up as a type error:
-//   - JSON keys are camelCase (documented 2026-04-19 via SDK probe)
-//   - Audio is base64 PCM16 @ 16 kHz for input; base64 PCM16 @ 24 kHz for
-//     output per Gemini docs (CLAUDE.md §sharp-edge #10 — input rate)
-//   - `functionResponse.id` on a toolResponse frame MUST match the id on
-//     the triggering toolCall.functionCall — ids are opaque strings
-//     (sometimes numeric-looking but always string). Round-trip as-is.
-//   - In-session text injection uses `realtimeInput.text`, NOT
-//     `clientContent` (CLAUDE.md §sharp-edge #11). `clientContent` is
-//     history-only on 3.1 Flash Live and Stir doesn't seed history.
-//   - Function responses go in `toolResponse`, NOT `clientContent`.
-//     (CLAUDE.md §sharp-edge #9)
+//   - Every server message is ONE JSON object with a `type` field. Events
+//     Stir doesn't act on parse to no frames; unknown types parse to
+//     `.unknown(key: type)`.
+//   - Audio is base64 PCM16 mono @ 24 kHz in both directions.
+//   - Tool calls arrive as `response.function_call_arguments.done` and the
+//     result goes back as a `function_call_output` conversation item. The
+//     model does NOT continue on its own after a tool result, so the
+//     output is always followed by an explicit `response.create`.
+//   - In-session text injection is a `conversation.item.create` user
+//     message followed by `response.create` (same reason).
+//   - `response.done` carries usage for ONE response. A turn that calls a
+//     tool has two responses (tool call, then spoken reply); only the
+//     second one completes the turn.
+//   - The input transcript arrives as a full utterance, asynchronously,
+//     often after model audio has started.
 
 import Foundation
 import OSLog
 
 // MARK: - Outbound frames (iOS → server)
 
-/// Envelope union for everything iOS sends after the WebSocket is open.
-/// The sdk prefers oneOf-style top-level keys — we encode as a plain
-/// dictionary from the struct variant to keep the wire shape exact.
+/// Everything iOS sends after the WebSocket is open. Some frames expand to
+/// more than one wire message, so the encoders return an ordered array and
+/// the transport sends each in order.
 enum LiveOutboundFrame {
-    /// First frame iOS sends after `ws.open`. Payload is the entire
-    /// `{"setup": {...}}` object as the backend pre-serialized it —
-    /// forwarded verbatim so iOS doesn't risk camelCase/snake_case
-    /// drift against Gemini's wire shape. Server does NOT emit
-    /// `setupComplete` until it receives this frame even with a
-    /// Constrained ephemeral token.
-    case setup(payload: [String: Any])
-    /// P3-D (2026-04-23): zero-parse setup path. Backend already sends
-    /// `setup_frame_json` as a serialized JSON string. Prior path
-    /// parsed it via JSONSerialization → wrapped as `[String: Any]` →
-    /// this frame → re-serialized in transport — three JSON round-
-    /// trips for a ~4-8 KiB payload, paid on preWarm AND every refresh
-    /// (~10 ms/refresh). The `setupRawJSON` variant short-circuits
-    /// `asJSONObject()` to return nil; transport routes via
-    /// `asJSONString()` instead and sends the string unchanged.
+    /// The backend pre-serialized `{"type":"session.update","session":{...}}`
+    /// and sends it as `setup_frame_json`. It is forwarded verbatim as the
+    /// first message so iOS can't drift from what the backend minted the
+    /// client secret for, and so the 4–8 KiB payload isn't parsed and
+    /// re-serialized on every preWarm and refresh. The server does not
+    /// emit `session.updated` (→ `.setupComplete`) until it receives this.
     case setupRawJSON(String)
+    /// `mimeType` is carried for the mic pipeline's bookkeeping; the wire
+    /// message has no field for it (the session format is fixed at 24 kHz
+    /// PCM16 by the setup frame).
     case realtimeInputAudio(base64: String, mimeType: String)
     case realtimeInputText(String)
+    /// `name` is not on the wire — OpenAI correlates by `call_id` alone.
     case toolResponse(functionResponseId: String, name: String, response: [String: Any])
-    /// `session.update` — used for pruning context via turn-coverage flips
-    /// and to bump generation_config mid-session when needed (CLAUDE.md
-    /// #7 — pruning to last 3 turns after every step advance).
+    /// Mid-session `session.update`. `payload` is the inner `session` object.
     case sessionUpdate(payload: [String: Any])
 
-    /// Encoded as JSON-ready dictionary. `JSONSerialization` is used (vs
-    /// JSONEncoder) because `toolResponse.response` and `sessionUpdate`
-    /// carry untyped JSON objects — Codable would require `AnyEncodable`
-    /// machinery for what's fundamentally a heterogeneous payload.
-    ///
-    /// Returns nil for `.setupRawJSON` — callers must check
-    /// `asJSONString()` first for that variant (P3-D).
-    func asJSONObject() -> [String: Any]? {
+    /// Wire messages as JSON-ready dictionaries, in send order. Empty for
+    /// `.setupRawJSON`, which is already a string — callers check
+    /// `asJSONString()` first. `JSONSerialization` is used (vs JSONEncoder)
+    /// because tool outputs and `session.update` payloads are untyped JSON.
+    func asJSONObjects() -> [[String: Any]] {
         switch self {
-        case let .setup(payload):
-            // Payload is already shaped `{"setup": {...}}` on the
-            // wire; return as-is. Backend serialized it atomically so
-            // iOS never reaches into the inner shape.
-            return payload
         case .setupRawJSON:
-            return nil
-        case let .realtimeInputAudio(base64, mimeType):
-            return [
-                "realtimeInput": [
-                    "audio": [
-                        "data": base64,
-                        "mimeType": mimeType,
-                    ],
-                ],
-            ]
+            return []
+        case let .realtimeInputAudio(base64, _):
+            return [[
+                "type": "input_audio_buffer.append",
+                "audio": base64,
+            ]]
         case let .realtimeInputText(text):
             return [
-                "realtimeInput": [
-                    "text": text,
+                [
+                    "type": "conversation.item.create",
+                    "item": [
+                        "type": "message",
+                        "role": "user",
+                        "content": [["type": "input_text", "text": text]],
+                    ],
                 ],
+                ["type": "response.create"],
             ]
-        case let .toolResponse(id, name, response):
+        case let .toolResponse(id, _, response):
             return [
-                "toolResponse": [
-                    "functionResponses": [[
-                        "id": id,
-                        "name": name,
-                        "response": response,
-                    ]],
+                [
+                    "type": "conversation.item.create",
+                    "item": [
+                        "type": "function_call_output",
+                        "call_id": id,
+                        // OpenAI wants the result as a JSON *string*, not
+                        // a nested object.
+                        "output": Self.jsonString(response),
+                    ],
                 ],
+                // Required: unlike the previous provider, the model does
+                // not resume speaking after a tool result by itself.
+                ["type": "response.create"],
             ]
         case let .sessionUpdate(payload):
-            return [
-                "sessionUpdate": payload,
-            ]
+            return [[
+                "type": "session.update",
+                "session": payload,
+            ]]
         }
     }
 
     /// Pre-serialized JSON string if this frame is already serialized
     /// (currently only `.setupRawJSON`). Transport uses this path to
-    /// skip the JSONSerialization encode/decode round-trip. P3-D.
+    /// skip the JSONSerialization encode/decode round-trip.
     func asJSONString() -> String? {
         if case let .setupRawJSON(json) = self {
             return json
         }
         return nil
     }
+
+    /// Serialize a tool-response dictionary for the `output` field.
+    /// `JSONSerialization.data` raises an Objective-C exception on an
+    /// invalid object graph, so validity is checked first; an
+    /// unencodable result degrades to a small error object the model can
+    /// narrate rather than dropping the tool output (which would leave
+    /// the call unanswered and the turn stuck).
+    private static func jsonString(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            Logger.voice.warning("live_tool_output_not_encodable")
+            return #"{"ok":false,"error":"response_not_encodable"}"#
+        }
+        return string
+    }
 }
 
 // MARK: - Inbound frames (server → iOS)
 
-/// Top-level envelope the server sends. We peek at the key names on the
-/// first pass of JSONSerialization (`.mutableContainers` not needed —
-/// we're just reading), then dispatch to a typed decoder per variant.
-/// Keeping dispatch manual (not Decodable) because the sdk wraps each
-/// frame in a single top-level key (`setupComplete` | `serverContent` |
-/// `toolCall` | `usageMetadata` | `goAway` | `sessionResumptionUpdate`)
-/// and Codable's associated-value enum decoding is clumsier than worth.
+/// Typed view of one OpenAI Realtime server event. Dispatch is by the
+/// event's `type` string (manual, not Decodable): Stir reads a handful of
+/// fields from a handful of events and ignores the rest, and the
+/// heterogeneous `usage` / tool-argument payloads don't fit Codable well.
 enum LiveInboundFrame {
+    /// `session.updated` — the server accepted our setup frame.
     case setupComplete
     case serverContent(LiveServerContent)
     case toolCall(LiveToolCall)
     case usageMetadata(LiveUsageMetadata)
-    /// Server is about to close the session (session too long, backend
-    /// maintenance, etc.). Treated as "refresh now" signal.
-    case goAway(timeBeforeDisconnectMs: Int?)
-    /// Session resumption handle for seamless reconnection. Not yet used
-    /// by Stir (we do fresh sessions on refresh) but parsed so it doesn't
-    /// surface as an "unknown frame" warning.
-    case sessionResumption
-    /// Unknown top-level key — logged at debug level, not fatal. Keeps
-    /// forward-compat when Google adds a new envelope we don't know yet.
+    case responseError(code: String)
+    /// `input_audio_buffer.speech_stopped` — server VAD decided the user
+    /// finished speaking. The only anchor for time-to-first-audio: the
+    /// input transcript arrives later and asynchronously, so anchoring on
+    /// it would under-report TTFA.
+    case userSpeechEnded
+    /// An event type we don't handle (or an `error` event, keyed
+    /// `error:<code>`). Logged at debug level, never fatal, so a new
+    /// server event type can't tear down a session.
     case unknown(key: String)
 
-    // swiftlint:disable cyclomatic_complexity
-    /// Parse all applicable frames from one WebSocket envelope. Gemini Live
-    /// envelopes commonly carry MULTIPLE top-level keys in a single message
-    /// — e.g., `{ serverContent: {...}, usageMetadata: {...} }` on the
-    /// turn-complete frame. An earlier version returned on first match and
-    /// silently dropped sibling keys; that lost every usageMetadata that
-    /// arrived alongside serverContent, so downstream token/cost reporting
-    /// always saw 0 (observed 2026-04-22 against a 36-generation prod run:
-    /// every $ai_generation had $ai_input_tokens=0).
-    ///
-    /// Returns frames in order of dispatch dependency:
-    ///   1. `setupComplete` — handshake gate.
-    ///   2. `usageMetadata` — pure state update that must land before
-    ///      anything that triggers `finalizeTurn()`. `{serverContent:
-    ///      {turnComplete}, usageMetadata}` would otherwise POST 0
-    ///      tokens because `finalizeTurn()` would fire before the
-    ///      usage envelope was accumulated.
-    ///   3. `toolCall` — must land BEFORE a same-envelope `serverContent`
-    ///      with `turnComplete=true`, otherwise `finalizeTurn()` latches
-    ///      `containedToolCall=false` and the belated `handleToolCall`
-    ///      mis-tags the NEXT turn as `tool_call` (ADR 0012 gate split).
-    ///      Gemini Live's documented envelope shape `{serverContent:
-    ///      {turnComplete}, toolCall}` means "here's my tool call AND
-    ///      I'm done" — the call belongs to the turn that's ending.
-    ///      Trade-off: in the rare combined envelope `{audioChunks,
-    ///      turnComplete, toolCall}`, the last audio chunks wait on the
-    ///      tool dispatch round-trip (~500 ms) before enqueue. Still
-    ///      audible; playback queue already has preceding chunks
-    ///      buffered, and correctness of result-type tagging wins over
-    ///      tail-audio promptness for a rare shape.
-    ///   4. `serverContent` — content + the `turnComplete` trigger.
+    /// Server events that carry nothing Stir acts on. Prefix families are
+    /// matched in `isIgnored`.
+    private static let ignoredTypes: Set<String> = [
+        "session.created",
+        "response.created",
+        "response.output_item.added",
+        "response.output_item.done",
+        "input_audio_buffer.committed",
+        "input_audio_buffer.speech_started",
+        "rate_limits.updated",
+        "response.output_audio.done",
+        "response.output_audio_transcript.done",
+        "response.function_call_arguments.delta",
+    ]
+
+    private static func isIgnored(_ type: String) -> Bool {
+        ignoredTypes.contains(type)
+            || type.hasPrefix("response.content_part.")
+            // The one `conversation.item.*` event Stir uses is handled
+            // before this check.
+            || type.hasPrefix("conversation.item.")
+    }
+
+    /// Parse the frames carried by one WebSocket message. OpenAI sends one
+    /// event per message, but `response.done` fans out to several frames,
+    /// in dispatch-dependency order:
+    ///   1. `usageMetadata` — pure state update that must land before
+    ///      `turnComplete` triggers `finalizeTurn()`, otherwise the turn's
+    ///      usage report would fire with zero tokens.
+    ///   2. `serverContent(turnComplete)` — omitted when the response
+    ///      ended in a tool call: that response is not the end of the
+    ///      turn, the spoken reply (a second response) is.
+    /// The tool call itself arrives earlier, in its own
+    /// `function_call_arguments.done` event, so `turnContainedToolCall` is
+    /// already latched when the turn finally completes (ADR 0012).
     static func parseAll(_ json: Any) -> [LiveInboundFrame] {
         guard let dict = json as? [String: Any] else { return [] }
+        guard let type = dict["type"] as? String else {
+            return [.unknown(key: "missing_type")]
+        }
+
+        switch type {
+        case "session.updated":
+            return [.setupComplete]
+
+        case "response.output_audio.delta":
+            guard let delta = dict["delta"] as? String, !delta.isEmpty else { return [] }
+            var content = LiveServerContent()
+            content.audioChunks = [LiveAudioChunk(base64: delta, mimeType: "audio/pcm;rate=24000")]
+            return [.serverContent(content)]
+
+        case "response.output_audio_transcript.delta":
+            guard let delta = dict["delta"] as? String else { return [] }
+            var content = LiveServerContent()
+            content.outputTranscription = LiveTranscription(text: delta, finished: false)
+            return [.serverContent(content)]
+
+        case "conversation.item.input_audio_transcription.completed":
+            guard let transcript = dict["transcript"] as? String else { return [] }
+            var content = LiveServerContent()
+            content.inputTranscription = LiveTranscription(text: transcript, finished: true)
+            return [.serverContent(content)]
+
+        case "input_audio_buffer.speech_stopped":
+            return [.userSpeechEnded]
+
+        case "response.function_call_arguments.done":
+            guard let call = LiveFunctionCall.parse(argumentsDoneEvent: dict) else {
+                Logger.voice.warning("live_tool_call_event_malformed")
+                return [.unknown(key: type)]
+            }
+            return [.toolCall(LiveToolCall(functionCalls: [call]))]
+
+        case "response.done":
+            return parseResponseDone(dict)
+
+        case "error":
+            // Log the machine-readable `type`/`code` only. `message` is
+            // free text that can echo request content, so it never
+            // reaches the log. An error event does not end the session.
+            let err = dict["error"] as? [String: Any]
+            let errType = err?["type"] as? String ?? "unknown"
+            let errCode = err?["code"] as? String ?? "unknown"
+            Logger.voice.warning(
+                "live_ws_error_event type=\(errType, privacy: .public) code=\(errCode, privacy: .public)",
+            )
+            return [.responseError(code: errCode)]
+
+        default:
+            return isIgnored(type) ? [] : [.unknown(key: type)]
+        }
+    }
+
+    private static func parseResponseDone(_ dict: [String: Any]) -> [LiveInboundFrame] {
+        let response = dict["response"] as? [String: Any] ?? [:]
         var frames: [LiveInboundFrame] = []
 
-        if dict["setupComplete"] != nil {
-            frames.append(.setupComplete)
-        }
-        // Side-data first so state-dependent handlers downstream see it.
-        if let obj = dict["usageMetadata"] as? [String: Any] {
-            frames.append(.usageMetadata(LiveUsageMetadata.parse(obj)))
-        }
-        // toolCall BEFORE serverContent so handleToolCall stamps
-        // `turnContainedToolCall = true` before finalizeTurn latches it.
-        // See ordering docstring above for the combined-envelope case.
-        if let obj = dict["toolCall"] as? [String: Any] {
-            frames.append(.toolCall(LiveToolCall.parse(obj)))
-        }
-        if let obj = dict["serverContent"] as? [String: Any] {
-            frames.append(.serverContent(LiveServerContent.parse(obj)))
-        }
-        if let obj = dict["goAway"] as? [String: Any] {
-            let ms = obj["timeBeforeDisconnectMs"] as? Int
-                ?? (obj["timeBeforeDisconnect"] as? String).flatMap(Int.init)
-            frames.append(.goAway(timeBeforeDisconnectMs: ms))
-        }
-        if dict["sessionResumptionUpdate"] != nil {
-            frames.append(.sessionResumption)
+        if let usage = response["usage"] as? [String: Any] {
+            frames.append(.usageMetadata(LiveUsageMetadata.parse(usage)))
         }
 
-        // If we didn't recognize any known key, yield one `.unknown` so
-        // the receive dispatcher's debug log fires. Otherwise stay
-        // silent — unrecognized extra keys alongside known ones are
-        // likely future-compat extensions and not worth alerting on.
-        if frames.isEmpty, let firstKey = dict.keys.first {
-            frames.append(.unknown(key: firstKey))
+        // Anything other than `completed` (failed / cancelled /
+        // incomplete) still ends the turn so the state machine can't
+        // wedge in `.modelSpeaking`; the status is logged for triage.
+        // Status and reason are enum strings — response content is never
+        // logged.
+        let status = response["status"] as? String ?? "unknown"
+        if status != "completed" {
+            let details = response["status_details"] as? [String: Any]
+            let reason = details?["reason"] as? String ?? "none"
+            Logger.voice.warning(
+                "live_response_not_completed status=\(status, privacy: .public) reason=\(reason, privacy: .public)",
+            )
         }
-        #if DEBUG
-        // Log unknown-sibling keys at debug level so Gemini Live API
-        // drift (new envelope types alongside known ones) shows up
-        // before it becomes load-bearing. Doesn't fire on the common
-        // single-key frames we already handle.
-        //
-        // P3-J (2026-04-23): `knownKeys` hoisted to a static let so the
-        // Set isn't rebuilt per inbound frame. `parseAll` fires at
-        // ~1-5 Hz during a turn; per-frame Set construction was cheap
-        // but avoidable.
-        for k in dict.keys where !Self.knownTopLevelKeys.contains(k) {
-            Logger.voice.debug("live_ws_unknown_sibling_key key=\(k, privacy: .public)")
+
+        let output = response["output"] as? [[String: Any]] ?? []
+        let endedInToolCall = output.contains { ($0["type"] as? String) == "function_call" }
+        if !endedInToolCall {
+            var content = LiveServerContent()
+            content.turnComplete = true
+            frames.append(.serverContent(content))
         }
-        #endif
         return frames
     }
-
-    #if DEBUG
-    private static let knownTopLevelKeys: Set<String> = [
-        "setupComplete", "serverContent", "toolCall", "usageMetadata",
-        "goAway", "sessionResumptionUpdate",
-    ]
-    #endif
-    // swiftlint:enable cyclomatic_complexity
 }
 
-/// `serverContent` — model's turn output (audio + optional text +
-/// optional completion flags).
+/// Model output and user-transcript content for the current turn.
 struct LiveServerContent: Sendable, Equatable {
-    /// Base64-encoded audio chunks. One frame can carry multiple inline
-    /// audio parts; we concatenate in arrival order. `mimeType` is
-    /// typically `audio/pcm;rate=24000` per Gemini docs.
+    /// Base64 PCM16 chunks, mimeType `audio/pcm;rate=24000`.
     var audioChunks: [LiveAudioChunk] = []
-    /// Optional inline text (rare in AUDIO mode; kept for the case
-    /// where the model surfaces a typed response — we don't render it
-    /// but log it for Sentry triage).
-    var inlineText: String?
-    /// Server-provided transcript of what the USER just said. Only
-    /// populated when `inputAudioTranscription: {}` is in the setup.
-    /// Extremely useful as a diagnostic: if Gemini isn't "hearing"
-    /// the audio, this stays nil even on a speaking user.
+    /// What the server heard the USER say. Populated from
+    /// `conversation.item.input_audio_transcription.completed`, which is
+    /// the FULL utterance (not a delta) and may arrive after the model has
+    /// started answering. Requires input transcription in the session
+    /// config; if the model doesn't seem to "hear" the user, this staying
+    /// nil on a speaking user is the diagnostic.
     var inputTranscription: LiveTranscription?
-    /// Server-provided transcript of what the MODEL is speaking back.
-    /// Gated on `outputAudioTranscription: {}` in the setup.
+    /// What the MODEL is speaking, as deltas
+    /// (`response.output_audio_transcript.delta`).
     var outputTranscription: LiveTranscription?
-    /// Server signals end-of-turn. iOS uses this to advance the state
-    /// machine from `.modelSpeaking` back to `.ready`.
+    /// The response ended and it was not a tool-call response. The state
+    /// machine advances `.modelSpeaking` back to `.ready` on this.
     var turnComplete: Bool = false
-    /// Server interrupted itself (e.g. user barge-in via audio VAD).
-    /// Rare — manual cancel is the primary interruption path.
-    var interrupted: Bool = false
-    /// Server emitted a grounding metadata frame. Logged only.
-    var hasGroundingMetadata: Bool = false
-
-    static func parse(_ obj: [String: Any]) -> LiveServerContent {
-        var result = LiveServerContent()
-        if let modelTurn = obj["modelTurn"] as? [String: Any],
-           let parts = modelTurn["parts"] as? [[String: Any]] {
-            for part in parts {
-                if let inline = part["inlineData"] as? [String: Any],
-                   let data = inline["data"] as? String {
-                    let mime = inline["mimeType"] as? String ?? "audio/pcm;rate=24000"
-                    result.audioChunks.append(LiveAudioChunk(base64: data, mimeType: mime))
-                } else if let text = part["text"] as? String {
-                    result.inlineText = (result.inlineText ?? "") + text
-                }
-            }
-        }
-        if let input = obj["inputTranscription"] as? [String: Any] {
-            result.inputTranscription = LiveTranscription.parse(input)
-        }
-        if let output = obj["outputTranscription"] as? [String: Any] {
-            result.outputTranscription = LiveTranscription.parse(output)
-        }
-        if let done = obj["turnComplete"] as? Bool, done {
-            result.turnComplete = true
-        }
-        if let interrupted = obj["interrupted"] as? Bool, interrupted {
-            result.interrupted = true
-        }
-        if obj["groundingMetadata"] != nil {
-            result.hasGroundingMetadata = true
-        }
-        return result
-    }
 }
 
-/// Partial transcription frame. `text` accumulates across frames in the
-/// same turn; `finished` flips true on the last delta.
+/// One transcription frame. `finished` is true for the full-utterance
+/// input transcript and false for streamed output deltas.
 struct LiveTranscription: Sendable, Equatable {
     let text: String
     let finished: Bool
-
-    static func parse(_ obj: [String: Any]) -> LiveTranscription {
-        LiveTranscription(
-            text: obj["text"] as? String ?? "",
-            finished: obj["finished"] as? Bool ?? false,
-        )
-    }
 }
 
 struct LiveAudioChunk: Sendable, Equatable {
@@ -310,29 +307,19 @@ struct LiveAudioChunk: Sendable, Equatable {
     let mimeType: String
 }
 
-/// `toolCall` — model wants iOS to run a function. Stir's mint baked
-/// three tools: `substitution_check`, `start_timer`, `advance_step`.
-/// Tools are synchronous on 3.1 Flash Live (one call in flight at a
-/// time, CLAUDE.md §sharp-edge #12) so the array has length 1 in
-/// practice but we parse as an array to match the wire.
+/// A model request for iOS to run functions. OpenAI delivers one call per
+/// event, so the array has length 1 in practice; the array form is kept
+/// because the dispatcher iterates it.
 struct LiveToolCall: Sendable, Equatable {
     let functionCalls: [LiveFunctionCall]
-
-    static func parse(_ obj: [String: Any]) -> LiveToolCall {
-        guard let rawArr = obj["functionCalls"] as? [[String: Any]] else {
-            return LiveToolCall(functionCalls: [])
-        }
-        let calls = rawArr.compactMap { LiveFunctionCall.parse($0) }
-        return LiveToolCall(functionCalls: calls)
-    }
 }
 
 /// `@unchecked Sendable` because `args: [String: Any]` is heterogeneous
 /// (String/Int/NSNumber in practice; never mutable closures or refs).
 /// The dict is `let`-immutable after parse — no races are possible.
 struct LiveFunctionCall: @unchecked Sendable, Equatable {
-    /// Opaque id the server expects back on toolResponse.functionResponse.id.
-    /// Always a string on the wire; if we see a numeric, we stringify.
+    /// Opaque `call_id` the server expects back on the
+    /// `function_call_output` item.
     let id: String
     let name: String
     /// Arguments as a heterogeneous dictionary. Stir's tool signatures
@@ -345,23 +332,33 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
         lhs.id == rhs.id && lhs.name == rhs.name
     }
 
-    static func parse(_ obj: [String: Any]) -> LiveFunctionCall? {
-        guard let name = obj["name"] as? String else { return nil }
-        // `id` is a string per Google's current wire but some proto
-        // encodings emit it as a number. Normalize both to String.
-        let id: String
-        if let s = obj["id"] as? String {
-            id = s
-        } else if let n = obj["id"] as? NSNumber {
-            id = n.stringValue
-        } else {
-            return nil
+    /// Build from a `response.function_call_arguments.done` event
+    /// (`call_id`, `name`, `arguments` as a JSON STRING). Malformed
+    /// arguments degrade to an empty dict so the call still reaches
+    /// `dispatchTool`, whose per-tool guards turn a missing argument into
+    /// a structured error the model can narrate. Only the tool name is
+    /// logged, never the argument text.
+    static func parse(argumentsDoneEvent event: [String: Any]) -> LiveFunctionCall? {
+        guard let id = event["call_id"] as? String, !id.isEmpty,
+              let name = event["name"] as? String, !name.isEmpty
+        else { return nil }
+
+        var args: [String: Any] = [:]
+        if let raw = event["arguments"] as? String,
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let data = raw.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                args = parsed
+            } else {
+                Logger.voice.warning(
+                    "live_tool_arguments_malformed name=\(name, privacy: .public)",
+                )
+            }
         }
-        let args = (obj["args"] as? [String: Any]) ?? [:]
         return LiveFunctionCall(id: id, name: name, args: args)
     }
 
-    // MARK: - Typed args for Stir's three tools
+    // MARK: - Typed args for Stir's tools
 
     /// `substitution_check.missing_ingredient` — required string arg.
     var substitutionMissingIngredient: String? {
@@ -404,7 +401,7 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
         args["label"] as? String
     }
 
-    /// `set_step.step_number` — nominally 1-indexed int arg. Gemini
+    /// `set_step.step_number` — nominally 1-indexed int arg. The model
     /// sometimes emits `step_number: 0` when the user says "step one"
     /// (model briefly mistakes the tool contract for 0-indexed — observed
     /// 2026-04-22 on a multi-turn session where every step 2..5
@@ -444,70 +441,51 @@ struct LiveFunctionCall: @unchecked Sendable, Equatable {
     }
 }
 
-/// `usageMetadata` — per-turn token accounting. Populated on every
-/// response frame per Gemini docs; Stir uses it to drive the
-/// `voice_session_token_snapshot` telemetry + the 80k hard cap
-/// enforcement (CLAUDE.md §Live constants).
+/// Per-response token accounting from `response.done.response.usage`.
+/// Stir uses it to drive the `voice_session_token_snapshot` telemetry and
+/// the voice-turn-usage report. A tool-call turn has two responses, so the
+/// session's `TurnUsageAccumulator` sums the frames.
 struct LiveUsageMetadata: Sendable, Equatable {
-    /// Total input tokens (audio + text + system prompt + cached history).
+    /// `input_tokens` — text + audio (+ image) input, INCLUDING cached.
     let promptTokenCount: Int
-    /// Total output tokens (audio + text).
+    /// `output_tokens` — audio + text output.
     let responseTokenCount: Int
-    /// Cumulative tokens for the session so far. The spike doc noted
-    /// this is NOT present in every frame; absent = "same as last".
+    /// `total_tokens` for this response.
     let totalTokenCount: Int
 
-    /// Breakdown per modality (audio/text/image). Only recorded when
-    /// we need it for cost tracking — present by default on Live.
+    /// Per-modality breakdown from `input_token_details` /
+    /// `output_token_details`.
     let promptAudioTokens: Int?
     let promptTextTokens: Int?
     let responseAudioTokens: Int?
     let responseTextTokens: Int?
-    /// Portion of `promptTokenCount` that was served from Gemini's
-    /// content cache (system prompt re-use). Billed at a discounted
-    /// rate. `promptTokensDetails` typically lists only the fresh AUDIO
-    /// chunk and omits the cached portion; without parsing this field
-    /// we silently drop cached tokens from cost attribution — observed
-    /// gap 2026-04-22: 185–261 tokens per turn unaccounted.
+    /// Cached TEXT input tokens (`cached_tokens_details.text_tokens`).
+    /// Billed at the discounted cached rate; text and audio are cached at
+    /// different rates, so they are carried separately. Cache hits are
+    /// the main voice cost lever.
     let cachedContentTokenCount: Int?
+    /// Cached AUDIO input tokens (`cached_tokens_details.audio_tokens`).
+    let cachedAudioTokens: Int?
 
     static func parse(_ obj: [String: Any]) -> LiveUsageMetadata {
-        let prompt = obj["promptTokenCount"] as? Int ?? 0
-        let response = obj["responseTokenCount"] as? Int ?? 0
-        let total = obj["totalTokenCount"] as? Int ?? (prompt + response)
-        let cached = obj["cachedContentTokenCount"] as? Int
+        let prompt = obj["input_tokens"] as? Int ?? 0
+        let response = obj["output_tokens"] as? Int ?? 0
+        let total = obj["total_tokens"] as? Int ?? (prompt + response)
 
-        var pAudio: Int?
-        var pText: Int?
-        if let arr = obj["promptTokensDetails"] as? [[String: Any]] {
-            for item in arr {
-                let mod = (item["modality"] as? String) ?? ""
-                let count = item["tokenCount"] as? Int ?? 0
-                if mod == "AUDIO" { pAudio = count }
-                if mod == "TEXT" { pText = count }
-            }
-        }
-
-        var rAudio: Int?
-        var rText: Int?
-        if let arr = obj["responseTokensDetails"] as? [[String: Any]] {
-            for item in arr {
-                let mod = (item["modality"] as? String) ?? ""
-                let count = item["tokenCount"] as? Int ?? 0
-                if mod == "AUDIO" { rAudio = count }
-                if mod == "TEXT" { rText = count }
-            }
-        }
+        let inDetails = obj["input_token_details"] as? [String: Any]
+        let outDetails = obj["output_token_details"] as? [String: Any]
+        let cachedDetails = inDetails?["cached_tokens_details"] as? [String: Any]
 
         return LiveUsageMetadata(
             promptTokenCount: prompt,
             responseTokenCount: response,
             totalTokenCount: total,
-            promptAudioTokens: pAudio,
-            promptTextTokens: pText,
-            responseAudioTokens: rAudio,
-            responseTextTokens: rText,
-            cachedContentTokenCount: cached,
+            promptAudioTokens: inDetails?["audio_tokens"] as? Int,
+            promptTextTokens: inDetails?["text_tokens"] as? Int,
+            responseAudioTokens: outDetails?["audio_tokens"] as? Int,
+            responseTextTokens: outDetails?["text_tokens"] as? Int,
+            cachedContentTokenCount: cachedDetails?["text_tokens"] as? Int,
+            cachedAudioTokens: cachedDetails?["audio_tokens"] as? Int,
         )
     }
 }

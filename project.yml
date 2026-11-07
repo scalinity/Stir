@@ -89,8 +89,11 @@ targets:
         UIRequiredDeviceCapabilities:
           - arm64
         UIApplicationSupportsIndirectInputEvents: true
+        UIBackgroundModes:
+          - remote-notification
         # Config.xcconfig values flow through as $(VAR) at build time.
         # Read at runtime via Bundle.main.infoDictionary.
+        CloudKitAPIToken: $(CLOUDKIT_API_TOKEN)
         SupabaseURL: $(SUPABASE_URL)
         SupabaseAnonKey: $(SUPABASE_ANON_KEY)
         PostHogPublicAPIKey: $(POSTHOG_PUBLIC_API_KEY)
@@ -102,6 +105,7 @@ targets:
         NSSupportsLiveActivitiesFrequentUpdates: true
         # Permission usage strings. Presented inside the system prompt.
         NSCameraUsageDescription: "Stir uses the camera to scan your kitchen and turn ingredients into tonight's dinner options."
+        NSSpeechRecognitionUsageDescription: "Stir uses on-device speech recognition so you can ask cooking questions when live voice is unavailable."
         NSMicrophoneUsageDescription: "Stir listens hands-free during Cook Mode so you can ask questions without touching your phone."
         NSPhotoLibraryUsageDescription: "Stir reads recipe screenshots you pick so it can turn them into steps you can cook from."
         NSRemindersUsageDescription: "Stir writes your missing-ingredients list to Reminders so it shows up next time you're at the store."
@@ -118,6 +122,7 @@ targets:
     entitlements:
       path: Stir/App/Stir.entitlements
       properties:
+        aps-environment: development
         com.apple.developer.icloud-container-identifiers:
           - iCloud.com.scalinity.stir
         com.apple.developer.icloud-services:
@@ -183,6 +188,8 @@ targets:
       path: Extensions/StirWidgets/Info.plist
       properties:
         CFBundleDisplayName: Stir Widgets
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         NSSupportsLiveActivities: true
@@ -241,6 +248,8 @@ targets:
       path: Extensions/StirShareExtension/Info.plist
       properties:
         CFBundleDisplayName: Stir
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"

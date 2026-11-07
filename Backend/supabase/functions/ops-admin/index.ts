@@ -15,6 +15,7 @@
 // Per-action handlers live in this file as a closed switch; Phase-2 ships
 // 2 actions (users.list, users.force_reauth); remaining 9 ship in P2.4.
 
+import { withOpsCors } from '../_shared/ops_cors.ts';
 import { z, ZodError } from 'zod';
 import { createServiceClient } from '../_shared/db.ts';
 import {
@@ -194,7 +195,10 @@ const AdminActionSchema = z.discriminatedUnion('action', [
     action: z.literal('deletion_requests.list'),
     params: DeletionRequestsListParams.default({}),
   }).strict(),
-  z.object({ action: z.literal('deletion_requests.approve'), params: DeletionRequestsApproveParams })
+  z.object({
+    action: z.literal('deletion_requests.approve'),
+    params: DeletionRequestsApproveParams,
+  })
     .strict(),
 ]);
 
@@ -204,7 +208,7 @@ type AdminAction = z.infer<typeof AdminActionSchema>;
 // Entry
 // ---------------------------------------------------------------------------
 
-Deno.serve(async (req) => {
+async function handleRequest(req: Request): Promise<Response> {
   const requestId = requestIdFrom(req);
   const endpoint = '/v1/ops/admin';
   const log = await createLogger(requestId, endpoint);
@@ -377,7 +381,7 @@ Deno.serve(async (req) => {
       requestId,
     );
   }
-});
+}
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -1144,3 +1148,5 @@ async function emitOpsEvent(
 
 // ---------------------------------------------------------------------------
 // (Helpers: zodToFieldErrors imported from _shared/validation.ts since W18 fix.)
+
+Deno.serve((req) => withOpsCors(req, handleRequest));

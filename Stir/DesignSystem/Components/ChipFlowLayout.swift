@@ -35,7 +35,7 @@ struct ChipFlowLayout: Layout {
         var totalHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
             if currentX + size.width > width, currentX > 0 {
                 currentY += lineHeight + spacing
                 currentX = 0
@@ -60,7 +60,7 @@ struct ChipFlowLayout: Layout {
         var lineHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if currentX + size.width > bounds.maxX, currentX > bounds.minX {
                 currentY += lineHeight + spacing
                 currentX = bounds.minX

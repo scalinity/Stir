@@ -1,6 +1,6 @@
 # Stir — Cook Mode Realtime Research
 
-Validated reference for implementing Cook Mode voice on **Google Gemini 3.1 Flash Live Preview** at `thinkingLevel: minimal`. Supersedes the earlier OpenAI `gpt-realtime-mini` research draft after the decision to consolidate on a single AI vendor (Google Gemini).
+The current Cook Mode voice design is OpenAI Realtime over a direct iOS WebSocket (ADR 0038 and ADR 0041). The server meters and authorizes client-secret mints; credentials remain reusable within their connection window, and attached session settings can be overridden. The supported client applies the 400-token output cap and truncation defaults. The Gemini protocol and single-use token details below are retained as historical research and do not define the current provider contract.
 
 Last validated: May 8, 2026.
 

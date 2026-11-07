@@ -281,14 +281,22 @@ enum ImageCompression {
     }
 
     private static func resized(_ image: UIImage, maxLongEdge: CGFloat) -> UIImage {
-        let longEdge = max(image.size.width, image.size.height)
+        // UIImage.size is in points; the upload cap is in pixels. Keep
+        // the decision independent of both image scale and screen scale.
+        let pixelSize = CGSize(
+            width: image.size.width * image.scale,
+            height: image.size.height * image.scale,
+        )
+        let longEdge = max(pixelSize.width, pixelSize.height)
         if longEdge <= maxLongEdge { return image }
         let scale = maxLongEdge / longEdge
         let newSize = CGSize(
-            width: image.size.width * scale,
-            height: image.size.height * scale,
+            width: max(1, floor(pixelSize.width * scale)),
+            height: max(1, floor(pixelSize.height * scale)),
         )
-        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
         return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: newSize))
         }

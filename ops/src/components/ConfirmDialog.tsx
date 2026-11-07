@@ -5,7 +5,7 @@
 // plain-chrome chrome that looks nothing like the ops UI — a mis-click
 // from a 100-row table has real consequences.
 //
-// Three presentation modes:
+// Four presentation modes:
 //   plain       — one-line prompt + Confirm/Cancel (defaults to destructive style)
 //   typed       — require operator to type a specific phrase ("BAN user xyz")
 //                 before Confirm activates; primarily for ban/reauth
@@ -14,9 +14,10 @@
 //   json        — textarea with JSON.parse badge; used by canned_fallback_pinned
 //
 // Controlled via a hook: `useConfirm()` returns { ask, dialog }. Mount
-// `dialog` once in AppShell; call `await ask({ ... })` from any handler.
+// `dialog` once in the page that owns the hook; call `await ask({ ... })`
+// from its handlers. Native modal dialogs keep the background inert.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 type ConfirmMode =
@@ -50,8 +51,20 @@ export function useConfirm(): {
   const [selectValue, setSelectValue] = useState('');
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const inputId = useId();
+
+  const mountDialog = useCallback((node: HTMLDialogElement | null) => {
+    if (!node) dialogRef.current?.close();
+    dialogRef.current = node;
+    if (node && !node.open) node.showModal();
+  }, []);
 
   const ask = useCallback((req: ConfirmRequest): Promise<ConfirmResult> => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement : null;
     setInput('');
     setSelectValue(req.mode.kind === 'enum_select' ? req.mode.options[0]?.value ?? '' : '');
     setJsonText('');
@@ -62,6 +75,8 @@ export function useConfirm(): {
   }, []);
 
   const close = useCallback((result: ConfirmResult) => {
+    dialogRef.current?.close();
+    returnFocusRef.current?.focus();
     pending?.resolve(result);
     setPending(null);
     setInput('');
@@ -71,25 +86,25 @@ export function useConfirm(): {
   }, [pending]);
 
   const dialog = pending ? (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onKeyDown={(e) => { if (e.key === 'Escape') close({ confirmed: false }); }}
+    <dialog
+      ref={mountDialog}
+      aria-labelledby={titleId}
+      className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[calc(100%_-_2rem)] overflow-y-auto bg-neutral-900 text-neutral-100 border border-neutral-700 rounded-lg p-6 backdrop:bg-black/60"
+      onCancel={(e) => { e.preventDefault(); close({ confirmed: false }); }}
     >
-      <div className="bg-neutral-900 border border-neutral-700 rounded-lg max-w-md w-full p-6 space-y-4">
-        <h2 id="confirm-dialog-title" className="text-lg font-semibold">{pending.title}</h2>
+      <div className="space-y-4">
+        <h2 id={titleId} className="text-lg font-semibold">{pending.title}</h2>
         {pending.description && (
           <div className="text-sm text-neutral-300">{pending.description}</div>
         )}
 
         {pending.mode.kind === 'typed' && (
           <div>
-            <label className="block text-xs text-neutral-400 mb-1">
+            <label htmlFor={inputId} className="block text-xs text-neutral-400 mb-1">
               Type <span className="font-mono text-amber-400">{pending.mode.expected}</span> to confirm
             </label>
             <input
+              id={inputId}
               autoFocus
               type="text"
               value={input}
@@ -102,6 +117,7 @@ export function useConfirm(): {
 
         {pending.mode.kind === 'enum_select' && (
           <select
+            aria-label="Choose an option"
             autoFocus
             value={selectValue}
             onChange={(e) => setSelectValue(e.target.value)}
@@ -116,6 +132,7 @@ export function useConfirm(): {
         {pending.mode.kind === 'json' && (
           <div>
             <textarea
+              aria-label="Replacement response JSON"
               autoFocus
               value={jsonText}
               onChange={(e) => {
@@ -134,7 +151,7 @@ export function useConfirm(): {
               ) : jsonText.trim() ? (
                 <span className="text-green-400">valid JSON</span>
               ) : (
-                <span className="text-neutral-500">paste the replacement response body</span>
+                <span className="text-neutral-400">paste the replacement response body</span>
               )}
             </div>
           </div>
@@ -142,6 +159,7 @@ export function useConfirm(): {
 
         <div className="flex justify-end gap-2 pt-2">
           <button
+            autoFocus={pending.mode.kind === 'plain'}
             onClick={() => close({ confirmed: false })}
             className="bg-neutral-800 hover:bg-neutral-700 rounded px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
           >
@@ -182,7 +200,7 @@ export function useConfirm(): {
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   ) : null;
 
   return { ask, dialog };

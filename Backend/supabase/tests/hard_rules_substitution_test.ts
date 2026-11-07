@@ -186,6 +186,47 @@ Deno.test('validateSubstitution: summarizeViolations emits PII-free kind labels'
   assertEquals(summary.includes('substitution_text'), false);
 });
 
+Deno.test('validateSubstitution: summarizeViolations names the matched words as banned_words (ADR 0038)', () => {
+  // A safe swap phrased with the replaced item ("instead of butter") and a
+  // negation ("peanut-free") still fails the keyword scan; the retry note
+  // must name those exact words, not only the rule labels.
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use coconut oil instead of butter.',
+      reasoning: 'It is peanut-free and sears like a grill.',
+      constraint_safe: true,
+    },
+    {
+      dietaryRules: [allergy('peanut'), diet('vegan'), dislike('cilantro')],
+      availableEquipment: ['stovetop'],
+    },
+  );
+  assertEquals(result.valid, false);
+  const summary = summarizeViolations(result);
+  const banned = summary.split('; ').find((p) => p.startsWith('banned_words='));
+  assertEquals(typeof banned, 'string', `summary should carry banned_words; got: ${summary}`);
+  const words = new Set(banned!.slice('banned_words='.length).split('|'));
+  assertEquals(words.has('peanut'), true);
+  assertEquals(words.has('butter'), true);
+  assertEquals(words.has('grill'), true);
+  // Rule labels stay for back-compat with the existing retry note.
+  assertEquals(summary.includes('allergens=peanut'), true);
+  assertEquals(summary.includes('diets=vegan'), true);
+});
+
+Deno.test('validateSubstitution: allergen issue records the matched keyword, not only the rule value', () => {
+  const result = validateSubstitution(
+    {
+      substitution_text: 'Use 1 cup buttermilk.',
+      reasoning: 'Tangy.',
+      constraint_safe: true,
+    },
+    { dietaryRules: [allergy('milk')], availableEquipment: ['stovetop'] },
+  );
+  const issue = result.issues.find((i) => i.kind === 'allergen');
+  assertEquals(issue?.kind === 'allergen' ? issue.keyword : undefined, 'milk');
+});
+
 Deno.test('validateSubstitution: pescatarian diet blocks meat substitutions', () => {
   const result = validateSubstitution(
     {

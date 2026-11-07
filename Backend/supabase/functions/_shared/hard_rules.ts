@@ -70,7 +70,9 @@ export interface DishContext {
 }
 
 export type ValidationIssue =
-  | { kind: 'allergen'; value: string; ingredient: string }
+  // `keyword`: the matched needle (e.g. "milk" for a dairy rule); set by
+  // validateSubstitution for the amplified-retry summary.
+  | { kind: 'allergen'; value: string; ingredient: string; keyword?: string }
   | { kind: 'diet_violation'; diet: string; ingredient: string; keyword: string }
   | { kind: 'dislike_hard'; value: string; ingredient: string }
   | { kind: 'time_over_budget'; actual: number; max: number }
@@ -230,6 +232,39 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
     'gianduja',
   ],
   peanut: ['peanut', 'groundnut'],
+  dairy: ['dairy', ...DAIRY_KEYWORDS],
+  egg: [...EGG_KEYWORDS, 'albumen', 'ovalbumin', 'mayonnaise', 'meringue'],
+  gluten: [
+    'gluten',
+    'wheat',
+    'barley',
+    'rye',
+    'malt',
+    'spelt',
+    'semolina',
+    'farro',
+    'bulgur',
+    'couscous',
+    'seitan',
+    'soy sauce',
+  ],
+  fish: [
+    'fish',
+    'salmon',
+    'tuna',
+    'cod',
+    'halibut',
+    'trout',
+    'mackerel',
+    'sardine',
+    'anchovy',
+    'anchovies',
+    'haddock',
+    'tilapia',
+    'pollock',
+    'bonito',
+  ],
+  sesame: ['sesame', 'tahini', 'benne', 'gingelly'],
   // soy: covers tofu / tempeh / edamame / miso / soy sauce that don't
   // contain "soy" as a substring on their own.
   soy: ['soy', 'soya', 'tofu', 'tempeh', 'edamame', 'miso'],
@@ -254,7 +289,7 @@ const ALLERGEN_KEYWORD_EXPANSION: Record<string, string[]> = {
 };
 
 /** Allergen rawValue → keywords (rawValue itself if no expansion). */
-function allergyKeywordsFor(allergenValue: string): string[] {
+export function allergyKeywordsFor(allergenValue: string): string[] {
   return ALLERGEN_KEYWORD_EXPANSION[allergenValue] ?? [allergenValue];
 }
 
@@ -398,10 +433,11 @@ function containsDietKeyword(
   displayName: string,
   ingredientText: string,
   needles: string[],
+  amountText = '',
 ): string | null {
   const trimmedDisplay = displayName.toLowerCase().trim();
-  if (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay)) return null;
-  const lower = ingredientText.toLowerCase();
+  const lower = (MULTI_WORD_DIET_EXCEPTIONS.has(trimmedDisplay) ? amountText : ingredientText)
+    .toLowerCase();
   for (const n of needles) {
     if (matchesNeedleDiet(lower, n)) return n;
   }
@@ -409,7 +445,7 @@ function containsDietKeyword(
 }
 
 function ingredientText(ing: DishIngredient): string {
-  return `${ing.display_name} ${ing.canonical_slug ?? ''}`;
+  return `${ing.display_name} ${ing.canonical_slug ?? ''} ${ing.amount_text ?? ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +490,7 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
       if (rule.kind === 'diet') {
         const keywords = dietKeywordsFor(value);
         if (keywords) {
-          const hit = containsDietKeyword(ing.display_name, text, keywords);
+          const hit = containsDietKeyword(ing.display_name, text, keywords, ing.amount_text);
           if (hit) {
             issues.push({
               kind: 'diet_violation',
@@ -477,20 +513,16 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
     });
   }
 
-  // 3. Unavailable / avoid equipment implied by step text.
-  const unavailable = new Set<string>();
-  for (const eqKey of Object.keys(EQUIPMENT_IMPLICATION)) {
-    if (!ctx.availableEquipment.includes(eqKey)) unavailable.add(eqKey);
-  }
-  for (const avoid of ctx.avoidEquipment ?? []) {
-    unavailable.add(avoid);
-  }
-  const stepText = dish.recipe_plan.steps.map((s) => s.instruction_text).join(' ').toLowerCase();
-  for (const eqKey of unavailable) {
-    const needles = EQUIPMENT_IMPLICATION[eqKey];
-    if (!needles) continue;
-    const hit = containsAnyStrict(stepText, needles);
-    if (hit) issues.push({ kind: 'unavailable_equipment_implied', keyword: hit });
+  // 3. Instructions are actionable output too. Scan each step against
+  // dietary and equipment constraints, even when its ingredient was
+  // omitted from the structured list.
+  for (const step of dish.recipe_plan.steps) {
+    issues.push(
+      ...validateSubstitution(
+        { substitution_text: step.instruction_text, reasoning: '', constraint_safe: false },
+        ctx,
+      ).issues,
+    );
   }
 
   // 4. Model falsely claimed hard_constraint_pass.
@@ -512,11 +544,9 @@ export function validateDish(dish: CandidateDish, ctx: DishContext): ValidationR
 //
 // Same safety bias: allergies run on plain-substring match, diets run with
 // word-boundary + exceptions. The suggestion TEXT is free-form, so we have
-// no "display_name" to check against MULTI_WORD_DIET_EXCEPTIONS (that
-// exception list filters by exact lowercased display_name match — no
-// substring safe anchor exists in a suggestion blob). In practice the
-// substitution suggestions are short and narrow — "use cashew milk" not
-// "a milk thistle infusion" — so the ambiguity window is tiny.
+// no structured display_name. Remove only complete known plant-name
+// phrases for diet checks; the remainder is still checked, and allergies
+// always scan the unmodified text.
 //
 // Equipment check: if the model proposed a workaround that mentions
 // equipment the household doesn't have (available_equipment list), flag.
@@ -559,6 +589,11 @@ export function validateSubstitution(
     sub.reasoning,
     sub.amount_conversion ?? '',
   ].join(' ').toLowerCase();
+  let dietText = combined;
+  for (const name of MULTI_WORD_DIET_EXCEPTIONS) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    dietText = dietText.replace(new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'g'), '');
+  }
 
   // 1. Allergy + hard dislike + diet: keyword match on the combined text.
   // Allergy uses plain substring (safety first); dislike likewise;
@@ -574,7 +609,12 @@ export function validateSubstitution(
       // miss what the dish validator catches.
       const hit = containsAnyStrict(combined, allergyKeywordsFor(value));
       if (hit) {
-        issues.push({ kind: 'allergen', value: rule.value, ingredient: sub.substitution_text });
+        issues.push({
+          kind: 'allergen',
+          value: rule.value,
+          ingredient: sub.substitution_text,
+          keyword: hit,
+        });
       }
       continue;
     }
@@ -591,7 +631,7 @@ export function validateSubstitution(
       const keywords = dietKeywordsFor(value);
       if (keywords) {
         for (const n of keywords) {
-          if (matchesNeedleDiet(combined, n)) {
+          if (matchesNeedleDiet(dietText, n)) {
             issues.push({
               kind: 'diet_violation',
               diet: rule.value,
@@ -668,6 +708,34 @@ export function validateSubstitution(
   return { valid: issues.length === 0, issues };
 }
 
+/** A rewrite is new actionable output; upstream substitution safety does not cover it. */
+export function validateStepRewrite(
+  rewrittenText: string,
+  originalIngredient: string,
+  substituteIngredient: string,
+  ctx: SubstitutionContext,
+): ValidationResult {
+  const result = validateSubstitution(
+    { substitution_text: rewrittenText, reasoning: '', constraint_safe: false },
+    ctx,
+  );
+  // Permit the original word inside the accepted replacement (e.g. milk →
+  // oat milk), but reject a separate retained reference to the old item.
+  const normalize = (text: string) =>
+    text.toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const original = normalize(originalIngredient);
+  const substitute = normalize(substituteIngredient);
+  const remaining = normalize(rewrittenText).split(substitute).join('');
+  if (original && containsAnyStrict(remaining, [original])) {
+    result.issues.push({
+      kind: 'dislike_hard',
+      value: originalIngredient,
+      ingredient: rewrittenText,
+    });
+  }
+  return { valid: result.issues.length === 0, issues: result.issues };
+}
+
 // SCA-431: phrasings the model uses when claiming an ingredient is
 // already in the user's pantry. Mirrors the prompt's "NEVER write
 // 'from your pantry'..." clause — keep this list and the prompt
@@ -689,7 +757,8 @@ const PANTRY_CLAIM_NEEDLES: readonly string[] = [
  * Compose a compact human-readable violation summary to amplify the retry
  * prompt. The model gets "RE-VIOLATED: <summary>" prepended to the system
  * prompt on retry, so it understands what to avoid without us re-sending
- * the entire ruleset. Emits PII-free labels — no user text quoted back.
+ * the entire ruleset. Quotes only rule values and matched keywords, never
+ * the model's answer or the user's free-text problem.
  */
 export function summarizeViolations(result: ValidationResult): string {
   if (result.valid) return '';
@@ -700,11 +769,27 @@ export function summarizeViolations(result: ValidationResult): string {
   // SCA-431: collect the forbidden phrasings the model used so the
   // retry prompt knows specifically what to avoid in the next attempt.
   const ungroundedPhrasings = new Set<string>();
+  // The exact words the keyword checks matched. The checks are substring
+  // and word-boundary matches with no notion of context, so "peanut-free"
+  // or "instead of butter" fails exactly like a suggestion of peanuts or
+  // butter. Naming the matched word lets the retry remove it; a label
+  // like "diets=vegan" does not say which word tripped the check (ADR 0038).
+  const bannedWords = new Set<string>();
   for (const issue of result.issues) {
     kinds.add(issue.kind);
-    if (issue.kind === 'allergen') allergens.add(issue.value);
-    if (issue.kind === 'diet_violation') diets.add(issue.diet);
-    if (issue.kind === 'unavailable_equipment_implied') equipment.add(issue.keyword);
+    if (issue.kind === 'allergen') {
+      allergens.add(issue.value);
+      bannedWords.add(issue.keyword ?? issue.value);
+    }
+    if (issue.kind === 'diet_violation') {
+      diets.add(issue.diet);
+      bannedWords.add(issue.keyword);
+    }
+    if (issue.kind === 'dislike_hard') bannedWords.add(issue.value);
+    if (issue.kind === 'unavailable_equipment_implied') {
+      equipment.add(issue.keyword);
+      bannedWords.add(issue.keyword);
+    }
     if (issue.kind === 'ungrounded_pantry_claim') ungroundedPhrasings.add(issue.phrasing);
   }
   const parts: string[] = [];
@@ -714,6 +799,7 @@ export function summarizeViolations(result: ValidationResult): string {
   if (ungroundedPhrasings.size) {
     parts.push(`ungrounded_pantry_claim=${[...ungroundedPhrasings].join('|')}`);
   }
+  if (bannedWords.size) parts.push(`banned_words=${[...bannedWords].join('|')}`);
   if (!parts.length) parts.push(`kinds=${[...kinds].join('|')}`);
   return parts.join('; ');
 }

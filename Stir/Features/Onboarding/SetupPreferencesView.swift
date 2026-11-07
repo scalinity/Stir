@@ -166,13 +166,19 @@ struct SetupPreferencesView: View {
         }
     }
 
+    private var visibleDislikes: [DislikeOption] {
+        Self.dislikesForOnboarding + DislikeOption.allCases.filter {
+            !Self.dislikesForOnboarding.contains($0) && viewModel.selectedDislikes.contains($0)
+        }
+    }
+
     private var dislikesSection: some View {
         OnboardingSection(
             title: "Dislikes",
             subtitle: "Strong preferences — I'll avoid unless you override.",
         ) {
             ChipFlowLayout(spacing: CGFloat.Stir.space2) {
-                ForEach(Self.dislikesForOnboarding, id: \.self) { opt in
+                ForEach(visibleDislikes, id: \.self) { opt in
                     SelectableChip(
                         label: opt.displayName.lowercased(),
                         tone: .danger,
@@ -240,7 +246,7 @@ struct SetupPreferencesView: View {
                     .overlay(alignment: .trailing) {
                         Image.Stir.disclosure
                             .font(.system(size: CGFloat.Stir.iconSm, weight: .semibold))
-                            .foregroundStyle(Color.Stir.paper50)
+                            .foregroundStyle(Color.Stir.onAccent)
                             .padding(.trailing, CGFloat.Stir.space4)
                     }
             }
@@ -323,7 +329,7 @@ private struct OnboardingSection<Content: View>: View {
 /// the user sees the sheet close and no new chip appear, which the
 /// trim+fold path makes unambiguous (empty → nothing added, fold →
 /// the matching predefined chip toggles instead).
-private struct AddDislikePill: View {
+struct AddDislikePill: View {
     @Bindable var viewModel: OnboardingViewModel
     @State private var isPresenting = false
     @State private var draft: String = ""

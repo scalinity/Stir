@@ -8,12 +8,14 @@
 import SwiftUI
 
 struct ImportRoot: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(RootCoordinator.self) private var coordinator
     @Bindable var viewModel: ImportViewModel
     let onDismiss: () -> Void
     let onCompleted: (UUID) -> Void
 
     var body: some View {
-        switch viewModel.stage {
+        Group { switch viewModel.stage {
         case .idle, .submitting:
             ImportEntryView(viewModel: viewModel, onDismiss: onDismiss)
         case .review(let recipe, let parseQuality):
@@ -24,7 +26,7 @@ struct ImportRoot: View {
                 onDismiss: onDismiss,
             )
         case .queued(let jobID):
-            QueuedView(jobID: jobID, onDismiss: onDismiss)
+            QueuedView(jobID: jobID, onCheck: { Task { try? await viewModel.refreshQueuedResult() } }, onDismiss: onDismiss)
         case .saving:
             ImportEntryView(viewModel: viewModel, onDismiss: onDismiss)  // overlay handled within
         case .saved(let planID):
@@ -36,7 +38,12 @@ struct ImportRoot: View {
                 // Return to entry so the user can try a different method.
                 viewModel.cancelImport()
             })
+        } }
+        .task(id: "\(viewModel.stageKind.rawValue)-\(scenePhase)") {
+            if scenePhase == .active { await viewModel.pollQueuedResult() }
         }
+        .onAppear { coordinator.beginHouseholdWorkflow() }
+        .onDisappear { coordinator.endHouseholdWorkflow() }
     }
 }
 
@@ -44,6 +51,7 @@ struct ImportRoot: View {
 
 private struct QueuedView: View {
     let jobID: String
+    let onCheck: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
@@ -53,16 +61,17 @@ private struct QueuedView: View {
             Text("Working on it…")
                 .stirFont(.displayMd)
                 .foregroundStyle(Color.Stir.ink900)
-            Text("Big recipes take a minute. We'll notify you when it's ready.")
+            Text("Big recipes take a minute. Keep this screen open or reopen Import to check. Results are available for 10 minutes after completion.")
                 .stirFont(.bodyMd)
                 .foregroundStyle(Color.Stir.ink500)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            Button("Check again", action: onCheck)
             Button(action: onDismiss) {
                 Text("Done")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(width: 160, height: 48)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -105,7 +114,7 @@ private struct SavedView: View {
                     Text("Open recipe")
                         .stirFont(.labelLg)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.Stir.onAccent)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .background(
@@ -156,7 +165,7 @@ private struct ErrorView: View {
                 Text("Try again")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .frame(width: 140, height: 44)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)

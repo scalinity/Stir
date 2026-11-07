@@ -3,7 +3,7 @@
 // SCA-79 — extracted from RealtimeSession.swift. Owns:
 //
 //   - **Outbound mic forwarding**: PCM16 → base64 →
-//     `realtimeInput.audio` frames pushed onto the live transport,
+//     `input_audio_buffer.append` frames pushed onto the live transport,
 //     with the half-duplex mute window during model speech / playback
 //     drain / refresh handoff.
 //   - **AVAudioSession event handling**: interruption, route change,
@@ -103,7 +103,7 @@ extension RealtimeSession {
     /// fallback-to-C.3 flow (via `.error` state) handle the user-facing
     /// recovery. Attempting an in-place refresh on `.interruptionEnded`
     /// is risky — the OS may be mid-interruption on the AVAudioSession
-    /// even after announcing end, and forcing Gemini Live audio through
+    /// even after announcing end, and forcing Realtime audio through
     /// a half-valid session produces worse UX than a clean "tap again
     /// to re-start voice" cue.
     private func handleAudioInterruption(_ event: AudioInterruptionObserver.Event) {
@@ -262,22 +262,9 @@ extension RealtimeSession {
                         ])
                     }
                     #endif
-                    // P3-C (2026-04-23): brief sleep instead of tight
-                    // read-and-drop during mute. Without the sleep, the
-                    // forwarder wakes on every 20 ms mic frame (50 Hz)
-                    // and burns MainActor contention while the user
-                    // hears 5-15 s of model speech. With the sleep we
-                    // release the MainActor for SwiftUI/other work and
-                    // re-check gate conditions on the next tick. 100 ms
-                    // is a balance: short enough that post-mute mic
-                    // resumption doesn't perceptibly lag (user has to
-                    // react to model finishing speaking anyway — their
-                    // utterance starts well after the 100 ms window),
-                    // long enough to materially reduce wake-ups during
-                    // a ~10 s model turn (~100 wakes vs ~500 without).
-                    try? await Task.sleep(for: .milliseconds(100))
                     continue
                 }
+                guard pipeline.captureGate.accepts(frame.captureEpoch) else { continue }
                 do {
                     try await transport.send(.realtimeInputAudio(
                         base64: frame.base64,
@@ -291,7 +278,7 @@ extension RealtimeSession {
                     // pushing bytes. If this log never appears while
                     // user is obviously speaking, the AVAudioEngine
                     // tap callback isn't firing and the whole
-                    // "silence from Gemini" problem is on iOS side.
+                    // "silence from the model" problem is on iOS side.
                     if framesSent >= nextLogAtFrame {
                         VoiceSessionLog.log("mic.sent", [
                             "frames": framesSent,

@@ -300,6 +300,7 @@ actor SupabaseSessionClient {
     /// AUTH-01 re-bootstrap exhausts its single retry.
     func clearSession() {
         cachedJWT = nil
+        lastBootstrapIdentity = nil
         try? keychain.delete(key: .sessionJWT)
     }
 

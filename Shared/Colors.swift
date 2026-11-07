@@ -42,8 +42,9 @@ extension Color.Stir {
 
     // MARK: - Ember (primary action family)
 
-    /// Primary action fill. Light `#C8532B` / Dark `#E26340`.
-    static let ember600 = dualColor(light: 0xC8532B, dark: 0xE26340)
+    /// Primary action fill and accent text. Light `#B54824` / Dark `#E56643`.
+    /// Clears 4.5:1 on ember100 and with onAccent in both appearances.
+    static let ember600 = dualColor(light: 0xB54824, dark: 0xE56643)
     /// Hover / pressed ember. Light `#E26340` / Dark `#F07D5A`.
     static let ember500 = dualColor(light: 0xE26340, dark: 0xF07D5A)
     /// Ember tint — selected chip, subtle highlight.
@@ -82,8 +83,8 @@ extension Color.Stir {
 
     /// Allergen, dietary breach, hard-rule block. Always paired with
     /// the `.allergen` SF Symbol, never color-alone.
-    /// Light `#9A2E2E` / Dark `#C94747`.
-    static let crimson600 = dualColor(light: 0x9A2E2E, dark: 0xC94747)
+    /// Light `#9A2E2E` / Dark `#DA6060`.
+    static let crimson600 = dualColor(light: 0x9A2E2E, dark: 0xDA6060)
     /// Crimson tint. Light `#F2DCDC` / Dark `#2E1818`.
     static let crimson100 = dualColor(light: 0xF2DCDC, dark: 0x2E1818)
 
@@ -91,7 +92,7 @@ extension Color.Stir {
 
     /// Soft recoverable error — OCR couldn't read, low-confidence parse.
     /// Distinct from `crimson600` (hard breach) and `amber600` (pending).
-    /// Folds to the dark ember hue on dark mode.
+    /// Warm ember hue in dark mode.
     /// Light `#A8441F` / Dark `#E26340`.
     static let rust600 = dualColor(light: 0xA8441F, dark: 0xE26340)
 
@@ -137,6 +138,9 @@ extension Color.Stir {
 
     /// Primary brand action alias — `ember600`.
     static let accent = ember600
+    /// Text and glyphs on an ember600 fill: light paper in light mode,
+    /// dark paper in dark mode, where the action fill is brighter.
+    static let onAccent = paper50
     /// Semantic success alias — `sage600`.
     static let success = sage600
     /// Semantic warning alias — `amber600`.

@@ -362,6 +362,99 @@ final class RootCoordinatorFastPathTests: XCTestCase {
 
         XCTAssertEqual(coord.phase, .ready)
     }
+
+    func test_readyAndOnboardingCompletionDrainQueuedSharesWithoutForeground() throws {
+        let controller = PersistenceController(inMemory: true)
+        let storage = Self.uniqueSharedStorage()
+        let cloud = CloudKitAvailabilityStore()
+        cloud.update(with: .install(uuid: "queued-share"))
+        let coordinator = RootCoordinator(
+            config: Self.config(), entitlements: EntitlementService(keychain: MockKeychain()),
+            cloudKit: cloud, sentry: StubSentry(), sessionClient: Self.sessionClient(),
+            persistenceController: controller, sharedStorage: storage, revenueCat: MockRevenueCatService()
+        )
+        _ = try coordinator.selectHousehold(for: "install:queued-share", previousKey: nil, installationID: "queued-share")
+        let first = Stir.PendingImport(url: "https://example.com/recipe", text: nil, capturedAt: Date(), consumingUserKey: "install:queued-share")
+        storage.writePendingImport(first)
+        coordinator.drainPendingImportsIfReady()
+        XCTAssertNil(coordinator.activeImport, "Loading retains the queued payload")
+        XCTAssertEqual(storage.readPendingImport()?.id, first.id)
+
+        coordinator._testSetPhase(.ready)
+        coordinator.drainPendingImportsIfReady()
+        XCTAssertEqual(coordinator.activeImport?.id, first.id)
+        let next = Stir.PendingImport(url: nil, text: "second recipe", capturedAt: Date(), consumingUserKey: "install:queued-share")
+        storage.writePendingImport(next)
+        coordinator.drainPendingImportsIfReady()
+        XCTAssertEqual(storage.readPendingImport()?.id, next.id, "An active import retains the next share")
+        coordinator.dismissImport()
+        coordinator._testSetPhase(.onboarding)
+        coordinator.handleOnboardingFinished()
+        XCTAssertEqual(coordinator.activeImport?.id, next.id)
+    }
+
+    func test_selectedControllerOwnsOnboardingImportAndRetentionMaintenance() throws {
+        let controller = PersistenceController(inMemory: true)
+        let storage = Self.uniqueSharedStorage()
+        let cloud = CloudKitAvailabilityStore()
+        cloud.update(with: .install(uuid: "composition"))
+        let coordinator = RootCoordinator(
+            config: Self.config(), entitlements: EntitlementService(keychain: MockKeychain()),
+            cloudKit: cloud, sentry: StubSentry(), sessionClient: Self.sessionClient(),
+            persistenceController: controller, sharedStorage: storage, revenueCat: MockRevenueCatService()
+        )
+        let profile = try coordinator.selectHousehold(for: "install:composition", previousKey: nil, installationID: "composition")
+        let onboarding = coordinator.makeOnboardingViewModel(for: profile)
+        onboarding.customDislikes = ["cilantro"]
+        onboarding.selectedEquipment = [.oven]
+        onboarding.servingsDefault = 4
+        try onboarding.savePreferences()
+        try onboarding.saveKitchen()
+        try onboarding.completeOnboarding()
+        XCTAssertEqual(profile.dietaryRuleArray.first?.managedObjectContext, controller.viewContext)
+        XCTAssertEqual(profile.kitchenEquipmentArray.first?.managedObjectContext, controller.viewContext)
+        XCTAssertEqual(profile.servingsDefault, 4)
+
+        let recipe = RecipeImportResponse.ImportedRecipe(
+            title: "Tomato pasta", servings: 2, estimatedMinutes: 20,
+            ingredients: [.init(displayName: "pasta", canonicalSlug: "pasta", amountText: "8 oz", group: nil)],
+            steps: [.init(stepNumber: 1, instructionText: "Cook the pasta.", timerSeconds: 600, cautionTags: nil)],
+            parseQuality: .high, editHints: nil
+        )
+        _ = try coordinator.makeImportViewModel(for: profile).buildRecipePlan(recipe, source: .pastedText)
+        try controller.save()
+        XCTAssertEqual((profile.recipePlans?.anyObject() as? RecipePlan)?.managedObjectContext, controller.viewContext)
+        let oldImport = try coordinator.recipeImportRepository.start(for: profile, input: .init(
+            importID: UUID(), source: .pastedText, sourceURL: nil, ocrPageCount: 0, rawContent: "recipe"
+        ))
+        try coordinator.recipeImportRepository.markCompleted(oldImport, recipePlanID: UUID(), aiRequestID: nil)
+        let oldID = try XCTUnwrap(oldImport.id)
+        let now = Date()
+        oldImport.completedAt = now.addingTimeInterval(-31 * 86_400)
+        try controller.save()
+        coordinator.runImportRetentionMaintenance(now: now)
+        XCTAssertNil(try coordinator.recipeImportRepository.find(importID: oldID))
+    }
+
+    func test_coordinatorPromotesOnlyItsExactInstallationKey() throws {
+        let controller = PersistenceController(inMemory: true)
+        let coordinator = RootCoordinator(
+            config: Self.config(), entitlements: EntitlementService(keychain: MockKeychain()),
+            sentry: StubSentry(), sessionClient: Self.sessionClient(), persistenceController: controller,
+            sharedStorage: Self.uniqueSharedStorage(), revenueCat: MockRevenueCatService()
+        )
+        let repository = HouseholdProfileRepository(controller: controller)
+        let local = try repository.ensureHouseholdProfile(for: "install:own")
+        let unrelated = try repository.ensureHouseholdProfile(for: "install:other")
+        _ = try coordinator.selectHousehold(for: "ck:A", previousKey: "install:other", installationID: "own")
+        XCTAssertEqual(unrelated.canonicalUserKey, "install:other")
+        let promoted = try coordinator.selectHousehold(for: "ck:B", previousKey: "install:own", installationID: "own")
+        XCTAssertEqual(promoted, local)
+        let otherAccount = try coordinator.selectHousehold(for: "ck:C", previousKey: "ck:B", installationID: "own")
+        XCTAssertNotEqual(otherAccount.objectID, promoted.objectID)
+        XCTAssertEqual(local.canonicalUserKey, "ck:B")
+    }
+
 }
 
 // MARK: - Stub

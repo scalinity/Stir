@@ -19,7 +19,7 @@
 // SCA-79 review W4 (CR1): tool-call dispatch is ~70% of this file.
 // Eventual extraction into a dedicated `RealtimeSessionTools.swift` is
 // tracked in `docs/deferred-work.md` (trigger: this file > ~1,800 LOC,
-// OR Gemini Live moves to GA, OR a third bucket needs cross-coupling).
+// OR a third bucket needs cross-coupling).
 // Until then, the `// MARK: - tool-call round-trip` section header at
 // the boundary lets Xcode's symbol jumper navigate cleanly.
 //
@@ -144,7 +144,7 @@ extension RealtimeSession {
         }
         let ctx: RealtimeHouseholdContext
         if let household = cookingSession.household {
-            ctx = RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot())
+            ctx = RealtimeHouseholdContext(snapshot: household.voiceContextSnapshot(recipe: cookingSession.recipePlan))
         } else {
             ctx = RealtimeHouseholdContext(snapshot: .empty)
         }
@@ -165,6 +165,7 @@ extension RealtimeSession {
     func startReceiveDispatcher() {
         guard let transport else { return }
         dispatcherGeneration += 1
+        setupAcknowledgedGeneration = nil
         let myGen = dispatcherGeneration
         // SCA-170 S14 (CA3): annotate the unstructured Task with `@MainActor`
         // so the catch-block read of `dispatcherGeneration` (MainActor-isolated)
@@ -182,7 +183,7 @@ extension RealtimeSession {
                     // frames; this guard cuts the loop earlier so any frame
                     // still queued in `transport.inbound` after a cancel
                     // doesn't trigger a needless dispatch.
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || myGen != self.dispatcherGeneration { return }
                     await self.handleInboundFrame(frame)
                 }
             } catch {
@@ -213,7 +214,9 @@ extension RealtimeSession {
         }
     }
 
-    /// Await the server's `setupComplete` handshake frame. Returns when
+    /// Await the server's `session.updated` handshake (`.setupComplete`).
+    /// The preceding `session.created` is ignored by the parser and does
+    /// not count. Returns when
     /// `handleInboundFrame` resumes the continuation; throws
     /// `RealtimeSessionError.setupTimeout` if the budget elapses first.
     ///
@@ -224,6 +227,10 @@ extension RealtimeSession {
     /// resumed and leaked. This version resolves the continuation
     /// explicitly from the timeout path, so neither side leaks.
     func awaitSetupComplete(timeoutSec: Double) async throws {
+        guard currentState != .closed && currentState != .error else {
+            throw RealtimeSessionError.notOpen
+        }
+        if setupAcknowledgedGeneration == dispatcherGeneration { return }
         setupCompleteGeneration += 1
         let gen = setupCompleteGeneration
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -286,10 +293,9 @@ extension RealtimeSession {
         // tags cook_turn_resolved.result_type accordingly (ADR 0012).
         turnContainedToolCall = true
         // Capture the most-recent tool name for the stuck-watchdog
-        // PostHog payload. 3.1 Flash Live is synchronous one-in-flight
-        // (CLAUDE.md §sharp-edge #12), so this is the only tool call
-        // for this turn in practice. Pre-dispatch so the name is
-        // available even if dispatchTool throws.
+        // PostHog payload. Stir's prompt calls one tool per turn, so this
+        // is the only tool call for this turn in practice. Pre-dispatch
+        // so the name is available even if dispatchTool throws.
         lastToolCallName = toolCall.functionCalls.first?.name
         #if DEBUG
         VoiceSessionLog.log("tool_call.received", [
@@ -297,18 +303,26 @@ extension RealtimeSession {
         ])
         #endif
 
-        // 3.1 Flash Live does synchronous tool calls — one in flight
-        // at a time (CLAUDE.md §sharp-edge #12). So iterating the
-        // (length-1) array in order is the right contract.
+        // Each `function_call_arguments.done` event carries one call, so
+        // the array has length 1; iterating in order is the right
+        // contract if that ever changes.
+        let generation = lifecycleGeneration
+        let toolTurn = turnCount
         for call in toolCall.functionCalls {
             let response = await dispatchTool(call)
+            guard generation == lifecycleGeneration, toolTurn == turnCount,
+                  currentState == .toolCalling else { return }
+            // Bound the response send and first-audio wait without replaying the tool.
+            rearmTurnStuckWatchdog()
             let frame = LiveOutboundFrame.toolResponse(
                 functionResponseId: call.id,
                 name: call.name,
                 response: response,
             )
             do {
-                try await transport?.send(frame)
+                guard let transport else { throw RealtimeSessionError.notOpen }
+                try await transport.send(frame)
+                guard generation == lifecycleGeneration, toolTurn == turnCount else { return }
                 #if DEBUG
                 VoiceSessionLog.log("tool_response.sent", ["name": call.name])
                 #endif
@@ -319,16 +333,18 @@ extension RealtimeSession {
                 #if DEBUG
                 VoiceSessionLog.logError("tool_response.send_failed", error: error, ["name": call.name])
                 #endif
+                turnStuckWatchdogFired()
+                return
             }
         }
 
-        // After toolResponse, state STAYS in `.toolCalling` until the
+        // After the tool output, state STAYS in `.toolCalling` until the
         // next serverContent audio frame arrives — the state machine's
         // legal transitions forbid `.toolCalling → .thinking` (only
-        // `.toolCalling → .modelSpeaking` is allowed). When Gemini
-        // resumes its spoken response (sharp-edge #9: auto-continue
-        // after toolResponse), `handleServerContent` advances
-        // `.toolCalling → .modelSpeaking` on the first audio chunk.
+        // `.toolCalling → .modelSpeaking` is allowed). The tool-result
+        // frame ends with an explicit `response.create`, which starts the
+        // spoken reply; `handleServerContent` advances
+        // `.toolCalling → .modelSpeaking` on its first audio chunk.
         // Removing a prior premature `.toolCalling → .thinking` hop
         // that would have hit an assertionFailure in debug builds.
     }
@@ -611,7 +627,7 @@ extension RealtimeSession {
         // items could leak into the substitution validator. Canonical
         // filter now applies uniformly.
         let householdContext = SubstitutionRequest.HouseholdContext(
-            snapshot: cookingSession.household?.voiceContextSnapshot() ?? .empty,
+            snapshot: cookingSession.household?.voiceContextSnapshot(recipe: cookingSession.recipePlan) ?? .empty,
         )
 
         let request = SubstitutionRequest(

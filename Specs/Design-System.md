@@ -67,7 +67,7 @@ Color is semantic, not decorative. Every value has a named role.
 | `paper.50` | `#FAF7F2` | Primary background (warm off-white, not sterile) |
 | `paper.100` | `#F3EEE5` | Secondary background, card surface |
 | `paper.200` | `#EBE3D6` | Tertiary background, grouped list |
-| `ember.600` | `#C8532B` | **Primary action** — CTAs, active states, selection highlight |
+| `ember.600` | `#B54824` | **Primary action** — CTAs, active states, selection highlight |
 | `ember.500` | `#E26340` | Ember hover/pressed |
 | `ember.100` | `#FBEAE0` | Ember tint (selected chip, subtle highlight) |
 | `ember.700` | `#8F3B1D` | Deep ember — gradient pair with `ember.600` on premium/Pro cards only. Never used as a flat fill. |
@@ -95,22 +95,23 @@ Dark mode is first-class for v1 — people cook at night with the phone backlit.
 | `paper.50` | `#14100B` | Primary background (warm near-black, not pure #000) |
 | `paper.100` | `#1F1A14` | Card surface |
 | `paper.200` | `#2A241C` | Grouped list |
-| `ember.600` | `#E26340` | Slightly brighter for contrast on dark bg |
+| `ember.600` | `#E56643` | Accent text clears 4.5:1 on `ember.100` |
 | `ember.500` | `#F07D5A` | — |
 | `ember.100` | `#3A1E13` | Ember tint dark |
-| `ember.700` | `#C8532B` | Deep ember (equivalent of light `ember.600`) — gradient-pair only |
+| `ember.700` | `#C8532B` | Deep ember — gradient-pair only |
 | `sage.600` | `#6FA07C` | Brighter for dark |
 | `sage.100` | `#1E2E23` | — |
 | `amber.600` | `#D4A21F` | — |
 | `amber.100` | `#2E2614` | — |
-| `crimson.600` | `#C94747` | — |
+| `crimson.600` | `#DA6060` | Text clears 4.5:1 on `crimson.100` |
 | `crimson.100` | `#2E1818` | — |
-| `rust.600` | `#E26340` | Folds to the dark `ember.600` value on dark mode — the soft-error distinction collapses into the warmer ember hue on dark |
+| `rust.600` | `#E26340` | Warm recoverable-error accent |
 | `voice.600` | `#8473E8` | — |
 | `voice.100` | `#1F1A33` | — |
 
 ### 3.3 Color rules
 
+- **`onAccent` resolves to `paper.50`.** Use it for text, glyphs, and spinners on `ember.600` fills: `#FAF7F2` in light mode and `#14100B` in dark mode. The enabled action pair clears 4.5:1 in both appearances.
 - **Never communicate semantics with color alone.** Confidence chips pair color with icon (checkmark/question/sparkle). Error banners pair crimson with an exclamation. Per WCAG 2.2 AA and spec §6 accessibility baseline.
 - **Ember is the only hue used for primary CTAs — one brand signal.** Paywall is the deliberate exception: its "soft bottom sheet" and "inline" surfaces use `ink.900` CTAs to signal editorial consideration rather than bright-intent action (see §8.1 paywall override). Feature-specific paywall modals (e.g., voice upsell) revert to `ember.600`.
 - **`ember.700` is gradient-stop-only.** Never a flat button fill. Always paired with `ember.600` as `LinearGradient(ember.600 → ember.700, topLeading → bottomTrailing)` on premium/Pro emphasis cards.
@@ -344,7 +345,7 @@ Three variants. That's it.
 
 | Variant | Use | Visual |
 |---|---|---|
-| `PrimaryButton` | The single most important action on a screen | `ember.600` fill, `paper.50` label, 12pt radius, 48pt min height, full-width default |
+| `PrimaryButton` | The single most important action on a screen | `ember.600` fill, `onAccent` label, 12pt radius, 48pt min height, full-width default |
 | `SecondaryButton` | Important but not hero | `paper.100` fill, `ink.900` label, 1pt `ink.100` border, same size |
 | `TextButton` | Tertiary actions, links | `ember.600` label, no fill, no border |
 

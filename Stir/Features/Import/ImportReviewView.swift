@@ -25,6 +25,17 @@ struct ImportReviewView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     header
                     metadataStrip
+                    if !viewModel.dietaryConflicts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Dietary conflict — saving is blocked", systemImage: "exclamationmark.triangle")
+                                .stirFont(.labelLg)
+                            ForEach(viewModel.dietaryConflicts, id: \.self) { Text($0).stirFont(.bodySm) }
+                            Text("Import a recipe that meets your household rules.").stirFont(.bodySm)
+                        }
+                        .foregroundStyle(Color.Stir.rust600)
+                        .padding(14)
+                        .stirCard(borderColor: Color.Stir.rust600.opacity(0.4), radius: CGFloat.Stir.radiusMd)
+                    }
                     if parseQuality == "low" {
                         lowQualityNote
                     }
@@ -172,12 +183,12 @@ struct ImportReviewView: View {
         } label: {
             HStack(spacing: 8) {
                 if viewModel.isBusy {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Color.Stir.onAccent)
                 }
                 Text(viewModel.isBusy ? "Saving…" : "Save to Saved")
                     .stirFont(.labelLg)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(viewModel.isBusy ? Color.white : Color.Stir.onAccent)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 52)
@@ -186,7 +197,7 @@ struct ImportReviewView: View {
                     .fill(viewModel.isBusy ? Color.Stir.ink300 : Color.Stir.ember600),
             )
         }
-        .disabled(viewModel.isBusy)
+        .disabled(viewModel.isBusy || !viewModel.dietaryConflicts.isEmpty)
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 20)

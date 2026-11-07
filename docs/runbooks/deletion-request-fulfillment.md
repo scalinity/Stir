@@ -30,20 +30,27 @@ The worker walks subsystems in this order and writes per-step status to
 `deletion_requests.external_refs_json`. Postgres is LAST so the audit
 anchor lives on a separate table.
 
-### 1. PostHog identify-merge
+### 1. PostHog person, event and recording deletion
 
-Emits a `$delete_person` capture event for `distinct_id =
-canonical_user_key_hash`. PostHog's retention pipeline picks it up and
-removes the person from `persons`, plus retroactively redacts
-identifying properties from event blobs.
+Await `POST /api/projects/{project}/persons/bulk_delete/` with
+`distinct_ids: [canonical_user_key_hash]`, `delete_events: true` and
+`delete_recordings: true`. Requires `POSTHOG_PERSONAL_API_KEY` with
+`person:write`, `POSTHOG_PROJECT_ID`, and an optional allowlisted
+`POSTHOG_API_HOST` (`https://us.posthog.com` or `https://eu.posthog.com`).
+The public event-capture key cannot authorize this operation.
 
-- **Verify:** PostHog → Activity → search the hashed distinct_id; the
-  event log shows `$delete_person` with our `deletion_request_id`
-  property.
-- **Failure modes:** PostHog ingest brown-out. The capture is
-  fire-and-forget (`EdgeRuntime.waitUntil`) so the worker doesn't block.
-  If a PostHog outage during fulfillment matters for compliance,
-  manually re-emit via the PostHog dashboard's user-deletion control.
+- **Verify:** a 202 plus empty `deletion_errors` and the requested queue
+  flags proves submission only. `submitted_at` records that boundary;
+  `requires_manual_action` remains until processor completion is verified.
+- **Missing configuration/failure:** retains a stable manual-action reason
+  without `completed_at`. The normal Postgres sweep can continue after the
+  outstanding check is durably recorded.
+- **Operator action:** find `deletion_requests.external_actions_pending`
+  or `deletion_requests.fulfilled` in `audit_log` by the hashed target.
+  Inspect `after_json.external_refs.posthog`. Use the project's person
+  deletion controls and verify completion; do not treat a `$delete_person`
+  capture event as erasure. Do not put personal API credentials in notes.
+- **API reference:** https://posthog.com/docs/api/persons
 
 ### 2. Sentry — bulk issue deletion (NOT full PII erasure — see scope note)
 
@@ -89,30 +96,36 @@ row). Requires `REVENUECAT_SECRET_API_KEY`.
   `external_refs.revenuecat.requires_manual_action = true`. Manual fix:
   RevenueCat dashboard → Customers → delete subscriber.
 
-### 4. CloudKit zone-delete trigger
+### 4. Household-scoped Core Data / CloudKit removal
 
-Apple's CloudKit Web Services API does NOT expose private-DB writes.
-Server cannot reach the user's iCloud-private zone. Worker marks
-`external_refs.cloudkit.requires_client_action = true` with
-`triggered_at` timestamp.
+The confirmed client flow removes the exact selected household's child
+content after backend request acceptance. A durable local identity/cutoff
+marker and empty tombstoned household roots route late imports back through
+cleanup. No whole-zone purge or sign-out/forced process exit is used.
 
-iOS sees the marker on next launch (via the existing
-`/v1/session/bootstrap` response or — TODO — a dedicated
-`/v1/users/deletion-status` probe) and triggers
-`CKContainer.privateCloudDatabase.deleteRecordZone(zoneID)` then signs
-the user out and exits.
-
-- **Verify:** the user's CloudKit private zone is wiped on next app
-  launch. There is no server-visible signal. Privacy Policy §6
-  acknowledges this asymmetry.
-- **Edge case:** if the user never re-launches, their CloudKit data
-  persists indefinitely. This is acceptable per the privacy contract:
-  CloudKit data is the user's own iCloud, not Stir-controlled.
+- **Verify local:** selected-household content and App Group snapshots are
+  absent, session credentials are cleared, and relaunch shows local-deletion
+  acknowledgement rather than creating a replacement household.
+- **Verify cloud:** a successful export must match the affected persistent
+  store and start after the deletion save. Its start and end must be observed
+  under the same resolved identity; an account switch or unknown start leaves
+  the status pending. The UI labels it as a subsequent
+  export; it is not a per-record erase receipt or proof that offline devices
+  have synchronized. Late content is removed on merge and invalidates the
+  previous export state when further deletion changes are saved.
+- **Backend boundary:** `external_refs.cloudkit.requires_client_action` is
+  retained because the worker has no authenticated CloudKit completion
+  receipt. Local removal never marks this server-side check complete.
+- **Start over:** explicit acknowledgement permits a new post-cutoff local
+  household without canceling the outstanding backend request. Other iCloud
+  accounts' graphs remain separate. ADR 0040 defines the exact boundaries.
 
 ### 5. Postgres row sweep (LAST)
 
-Inserts an `audit_log` durable record THEN runs `DELETE FROM app_users
-WHERE canonical_user_key = $1`. The cascade fans out across:
+Preserves outstanding external actions first in an idempotent
+`deletion_requests.external_actions_pending` audit record, then runs
+`DELETE FROM app_users WHERE canonical_user_key = $1`. Only after that
+delete succeeds does it insert `deletion_requests.fulfilled`. The cascade fans out across:
 
 - `device_installations`
 - `entitlement_snapshots`

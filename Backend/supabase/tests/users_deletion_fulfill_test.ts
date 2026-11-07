@@ -9,8 +9,8 @@
 // Coverage:
 //   1. Happy-path: approved row → completed (with cloudkit marker), all
 //      cascaded child rows gone, audit_log row written AFTER delete.
-//   2. Resume: a row whose external_refs_json already shows posthog
-//      completed skips the PostHog step on retry.
+//   2. A legacy fire-and-forget PostHog completion marker is replaced by
+//      an honest configured/missing-configuration deletion outcome.
 //   3. SCA-223 (C2) regression: fulfillSweep claims at most CLAIM_LIMIT
 //      approved rows per call; the surplus stays in 'approved'.
 //   4. fulfillSweep zero-row path: no approved rows in db → empty summary.
@@ -32,16 +32,17 @@ import './_helpers/env.ts';
 // and `_helpers/env.ts` loads everything wholesale; without these
 // deletes the tests would issue real DELETEs against Sentry / RC for
 // `install:test:sca88-...` users — wasted API calls at best, real
-// cleanup against a staging account at worst. POSTHOG_PUBLIC_API_KEY
-// is intentionally left set so the `$delete_person` event still fires
-// (PostHog ingest is fire-and-forget and the test asserts the success
-// path; clearing the key would silently no-op the call).
+// cleanup against a staging account at worst. The authenticated PostHog
+// deletion credentials are also cleared so this file never reaches a live
+// processor. Missing configuration must retain a manual-action outcome.
 Deno.env.delete('SENTRY_AUTH_TOKEN');
 Deno.env.delete('SENTRY_ORG_SLUG');
 Deno.env.delete('SENTRY_PROJECT_SLUG');
 Deno.env.delete('REVENUECAT_SECRET_API_KEY');
+Deno.env.delete('POSTHOG_PERSONAL_API_KEY');
+Deno.env.delete('POSTHOG_PROJECT_ID');
 
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from '@std/assert';
 import { createServiceClient } from '../functions/_shared/db.ts';
 import { createLogger } from '../functions/_shared/logger.ts';
 import {
@@ -173,7 +174,7 @@ Deno.test('users-deletion-fulfill: happy-path approved → completed (with cloud
   }
 });
 
-Deno.test('users-deletion-fulfill: resume skips already-completed subsystems', async () => {
+Deno.test('users-deletion-fulfill: legacy fire-and-forget PostHog marker is not proof of completion', async () => {
   const client = createServiceClient();
   await cleanup(client);
 
@@ -212,7 +213,9 @@ Deno.test('users-deletion-fulfill: resume skips already-completed subsystems', a
       string,
       Record<string, unknown>
     >;
-    assertEquals(refs.posthog?.completed_at, priorPosthogTimestamp);
+    assertEquals(refs.posthog?.completed_at, undefined);
+    assertEquals(refs.posthog?.requires_manual_action, true);
+    assertEquals(refs.posthog?.error, 'posthog_deletion_credentials_unset');
   } finally {
     await cleanup(client, [seed.canonicalUserKeyHash]);
   }
@@ -232,7 +235,11 @@ Deno.test('users-deletion-fulfill: SCA-223 (C2) — fulfillSweep bounds claim at
   const targetHashes = seeded.map((s) => s.canonicalUserKeyHash);
   try {
     const summary = await fulfillSweep(client, log);
-    assertEquals(summary.claimed, 5, `expected exactly CLAIM_LIMIT=5 claimed, got ${summary.claimed}`);
+    assertEquals(
+      summary.claimed,
+      5,
+      `expected exactly CLAIM_LIMIT=5 claimed, got ${summary.claimed}`,
+    );
 
     // Of the surplus, 3 should still be 'approved'.
     const { data: remaining } = await client

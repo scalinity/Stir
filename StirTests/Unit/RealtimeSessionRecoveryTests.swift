@@ -3,10 +3,11 @@
 // Pins the two critical-path recovery behaviors added in the 2026-04-23
 // review remediation:
 //
-//   P0-L: `turnStuckWatchdogFired` — Gemini Live drops `turnComplete`
-//         on multi-pass tool-call turns (CLAUDE.md §sharp-edge #20).
-//         The watchdog synthesizes a turnComplete after 15 s of silence
-//         on `.modelSpeaking`; the VoiceTurn row MUST persist with
+//   P0-L: `turnStuckWatchdogFired` — the turn-completing server event
+//         can go missing (observed on multi-pass tool-call turns on the
+//         previous provider, and the client still owns every transition
+//         on OpenAI). The watchdog synthesizes a turnComplete after 15 s
+//         of silence on `.modelSpeaking`; the VoiceTurn row MUST persist with
 //         `resultType=.error, errorCode="turnComplete_timeout"` so
 //         ADR 0015's cap-reversal trigger query can count these.
 //
@@ -114,6 +115,8 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
 
     func test_watchdog_latches_tool_call_name_from_preceding_tool_frame() async throws {
         let driver = makeDriverAt(state: .ready)
+        driver._testInstallLiveTransport(MockLiveTransport())
+        defer { driver.close() }
         var captured: String??
         driver.onVoiceTurnStuckWatchdogFired = { _, _, tool, _, _ in
             captured = tool
@@ -126,7 +129,8 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
         await driver._testInjectFrame(.toolCall(toolCall))
 
         // Transition to .modelSpeaking (toolCalling → modelSpeaking is
-        // the production path when Gemini resumes audio after toolResponse).
+        // the production path when the model resumes audio after the
+        // tool output + response.create).
         driver._testAdvance(to: .modelSpeaking)
 
         driver._testFireTurnStuckWatchdog()
@@ -209,6 +213,8 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
     /// dispatch contract specifically.
     func test_handleInboundFrame_routesToolCall_throughTransportBucket() async throws {
         let driver = makeDriverAt(state: .ready)
+        driver._testInstallLiveTransport(MockLiveTransport())
+        defer { driver.close() }
 
         XCTAssertNil(
             driver._testLastToolCallName,
@@ -283,6 +289,180 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
         XCTAssertEqual(userRow.errorCode, "transport_error")
     }
 
+    func test_closeWhileRefreshMintSuspended_doesNotOpenReplacement() async throws {
+        let driver = makeDriverAt(state: .ready)
+        var mintContinuation: CheckedContinuation<RealtimeSessionResponse, Error>?
+        let mint = Task<RealtimeSessionResponse, Error> { @MainActor in
+            try await withCheckedThrowingContinuation { mintContinuation = $0 }
+        }
+        driver._testSetPreMintTask(mint, startedAt: Date())
+        var opened = 0
+        driver.testingTransportFactory = { opened += 1; return MockLiveTransport() }
+        let refresh = Task { @MainActor in await driver.refreshSession(reason: "minutes") }
+        for _ in 0..<100 where !driver.isRefreshing || mintContinuation == nil { await Task.yield() }
+        XCTAssertTrue(driver.isRefreshing)
+        let continuation = try XCTUnwrap(mintContinuation)
+        driver.close()
+        continuation.resume(returning: MockMintResponse.make())
+        let outcome = await refresh.value
+        if case .skipped = outcome {} else { XCTFail("closed refresh must be discarded") }
+        XCTAssertEqual(opened, 0)
+        XCTAssertEqual(driver.currentState, .closed)
+        XCTAssertNil(driver.transport)
+        XCTAssertNil(driver.receiveDispatcherTask)
+        XCTAssertNil(driver.audioPipeline)
+    }
+
+    func test_closeWhileReplacementSetupSuspended_closesBothTransports() async throws {
+        let driver = makeDriverAt(state: .ready)
+        let old = MockLiveTransport()
+        let replacement = MockLiveTransport()
+        let setupSending = expectation(description: "replacement setup send suspended")
+        var sendContinuation: CheckedContinuation<Void, Never>?
+        replacement.onSend = { frame in
+            if case .setupRawJSON = frame {
+                await withCheckedContinuation { continuation in
+                    sendContinuation = continuation
+                    setupSending.fulfill()
+                }
+            }
+        }
+        driver._testInstallLiveTransport(old)
+        driver.testingTransportFactory = { replacement }
+        driver._testSetPreMintTask(Task { MockMintResponse.make() }, startedAt: Date())
+        let refresh = Task { @MainActor in await driver.refreshSession(reason: "minutes") }
+        await fulfillment(of: [setupSending], timeout: 1)
+        let continuation = try XCTUnwrap(sendContinuation)
+        driver.close()
+        XCTAssertTrue(replacement.isClosed, "close tears down the current replacement")
+        continuation.resume()
+        let outcome = await refresh.value
+        if case .skipped = outcome {} else { XCTFail("closed refresh must be discarded") }
+        XCTAssertTrue(old.isClosed, "cancelled committed refresh must also release the captured old transport")
+        XCTAssertTrue(replacement.isClosed)
+        XCTAssertEqual(driver.currentState, .closed)
+        XCTAssertNil(driver.transport)
+        XCTAssertNil(driver.receiveDispatcherTask)
+        XCTAssertNil(driver.micForwardTask)
+        XCTAssertNil(driver.refreshTask)
+        XCTAssertNil(driver.audioPipeline)
+    }
+
+    func test_refreshSetupSendCanAcknowledgeBeforeReturning() async throws {
+        let driver = makeDriverAt(state: .ready)
+        let transport = MockLiveTransport()
+        transport.onSend = { frame in
+            if case .setupRawJSON = frame {
+                // Receive the ack before send returns and before the waiter exists.
+                await driver._testInjectFrame(.setupComplete)
+            }
+        }
+        driver.testingTransportFactory = { transport }
+        driver._testSetPreMintTask(Task { MockMintResponse.make() }, startedAt: Date())
+        let outcome = await driver.refreshSession(reason: "minutes")
+        if case .success = outcome {} else { XCTFail("early ack must complete refresh") }
+        XCTAssertEqual(driver.currentState, .ready)
+        driver.close()
+    }
+
+    func test_refreshSetupFailureClosesBothTransportsAndDispatcher() async throws {
+        let driver = makeDriverAt(state: .ready)
+        let old = MockLiveTransport()
+        let replacement = MockLiveTransport()
+        replacement.sendError = RealtimeSession.RealtimeSessionError.setupTimeout
+        driver._testInstallLiveTransport(old)
+        driver.testingTransportFactory = { replacement }
+        driver._testSetPreMintTask(Task { MockMintResponse.make() }, startedAt: Date())
+        let outcome = await driver.refreshSession(reason: "minutes")
+        if case .postCommitFailure = outcome {} else { XCTFail("expected failed committed swap") }
+        XCTAssertTrue(old.isClosed)
+        XCTAssertTrue(replacement.isClosed)
+        XCTAssertNil(driver.transport)
+        XCTAssertNil(driver.receiveDispatcherTask)
+        XCTAssertNil(driver.micForwardTask)
+        driver.close()
+    }
+
+    func test_earlySetupAcknowledgmentResolvesLaterWaiter() async throws {
+        let driver = makeDriverAt(state: .ready)
+        await driver._testInjectFrame(.setupComplete)
+        try await driver.awaitSetupComplete(timeoutSec: 0.01)
+        driver.close()
+    }
+
+    func test_postToolResponseErrorFinalizesOnceWithoutReplayingTool() async throws {
+        let driver = makeDriverAt(state: .ready)
+        let transport = MockLiveTransport()
+        driver._testInstallLiveTransport(transport)
+        var toolExecutions = 0
+        driver.onAdvanceStepRequested = { toolExecutions += 1 }
+        await driver._testInjectFrame(.toolCall(LiveToolCall(functionCalls: [
+            LiveFunctionCall(id: "tool-timeout", name: "advance_step", args: [:]),
+        ])))
+        XCTAssertEqual(driver.currentState, .toolCalling)
+        await driver._testInjectFrame(.responseError(code: "server_error"))
+        XCTAssertEqual(driver.currentState, .closed)
+        let turns = VoiceTurnRepository(controller: controller).turns(for: cookingSession)
+        XCTAssertEqual(turns.last { $0.typedSpeaker == .model }?.errorCode, "turnComplete_timeout")
+        let count = turns.count
+        driver._testFireTurnStuckWatchdog()
+        XCTAssertEqual(VoiceTurnRepository(controller: controller).turns(for: cookingSession).count, count)
+        XCTAssertEqual(toolExecutions, 1)
+        driver.close()
+    }
+
+    func test_postToolNoAudioWatchdogClosesForFallback() async throws {
+        let driver = makeDriverAt(state: .toolCalling)
+        driver._testFireTurnStuckWatchdog()
+        XCTAssertEqual(driver.currentState, .closed)
+        XCTAssertEqual(VoiceTurnRepository(controller: controller).turns(for: cookingSession)
+            .last { $0.typedSpeaker == .model }?.typedResultType, .error)
+        driver.close()
+    }
+
+    func test_postToolSuspendedSendWatchdogClosesDispatcherAndDoesNotReplay() async throws {
+        let driver = makeDriverAt(state: .ready)
+        let transport = MockLiveTransport()
+        let sendStarted = expectation(description: "tool response send suspended")
+        var sendContinuation: CheckedContinuation<Void, Never>?
+        transport.onSend = { frame in
+            if case .toolResponse = frame {
+                await withCheckedContinuation { continuation in
+                    sendContinuation = continuation
+                    sendStarted.fulfill()
+                }
+            }
+        }
+        driver._testInstallLiveTransport(transport)
+        var toolExecutions = 0
+        var fallbackReason: String?
+        driver.onAdvanceStepRequested = { toolExecutions += 1 }
+        driver.onVoiceFallbackRequired = { fallbackReason = $0 }
+        driver.startReceiveDispatcher()
+        let dispatcher = try XCTUnwrap(driver.receiveDispatcherTask)
+        transport.yield(.toolCall(LiveToolCall(functionCalls: [
+            LiveFunctionCall(id: "blocked-tool", name: "advance_step", args: [:]),
+        ])))
+        await fulfillment(of: [sendStarted], timeout: 1)
+        let continuation = try XCTUnwrap(sendContinuation)
+        driver._testFireTurnStuckWatchdog()
+        XCTAssertEqual(driver.currentState, .closed)
+        XCTAssertTrue(transport.isClosed)
+        XCTAssertTrue(dispatcher.isCancelled)
+        XCTAssertNil(driver.transport)
+        XCTAssertNil(driver.receiveDispatcherTask)
+        XCTAssertNil(driver.micForwardTask)
+        XCTAssertNil(driver.audioPipeline)
+        XCTAssertEqual(fallbackReason, "turnComplete_timeout")
+        XCTAssertEqual(toolExecutions, 1)
+        let persisted = VoiceTurnRepository(controller: controller).turns(for: cookingSession).count
+        continuation.resume()
+        await dispatcher.value
+        XCTAssertEqual(toolExecutions, 1)
+        XCTAssertEqual(transport.sentFrames.count, 1, "late tool send cannot enqueue another frame")
+        XCTAssertEqual(VoiceTurnRepository(controller: controller).turns(for: cookingSession).count, persisted)
+    }
+
     // MARK: - Helpers
 
     private func makeDriver() -> RealtimeSession {
@@ -298,14 +478,7 @@ final class RealtimeSessionRecoveryTests: XCTestCase {
             sentry: NoOpSentryReporter(),
         )
         let aiDispatch = AIDispatch(session: sessionClient, config: config)
-        let mint = RealtimeSessionResponse(
-            authToken: "auth_tokens/test",
-            expiresAt: "2027-01-01T00:00:00Z",
-            sessionID: UUID().uuidString,
-            wsURL: "wss://test.invalid",
-            promptVersion: "1.0.0",
-            setupFrameJSON: "{\"setup\":{}}",
-        )
+        let mint = MockMintResponse.make(wsURL: "wss://test.invalid")
         return RealtimeSession(
             testingOnlyMintResponse: mint,
             aiDispatch: aiDispatch,

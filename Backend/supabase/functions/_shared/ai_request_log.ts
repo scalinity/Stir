@@ -5,13 +5,15 @@
 // handler should not surface it to the user — the primary work (AI call)
 // already succeeded. Failures log via logger.error for ops visibility.
 //
-// Pricing table mirrors CLAUDE.md §"Gemini model strings and pricing".
-// All rates per 1M tokens. If CLAUDE.md changes, update here — single
-// source of truth for cost math in handlers.
+// Pricing table mirrors docs/CLAUDE-Constants.md §Models and pricing; the
+// sources and retrieval dates are in ADR 0038. All rates per 1M tokens.
+// Single source of truth for cost math in handlers.
 
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import type { Logger } from './logger.ts';
 import { GeminiModel } from './gemini.ts';
+import { ClaudeModel } from './claude.ts';
+import { OpenAIRealtimeModel } from './realtime_mint.ts';
 
 // ---------------------------------------------------------------------------
 // Pricing
@@ -19,42 +21,53 @@ import { GeminiModel } from './gemini.ts';
 
 export interface ModelPricing {
   textInPer1M: number; // USD per 1M text input tokens
-  /** USD per 1M text input tokens served from implicit context cache.
+  /** USD per 1M text input tokens served from the provider's prompt cache.
    *
-   * Values below are LITERALS, not derived from `textInPer1M * 0.25`.
-   * Keep them as literals: Google's published rates are the source of
-   * truth and tiered pricing isn't guaranteed to stay uniform — if
-   * one tier's discount rate ever changes, we want to update that tier
-   * alone without silently drifting the others. Comment the 25%
-   * relationship so future maintainers know the current invariant;
-   * verify against https://ai.google.dev/gemini-api/docs/pricing when
-   * changing any of these numbers.
-   *
-   * Flash + FlashLite: 25% of `textInPer1M` per Google's published
-   * cached-input rate for `generateContent`. Verified against the
-   * pricing page as of 2026-04-23.
-   *
-   * FlashLivePreview: **unverified assumption**. Google lists caching
-   * as "not supported" in the published pricing row for this model,
-   * so there's no authoritative cached-input rate to reference. ADR
-   * 0015 device measurements confirm `cachedContentTokenCount = 0`
-   * on every Live turn, so the cached-cost contribution is always 0
-   * in practice. The 0.1875 literal (25% of 0.75) is a best-guess
-   * defensive value in case caching ever starts firing; the handler
-   * (`voice-turn-usage/index.ts`) also logs at warn level when a
-   * non-zero cached count arrives so the assumption break is
-   * surfaced BEFORE the cost math feeds a cap-reversal decision. */
+   * Values below are LITERALS copied from each vendor's pricing page, not
+   * derived from `textInPer1M` — vendors change discount ratios per model
+   * (Gemini 10%, Claude Haiku 5.5 10%, Sonnet 5.5 5%), and a literal keeps
+   * one model's change from silently drifting the others. */
   cachedInPer1M: number;
+  /** USD per 1M input tokens written to the prompt cache (Claude 5-minute
+   * TTL). 0 for providers that don't bill cache writes separately. */
+  cacheWriteInPer1M: number;
   audioInPer1M: number; // USD per 1M audio input tokens
-  imageInPer1M: number; // USD per 1M image tokens (approximated as text-price tier)
+  /** USD per 1M audio input tokens served from the prompt cache (OpenAI
+   * Realtime). Omitted where audio input is not cached. */
+  cachedAudioInPer1M?: number;
+  imageInPer1M: number; // USD per 1M image tokens (Claude bills images as text input)
   textOutPer1M: number; // USD per 1M text output tokens
-  audioOutPer1M: number; // USD per 1M audio output tokens (Live only; 0 for non-audio)
+  audioOutPer1M: number; // USD per 1M audio output tokens (0 for non-audio models)
 }
 
-export const MODEL_PRICING: Readonly<Record<GeminiModel, ModelPricing>> = {
+export type PricedModel = GeminiModel | ClaudeModel | OpenAIRealtimeModel;
+
+export const MODEL_PRICING: Readonly<Record<PricedModel, ModelPricing>> = {
+  // Claude rates: prompts up to 100K tokens (Haiku 5.5 doubles above that;
+  // no Stir prompt approaches it). Verified 2026-11-06, ADR 0038 sources.
+  [ClaudeModel.Haiku]: {
+    textInPer1M: 0.10,
+    cachedInPer1M: 0.01,
+    cacheWriteInPer1M: 0.125,
+    audioInPer1M: 0,
+    imageInPer1M: 0.10,
+    textOutPer1M: 0.50,
+    audioOutPer1M: 0,
+  },
+  [ClaudeModel.Sonnet]: {
+    textInPer1M: 2.00,
+    cachedInPer1M: 0.10,
+    cacheWriteInPer1M: 2.50,
+    audioInPer1M: 0,
+    imageInPer1M: 2.00,
+    textOutPer1M: 10.00,
+    audioOutPer1M: 0,
+  },
+  // Gemini rates verified 2026-11-06 against ai.google.dev/gemini-api/docs/pricing.
   [GeminiModel.Flash]: {
     textInPer1M: 0.50,
-    cachedInPer1M: 0.125, // 25% of textInPer1M per Google's cached-input pricing
+    cachedInPer1M: 0.05,
+    cacheWriteInPer1M: 0,
     audioInPer1M: 1.00,
     imageInPer1M: 0.50,
     textOutPer1M: 3.00,
@@ -62,25 +75,25 @@ export const MODEL_PRICING: Readonly<Record<GeminiModel, ModelPricing>> = {
   },
   [GeminiModel.FlashLite]: {
     textInPer1M: 0.25,
-    cachedInPer1M: 0.0625, // 25% of textInPer1M
+    cachedInPer1M: 0.025,
+    cacheWriteInPer1M: 0,
     audioInPer1M: 0.50,
     imageInPer1M: 0.25,
     textOutPer1M: 1.50,
     audioOutPer1M: 0,
   },
-  [GeminiModel.FlashLivePreview]: {
-    textInPer1M: 0.75,
-    // Published Gemini pricing lists Live-API caching as "not supported."
-    // Kept arithmetically consistent with the 25% discount (0.1875 =
-    // 0.75 * 0.25) so IF the invariant ever breaks, cost math is
-    // conservative rather than accidentally under-billing. ADR 0015
-    // measurements keep `cachedContentTokenCount = 0` for all Live turns,
-    // so this rate is a no-op in practice.
-    cachedInPer1M: 0.1875,
-    audioInPer1M: 3.00,
-    imageInPer1M: 1.00,
-    textOutPer1M: 4.50,
-    audioOutPer1M: 12.00,
+  // OpenAI Realtime rates verified 2026-11-06 against
+  // developers.openai.com/api/docs/models/gpt-realtime-2.1-mini.md. Audio
+  // tokens: user speech 10/s, model speech 20/s. Caching is automatic.
+  [OpenAIRealtimeModel.Mini]: {
+    textInPer1M: 0.60,
+    cachedInPer1M: 0.06,
+    cacheWriteInPer1M: 0,
+    audioInPer1M: 10.00,
+    cachedAudioInPer1M: 0.30,
+    imageInPer1M: 0.80,
+    textOutPer1M: 2.40,
+    audioOutPer1M: 20.00,
   },
 };
 
@@ -101,17 +114,21 @@ export const MODEL_PRICING: Readonly<Record<GeminiModel, ModelPricing>> = {
  *   - Omit or pass 0 when the caller doesn't have cached-token data
  *     (most handlers today do not extract `cachedContentTokenCount`; this
  *     param is opt-in until each site wires it through).
- *   - Live API caching doesn't fire in practice (ADR 0015 measurement);
- *     FlashLivePreview callers will typically pass 0 here forever, but
- *     the math handles non-zero values correctly if the assumption breaks.
+ *   - Claude reports cache reads and writes separately; OpenAI Realtime
+ *     reports cached text and cached audio separately — pass each to its
+ *     own parameter so every portion is priced at its published rate.
  */
 export function computeCostUSD(
-  model: GeminiModel,
+  model: PricedModel,
   counts: {
     textInputTokens: number;
     cachedInputTokens?: number;
+    /** Portion of `textInputTokens` written to the prompt cache (Claude). */
+    cacheWriteInputTokens?: number;
     imageInputTokens?: number;
     audioInputTokens?: number;
+    /** Portion of `audioInputTokens` served from the prompt cache. */
+    cachedAudioInputTokens?: number;
     textOutputTokens: number;
     audioOutputTokens?: number;
   },
@@ -127,6 +144,8 @@ export function computeCostUSD(
   const textInputTokens = safe(counts.textInputTokens);
   const imageInputTokens = safe(counts.imageInputTokens);
   const audioInputTokens = safe(counts.audioInputTokens);
+  // Cached audio is a subset of audio input; clamp like cached text.
+  const cachedAudioTokens = Math.min(safe(counts.cachedAudioInputTokens), audioInputTokens);
   const textOutputTokens = safe(counts.textOutputTokens);
   const audioOutputTokens = safe(counts.audioOutputTokens);
   // Clamp cached in BOTH directions: `≥ 0` (a negative cached count
@@ -141,11 +160,18 @@ export function computeCostUSD(
     0,
     Math.min(safe(counts.cachedInputTokens), textInputTokens),
   );
-  const uncachedTextTokens = textInputTokens - cachedTextTokens;
+  // Same subset clamp for cache writes, against what remains after reads.
+  const cacheWriteTokens = Math.min(
+    safe(counts.cacheWriteInputTokens),
+    textInputTokens - cachedTextTokens,
+  );
+  const uncachedTextTokens = textInputTokens - cachedTextTokens - cacheWriteTokens;
   const cost = (uncachedTextTokens * p.textInPer1M) / 1_000_000 +
     (cachedTextTokens * p.cachedInPer1M) / 1_000_000 +
+    (cacheWriteTokens * p.cacheWriteInPer1M) / 1_000_000 +
     (imageInputTokens * p.imageInPer1M) / 1_000_000 +
-    (audioInputTokens * p.audioInPer1M) / 1_000_000 +
+    ((audioInputTokens - cachedAudioTokens) * p.audioInPer1M) / 1_000_000 +
+    (cachedAudioTokens * (p.cachedAudioInPer1M ?? p.audioInPer1M)) / 1_000_000 +
     (textOutputTokens * p.textOutPer1M) / 1_000_000 +
     (audioOutputTokens * p.audioOutPer1M) / 1_000_000;
   // Round to 6 decimal places to match ai_request_log.cost_usd NUMERIC(10,6).

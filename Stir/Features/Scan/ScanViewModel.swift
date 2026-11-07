@@ -363,6 +363,9 @@ final class ScanViewModel {
             deleteIngredient(id: id)
             return
         }
+        if ingredients[idx].displayName.pantryMatchTokens() != bounded.pantryMatchTokens() {
+            ingredients[idx].canonicalSlug = nil
+        }
         ingredients[idx].displayName = bounded
         ingredients[idx].confidence = .confirmed // user typed it → confident
         reviewValidationMessage = nil

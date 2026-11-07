@@ -1,7 +1,9 @@
 // POST /functions/v1/realtime-session
 // Logical endpoint: POST /v1/ai/realtime-session (spec §3).
 //
-// Mints one Gemini Live ephemeral token for one Cook Session. Premium+
+// Mints a reusable OpenAI Realtime client secret for a charged Cook Session.
+// The secret does not enforce one upstream session or immutable client config;
+// that separate relay boundary is tracked by SA2-C1. Premium+
 // only — voice cook sessions gate on voice_cook_mode entitlement and
 // consume one voice_cook_session quota row at mint time.
 //
@@ -14,14 +16,13 @@
 //   6. Quota: atomic voice_cook_session increment → 429 RATE-01 if capped
 //   7. Prompt: read active cook_mode_realtime v1.0.0
 //   8. Render system prompt with recipe + household context
-//   9. mintLiveToken() → 502 AI-01 + quota refund on Gemini upstream fail
+//   9. mintRealtimeSession() → 502 AI-01 + quota refund on upstream fail
 //  10. Log ai_request_log, return { auth_token, expires_at, session_id,
-//      ws_url, prompt_version }
+//      ws_url, prompt_version, setup_frame_json }
 //
-// The response's `auth_token` value is the mint's `.name` field
-// (auth_tokens/<hex>). iOS passes it unchanged as the `access_token`
-// query param on the WebSocket URL (which we also pre-build into
-// ws_url for convenience).
+// `auth_token` is an `ek_…` client secret sent in the WebSocket bearer
+// header by the supported client. Session defaults remain client-mutable.
+// Closing an ownership row does not revoke upstream credentials (ADR 0041).
 //
 // Quota refund rules (match dinner-solve pattern):
 //   - Refund ONLY on mint upstream 5xx / timeout.
@@ -40,8 +41,11 @@ import { hashCanonicalKey } from '../_shared/hashing.ts';
 import { captureSafe } from '../_shared/posthog.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiModel } from '../_shared/gemini.ts';
-import { LiveMintError, mintLiveToken } from '../_shared/live_mint.ts';
+import {
+  mintRealtimeSession,
+  OpenAIRealtimeModel,
+  RealtimeMintError,
+} from '../_shared/realtime_mint.ts';
 import { logAIRequest } from '../_shared/ai_request_log.ts';
 import {
   createLogger,
@@ -54,10 +58,7 @@ import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 import { RealtimeSessionRequest, zodToFieldErrors } from '../_shared/validation.ts';
 
 const FEATURE_KEY = 'cook_mode_realtime';
-const MODEL = GeminiModel.FlashLivePreview;
-
-/** PostgREST error.code for SQLSTATE 23505 (unique_violation). */
-const UNIQUE_VIOLATION_CODE = '23505';
+const MODEL = OpenAIRealtimeModel.Mini;
 
 /**
  * SCA-145 — refund-audit observability. Emit `voice_quota_refund` to
@@ -80,11 +81,11 @@ const UNIQUE_VIOLATION_CODE = '23505';
  *   join against `ai_request_log`.
  * - `reason` — what tripped the refund. Discriminated:
  *     `no_active_prompt` — prompt-version table empty for FEATURE_KEY
- *     `mint_failed` — Gemini /v1alpha/auth_tokens returned 4xx/5xx
- *     `mint_unexpected_error` — non-LiveMintError thrown during mint
+ *     `mint_failed` — OpenAI /v1/realtime/client_secrets returned 4xx/5xx
+ *     `mint_unexpected_error` — non-RealtimeMintError thrown during mint
  * - `upstream_status` — number, present iff `reason='mint_failed'` and
- *   the LiveMintError carried a status code. Lets ops correlate
- *   refund storms with Gemini outage windows.
+ *   the RealtimeMintError carried a status code. Lets ops correlate
+ *   refund storms with provider outage windows.
  *
  * `is_refresh` is intentionally NOT a property: the `didConsumeQuota`
  * guard short-circuits refresh mints before the refund branch fires,
@@ -121,76 +122,12 @@ async function emitVoiceQuotaRefund(
   });
 }
 
-/**
- * Supersede any prior open `voice_session_owners` row for this user,
- * then insert the new one. Retries once on unique_violation — the
- * UNIQUE partial index `voice_session_owners_one_open_per_user_uniq`
- * enforces "at most one open row per user" at the DB layer, so a
- * concurrent-mint race produces 23505 on one side. Single retry
- * handles the two-way race; a three-way race is pathological and
- * logged.
- *
- * Returns true if the new row landed, false if both attempts failed.
- */
-async function supersedeAndInsertWithRetry(args: {
-  client: ReturnType<typeof createServiceClient>;
-  sessionId: string;
-  canonicalUserKey: string;
-  userLog: { warn: (msg: string, fields?: Record<string, unknown>) => void };
-}): Promise<boolean> {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    // Supersede any currently-open row for this user.
-    const { error: updateErr } = await args.client
-      .from('voice_session_owners')
-      .update({ closed_at: new Date().toISOString() })
-      .eq('canonical_user_key', args.canonicalUserKey)
-      .is('closed_at', null);
-    if (updateErr) {
-      args.userLog.warn('voice_session_owner_supersede_failed', {
-        attempt,
-        err: updateErr.message,
-      });
-      // Supersede failure doesn't prevent the INSERT from trying —
-      // if the unique index rejects it we know why. If it succeeds,
-      // we accept that the prior row may still be open (stale
-      // closed_at), which voice-turn-usage will gate correctly.
-    }
-    const { error: insertErr } = await args.client
-      .from('voice_session_owners')
-      .insert({
-        session_id: args.sessionId,
-        canonical_user_key: args.canonicalUserKey,
-      });
-    if (!insertErr) return true;
-    // Retry only on unique_violation (23505). All other errors we
-    // log and bail — the issue isn't a race we can resolve by
-    // retrying (network, permission, schema drift).
-    if (insertErr.code !== UNIQUE_VIOLATION_CODE) {
-      args.userLog.warn('voice_session_owner_insert_failed', {
-        attempt,
-        code: insertErr.code,
-        err: insertErr.message,
-      });
-      return false;
-    }
-    args.userLog.warn('voice_session_owner_insert_race_retry', {
-      attempt,
-      code: insertErr.code,
-    });
-  }
-  return false;
-}
-
 interface WireResponse {
   auth_token: string;
   expires_at: string;
   session_id: string;
   ws_url: string;
   prompt_version: string;
-  /** Pre-serialized `{"setup": {...}}` frame iOS MUST send as the first
-   * WebSocket message after `open`. Server waits for this before
-   * emitting `setupComplete`, even with a Constrained ephemeral token.
-   * See live_mint.setupFrameJSON for provenance. */
   setup_frame_json: string;
 }
 
@@ -308,7 +245,7 @@ Deno.serve(async (req) => {
   //     refresh mints. Refreshes bypass the monthly voice_cook_session
   //     quota (ADR 0014 — is_refresh skips increment); without a
   //     rate-limit layer a runaway is_refresh=true loop could drive
-  //     Gemini API spend indefinitely. Fail-open on rate limiter
+  //     voice API spend indefinitely. Fail-open on rate limiter
   //     outage (same posture as other AI endpoints).
   // ---------------------------------------------------------------------
   const sourceIP = extractSourceIP(req);
@@ -453,6 +390,7 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 6. Quota: atomic voice_cook_session increment (skipped on refresh)
   // ---------------------------------------------------------------------
+  // Refresh mints must claim a ready, charged server-owned chain below.
   // Refresh mints are silent handoffs within an already-active cook
   // session (ADR 0014). The user's original session start consumed a
   // quota slot; the refresh is a cost-control mechanism on the SAME
@@ -513,11 +451,38 @@ Deno.serve(async (req) => {
     quotaCap = quotaResult.cap;
   }
 
+  const sessionId = crypto.randomUUID();
+  const claimArgs = { p_session_id: sessionId, p_canonical_user_key: claims.canonical_user_key };
+  const { data: claimed, error: claimError } = await client.rpc('stir_voice_session_claim', {
+    ...claimArgs,
+    p_cooking_session_id: body.cooking_session_id,
+    p_is_refresh: body.is_refresh,
+  });
+  if (claimError || !claimed) {
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
+      );
+    }
+    // An unproved continuation never reaches the provider or skips a new charge.
+    return jsonError(claimError ? ErrorCode.NET_01 : ErrorCode.VAL_01, claimError ? 500 : 400, {
+      message: claimError
+        ? 'Could not start voice. Try again.'
+        : 'No active charged cook is available to continue.',
+      field_errors: [{ field: 'is_refresh', issue: 'active charged cooking session required' }],
+    }, requestId);
+  }
+
   // ---------------------------------------------------------------------
   // 7. Prompt + render
   // ---------------------------------------------------------------------
   // Already read in parallel above (P3-G); just gate on the result.
   if (!activePrompt) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
     if (didConsumeQuota && consumedPeriodStart) {
       await refundQuota(
         client,
@@ -606,8 +571,9 @@ Deno.serve(async (req) => {
 
   let mint;
   try {
-    // If the request carried a recap (session-refresh path per ADR 0014),
-    // append it as a clearly-delimited suffix to systemInstruction so the
+    // If the request carried a recap (refresh path — ADR 0014 handoff, kept
+    // for the 60-minute session limit and transport recovery per ADR 0038),
+    // append it as a clearly-delimited suffix to the instructions so the
     // new session's very first turn has continuity context. Delimiter
     // markers ensure the model treats the recap as context, not part of
     // the core style/rules contract.
@@ -615,13 +581,15 @@ Deno.serve(async (req) => {
       ? `${renderedPrompt}\n\n# Recent conversation context (from prior session)\n${body.recap.trim()}`
       : renderedPrompt;
 
-    mint = await mintLiveToken({
-      systemInstruction: systemInstructionWithRecap,
-      model: `models/${MODEL}`,
-      thinkingLevel: resolvedThinkingLevel,
+    mint = await mintRealtimeSession({
+      instructions: systemInstructionWithRecap,
+      model: MODEL,
+      reasoningEffort: resolvedThinkingLevel,
       turnDetectionMode: resolvedTurnDetectionMode,
+      safetyIdentifier: await hashCanonicalKey(claims.canonical_user_key),
     });
   } catch (err) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
     // Refund only if we actually consumed quota. Refresh mints
     // skip the increment entirely; refunding there would decrement
     // a counter we never touched and grant the user extra free
@@ -636,20 +604,20 @@ Deno.serve(async (req) => {
       );
       // SCA-145: refund-audit observability. See no_active_prompt
       // refund site for rationale. `upstream_status` is included on
-      // the LiveMintError branch so ops can correlate refunds with
-      // Gemini outage windows.
+      // the RealtimeMintError branch so ops can correlate refunds with
+      // provider outage windows.
       await emitVoiceQuotaRefund(userLog, {
         canonicalUserKey: claims.canonical_user_key,
         requestId,
-        reason: err instanceof LiveMintError ? 'mint_failed' : 'mint_unexpected_error',
+        reason: err instanceof RealtimeMintError ? 'mint_failed' : 'mint_unexpected_error',
         // exactOptionalPropertyTypes rejects `upstreamStatus: undefined`
         // — only set the key when there's a real value.
-        ...(err instanceof LiveMintError ? { upstreamStatus: err.statusCode } : {}),
+        ...(err instanceof RealtimeMintError ? { upstreamStatus: err.statusCode } : {}),
       });
     }
     // `refund_applied` metadata mirrors the actual refund decision so
     // ops triage isn't misled on refresh-mint failures.
-    if (err instanceof LiveMintError) {
+    if (err instanceof RealtimeMintError) {
       userLog.error('mint_failed', err, {
         upstream_status: err.statusCode,
         refund_applied: didConsumeQuota,
@@ -675,57 +643,27 @@ Deno.serve(async (req) => {
   // ---------------------------------------------------------------------
   // 9. Log + respond
   // ---------------------------------------------------------------------
-  const sessionId = crypto.randomUUID();
-
-  // P1-B / SA2-W4 (2026-04-23; revised post-review): persist the
-  // (session_id → owner) binding so `/v1/ai/voice-turn-usage` can
-  // reject turns posted under someone else's session_id AND turns
-  // posted on a superseded session.
-  //
-  // Two-step sequence, inline (not fire-and-forget), because the
-  // ordering matters and both steps must complete before the mint
-  // response lands on iOS:
-  //
-  //   1. Supersede: mark any prior unclosed rows for THIS user as
-  //      closed. Gemini Live has no server-side logout; this
-  //      UPDATE is how we declare "the client's previous session_id
-  //      is no longer accepting turns." The partial index
-  //      `voice_session_owners_open_by_user_idx` makes the WHERE
-  //      predicate O(log n) even at scale.
-  //
-  //   2. Insert the new row with closed_at=NULL. The authenticated
-  //      client's next /v1/ai/voice-turn-usage POST will pass the
-  //      ownership + lifecycle checks; any concurrent POST under an
-  //      OLD session_id will now hit closed_at IS NOT NULL and 403
-  //      with `reason: session_closed` — the smoke-test-targeted
-  //      signal ops need to distinguish "forgot to mint" (missing)
-  //      from "client holding stale session_id" (closed).
-  //
-  // Inline (not waitUntil) because a fire-and-forget order creates
-  // a race: iOS can POST its first turn BEFORE the supersede
-  // UPDATE lands, missing the old row's new closed_at timestamp.
-  // The 10-30ms latency cost is negligible on the mint path.
-  // Supersede + insert with one retry on unique_violation (SQLSTATE
-  // 23505). The UNIQUE partial index
-  // `voice_session_owners_one_open_per_user_uniq` enforces "at most
-  // one open row per user" at the DB layer. Under a concurrent-mint
-  // race, the losing INSERT returns 23505; we retry once — the
-  // retry's UPDATE finds the winner's row open and closes it, then
-  // the INSERT succeeds. A third concurrent mint on the same user
-  // within the same instant is pathological; if it ever happens
-  // we'll see repeated 23505s in logs and have a known case to
-  // address.
-  const inserted = await supersedeAndInsertWithRetry({
-    client,
-    sessionId,
-    canonicalUserKey: claims.canonical_user_key,
-    userLog,
-  });
-  if (!inserted) {
-    userLog.warn('voice_session_owner_write_gave_up', {});
-    // Non-fatal for the mint — voice-turn-usage will fail-close on
-    // the missing binding, which disables THIS session's turn posts
-    // but doesn't break the response path.
+  const { data: ready, error: readyError } = await client.rpc(
+    'stir_voice_session_ready',
+    claimArgs,
+  );
+  if (readyError || !ready) {
+    await client.rpc('stir_voice_session_abort', claimArgs);
+    if (didConsumeQuota && consumedPeriodStart) {
+      await refundQuota(
+        client,
+        userLog,
+        claims.canonical_user_key,
+        'voice_cook_session',
+        consumedPeriodStart,
+      );
+    }
+    return jsonError(
+      ErrorCode.AI_01,
+      503,
+      { message: 'Voice session changed. Try again.' },
+      requestId,
+    );
   }
 
   // Cost is zero at mint time — the minted session's real spend arrives via
@@ -759,7 +697,7 @@ Deno.serve(async (req) => {
   // trace view automatically via PostHog's pseudo-trace rollup.
 
   const wire: WireResponse = {
-    auth_token: mint.tokenName,
+    auth_token: mint.authToken,
     expires_at: mint.expiresAt,
     session_id: sessionId,
     ws_url: mint.wsUrl,

@@ -18,7 +18,6 @@ import OSLog
 struct RootView: View {
     @Bindable var coordinator: RootCoordinator
     @Environment(\.scenePhase) private var scenePhase
-    @State private var pendingShareImport: PendingImport?
 
     // User-selected color scheme override, written by the Appearance
     // card in `SettingsRootView`. Applied at the root via
@@ -53,6 +52,9 @@ struct RootView: View {
 
             case .ready:
                 StirTabRoot(coordinator: coordinator)
+
+            case .dataDeleted:
+                DeletionCompleteView(state: coordinator.deletionState, onStartOver: coordinator.startOverAfterDeletion)
 
             case .offlineFallback:
                 VStack(spacing: 0) {
@@ -106,27 +108,9 @@ struct RootView: View {
                         properties: StepSevenTelemetry.widgetAdded(source: "home_screen"),
                     )
                 }
-                // Drain any share-extension-queued import. Two guards:
-                //   (a) Only consume when phase == .ready. If the user
-                //       shared during onboarding, coordinator.household.
-                //       profile is nil and the cover body below would
-                //       render empty @ViewBuilder — but consume* would
-                //       have cleared the slot forever, producing an
-                //       undismissable blank modal and losing the share
-                //       (DB1-19). Re-checks on every foreground until
-                //       onboarding completes.
-                //   (b) User-scoped consume — drops the payload if its
-                //       consumingUserKey mismatches the current
-                //       identity (user signed into a different iCloud
-                //       between share-time and re-open). Share-ext
-                //       captures canonical_user_key at share time
-                //       (SA2-10, CWE-345 defense).
-                if coordinator.phase == .ready,
-                   let pending = SharedStorage().consumePendingImport(
-                       currentUserKey: SharedStorage().readCanonicalUserKey(),
-                   ) {
-                    pendingShareImport = pending
-                }
+                drainPendingInputs()
+                coordinator.reconcileImportedHouseholdsIfReady()
+                coordinator.runImportRetentionMaintenance()
                 // SCA-22: sweep expired ephemeral pantry rows on every
                 // foreground. The "TODAY" badge would otherwise lie —
                 // items scanned days ago would still display as today.
@@ -176,25 +160,25 @@ struct RootView: View {
         .onOpenURL { url in
             StirDeepLinkHandler.handle(url, coordinator: coordinator)
         }
-        .fullScreenCover(item: $pendingShareImport) { pending in
+        .onChange(of: coordinator.phase) { _, _ in drainPendingInputs() }
+        .onReceive(NotificationCenter.default.publisher(for: .stirImportResultTapped)) { _ in
+            drainPendingInputs()
+        }
+        .fullScreenCover(item: $coordinator.activeImport, onDismiss: coordinator.dismissImport) { presentation in
             if let household = coordinator.household.profile {
-                let importController = PersistenceController.shared
-                let vm = ImportViewModel(
-                    household: household,
-                    aiDispatch: coordinator.aiDispatch,
-                    importRepo: RecipeImportRepository(controller: importController),
-                    controller: importController,
-                )
+                let vm = coordinator.makeImportViewModel(for: household)
                 ImportRoot(
                     viewModel: vm,
-                    onDismiss: { pendingShareImport = nil },
-                    onCompleted: { _ in pendingShareImport = nil },
+                    onDismiss: coordinator.dismissImport,
+                    onCompleted: { _ in coordinator.dismissImport() }
                 )
                 .task {
-                    if let url = pending.url, !url.isEmpty {
-                        await vm.submitURL(url)
-                    } else if let text = pending.text, !text.isEmpty {
-                        await vm.submitPastedText(text)
+                    switch presentation {
+                    case .shared(let pending):
+                        if let url = pending.url, !url.isEmpty { await vm.submitURL(url) }
+                        else if let text = pending.text, !text.isEmpty { await vm.submitPastedText(text) }
+                    case .recovery(let importID):
+                        await vm.resume(importID: importID)
                     }
                 }
             }
@@ -206,6 +190,15 @@ struct RootView: View {
         // paywall fullScreenCover above all inherit the choice.
         .preferredColorScheme(appearance.colorScheme)
     }
+
+    private func drainPendingInputs() {
+        if let id = StirNotificationDelegate.shared.consumePendingImportID() {
+            coordinator.requestImportResult(importID: id)
+        } else {
+            coordinator.drainPendingImportsIfReady()
+        }
+    }
+
 }
 
 // MARK: - StirTabRoot
@@ -260,6 +253,8 @@ private struct StirTabRoot: View {
                 SavedMealsView(
                     household: household,
                     aiDispatch: coordinator.aiDispatch,
+                    repository: coordinator.cookingSessionRepository,
+                    solveRepository: coordinator.solveRepository,
                 )
             } else {
                 VStack(spacing: CGFloat.Stir.space3) {

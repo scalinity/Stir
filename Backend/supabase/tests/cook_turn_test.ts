@@ -153,11 +153,18 @@ Deno.test('cook-turn: ENT-VOICE-01 on Free user', async () => {
 // logic OK). Skipped on the integration-test path.
 // ---------------------------------------------------------------------------
 
-Deno.test('cook-turn: Premium user reaches Gemini call (502 AI-01 on placeholder key)', async () => {
+Deno.test('cook-turn: Premium user reaches the provider call (200 with a real key, 502 AI-01 without)', async () => {
   if (Deno.env.get('STIR_RUN_AI_INTEGRATION_TESTS') === '1') return;
   const bs = await quickBootstrap();
   await promoteToPremium(bs.canonical_user_key);
   const res = await callCookTurn(validBody(), bs.session_jwt);
-  assertEquals(res.status, 502);
-  assertEquals(res.body.error, 'AI-01');
+  // Either outcome proves auth, entitlement and prompt read all passed:
+  // a real ANTHROPIC_API_KEY in functions/.env answers 200, a missing or
+  // placeholder key fails upstream as 502 AI-01.
+  if (res.status === 200) {
+    assertEquals(typeof (res.body as { spoken_response?: unknown }).spoken_response, 'string');
+  } else {
+    assertEquals(res.status, 502);
+    assertEquals(res.body.error, 'AI-01');
+  }
 });

@@ -1,46 +1,98 @@
 // LiveAudioPipeline
 //
-// Half-duplex audio I/O for the Gemini Live WebSocket session.
+// Half-duplex audio I/O for the OpenAI Realtime WebSocket session.
 //
-// Mic capture (PCM16 @ 16 kHz, base64 in `realtimeInput.audio`):
-//   - AVAudioEngine input node tap → AVAudioConverter → 16 kHz mono
-//     PCM16 Data chunks → base64 string → pushed via an AsyncStream
+// Mic capture (PCM16 @ 24 kHz, base64 in `input_audio_buffer.append`):
+//   - AVAudioEngine input node tap → AVAudioConverter → 24 kHz mono
+//     PCM16 little-endian Data chunks → base64 string → pushed via an AsyncStream
 //     that the session actor reads and forwards over the WebSocket
 //
-// Playback (PCM16 @ 24 kHz from `serverContent.modelTurn.parts[].inlineData`):
+// Playback (PCM16 @ 24 kHz from `response.output_audio.delta`):
 //   - Base64-decoded audio is queued to AVAudioPlayerNode
 //   - Each chunk is scheduled as an AVAudioPCMBuffer; node plays on a
 //     shared AVAudioEngine
 //   - Callers can `cancelPlayback()` to stop the queue immediately
 //     (returns when the node transitions to stopped)
 //
-// CLAUDE.md §sharp-edge #10 pins the input rate at 16 kHz. Output is
-// 24 kHz per Gemini docs (not settable; we match whatever the mime
-// type says). If rate doesn't match inline_data's mime, we trust the
-// mime and reformat on the fly — safer than hardcoding one side.
+// Both directions are PCM16 mono @ 24 kHz — the Realtime `audio/pcm`
+// format. Inbound chunks are tagged with `audio/pcm;rate=24000`; if a
+// chunk's mime rate ever differs from the player format we log it rather
+// than hardcode one side silently.
 //
-// Why half-duplex: 3.1 Flash Live doesn't emit audio-based barge-in
-// signals the way gpt-realtime does. Stir's UX is tap-to-speak; the
-// mic is OFF while the model is speaking (state machine enforces
-// .modelSpeaking → .ready before .userSpeaking). Building full-duplex
-// barge-in here would be wasted plumbing.
+// Why half-duplex: Stir's mic is gated OFF while the model is speaking
+// (the state machine enforces .modelSpeaking → .ready before
+// .userSpeaking), so the server never hears the model's own playback and
+// can't mistake it for a barge-in. Barge-in is deferred (ADR 0011);
+// building full-duplex handling here would be wasted plumbing.
 
 @preconcurrency import AVFoundation
 import Foundation
 import os
 import OSLog
 
+/// Shared by capture, playback completion and the session actor. Epochs reject
+/// audio queued before a mute/playback transition, even after the gate reopens.
+final class MicCaptureGate: @unchecked Sendable {
+    private struct State {
+        var muted = false
+        var playbackCount = 0
+        var allowAfter: TimeInterval = 0
+        var epoch: UInt64 = 0
+    }
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+
+    func setMuted(_ muted: Bool) {
+        lock.withLock { state in
+            if state.muted != muted { state.epoch &+= 1 }
+            state.muted = muted
+        }
+    }
+
+    func playbackStarted() {
+        lock.withLock { $0.playbackCount += 1; $0.epoch &+= 1 }
+    }
+
+    func playbackEnded(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            $0.playbackCount = max(0, $0.playbackCount - 1)
+            if $0.playbackCount == 0 { $0.allowAfter = time + LiveSessionBudget.echoCooldownSec }
+        }
+    }
+
+    func resetPlayback(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lock.withLock {
+            $0.playbackCount = 0
+            $0.allowAfter = time + LiveSessionBudget.echoCooldownSec
+            $0.epoch &+= 1
+        }
+    }
+
+    func captureToken(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> UInt64? {
+        lock.withLock {
+            guard !$0.muted, $0.playbackCount == 0, time >= $0.allowAfter else { return nil }
+            return $0.epoch
+        }
+    }
+
+    func accepts(_ epoch: UInt64, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        captureToken(at: time) == epoch
+    }
+}
+
 @MainActor
 final class LiveAudioPipeline {
-    /// Stream of base64-encoded PCM16 @ 16 kHz mic frames. The session
+    /// Stream of base64-encoded PCM16 @ 24 kHz mic frames. The session
     /// actor reads this and forwards to the WebSocket as
-    /// `realtimeInput.audio`. ~20 ms per frame (640 samples × 2 bytes).
+    /// `input_audio_buffer.append`. ~20 ms per frame (480 samples × 2 bytes).
     private(set) var micFrames: AsyncStream<LiveAudioPipeline.MicFrame>!
     private var micContinuation: AsyncStream<MicFrame>.Continuation!
+    let captureGate = MicCaptureGate()
+    static let micBufferLimit = 5  // About 100 ms at the 20 ms capture cadence.
 
     struct MicFrame: Sendable {
         let base64: String
-        /// Always "audio/pcm;rate=16000" for outbound mic frames.
+        let captureEpoch: UInt64
+        /// Always "audio/pcm;rate=24000" for outbound mic frames.
         let mimeType: String
     }
 
@@ -49,7 +101,7 @@ final class LiveAudioPipeline {
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
 
-    /// Linear gain factor applied to Gemini Live audio output before it
+    /// Linear gain factor applied to model audio output before it
     /// hits the player node. 2.8 ≈ +9 dB, perceptually nearly 2× louder
     /// than the previous 2.0 setting. Rationale: `AVAudioSession.mode =
     /// .voiceChat` applies voice-processing AGC tuned for phone-to-ear
@@ -87,16 +139,21 @@ final class LiveAudioPipeline {
     private let pendingPlaybackBuffers = OSAllocatedUnfairLock(initialState: 0)
 
     /// P3-B (2026-04-23): upper bound on queued playback buffers. Prior
-    /// code had no admission gate; a misbehaving upstream (Gemini Live
-    /// preview-API flood) could queue dozens of chunks into
-    /// `playerNode.scheduleBuffer` with no back-pressure, consuming
-    /// memory proportional to streamed duration. `max_output_tokens=400`
-    /// caps the happy-path queue around ~50 chunks (~16 s of audio at
-    /// ~320 ms/chunk). The 30-buffer cap gives ~50 % headroom over that
-    /// ceiling while preventing runaway growth. When the cap trips we
-    /// drop the incoming chunk and log `live_playback_queue_overflow`
-    /// so ops can see the pattern.
-    private static let playbackQueueHardCap: Int = 30
+    /// code had no admission gate; a misbehaving upstream could queue
+    /// chunks into `playerNode.scheduleBuffer` with no back-pressure,
+    /// consuming memory proportional to streamed duration. When the cap
+    /// trips we drop the incoming chunk and log
+    /// `live_playback_queue_overflow` so ops can see the pattern.
+    ///
+    /// The Realtime API streams audio FASTER than real time, so a normal
+    /// response is queued far ahead of the speaker (the whole reply can
+    /// be scheduled within a second or two). The previous cap of 30 was
+    /// sized for a near-real-time stream and would have dropped the
+    /// middle of long replies. 300 buffers still bounds memory (a
+    /// bounded reply is at most tens of seconds of mono 24 kHz audio,
+    /// a few MB) while leaving a wide margin over any legitimate
+    /// response.
+    private static let playbackQueueHardCap: Int = 300
 
     /// Is the output device currently rendering model audio? True iff
     /// at least one scheduled buffer hasn't hit its `.dataPlayedBack`
@@ -144,16 +201,18 @@ final class LiveAudioPipeline {
     }
 
     /// Format native to the mic hardware — varies by device. Converted
-    /// to 16 kHz mono PCM16 via AVAudioConverter before we base64.
+    /// to 24 kHz mono PCM16 via AVAudioConverter before we base64.
     private var hardwareInputFormat: AVAudioFormat?
 
-    /// Target format for Gemini Live audio input. MUST match the mime
-    /// type we declare on outbound audio frames.
+    /// Target format for Realtime audio input. MUST match the session's
+    /// `audio/pcm` input format (24 kHz) and the mime type we declare on
+    /// outbound audio frames.
     private let targetInputFormat: AVAudioFormat = {
-        // Int16 linear PCM, mono, 16 kHz. .pcmFormatInt16 is signed.
+        // Int16 linear PCM, mono, 24 kHz. .pcmFormatInt16 is signed;
+        // iOS devices are little-endian, which is what the API expects.
         let fmt = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 16000,
+            sampleRate: 24000,
             channels: 1,
             interleaved: true,
         )
@@ -166,7 +225,7 @@ final class LiveAudioPipeline {
 
     /// Stable format the playerNode is connected with AND every
     /// scheduled buffer must use. Mono Float32 at 24 kHz matches
-    /// Gemini Live's documented output (`audio/pcm;rate=24000`, mono),
+    /// the Realtime API's output (`audio/pcm;rate=24000`, mono),
     /// and AVAudioPlayerNode auto-resamples + auto-mixes to the
     /// hardware output format via the mainMixer stage — so we only
     /// need to pin the *input* side of the node.
@@ -200,7 +259,7 @@ final class LiveAudioPipeline {
             Self.playbackGain <= Self.playbackGainMax,
             "playbackGain (\(Self.playbackGain)) exceeds documented ceiling \(Self.playbackGainMax). Update the ceiling AND the rationale comment together.",
         )
-        let (stream, continuation) = AsyncStream.makeStream(of: MicFrame.self)
+        let (stream, continuation) = AsyncStream.makeStream(of: MicFrame.self, bufferingPolicy: .bufferingNewest(Self.micBufferLimit))
         self.micFrames = stream
         self.micContinuation = continuation
 
@@ -299,6 +358,7 @@ final class LiveAudioPipeline {
         // ever run it from a single audio thread.
         let target = self.targetInputFormat
         let continuation = self.micContinuation
+        let captureGate = self.captureGate
         // Hoist the level lock into a local so the audio-thread closure
         // doesn't capture `self` (the class is @MainActor and the tap
         // closure is non-isolated). `OSAllocatedUnfairLock` is a value-
@@ -358,11 +418,13 @@ final class LiveAudioPipeline {
                     "mic_tap_fired count=\(counter.total, privacy: .public) frames=\(fl, privacy: .public) peak=\(peak, privacy: .public)",
                 )
             }
+            guard let captureEpoch = captureGate.captureToken() else { return }
             Self.convertAndYield(
                 buffer,
                 converter: converter,
                 target: target,
                 continuation: continuation,
+                captureEpoch: captureEpoch,
             )
         }
 
@@ -402,10 +464,9 @@ final class LiveAudioPipeline {
 
     // MARK: - Playback
 
-    /// Schedule a base64-encoded audio chunk to play. Gemini Live
-    /// emits these in `serverContent.modelTurn.parts[].inlineData`
-    /// with `mimeType: audio/pcm;rate=<N>` — documented as mono Int16
-    /// at 24 kHz.
+    /// Schedule a base64-encoded audio chunk to play. The server emits
+    /// these as `response.output_audio.delta` (mono Int16 at 24 kHz);
+    /// the event parser tags them `audio/pcm;rate=24000`.
     ///
     /// Scheduled buffer MUST match the format that `playerNode` was
     /// connected with (see `playerFormat` — mono Float32 24 kHz).
@@ -418,8 +479,8 @@ final class LiveAudioPipeline {
         }
         let incomingRate = parseSampleRate(from: chunk.mimeType) ?? 24000
         if Int(playerFormat.sampleRate) != incomingRate {
-            // Gemini hasn't shipped a non-24kHz chunk in testing, but
-            // guard for the day it does: logging here means we'll see
+            // The API only emits 24 kHz, but guard for the day it
+            // changes: logging here means we'll see
             // the drift before users do. Playing it at our fixed
             // `playerFormat` rate would make speech sound pitched.
             Logger.voice.warning(
@@ -472,7 +533,7 @@ final class LiveAudioPipeline {
         if !audioEngine.isRunning {
             // Only starts if startCapture or tearDown left it stopped.
             // Propagate errors instead of `try?`-swallowing — a silent
-            // engine-start failure produces "Gemini speaking, user
+            // engine-start failure produces "model speaking, user
             // hears nothing" with no signal for triage. enqueuePlayback
             // already declares `throws`; `handleServerContent` logs
             // the failure via `live_playback_enqueue_failed`.
@@ -490,12 +551,11 @@ final class LiveAudioPipeline {
         }
         // P3-B (2026-04-23): admission gate. If the queue is already
         // at the hard cap, drop this chunk rather than scheduling it.
-        // Playback queue depth reflects Gemini's send rate vs our local
-        // drain rate; persistent overflow means either Gemini is
-        // misbehaving (preview-API protocol bug) or the session is
-        // stuck and queuing speech the user will never hear. Either
-        // way, growing memory indefinitely is worse than dropping the
-        // chunk.
+        // Playback queue depth reflects the server's send rate vs our
+        // local drain rate; persistent overflow means either the server
+        // is misbehaving or the session is stuck and queuing speech the
+        // user will never hear. Either way, growing memory indefinitely
+        // is worse than dropping the chunk.
         let depthAfterIncrement = pendingPlaybackBuffers.withLock { count -> Int in
             if count >= Self.playbackQueueHardCap {
                 return count
@@ -525,12 +585,14 @@ final class LiveAudioPipeline {
         // `self.pendingPlaybackBuffers` / `self.outputLevelLock`) AND
         // avoids `self` capture into the audio-render-thread completion
         // callback that fires the closure.
+        captureGate.playbackStarted()
         playerNode.scheduleBuffer(
             pcmBuffer,
             at: nil,
             options: [],
             completionCallbackType: .dataPlayedBack,
-        ) { [pendingPlaybackBuffers, outputLevelLock] _ in
+        ) { [pendingPlaybackBuffers, outputLevelLock, captureGate] _ in
+            captureGate.playbackEnded()
             let remaining = pendingPlaybackBuffers.withLock { count -> Int in
                 count = max(0, count - 1)
                 return count
@@ -556,6 +618,7 @@ final class LiveAudioPipeline {
         }
         playerNode.reset()
         pendingPlaybackBuffers.withLock { $0 = 0 }
+        captureGate.resetPlayback()
         // Drop the output meter so the UI's waveform settles to flat
         // immediately on stop, instead of holding the last chunk's peak
         // until a fresh playback starts.
@@ -596,6 +659,7 @@ final class LiveAudioPipeline {
         converter: AVAudioConverter,
         target: AVAudioFormat,
         continuation: AsyncStream<MicFrame>.Continuation?,
+        captureEpoch: UInt64,
     ) {
         // Output buffer capacity: target rate × buffer duration. We
         // overallocate slightly (2x) so the converter always has room
@@ -626,7 +690,7 @@ final class LiveAudioPipeline {
                 // rest of the session. Observed 2026-04-22: hundreds
                 // of `live_audio_convert_unexpected_status status=2`
                 // warnings across 18 s of real speech, zero MicFrames
-                // yielded, zero audio reached Gemini.
+                // yielded, zero audio reached the server.
                 statusPtr.pointee = .noDataNow
                 return nil
             }
@@ -676,7 +740,7 @@ final class LiveAudioPipeline {
             return view.base64EncodedString()
         }
         continuation?.yield(
-            MicFrame(base64: base64, mimeType: "audio/pcm;rate=16000"),
+            MicFrame(base64: base64, captureEpoch: captureEpoch, mimeType: "audio/pcm;rate=24000"),
         )
     }
 

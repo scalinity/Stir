@@ -103,11 +103,11 @@ private struct ListeningPillMiniature: View {
 
             HStack(spacing: 10) {
                 Image.Stir.micActive
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(Color.Stir.onAccent)
                     .font(.system(size: 14, weight: .semibold))
                 Text("Listening")
                     .stirFont(.bodyMd)
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(Color.Stir.onAccent)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)

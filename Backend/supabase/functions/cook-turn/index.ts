@@ -42,7 +42,7 @@ import {
   USER_DATA_END,
   USER_DATA_START,
 } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import { createLogger, requestIdFrom } from '../_shared/logger.ts';
@@ -55,7 +55,7 @@ import {
 import { equipmentDisplayNames } from '../_shared/equipment_display.ts';
 
 const FEATURE_KEY = 'cook_turn';
-const MODEL = GeminiModel.Flash;
+const MODEL = textModelFor('cook_turn');
 
 // Response JSON schema Gemini adheres to. Shape matches the wire response
 // we return to iOS.
@@ -313,7 +313,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: renderedPrompt,
         userText: 'Respond with JSON matching the schema exactly.',
@@ -340,12 +340,17 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500 && attempt === 0) {
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatency += err.usage.latencyMs;
+      }
+      if (err instanceof AITextError && err.status >= 500 && attempt === 0) {
         retryCount++;
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         continue;
       }
-      userLog.error('gemini_call_failed', err);
+      userLog.error('ai_call_failed', err);
       break;
     }
   }

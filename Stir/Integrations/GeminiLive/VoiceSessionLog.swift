@@ -89,14 +89,14 @@ enum VoiceSessionLog {
 
     /// Convenience for error paths. Truncates the description to 200
     /// chars so a wall-of-text URLError doesn't bury the transcript,
-    /// AND runs through the shared `access_token=...` scrubber so a
-    /// token-bearing WebSocket URL embedded in `URLError.userInfo`
-    /// doesn't end up in a D.1 transcript pasted back for review.
-    /// The token is ephemeral (35 min, single-use) but still live.
+    /// AND runs through the shared client-secret scrubber so a secret
+    /// embedded in an error's description or `userInfo` doesn't end up in
+    /// a D.1 transcript pasted back for review. The secret is ephemeral
+    /// (opens one connection within its short window) but still live.
     static func logError(_ tag: String, error: any Error, _ kv: [String: Any] = [:]) {
         var extended = kv
         let raw = String(describing: error)
-        let scrubbed = LiveWebSocketTransport.scrubAccessToken(raw)
+        let scrubbed = LiveWebSocketTransport.scrubClientSecret(raw)
         let truncated = scrubbed.count > 200 ? String(scrubbed.prefix(200)) + "…" : scrubbed
         extended["error"] = truncated
         log(tag, extended)

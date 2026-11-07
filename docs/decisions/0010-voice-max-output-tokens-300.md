@@ -12,7 +12,7 @@ Pro: +$0.72/mo per user.
 
 ---
 
-- **Status**: Accepted
+- **Status**: Accepted (amended by 0038, 2026-11-06 — the 400-token cap is now the OpenAI Realtime session's `max_output_tokens`, ≈ 18 s of speech at 20 audio tokens/s; the cost figures below are Gemini-era)
 - **Date**: 2026-04-22
 - **Owner-step**: Step 6 (voice)
 - **Related**: CLAUDE.md §North-star constraint #8, CLAUDE.md §Cost model, `_shared/live_mint.ts`, ADR 0008 (voice temporarily free for testing)

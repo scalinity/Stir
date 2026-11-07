@@ -629,6 +629,57 @@ final class PantryItemRepositoryTests: XCTestCase {
 
     // MARK: - SCA-24 bumpLastSeenAt
 
+    func test_updateChangedNameClearsSlugAndLaterScanDoesNotMatchOldIngredient() throws {
+        let lime = try seedItem(name: "lime", slug: "lime")
+        try repo.update(lime, displayName: "lemon", amountText: nil, memoryState: .remembered)
+        XCTAssertNil(lime.canonicalIngredientSlug)
+        let result = try repo.upsertFromScan([
+            .init(displayName: "lime", canonicalSlug: "lime", amountText: nil, confidence: 1, parseConfidence: .confirmed),
+        ], on: household)
+        XCTAssertNotEqual(result.rows.first?.id, lime.id)
+        XCTAssertEqual(lime.displayName, "lemon")
+    }
+
+    func test_updateNormalizedNamePreservesCanonicalSlug() throws {
+        let row = try seedItem(name: "Lime", slug: "lime")
+        try repo.update(row, displayName: " lime ", amountText: nil, memoryState: .remembered)
+        XCTAssertEqual(row.canonicalIngredientSlug, "lime")
+    }
+
+    func test_memoryStateTransitionsReplaceExpiredDeadlineAndSweepAtNewDeadline() throws {
+        let row = try seedItem(name: "basil")
+        let firstNow = Date(timeIntervalSince1970: 1_700_000_000)
+        try repo.update(row, displayName: "basil", amountText: nil, memoryState: .ephemeral, now: firstNow)
+        let firstExpiry = try XCTUnwrap(row.expiresAt)
+        XCTAssertGreaterThan(firstExpiry, firstNow)
+        try repo.update(row, displayName: "basil", amountText: nil, memoryState: .remembered, now: firstNow)
+        XCTAssertNil(row.expiresAt)
+        let later = firstExpiry.addingTimeInterval(3_600)
+        try repo.update(row, displayName: "basil", amountText: nil, memoryState: .ephemeral, now: later)
+        let newExpiry = try XCTUnwrap(row.expiresAt)
+        XCTAssertGreaterThan(newExpiry, later)
+        XCTAssertEqual(try repo.softDeleteExpired(now: later, for: household), 0)
+        XCTAssertEqual(try repo.softDeleteExpired(now: newExpiry.addingTimeInterval(1), for: household), 1)
+    }
+
+    func test_rescanAndManualUpsertRefreshTemporaryExpiry() throws {
+        let row = try seedItem(name: "basil", slug: "basil", memoryState: .ephemeral)
+        let oldExpiry = Date(timeIntervalSince1970: 1_700_000_000)
+        row.expiresAt = oldExpiry
+        try pc.save()
+        let scanDate = oldExpiry.addingTimeInterval(-60)
+        try repo.upsertFromScan([
+            .init(displayName: "basil", canonicalSlug: "basil", amountText: nil, confidence: 1, parseConfidence: .confirmed),
+        ], on: household, now: scanDate)
+        XCTAssertGreaterThan(try XCTUnwrap(row.expiresAt), oldExpiry)
+        XCTAssertEqual(try repo.softDeleteExpired(now: oldExpiry.addingTimeInterval(1), for: household), 0)
+        _ = try repo.insertManual(displayName: "basil", amountText: nil, memoryState: .remembered, on: household)
+        XCTAssertNil(row.expiresAt)
+        let manualDate = oldExpiry.addingTimeInterval(86_400)
+        _ = try repo.insertManual(displayName: "basil", amountText: nil, memoryState: .ephemeral, on: household, now: manualDate)
+        XCTAssertGreaterThan(try XCTUnwrap(row.expiresAt), manualDate)
+    }
+
     func test_bumpLastSeenAt_matchingRow_bumpsTimestamp() throws {
         let oldTime = Date(timeIntervalSinceNow: -86_400)
         let row = try seedItem(name: "olive oil", memoryState: .remembered, lastSeenAt: oldTime)

@@ -1,37 +1,25 @@
-// POST /functions/v1/recipe-import
-// Logical endpoint: POST /v1/ai/recipe-import (spec §3).
+// POST /functions/v1/recipe-import admits URL, shared URL, OCR, or pasted text.
+// Large inputs enter a ten-minute queued operation; identical import_id retries
+// replay its job/result before quota work. GET ?import_id=<uuid> retrieves only
+// the authenticated owner's existing result and never admits work or debits quota.
+// Parsed results are readable for ten minutes from completion. Expiry is explicit;
+// an intentional retry submits a new import_id. Queue raw input is scrubbed at
+// terminal state, with a database deadline sweep independent of Edge availability.
 //
-// Four source_type paths (wire-contract stable):
-//   url            : iOS paste flow; server fetches HTML
-//   share_sheet    : Safari share extension; server fetches HTML (same code path
-//                    as 'url' but distinct for funnel telemetry)
-//   screenshot_ocr : iOS ran VNRecognizeTextRequest on-device; sends ocr_text
-//   pasted_text    : user pasted free-form text
-//
-// Sync vs async: if raw content byte-size > feature_flags.recipe_import_async_threshold
-// (default 8 KiB), queue the job via notification_jobs and return HTTP 202
-// { status: 'queued', import_id }. iOS re-POSTs with same import_id after
-// APNs push completion; second call hits ai_response_cache and replays.
-// Sync path: single generateContent call to gemini-3.1-flash-lite-preview;
-// result persisted to ai_response_cache for idempotent retries.
-//
-// Safety: imported content is UNTRUSTED. System prompt explicitly forbids
-// following embedded directives. Hard-rule validator runs on extracted
-// ingredients against household dietary rules; violations flag via
-// edit_hints=["dietary_conflict"] — iOS surfaces in Import Review.
-//
-// Quota: recipe_import is metered (Free:2/mo, Premium/Pro:unlimited per §9).
-// Atomic increment BEFORE Gemini work. Refund on Gemini 5xx; NO refund on
-// parse_quality='low' or edit_hints with dietary_conflict (we did the work).
+// URL content is untrusted. TCP pins a validated public address and TLS verifies
+// the original hostname on that socket. Import Review checks current local hard
+// dietary rules across ingredient names, slugs, amounts, and cooking instructions,
+// independently of model parse confidence, and blocks saving conflicts.
 
 import { z, ZodError } from 'zod';
-import { AuthError, verifySessionJWT } from '../_shared/auth.ts';
+import { FetchFailure, fetchPublicRecipeText } from '../_shared/recipe_url_fetch.ts';
+import { AuthError, requireActiveAccount, verifySessionJWT } from '../_shared/auth.ts';
 import { createServiceClient } from '../_shared/db.ts';
 import { ErrorCode, jsonError, jsonOk } from '../_shared/errors.ts';
 import { readAppUser } from '../_shared/identity.ts';
 import { readFlags } from '../_shared/flags.ts';
 import { readActivePrompt, renderPrompt } from '../_shared/prompt_versions.ts';
-import { GeminiError, geminiGenerate, GeminiModel } from '../_shared/gemini.ts';
+import { AITextError, aiTextGenerate, textModelFor } from '../_shared/ai_text.ts';
 import { computeCostUSD } from '../_shared/ai_request_log.ts';
 import { recordAIRequest } from '../_shared/ai_observability.ts';
 import {
@@ -47,15 +35,14 @@ import {
   extractSourceIP,
   ipBucket,
 } from '../_shared/rate_limiter.ts';
-import { readCache, responseFromCache, writeCache } from '../_shared/idempotency.ts';
+import { writeCache } from '../_shared/idempotency.ts';
 import { incrementQuotaAtomic, refundQuota } from '../_shared/quota.ts';
+import { computeCurrentPeriodStart, toIsoDate } from '../_shared/entitlements.ts';
+import { findImportResult } from '../_shared/recipe_import_result.ts';
 
 const FEATURE_KEY = 'recipe_import';
-const MODEL = GeminiModel.FlashLite;
+const MODEL = textModelFor('recipe_import');
 const DEFAULT_ASYNC_THRESHOLD_BYTES = 8192;
-const URL_FETCH_TIMEOUT_MS = 10_000;
-const URL_FETCH_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
-const URL_FETCH_USER_AGENT = 'StirBot/1.0 (+https://getstir.app)';
 
 // -----------------------------------------------------------------------------
 // Gemini output schema (must match prompt v1.0.0 recipe_import shape)
@@ -137,12 +124,12 @@ Deno.serve(async (req) => {
   const endpoint = '/v1/ai/recipe-import';
   const log = await createLogger(requestId, endpoint);
 
-  if (req.method !== 'POST') {
+  if (req.method !== 'POST' && req.method !== 'GET') {
     log.warn('method_not_allowed', { method: req.method });
     return jsonError(
       ErrorCode.METHOD_NOT_ALLOWED_01,
       405,
-      { message: 'Method Not Allowed; use POST.', allowed: ['POST'] },
+      { message: 'Method Not Allowed; use POST or GET.', allowed: ['POST', 'GET'] },
       requestId,
     );
   }
@@ -167,12 +154,37 @@ Deno.serve(async (req) => {
   }
 
   const userLog = await createLogger(requestId, endpoint, claims.canonical_user_key);
+  const client = createServiceClient();
+  // A still-valid JWT cannot replay content after the account is banned,
+  // removed, or merged. Apply the shared guard before either GET or POST replay.
+  const accountError = await requireActiveAccount(client, claims.canonical_user_key, requestId);
+  if (accountError) return accountError;
+
+  // Result reads never fetch a source, consume quota, or admit a job.
+  if (req.method === 'GET') {
+    const id = z.string().uuid().safeParse(new URL(req.url).searchParams.get('import_id'));
+    if (!id.success) {
+      return jsonError(
+        ErrorCode.VAL_01,
+        400,
+        { message: 'A valid import_id is required.' },
+        requestId,
+      );
+    }
+    try {
+      return (await findImportResult(client, claims.canonical_user_key, id.data, requestId, true))!;
+    } catch (err) {
+      userLog.error('import_result_read_failed', err);
+      return jsonError(ErrorCode.NET_01, 503, undefined, requestId);
+    }
+  }
 
   // ---- 2. Body validation
   let body: RecipeImportRequest;
   try {
     const raw = await req.text();
     body = RecipeImportRequest.parse(JSON.parse(raw));
+    body.import_id = body.import_id.toLowerCase();
   } catch (err) {
     if (err instanceof ZodError) {
       userLog.warn('validation_failed', { issue_count: err.issues.length });
@@ -194,17 +206,19 @@ Deno.serve(async (req) => {
     );
   }
 
-  const client = createServiceClient();
-
-  // ---- 3. Idempotency cache — covers both prior sync completion and async re-poll
+  // Replay accepted operations before any rate/quota/fetch work. A read
+  // failure is not permission to create a duplicate accepted job.
   try {
-    const hit = await readCache(client, claims.canonical_user_key, body.import_id);
-    if (hit) {
-      userLog.info('cache_replay', { age_seconds: hit.age_seconds, status: hit.status_code });
-      return responseFromCache(hit, requestId);
-    }
+    const existing = await findImportResult(
+      client,
+      claims.canonical_user_key,
+      body.import_id,
+      requestId,
+    );
+    if (existing) return existing;
   } catch (err) {
-    userLog.warn('cache_read_failed', { err: sanitizeErrorForLog(err) });
+    userLog.error('import_replay_failed', err);
+    return jsonError(ErrorCode.NET_01, 503, undefined, requestId);
   }
 
   // ---- 4. Rate limits (IP)
@@ -262,6 +276,67 @@ Deno.serve(async (req) => {
     }, requestId);
   }
 
+  // ---- 7. Resolve raw content per source_type
+  let rawContent: string;
+  try {
+    rawContent = await resolveRawContent(body, userLog);
+  } catch (err) {
+    const message = err instanceof FetchFailure ? err.message : 'Failed to fetch source content.';
+    userLog.warn('source_fetch_failed', {
+      source_type: body.source_type,
+      err: sanitizeErrorForLog(err),
+    });
+    return jsonError(
+      ErrorCode.IMPORT_01,
+      502,
+      { message, source_type: body.source_type },
+      requestId,
+    );
+  }
+
+  // ---- 8. Async threshold check
+  const asyncThresholdBytes = await readAsyncThresholdBytes(client);
+  const rawBytes = new TextEncoder().encode(rawContent).byteLength;
+  const isAsync = rawBytes > asyncThresholdBytes;
+
+  if (isAsync) {
+    try {
+      const { periodStart } = computeCurrentPeriodStart(new Date(userRow.created_at), new Date());
+      const admission = await enqueueAsync(
+        client,
+        claims.canonical_user_key,
+        body,
+        rawContent,
+        toIsoDate(periodStart),
+      );
+      if (admission.status === 'capped') {
+        return jsonError(ErrorCode.RATE_01, 429, {
+          message: "You've used all of this month's Recipe Imports for your plan.",
+          scope: 'user:recipe_import_monthly',
+          used: admission.used,
+          cap: admission.cap,
+        }, requestId);
+      }
+      if (admission.status === 'not_bootstrapped') {
+        return jsonError(ErrorCode.VAL_01, 400, {
+          message: 'Call /v1/session/bootstrap to refresh the current quota period.',
+        }, requestId);
+      }
+      // The RPC serializes same-ID requests with debit+enqueue in one transaction.
+      const accepted = await findImportResult(
+        client,
+        claims.canonical_user_key,
+        body.import_id,
+        requestId,
+      );
+      if (!accepted) throw new Error('accepted import missing');
+      return accepted;
+    } catch (err) {
+      userLog.error('import_admission_failed', err);
+      return jsonError(ErrorCode.NET_01, 503, undefined, requestId);
+    }
+  }
+
   const quotaResult = await incrementQuotaAtomic(
     client,
     claims.canonical_user_key,
@@ -296,55 +371,6 @@ Deno.serve(async (req) => {
   }
   const consumedPeriodStart = quotaResult.period_start;
 
-  // ---- 7. Resolve raw content per source_type
-  let rawContent: string;
-  try {
-    rawContent = await resolveRawContent(body, userLog);
-  } catch (err) {
-    await refundQuota(
-      client,
-      userLog,
-      claims.canonical_user_key,
-      'recipe_import',
-      consumedPeriodStart,
-    );
-    const message = err instanceof FetchFailure ? err.message : 'Failed to fetch source content.';
-    userLog.warn('source_fetch_failed', {
-      source_type: body.source_type,
-      err: sanitizeErrorForLog(err),
-    });
-    return jsonError(
-      ErrorCode.IMPORT_01,
-      502,
-      { message, source_type: body.source_type },
-      requestId,
-    );
-  }
-
-  // ---- 8. Async threshold check
-  const asyncThresholdBytes = await readAsyncThresholdBytes(client);
-  const rawBytes = new TextEncoder().encode(rawContent).byteLength;
-  const isAsync = rawBytes > asyncThresholdBytes;
-
-  if (isAsync) {
-    const jobId = await enqueueAsync(
-      client,
-      claims.canonical_user_key,
-      body,
-      rawContent,
-    );
-    const queuedBody = {
-      import_id: body.import_id,
-      status: 'queued' as const,
-      recipe: null,
-      retry_count: 0,
-      prompt_version: '1.0.0', // best-effort; worker records real version on completion
-      async_job_id: jobId,
-    };
-    userLog.info('queued_async', { job_id: jobId, raw_bytes: rawBytes });
-    return jsonOk(queuedBody, requestId, 202);
-  }
-
   // ---- 9. Sync path — prompt + Gemini
   const activePrompt = await readActivePrompt(client, FEATURE_KEY);
   if (!activePrompt) {
@@ -374,7 +400,7 @@ Deno.serve(async (req) => {
 
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
-      const result = await geminiGenerate({
+      const result = await aiTextGenerate({
         model: MODEL,
         systemInstruction: rendered,
         userText: 'Normalize the raw content into the structured recipe schema.',
@@ -400,14 +426,19 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       lastErr = err;
-      if (err instanceof GeminiError && err.status >= 500) {
-        userLog.warn('gemini_upstream_error', { attempt: attempt + 1, status: err.status });
+      if (err instanceof AITextError && err.usage) {
+        totalInputTokens += err.usage.inputTokens;
+        totalOutputTokens += err.usage.outputTokens;
+        totalLatencyMs += err.usage.latencyMs;
+      }
+      if (err instanceof AITextError && err.status >= 500) {
+        userLog.warn('ai_upstream_error', { attempt: attempt + 1, status: err.status });
         if (attempt === 0) {
           retryCount++;
           continue;
         }
       } else {
-        userLog.error('gemini_call_failed', err);
+        userLog.error('ai_call_failed', err);
         break;
       }
     }
@@ -527,13 +558,6 @@ Deno.serve(async (req) => {
 // Helpers
 // -----------------------------------------------------------------------------
 
-class FetchFailure extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'FetchFailure';
-  }
-}
-
 async function resolveRawContent(
   body: RecipeImportRequest,
   log: Logger,
@@ -548,7 +572,7 @@ async function resolveRawContent(
     case 'url':
     case 'share_sheet': {
       if (!payload.url) throw new FetchFailure('url missing');
-      const html = await fetchUrlText(payload.url);
+      const html = await fetchPublicRecipeText(payload.url);
       const extracted = extractRecipeText(html);
       log.info('source_fetched', {
         // Host-only — paths/queries can carry session tokens, referral
@@ -579,195 +603,6 @@ function safeUrlHost(raw: string): string {
   } catch {
     return '<unparseable>';
   }
-}
-
-async function fetchUrlText(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), URL_FETCH_TIMEOUT_MS);
-  try {
-    // Walk redirects manually — `redirect: 'follow'` would skip
-    // per-hop SSRF re-validation and let a Location: http://10.0.0.1/
-    // (or a DNS rebind on the second hop) bypass the initial guard.
-    let currentUrl = url;
-    let response: Response | null = null;
-    for (let hop = 0; hop <= URL_FETCH_MAX_REDIRECTS; hop++) {
-      await assertUrlIsPublic(currentUrl);
-      const r = await fetch(currentUrl, {
-        method: 'GET',
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          'user-agent': URL_FETCH_USER_AGENT,
-          'accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-          'accept-language': 'en-US,en;q=0.9',
-        },
-      });
-      if (r.status >= 300 && r.status < 400) {
-        const location = r.headers.get('location');
-        if (!location) {
-          throw new FetchFailure(`redirect ${r.status} with no location`);
-        }
-        // Resolve relative Locations against the current URL.
-        currentUrl = new URL(location, currentUrl).toString();
-        // Drain + close the redirect response so the connection can
-        // be reused.
-        await r.body?.cancel();
-        continue;
-      }
-      response = r;
-      break;
-    }
-    if (!response) {
-      throw new FetchFailure(`too many redirects (>${URL_FETCH_MAX_REDIRECTS})`);
-    }
-    if (!response.ok) {
-      throw new FetchFailure(`upstream ${response.status}`);
-    }
-    const contentType = response.headers.get('content-type') ?? '';
-    if (
-      !contentType.includes('text/') && !contentType.includes('json') &&
-      !contentType.includes('xml')
-    ) {
-      throw new FetchFailure(`unsupported content-type: ${contentType.slice(0, 64)}`);
-    }
-    // Enforce the byte cap while streaming — avoids pulling a 50MB video
-    // page wholesale into memory only to discover it's unusable.
-    const reader = response.body?.getReader();
-    if (!reader) throw new FetchFailure('empty body');
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      total += value.byteLength;
-      if (total > URL_FETCH_MAX_BYTES) {
-        await reader.cancel();
-        throw new FetchFailure(`response exceeds ${URL_FETCH_MAX_BYTES} bytes`);
-      }
-      chunks.push(value);
-    }
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
-  } catch (err) {
-    if (err instanceof FetchFailure) throw err;
-    if ((err as Error).name === 'AbortError') {
-      throw new FetchFailure(`timeout after ${URL_FETCH_TIMEOUT_MS}ms`);
-    }
-    throw new FetchFailure(`fetch failed: ${(err as Error).message}`);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-const URL_FETCH_MAX_REDIRECTS = 5;
-
-/**
- * SSRF guard — blocks anything that isn't a public http(s) URL.
- *
- * Checks:
- *   1. Scheme allow-list: http/https only.
- *   2. No userinfo (prevents `http://attacker@target/` smuggling).
- *   3. Hostname resolves to a public IP — blocks RFC-1918, loopback,
- *      link-local (169.254 = AWS IMDS, GCP metadata), CGNAT, multicast,
- *      IPv4-mapped IPv6, ULA. Runs on EVERY hop via `redirect: 'manual'`,
- *      so a DNS rebind or Location redirect can't bypass the initial
- *      check. (CWE-918, CWE-601.)
- */
-async function assertUrlIsPublic(raw: string): Promise<void> {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new FetchFailure('invalid url');
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new FetchFailure(`scheme not allowed: ${parsed.protocol}`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new FetchFailure('userinfo in url not allowed');
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  if (!hostname) {
-    throw new FetchFailure('empty hostname');
-  }
-  // Reject bracketed IPv6 literals + localhost aliases eagerly.
-  if (hostname === 'localhost' || hostname === 'ip6-localhost' || hostname === 'ip6-loopback') {
-    throw new FetchFailure(`blocked hostname: ${hostname}`);
-  }
-  // Resolve A + AAAA records. An unresolvable host is harmless-to-us
-  // (fetch would error anyway), but we treat it as a block so the
-  // error is typed + logged here rather than surfacing as a generic
-  // fetch failure.
-  const ips = await resolveAllIps(hostname);
-  if (ips.length === 0) {
-    throw new FetchFailure(`hostname did not resolve: ${hostname}`);
-  }
-  for (const ip of ips) {
-    if (isPrivateIp(ip)) {
-      throw new FetchFailure(`blocked private ip: ${ip}`);
-    }
-  }
-}
-
-async function resolveAllIps(hostname: string): Promise<string[]> {
-  // If the hostname is already an IP literal, Deno.resolveDns throws;
-  // short-circuit by returning it directly so the range check runs.
-  if (isIpLiteral(hostname)) return [hostname];
-  const out: string[] = [];
-  for (const type of ['A', 'AAAA'] as const) {
-    try {
-      const records = await Deno.resolveDns(hostname, type);
-      out.push(...records);
-    } catch {
-      // Record type absent is normal; keep the other type's records.
-    }
-  }
-  return out;
-}
-
-function isIpLiteral(s: string): boolean {
-  // IPv4 dotted-quad or IPv6 (including brackets).
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return true;
-  const stripped = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s;
-  return stripped.includes(':');
-}
-
-function isPrivateIp(ip: string): boolean {
-  // IPv4 dotted-quad — cover loopback, RFC1918, link-local, CGNAT,
-  // multicast, class-E, and the any-host 0.0.0.0.
-  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const [a, b] = v4.slice(1, 3).map((n) => parseInt(n, 10));
-    if (a === 10) return true; // 10/8
-    if (a === 127) return true; // loopback
-    if (a === 0) return true; // 0/8
-    if (a === 169 && b === 254) return true; // link-local (IMDS)
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
-    if (a === 192 && b === 168) return true; // 192.168/16
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
-    if (a === 192 && b === 0 && v4[3] === '0') return true; // 192.0.0/24 IETF
-    if (a === 192 && b === 0 && v4[3] === '2') return true; // 192.0.2/24 TEST-NET-1
-    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18/15 benchmark
-    if (a === 198 && b === 51) return true; // 198.51.100/24
-    if (a === 203 && b === 0) return true; // 203.0.113/24
-    if (a >= 224) return true; // 224+ multicast + reserved
-    return false;
-  }
-  // IPv6 — normalize lower + strip zone id. Block loopback (::1), unspec
-  // (::), ULA fc00::/7, link-local fe80::/10, multicast ff00::/8, and
-  // IPv4-mapped ::ffff:a.b.c.d / IPv4-compat ::a.b.c.d.
-  const v6 = ip.toLowerCase().split('%')[0];
-  if (v6 === '::1' || v6 === '::') return true;
-  if (v6.startsWith('fc') || v6.startsWith('fd')) return true; // ULA fc00::/7
-  if (
-    v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')
-  ) return true; // fe80::/10
-  if (v6.startsWith('ff')) return true; // multicast
-  // IPv4-mapped / IPv4-compat: ::ffff:x.y.z.w or ::x.y.z.w — extract the v4 tail.
-  const mapped = v6.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (mapped) return isPrivateIp(mapped[1]);
-  return false;
 }
 
 /**
@@ -905,25 +740,24 @@ async function enqueueAsync(
   canonicalUserKey: string,
   body: RecipeImportRequest,
   rawContent: string,
-): Promise<string> {
-  const payload = body.payload as unknown as { url?: string; ocr_page_count?: number };
+  periodStart: string,
+): Promise<{ status: string; used?: number; cap?: number }> {
+  const payload = body.payload as unknown as { ocr_page_count?: number };
   const jobPayload: AsyncJobPayload = {
-    import_id: body.import_id,
+    import_id: body.import_id.toLowerCase(),
     source_type: body.source_type,
     raw_content: rawContent,
-    ...(payload.url ? { original_url: payload.url } : {}),
     ...(payload.ocr_page_count !== undefined ? { ocr_page_count: payload.ocr_page_count } : {}),
   };
-  const { data, error } = await client
-    .from('notification_jobs')
-    .insert({
-      canonical_user_key: canonicalUserKey,
-      kind: 'recipe_import_async',
-      state: 'pending',
-      payload_json: jobPayload,
-    })
-    .select('id')
-    .single<{ id: string }>();
+  const { data, error } = await client.rpc('stir_enqueue_recipe_import', {
+    p_canonical_user_key: canonicalUserKey,
+    p_import_id: body.import_id,
+    p_period_start: periodStart,
+    p_payload: jobPayload,
+  });
   if (error) throw error;
-  return data.id;
+  if (!data || !['queued', 'existing', 'capped', 'not_bootstrapped'].includes(data.status)) {
+    throw new Error('unexpected import admission response');
+  }
+  return data;
 }

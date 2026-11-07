@@ -16,7 +16,7 @@
 import * as jose from 'jose';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createServiceClient } from './db.ts';
-import type { AuthReason } from './errors.ts';
+import { type AuthReason, ErrorCode, jsonError } from './errors.ts';
 import { createLogger } from './logger.ts';
 // SCA-407: regex constants live in the leaf `regex.ts` module so
 // `auth.ts` and `validation.ts` both import from a leaf instead of
@@ -298,4 +298,37 @@ async function hashKeyForLog(key: string): Promise<string> {
   return Array.from(new Uint8Array(hash).slice(0, 4))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/** Authorize billable/cache work against current account state, not JWT age. */
+export async function requireActiveAccount(
+  client: SupabaseClient,
+  canonicalUserKey: string,
+  requestId: string,
+): Promise<Response | null> {
+  const { data: row, error } = await client.from('app_users')
+    .select('status, merged_into').eq('canonical_user_key', canonicalUserKey)
+    .maybeSingle<{ status: string; merged_into: string | null }>();
+  if (error) return jsonError(ErrorCode.NET_01, 500, undefined, requestId);
+  if (!row) {
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User not found; re-bootstrap.',
+      reason: 'user_stale',
+    }, requestId);
+  }
+  if (row.status === 'banned') {
+    return jsonError(ErrorCode.BILL_01, 403, {
+      message: 'Account is not eligible for Stir.',
+      state: 'banned',
+    }, requestId);
+  }
+  // A merged token must re-bootstrap to obtain the current identity. It may
+  // never spend against either the old account or an unchecked target.
+  if (row.merged_into || row.status !== 'active') {
+    return jsonError(ErrorCode.AUTH_01, 401, {
+      message: 'User identity changed; re-bootstrap required.',
+      reason: 'user_stale',
+    }, requestId);
+  }
+  return null;
 }

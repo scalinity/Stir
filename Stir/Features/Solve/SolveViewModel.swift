@@ -59,7 +59,7 @@ final class SolveViewModel {
     private(set) var lastLatencyMS: Int?
     private(set) var lastPromptVersion: String?
     private(set) var persistedSolveID: UUID?
-    private(set) var persistedSuggestedDishIDs: [UUID] = []
+    private(set) var persistedSuggestedDishIDsByRank: [Int: UUID] = [:]
 
     var constraints = ConstraintsInput()
     private(set) var ingredientsForSolve: [DinnerSolveRequest.IngredientLite] = []
@@ -125,7 +125,7 @@ final class SolveViewModel {
         self.lastLatencyMS = nil
         self.lastPromptVersion = nil
         self.persistedSolveID = nil
-        self.persistedSuggestedDishIDs = []
+        self.persistedSuggestedDishIDsByRank = [:]
     }
 
     /// Prime the VM from already-persisted dishes (no AI spend, no
@@ -136,14 +136,8 @@ final class SolveViewModel {
     /// `.task(id:)` only auto-solves when phase is `.constraints`, so
     /// this seed cannot accidentally re-issue the dinner-solve request.
     ///
-    /// Rank alignment matters: `persistedRecipePlan(for:)` looks up the
-    /// dish-id by `dish.rank - 1` index. We pad both arrays to length 3
-    /// so a tap on a rank-3 card always resolves to the rank-3 UUID
-    /// even if rank-2 is missing (corner case: that dish's RecipePlan
-    /// was soft-deleted between persistence and seed). Empty slots
-    /// fill with a fresh placeholder UUID that resolves to `nil` via
-    /// `fetchRecipePlan` — tapping such a slot can't happen because
-    /// OtherOptionsRoot only renders cards that came in via `inputs`.
+    /// Sparse ranks retain their own persisted identifiers; missing cards have
+    /// no dictionary entry and cannot resolve to another recipe.
     func seedFromPersistedSolve(
         inputs: [(rank: Int, card: DishCard, dishId: UUID)],
     ) {
@@ -158,15 +152,7 @@ final class SolveViewModel {
         self.slots = ranks.map { rank in
             SlotState(rank: rank, dish: byRank[rank]?.card, errorCode: nil)
         }
-        self.persistedSuggestedDishIDs = ranks.map { rank in
-            // Placeholder UUID for missing ranks — preserves positional
-            // alignment so `persistedRecipePlan(for:)` (which indexes
-            // by `dish.rank - 1`) resolves correctly for the ranks
-            // that DID seed. The placeholder won't match any row in
-            // fetchRecipePlan; tap on a missing-rank slot becomes a
-            // silent no-op in DishPreviewView (already error-toasted).
-            byRank[rank]?.dishId ?? UUID()
-        }
+        self.persistedSuggestedDishIDsByRank = byRank.mapValues(\.dishId)
         // Single summary log per seed — gives triage signal (which
         // ranks landed, how many duplicates dropped) without spamming
         // one line per missing rank.
@@ -282,7 +268,7 @@ final class SolveViewModel {
             if let idx = slots.firstIndex(where: { $0.rank == rank }) {
                 slots[idx].errorCode = code
             }
-        case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion):
+        case .done(_, let cost, let dishesReturned, let retryCount, let promptVersion, let model):
             self.lastCostUSD = cost
             self.lastLatencyMS = Int(Date().timeIntervalSince(startedAt) * 1000)
             self.lastPromptVersion = promptVersion
@@ -293,14 +279,13 @@ final class SolveViewModel {
                 "prompt_version": promptVersion,
                 "total_latency_ms": lastLatencyMS ?? 0,
                 "any_hard_rule_violations": slots.contains { $0.errorCode != nil },
-                // Spec §15 required property — the Gemini model string
-                // that served the solve. Lets AI Ops dashboards split
-                // cost/latency by preview vs GA model version. Literal
-                // mirrors CLAUDE.md §Stack-snapshot (dinner-solve uses
-                // `gemini-3-flash-preview`); backend emits the same
-                // string on the paired `$ai_generation` event so the
-                // two dashboards reconcile.
-                "model": "gemini-3-flash-preview",
+                // Spec §15 required property — the model that served the
+                // solve, taken from the backend's `done` frame because the
+                // backend selects the provider (ADR 0038). It matches the
+                // paired `$ai_generation` event so the two dashboards
+                // reconcile. `unknown` only for solves replayed from a
+                // cache row written before the frame carried the model.
+                "model": model ?? "unknown",
             ])
             // Persist to CloudKit now that we have the full result.
             persistCompletedSolve()
@@ -370,7 +355,7 @@ final class SolveViewModel {
                 aiRequestId: nil,
             )
             self.persistedSolveID = outcome.solveRequestId
-            self.persistedSuggestedDishIDs = outcome.suggestedDishIds
+            self.persistedSuggestedDishIDsByRank = outcome.suggestedDishIdsByRank
             writeTonightSnapshot(
                 solveId: outcome.solveRequestId,
                 suggestedDishIds: outcome.suggestedDishIds,
@@ -413,13 +398,12 @@ final class SolveViewModel {
     }
 
     /// Look up the persisted RecipePlan for a DishCard the user has seen
-    /// in the options grid. Uses the rank → persistedSuggestedDishIDs
-    /// mapping populated by persistCompletedSolve (sorted by rank). Nil
+    /// in the options grid. Rank keys remain intact when a solve returns
+    /// fewer than three valid dishes. Nil
     /// if persistence hasn't completed yet or the dish row is gone.
     func persistedRecipePlan(for dish: DishCard) -> RecipePlan? {
-        let idx = dish.rank - 1  // ranks are 1-based
-        guard idx >= 0, idx < persistedSuggestedDishIDs.count else { return nil }
-        return solveRepo.fetchRecipePlan(forSuggestedDishId: persistedSuggestedDishIDs[idx])
+        guard let id = persistedSuggestedDishIDsByRank[dish.rank] else { return nil }
+        return solveRepo.fetchRecipePlan(forSuggestedDishId: id)
     }
 
     /// Current household — exposed for Cook Mode entry which needs the

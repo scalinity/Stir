@@ -301,7 +301,7 @@ export type DinnerSolveRequest = z.infer<typeof DinnerSolveRequest>;
 //   integrity ("don't substitute an aromatic into a dessert").
 
 const MissingIngredient = z.object({
-  display_name: z.string().min(1).max(128),
+  display_name: z.string().min(1).max(256),
   canonical_slug: z.string().min(1).max(128).optional(),
   amount_text: z.string().min(1).max(128).optional(),
 }).strict();
@@ -312,7 +312,7 @@ const PantrySnapshotItem = z.object({
 }).strict();
 
 const RemainingIngredient = z.object({
-  display_name: z.string().min(1).max(128),
+  display_name: z.string().min(1).max(256),
   canonical_slug: z.string().min(1).max(128).optional(),
 }).strict();
 
@@ -326,7 +326,7 @@ const RemainingIngredient = z.object({
 //
 // Bounds mirror `RealtimeRecipeContext.all_steps` (the voice-path schema
 // that closed the same blindness for cook-turn): step_number 1..100,
-// instruction <= 2000 chars, timer_seconds nullable 0..36000.
+// instruction <= 2000 chars, timer_seconds nullable 0..86400.
 //
 // Optional for back-compat: legacy iOS clients that ship before this
 // rollout will not send the field, and the v1.0.0 prompt does not
@@ -335,7 +335,7 @@ const RemainingIngredient = z.object({
 const SubstitutionRecipeStep = z.object({
   step_number: z.number().int().min(1).max(100),
   instruction: z.string().min(1).max(2000),
-  timer_seconds: z.number().int().min(0).max(36000).nullable(),
+  timer_seconds: z.number().int().min(0).max(86400).nullable(),
 }).strict();
 
 export const SubstitutionRequest = z.object({
@@ -386,8 +386,8 @@ export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
 //
 // Idempotency: caller passes the same sub_event_id used for the
 // substitution request; cached for 10 min via ai_response_cache so an
-// accidental double-tap doesn't double-bill. Feature_key is distinct
-// (`recipe_step_rewrite`) so the cache lookups don't collide.
+// accidental double-tap does not double-bill. The rewrite uses a
+// safety-versioned namespace distinct from the substitution cache key.
 //
 // step_instruction_text: the literal RecipeStep.instructionText to
 //   rewrite. Capped at 2000 chars (matches RealtimeRecipeContext bound).
@@ -405,10 +405,18 @@ export type SubstitutionRequest = z.infer<typeof SubstitutionRequest>;
 export const RecipeStepRewriteRequest = z.object({
   sub_event_id: z.string().uuid(),
   step_instruction_text: z.string().min(1).max(2000),
-  original_ingredient: z.string().min(1).max(128),
+  original_ingredient: z.string().min(1).max(256),
   substitute_ingredient: z.string().min(1).max(400),
   amount_conversion: z.string().min(1).max(400).optional(),
   recipe_title: z.string().min(1).max(256).optional(),
+  dietary_rules: z.array(
+    z.object({
+      kind: DietaryRuleKind,
+      value: z.string().min(1).max(64),
+      severity: DietaryRuleSeverity,
+    }).strict(),
+  ).max(50),
+  available_equipment: z.array(z.string().min(1).max(64)).max(50),
 }).strict();
 
 export type RecipeStepRewriteRequest = z.infer<typeof RecipeStepRewriteRequest>;
@@ -447,13 +455,13 @@ export type RecipeStepRewriteRequest = z.infer<typeof RecipeStepRewriteRequest>;
 // (`all_steps` add on 2026-04-22 fixed twice — `5348383`, `e117af4`).
 const RealtimeRecipeContext = z.object({
   title: z.string().min(1).max(256),
-  servings: z.number().int().min(1).max(12),
-  estimated_minutes: z.number().int().min(1).max(720),
+  servings: z.number().int().min(1).max(24),
+  estimated_minutes: z.number().int().min(1).max(1440),
   total_steps: z.number().int().min(1).max(100),
   current_step_text: z.string().min(1).max(2000),
   // 0 → no timer. Use nullable for "no timer" but keep it integer so Zod
   // doesn't choke on null when a step has no timer.
-  current_step_timer_seconds: z.number().int().min(0).max(36000).nullable(),
+  current_step_timer_seconds: z.number().int().min(0).max(86400).nullable(),
   // Full numbered list of every step in the recipe. Added 2026-04-22
   // after observed hallucination: user on step 2 asked about step 3
   // and the model invented content (said step 3 was "sautéing with
@@ -467,15 +475,15 @@ const RealtimeRecipeContext = z.object({
     z.object({
       step_number: z.number().int().min(1).max(100),
       text: z.string().min(1).max(2000),
-      timer_seconds: z.number().int().min(0).max(36000).nullable(),
+      timer_seconds: z.number().int().min(0).max(86400).nullable(),
     }).strict(),
   ).max(100),
   remaining_ingredients: z.array(
     z.object({
-      display_name: z.string().min(1).max(128),
+      display_name: z.string().min(1).max(256),
       canonical_slug: z.string().min(1).max(128).optional(),
     }).strict(),
-  ).max(50),
+  ).max(100),
 }).strict();
 
 const RealtimeHouseholdContext = z.object({
@@ -576,16 +584,17 @@ const TurnUsage = z.object({
   // for `ai_request_log.input_tokens` / `output_tokens` and prices the
   // uncategorized remainder at audio in/out rate.
   prompt_tokens_total: z.number().int().min(0).max(1_000_000),
-  // Gemini Live `cachedContentTokenCount` — portion of prompt tokens
-  // served from implicit context cache. When > 0, that portion is
-  // discounted in pricing (Gemini publishes ~25% of text-in rate for
-  // cached). Feeds `ai_request_log.prompt_cached_tokens` + PostHog
-  // `$ai_cache_read_input_tokens` so the cap-reversal trigger in spec §9
-  // ("cachedContentTokenCount ≥ 50% of promptTokenCount across 100
-  // sessions") is measurable. Optional — iOS omits when the accumulated
-  // count is zero (saves a field on the common path where caching isn't
-  // firing).
+  // Cached TEXT input tokens — the portion of `prompt_tokens_text` served
+  // from OpenAI Realtime's automatic prompt cache (ADR 0038). Feeds
+  // `ai_request_log.prompt_cached_tokens` (together with the cached audio
+  // below) and PostHog `$ai_cache_read_input_tokens`. Optional — iOS omits
+  // it when the turn's cached count is zero.
   prompt_tokens_cached: z.number().int().min(0).max(1_000_000).optional(),
+  // Cached AUDIO input tokens — the portion of `prompt_tokens_audio` served
+  // from the prompt cache. Priced separately because OpenAI's cached-audio
+  // rate differs from its cached-text rate. Optional (ADR 0038 addition);
+  // older clients omit it and their cached audio is billed at full rate.
+  prompt_tokens_cached_audio: z.number().int().min(0).max(1_000_000).optional(),
   response_tokens_text: z.number().int().min(0).max(1_000_000),
   response_tokens_audio: z.number().int().min(0).max(1_000_000),
   response_tokens_total: z.number().int().min(0).max(1_000_000),
@@ -615,10 +624,13 @@ export const VoiceTurnUsageRequest = z.object({
   .refine(
     (body) =>
       body.turns.every(
-        (t) => (t.prompt_tokens_cached ?? 0) <= t.prompt_tokens_total,
+        (t) =>
+          (t.prompt_tokens_cached ?? 0) + (t.prompt_tokens_cached_audio ?? 0) <=
+            t.prompt_tokens_total,
       ),
     {
-      message: 'prompt_tokens_cached must not exceed prompt_tokens_total',
+      message:
+        'prompt_tokens_cached + prompt_tokens_cached_audio must not exceed prompt_tokens_total',
       path: ['turns'],
     },
   );
@@ -717,8 +729,8 @@ export type RecipeImportRequest = z.infer<typeof RecipeImportRequest>;
 // /v1/ai/grocery-generate (step 7)
 // ---------------------------------------------------------------------------
 //
-// source_id: idempotency key. Either a RecipePlan UUID or a CookingSession
-//   UUID depending on source_type — iOS reuses the entity's own UUID here.
+// source_id: source recipe/session identity. The cache also binds the full
+//   validated ingredient and pantry input fingerprint.
 // source_type: metadata for telemetry only. NOT persisted on GroceryList
 //   (spec §4.16 has sourceCookingSessionId but no source_type column).
 // ingredients_needed: full set of recipe ingredients to diff against pantry.

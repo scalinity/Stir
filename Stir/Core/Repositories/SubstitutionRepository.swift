@@ -87,6 +87,48 @@ final class SubstitutionRepository {
         try controller.save()
     }
 
+    /// Commit the decision, ingredient and validated instruction together.
+    /// Restore only these attributes on failure, preserving unrelated edits.
+    func acceptValidatedSwap(
+        _ event: SubstitutionEvent,
+        substitutionText: String,
+        amountConversion: String?,
+        step: RecipeStep?,
+        rewrittenText: String?,
+    ) throws {
+        let ingredient = event.recipeIngredient
+        let previousDecision = event.acceptedBool
+        let previousAlternative = event.acceptedAlternativeText
+        let previousName = ingredient?.displayName
+        let previousAmount = ingredient?.amountText
+        let previousSlug = ingredient?.canonicalIngredientSlug
+        let previousInstruction = step?.instructionText
+
+        event.acceptedBool = true
+        event.acceptedAlternativeText = substitutionText
+        ingredient?.displayName = substitutionText
+        if let amount = amountConversion?.trimmingCharacters(in: .whitespacesAndNewlines), !amount.isEmpty {
+            ingredient?.amountText = amount
+        }
+        ingredient?.canonicalIngredientSlug = nil
+        if let rewrittenText {
+            step?.instructionText = rewrittenText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        do {
+            // The shared controller rolls back the entire context on error.
+            // Keep unrelated pending edits intact and restore our fields below.
+            try controller.viewContext.save()
+        } catch {
+            event.acceptedBool = previousDecision
+            event.acceptedAlternativeText = previousAlternative
+            ingredient?.displayName = previousName
+            ingredient?.amountText = previousAmount
+            ingredient?.canonicalIngredientSlug = previousSlug
+            step?.instructionText = previousInstruction
+            throw error
+        }
+    }
+
     /// Apply an accepted substitution to the recipe by mutating the linked
     /// RecipeIngredient in place. Without this, the swap is recorded as a
     /// SubstitutionEvent for history but invisible to every downstream

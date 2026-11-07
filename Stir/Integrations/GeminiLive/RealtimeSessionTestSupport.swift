@@ -25,7 +25,7 @@
 //     — tests assert against last-finalized turn state.
 //   - Mock harnesses (`MockMintResponse`, `MockLiveTransport`) — tests can
 //     construct valid mint payloads and drive transport send/receive paths
-//     without touching Gemini Live.
+//     without touching the real service.
 //
 // What does NOT live here: the `init(testingOnlyMintResponse:...)`
 // initializer remains in `RealtimeSession.swift` inside its own
@@ -154,9 +154,8 @@ extension RealtimeSession {
 
     /// P1-P test hook: synchronous wrapper for the private prewarm.
     /// Production trigger is deep in the finalize-turn path (fires only
-    /// at `turnsSinceRefresh == refreshAtTurnCount - 1`, ~3 turns in);
-    /// driving that naturally in a test would require a full multi-turn
-    /// setup. The seam-integration test uses this hook to invoke the
+    /// once the transport is `preMintAtSessionAgeSec` old); driving that
+    /// naturally in a test would require a full multi-turn setup. The seam-integration test uses this hook to invoke the
     /// prewarm directly after injecting a MockURLProtocol-backed
     /// `AIDispatch` via the normal constructor, then asserts
     /// `_testPendingPreMintIsSet == true` to pin the seam.
@@ -189,12 +188,12 @@ extension RealtimeSession {
 /// hand-writing subtly different `RealtimeSessionResponse` fixtures.
 enum MockMintResponse {
     static func make(
-        authToken: String = "auth_tokens/test",
-        expiresAt: String = "2027-01-01T00:00:00Z",
+        authToken: String = "ek_test_client_secret",
+        expiresAt: String = "2099-01-01T00:00:00Z",
         sessionID: String = UUID().uuidString,
-        wsURL: String = "wss://generativelanguage.googleapis.com/v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=auth_tokens/test",
+        wsURL: String = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini",
         promptVersion: String = "1.0.0",
-        setupFrameJSON: String = "{\"setup\":{}}",
+        setupFrameJSON: String = "{\"type\":\"session.update\",\"session\":{}}",
     ) -> RealtimeSessionResponse {
         RealtimeSessionResponse(
             authToken: authToken,
@@ -208,7 +207,7 @@ enum MockMintResponse {
 }
 
 /// SCA-132: deterministic in-memory Live transport. It records opened URLs
-/// and outbound frames, and lets tests yield inbound frames directly into
+/// (and the auth token each was opened with) and outbound frames, and lets tests yield inbound frames directly into
 /// RealtimeSession's normal receive dispatcher.
 @MainActor
 final class MockLiveTransport: LiveTransporting {
@@ -216,11 +215,13 @@ final class MockLiveTransport: LiveTransporting {
     private var continuation: AsyncThrowingStream<LiveInboundFrame, Error>.Continuation!
 
     private(set) var openedURLs: [URL] = []
+    private(set) var openedAuthTokens: [String] = []
     private(set) var sentFrames: [LiveOutboundFrame] = []
     private(set) var isClosed = false
 
     var openError: Error?
     var sendError: Error?
+    var onSend: ((LiveOutboundFrame) async throws -> Void)?
 
     init() {
         let pair = AsyncThrowingStream.makeStream(of: LiveInboundFrame.self)
@@ -242,9 +243,10 @@ final class MockLiveTransport: LiveTransporting {
         continuation?.finish()
     }
 
-    func open(url: URL) throws {
+    func open(url: URL, authToken: String) throws {
         if let openError { throw openError }
         openedURLs.append(url)
+        openedAuthTokens.append(authToken)
     }
 
     func close() {
@@ -255,6 +257,7 @@ final class MockLiveTransport: LiveTransporting {
     func send(_ frame: LiveOutboundFrame) async throws {
         if let sendError { throw sendError }
         sentFrames.append(frame)
+        try await onSend?(frame)
     }
 
     func yield(_ frame: LiveInboundFrame) {

@@ -90,6 +90,68 @@ final class HouseholdProfileExtensionsTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func test_aiPantryProjectionBoundsSupportedPantriesAndKeepsOldRecipeMatches() throws {
+        let context = controller.viewContext
+        let recipe = RecipePlan(context: context)
+        recipe.id = UUID()
+        recipe.household = household
+        let ingredient = RecipeIngredient(context: context)
+        ingredient.id = UUID()
+        ingredient.recipePlan = recipe
+        ingredient.displayName = "old recipe match"
+        ingredient.canonicalIngredientSlug = "ingredient_0"
+        var rows: [PantryItem] = []
+        for count in [201, 250, 1_000] {
+            for i in rows.count ..< count {
+                let row = PantryItem(context: context)
+                row.id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", i))
+                row.household = household
+                row.displayName = "ingredient \(i)"
+                row.canonicalIngredientSlug = "ingredient_\(i)"
+                row.userConfirmed = true
+                row.lastSeenAt = Date(timeIntervalSince1970: Double(i))
+                rows.append(row)
+            }
+            try controller.save()
+            let voice = household.voiceContextSnapshot(recipe: recipe)
+            XCTAssertEqual(voice.pantry.count, 200, "supported pantry count \(count)")
+            XCTAssertTrue(voice.pantry.contains { $0.canonicalSlug == "ingredient_0" })
+            let grocery = household.aiPantryItems(limit: 500, recipe: recipe)
+            XCTAssertEqual(grocery.count, min(500, count))
+            XCTAssertEqual(grocery.first?.id, rows[0].id, "recipe match precedes newer unrelated pantry rows")
+            XCTAssertEqual(grocery.dropFirst().first?.id, rows[count - 1].id)
+        }
+    }
+
+    func test_aiPantryProjectionUsesStableIdentityForEqualRecency() throws {
+        try seedPantry([
+            (name: "first", deletedAt: nil, userConfirmed: true),
+            (name: "second", deletedAt: nil, userConfirmed: true),
+            (name: "third", deletedAt: nil, userConfirmed: true),
+        ])
+        let rows = household.confirmedActivePantry()
+        for row in rows { row.lastSeenAt = Date(timeIntervalSince1970: 100) }
+        let expected = rows.compactMap(\.id).sorted { $0.uuidString < $1.uuidString }
+        XCTAssertEqual(household.aiPantryItems(limit: 2).compactMap(\.id), Array(expected.prefix(2)))
+        XCTAssertEqual(household.aiPantryItems(limit: 2).compactMap(\.id), Array(expected.prefix(2)))
+        XCTAssertTrue(household.aiPantryItems(limit: 0).isEmpty)
+    }
+
+    func test_voiceContextExcludesDeactivatedDietaryRules() throws {
+        let repository = DietaryRuleRepository(controller: controller)
+        let removed = try repository.add(to: household, kind: .diet, value: "vegan", severity: .hard)
+        try repository.add(to: household, kind: .allergy, value: "peanut", severity: .hard)
+        try repository.deactivate(removed)
+        controller.viewContext.refresh(removed, mergeChanges: false)
+
+        let snapshot = household.voiceContextSnapshot()
+        XCTAssertEqual(snapshot.dietaryRules.map(\.value), ["peanut"])
+        let realtimeAndFallback = RealtimeHouseholdContext(snapshot: snapshot)
+        XCTAssertEqual(realtimeAndFallback.dietaryRules.map(\.value), ["peanut"])
+        let substitution = SubstitutionRequest.HouseholdContext(snapshot: snapshot)
+        XCTAssertEqual(substitution.dietaryRules.map(\.value), ["peanut"])
+    }
+
     private func seedPantry(_ items: [(name: String, deletedAt: Date?, userConfirmed: Bool)]) throws {
         let context = controller.viewContext
         for item in items {
