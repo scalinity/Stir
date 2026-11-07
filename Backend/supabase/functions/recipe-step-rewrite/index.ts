@@ -36,17 +36,13 @@ import { summarizeViolations, validateStepRewrite } from '../_shared/hard_rules.
 const FEATURE_KEY = 'recipe_step_rewrite';
 const MODEL = textModelFor('recipe_step_rewrite');
 
-// Cache-key namespace. `ai_response_cache`'s PK is
-// (canonical_user_key, request_id) — feature_key is NOT in the key
-// (Backend/supabase/migrations/20260418000024_ai_response_cache_user_scope.sql).
-// The accept flow calls /v1/ai/substitution and then /v1/ai/recipe-step-
-// rewrite with the SAME sub_event_id; without a namespace the rewrite
-// readCache would hit substitution's body and iOS would fail to decode
-// the {substitution_text, constraint_safe, ...} payload as a
-// {rewritten_text, ...} response. The suffix is server-side only — the
-// wire body keeps `sub_event_id` so ai_request_log.request_id still
-// joins to the upstream substitution call for cost-attribution.
+// Cache keys separate rewrite responses from substitution responses for
+// the same sub_event_id. The safety version invalidates stale rewrites.
 const REWRITE_CACHE_SUFFIX = ':rewrite:safety-v2';
+// Log rows need their own stable key because request_id alone is the PK.
+// Keep it independent of cache versions; both calls share sub_event_id
+// as their PostHog trace_id, and SQL can join on split_part(request_id, ':', 1).
+const REWRITE_LOG_SUFFIX = ':rewrite';
 // Sentinel string passed to the prompt template when an optional field
 // is absent. Empty-string fallbacks rendered as bare `<<<USER_DATA_START>>>
 // <<<USER_DATA_END>>>` fences which wasted tokens and read ambiguously.
@@ -355,7 +351,7 @@ Deno.serve(async (req) => {
       client,
       userLog,
       {
-        request_id: body.sub_event_id,
+        request_id: body.sub_event_id + REWRITE_LOG_SUFFIX,
         canonical_user_key: claims.canonical_user_key,
         feature_key: FEATURE_KEY,
         model: MODEL,
@@ -397,7 +393,7 @@ Deno.serve(async (req) => {
     client,
     userLog,
     {
-      request_id: body.sub_event_id,
+      request_id: body.sub_event_id + REWRITE_LOG_SUFFIX,
       canonical_user_key: claims.canonical_user_key,
       feature_key: FEATURE_KEY,
       model: MODEL,

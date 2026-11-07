@@ -212,7 +212,7 @@ Deno.test('safety handlers preserve model refusals and reject unsafe final rewri
     providerCalls = 0;
     const incompleteID = crypto.randomUUID();
     assertEquals((await call(rewrite, { ...rewriteBody, sub_event_id: incompleteID })).status, 502);
-    const billed = logRows.find((row) => row.request_id === incompleteID);
+    const billed = logRows.find((row) => row.request_id === `${incompleteID}:rewrite`);
     assertExists(billed);
     assertEquals(billed.input_tokens, providerCalls * 11);
     assertEquals(billed.output_tokens, providerCalls * 7);
