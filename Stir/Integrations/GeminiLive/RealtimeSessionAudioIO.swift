@@ -270,6 +270,7 @@ extension RealtimeSession {
                         base64: frame.base64,
                         mimeType: frame.mimeType,
                     ))
+                    self.micFramesSentTotal += 1
                     #if DEBUG
                     framesSent += 1
                     bytesSent += frame.base64.count
@@ -304,5 +305,144 @@ extension RealtimeSession {
                 }
             }
         }
+    }
+
+    // MARK: - Audio health
+
+    /// Engine reported a hardware configuration change. iOS has already
+    /// stopped it, so the mic and speaker are both dead until restarted.
+    func handleEngineConfigurationChange() {
+        guard let pipeline = audioPipeline else { return }
+        // Our own restart can trigger a further notification after the
+        // engine is back up; a running engine needs nothing here (the
+        // health check still catches a tap that came back dead).
+        guard !pipeline.isEngineRunning else { return }
+        if pipeline.isCapturing {
+            recoverAudioEngine(reason: "engine_configuration_change")
+        } else {
+            // Before the first turn: nothing is listening yet. Drop any
+            // playback the stopped engine stranded; the next
+            // `startCapture` or `enqueuePlayback` starts the engine again.
+            pipeline.cancelPlayback()
+        }
+    }
+
+    func startAudioHealthMonitor() {
+        guard audioHealthTask == nil else { return }
+        audioHealthTask = Task { @MainActor [weak self] in
+            let nanos = UInt64(LiveSessionBudget.audioHealthCheckIntervalSec * 1_000_000_000)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: nanos)
+                guard !Task.isCancelled, let self else { return }
+                self.checkAudioHealth()
+            }
+        }
+    }
+
+    /// One health pass. Two failure shapes, both silent before this
+    /// existed:
+    ///   1. Playback buffers that will never report done, which keep the
+    ///      half-duplex gate shut so no mic audio is sent.
+    ///   2. A mic tap that stopped firing (engine stopped, or the tap
+    ///      was installed against a format the engine no longer uses).
+    func checkAudioHealth() {
+        let state = stateMachine.state
+        guard state != .closed, state != .error, !isRefreshing,
+              let pipeline = audioPipeline
+        else { return }
+
+        if pipeline.playbackOverdue(grace: LiveSessionBudget.playbackOverdueGraceSec) {
+            Logger.voice.warning(
+                "live_playback_callbacks_lost pending=\(pipeline.pendingPlaybackBufferCount, privacy: .public) state=\(state.rawValue, privacy: .public) — resetting playback so the mic can reopen",
+            )
+            SentryReporter.shared.breadcrumb(
+                category: "voice",
+                message: "playback callbacks lost, reset",
+                data: ["pending": String(pipeline.pendingPlaybackBufferCount), "state": state.rawValue],
+            )
+            pipeline.cancelPlayback()
+        }
+
+        guard pipeline.isCapturing else { return }
+        if !pipeline.isEngineRunning {
+            recoverAudioEngine(reason: "engine_stopped")
+        } else if pipeline.secondsSinceLastMicTap() > LiveSessionBudget.micTapStallSec {
+            recoverAudioEngine(reason: "mic_tap_stalled")
+        }
+    }
+
+    /// Restart the audio path in place. Bounded: past
+    /// `maxAudioRecoveriesPerWindow` restarts in `audioRecoveryWindowSec`,
+    /// or if the engine will not start, the session moves to `.error` so
+    /// Cook Mode drops back to "Ask with voice" and the next tap builds a
+    /// fresh session. Either outcome is reported to Sentry, because until
+    /// now this failure left no trace at all.
+    func recoverAudioEngine(reason: String) {
+        let state = stateMachine.state
+        guard state != .closed, state != .error, let pipeline = audioPipeline else { return }
+        let nowDate = now()
+        audioRecoveryTimes.removeAll {
+            nowDate.timeIntervalSince($0) >= LiveSessionBudget.audioRecoveryWindowSec
+        }
+        let context: [String: String] = [
+            "reason": reason,
+            "state": state.rawValue,
+            "mic_frames_sent": String(micFramesSentTotal),
+            "recoveries_in_window": String(audioRecoveryTimes.count),
+        ]
+        guard audioRecoveryTimes.count < LiveSessionBudget.maxAudioRecoveriesPerWindow else {
+            failAudioSession(reason: reason, context: context)
+            return
+        }
+        audioRecoveryTimes.append(nowDate)
+        do {
+            try pipeline.restartCapture()
+            Logger.voice.warning(
+                "live_audio_recovered reason=\(reason, privacy: .public) state=\(state.rawValue, privacy: .public)",
+            )
+            #if DEBUG
+            VoiceSessionLog.log("audio.recovered", ["reason": reason, "state": state.rawValue])
+            #endif
+            SentryReporter.shared.captureError(
+                VoiceAudioStallError(reason: reason, recovered: true),
+                context: context,
+            )
+        } catch {
+            Logger.voice.error(
+                "live_audio_restart_failed reason=\(reason, privacy: .public) error=\(error.localizedDescription, privacy: .private)",
+            )
+            failAudioSession(reason: reason, context: context)
+        }
+    }
+
+    private func failAudioSession(reason: String, context: [String: String]) {
+        Logger.voice.error(
+            "live_audio_unrecoverable reason=\(reason, privacy: .public) — ending voice session",
+        )
+        #if DEBUG
+        VoiceSessionLog.log("audio.unrecoverable", ["reason": reason])
+        #endif
+        SentryReporter.shared.captureError(
+            VoiceAudioStallError(reason: reason, recovered: false),
+            context: context,
+        )
+        if turnStartedAt != nil {
+            recordTurnAsTransportError()
+        }
+        audioPipeline?.cancelPlayback()
+        if stateMachine.state != .closed && stateMachine.state != .error {
+            stateMachine.advance(to: .error)
+        }
+    }
+}
+
+/// Reported to Sentry when the Live audio path stalls. `recovered` says
+/// whether an in-place restart brought it back or the session had to end.
+struct VoiceAudioStallError: Error, LocalizedError, Equatable, Sendable {
+    let reason: String
+    let recovered: Bool
+
+    var errorDescription: String? {
+        "Voice audio stalled (\(reason)); \(recovered ? "restarted" : "session ended")"
     }
 }
