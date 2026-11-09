@@ -107,6 +107,21 @@ enum LiveSessionBudget {
     /// `expires_at` for refresh to use it. Covers the WS open; the secret
     /// is only needed to open the connection.
     static let clientSecretMinRemainingSec: TimeInterval = 15
+    /// How often the audio health check runs while the mic is live.
+    static let audioHealthCheckIntervalSec: TimeInterval = 1
+    /// A mic tap that has not fired for this long, while capture is
+    /// supposed to be running, means the engine stopped or the tap went
+    /// dead. At the 20 ms tap cadence that is ~150 missed callbacks.
+    static let micTapStallSec: TimeInterval = 3
+    /// Buffers still counted as playing this long after they should have
+    /// finished mean their completion callbacks were lost.
+    static let playbackOverdueGraceSec: TimeInterval = 3
+    /// At most this many audio restarts inside
+    /// `audioRecoveryWindowSec`. One more stall in the window ends the
+    /// session in `.error`, so a route that keeps failing surfaces a
+    /// retry instead of looping restarts.
+    static let maxAudioRecoveriesPerWindow: Int = 3
+    static let audioRecoveryWindowSec: TimeInterval = 30
 }
 
 /// Running totals of usage observed during a single turn. OpenAI reports
@@ -402,6 +417,16 @@ final class RealtimeSession: VoiceSessionDriver {
     // Mic forwarding task — reads mic frames from pipeline and sends
     // to the WebSocket. Started at beginTurn, cancelled at endTurn.
     var micForwardTask: Task<Void, Never>?
+
+    // Audio health check (see RealtimeSessionAudioIO). Started with the
+    // first turn, cancelled at close. Restarts the engine when it stops
+    // under us and ends the session visibly when restarts keep failing.
+    var audioHealthTask: Task<Void, Never>?
+    var audioRecoveryTimes: [Date] = []
+    /// Mic frames actually sent to the server this session. Rides on the
+    /// voice-state Sentry breadcrumbs so a stall shows whether audio was
+    /// leaving the phone.
+    var micFramesSentTotal: Int = 0
 
     // Receive dispatcher task — reads inbound frames from transport
     // and updates state / plays audio / handles tool calls. Started
@@ -920,6 +945,11 @@ final class RealtimeSession: VoiceSessionDriver {
             self?.audioPipeline?.captureGate.setMuted(
                 to == .modelSpeaking || to == .refreshing || to == .closed || to == .error
             )
+            SentryReporter.shared.breadcrumb(
+                category: "voice",
+                message: "state \(from.rawValue) -> \(to.rawValue)",
+                data: ["mic_frames_sent": String(self?.micFramesSentTotal ?? 0)],
+            )
             self?.onVoiceStateChange?(to)
         }
         stateMachine.advance(to: .connecting)
@@ -962,6 +992,9 @@ final class RealtimeSession: VoiceSessionDriver {
             // 3. Prepare audio pipeline (mic converter + playback node)
             let pipeline = LiveAudioPipeline()
             try pipeline.prepare()
+            pipeline.onEngineConfigurationChange = { [weak self] in
+                self?.handleEngineConfigurationChange()
+            }
             self.audioPipeline = pipeline
             #if DEBUG
             VoiceSessionLog.log("audio.prepared")
@@ -1042,6 +1075,7 @@ final class RealtimeSession: VoiceSessionDriver {
         stateMachine.advance(to: .userSpeaking)
         try pipeline.startCapture()
         startMicForwarding()
+        startAudioHealthMonitor()
         #if DEBUG
         // `turn = turnCount + 1`: the turn about to run. Matches the
         // value `turn.end_submitted` emits for the same turn, so a
@@ -1263,6 +1297,9 @@ final class RealtimeSession: VoiceSessionDriver {
         receiveDispatcherTask = nil
         micForwardTask?.cancel()
         micForwardTask = nil
+        audioHealthTask?.cancel()
+        audioHealthTask = nil
+        audioRecoveryTimes.removeAll()
         transport?.close()
         transport = nil
         audioPipeline?.tearDown()

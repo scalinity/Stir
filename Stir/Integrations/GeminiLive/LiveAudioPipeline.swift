@@ -89,6 +89,43 @@ final class LiveAudioPipeline {
     let captureGate = MicCaptureGate()
     static let micBufferLimit = 5  // About 100 ms at the 20 ms capture cadence.
 
+    /// Called on the main actor when AVAudioEngine posts
+    /// `AVAudioEngineConfigurationChange`. iOS posts it after the engine
+    /// has already stopped itself because the input or output hardware
+    /// changed (a Bluetooth or wired device connecting, a speaker
+    /// override, the voice-processing unit renegotiating its format).
+    /// A stopped engine fires no mic tap and plays no audio, and it does
+    /// not restart on its own, so without this hook the session sat in
+    /// `.ready` / `.userSpeaking` forever with nothing reaching the
+    /// server. Leading suspect for the "voice just stops" stall seen on
+    /// device 2026-11-07 (the UI kept working; no turn ever completed).
+    /// The owning session decides how to recover (`restartCapture()`).
+    var onEngineConfigurationChange: (@MainActor () -> Void)?
+
+    /// Uptime of the most recent mic tap callback (any callback, muted or
+    /// not, zero-length or not). Read by the session's audio health check
+    /// to spot a tap that silently stopped firing. Written from the audio
+    /// thread, so it sits behind a lock like the level meters.
+    private let lastMicTapUptime = OSAllocatedUnfairLock<TimeInterval>(initialState: 0)
+
+    /// Uptime at which every buffer scheduled so far should have finished
+    /// rendering, assuming real-time playback from the moment each chunk
+    /// was queued. If buffers are still pending well past this point, their
+    /// `.dataPlayedBack` callbacks were lost (the engine stopped under
+    /// them) and the mic gate would otherwise stay shut for good.
+    private let playbackDeadlineUptime = OSAllocatedUnfairLock<TimeInterval>(initialState: 0)
+
+    /// Owns the configuration-change observer token so it is removed when
+    /// the pipeline goes away, without touching main-actor state from
+    /// `deinit`.
+    private final class ObserverToken: @unchecked Sendable {
+        var token: NSObjectProtocol?
+        deinit {
+            if let token { NotificationCenter.default.removeObserver(token) }
+        }
+    }
+    private let configChangeObserver = ObserverToken()
+
     struct MicFrame: Sendable {
         let base64: String
         let captureEpoch: UInt64
@@ -264,6 +301,20 @@ final class LiveAudioPipeline {
         self.micContinuation = continuation
 
         audioEngine.attach(playerNode)
+
+        configChangeObserver.token = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main,
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                Logger.voice.warning(
+                    "live_audio_engine_configuration_change engine_running=\(self.audioEngine.isRunning, privacy: .public) capturing=\(self.isMicRunning, privacy: .public)",
+                )
+                self.onEngineConfigurationChange?()
+            }
+        }
     }
 
     // MARK: - Mic lifecycle
@@ -366,6 +417,10 @@ final class LiveAudioPipeline {
         // same underlying lock + state, so writes from this local are
         // visible to MainActor reads via `self.currentMicLevel`.
         let micLevelLock = self.micLevelLock
+        let lastMicTapUptime = self.lastMicTapUptime
+        // Start the stall clock now so the health check gives a freshly
+        // installed tap a full window to deliver its first callback.
+        lastMicTapUptime.withLock { $0 = ProcessInfo.processInfo.systemUptime }
 
         inputNode.installTap(
             onBus: 0,
@@ -386,6 +441,7 @@ final class LiveAudioPipeline {
             // All reads + the copy-into-Data happen synchronously here
             // so nothing leaks out to stale memory.
             counter.total &+= 1
+            lastMicTapUptime.withLock { $0 = ProcessInfo.processInfo.systemUptime }
             let fl = buffer.frameLength
             if fl == 0 {
                 if counter.total % 50 == 0 {
@@ -585,6 +641,9 @@ final class LiveAudioPipeline {
         // `self.pendingPlaybackBuffers` / `self.outputLevelLock`) AND
         // avoids `self` capture into the audio-render-thread completion
         // callback that fires the closure.
+        let chunkSeconds = Double(frameCount) / playerFormat.sampleRate
+        let queuedAt = ProcessInfo.processInfo.systemUptime
+        playbackDeadlineUptime.withLock { $0 = max($0, queuedAt) + chunkSeconds }
         captureGate.playbackStarted()
         playerNode.scheduleBuffer(
             pcmBuffer,
@@ -618,6 +677,7 @@ final class LiveAudioPipeline {
         }
         playerNode.reset()
         pendingPlaybackBuffers.withLock { $0 = 0 }
+        playbackDeadlineUptime.withLock { $0 = 0 }
         captureGate.resetPlayback()
         // Drop the output meter so the UI's waveform settles to flat
         // immediately on stop, instead of holding the last chunk's peak
@@ -641,7 +701,67 @@ final class LiveAudioPipeline {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
+        onEngineConfigurationChange = nil
+        if let token = configChangeObserver.token {
+            NotificationCenter.default.removeObserver(token)
+            configChangeObserver.token = nil
+        }
         micContinuation?.finish()
+    }
+
+    // MARK: - Health + recovery
+
+    /// True while the mic tap is installed (between `startCapture` and
+    /// `stopCapture`).
+    var isCapturing: Bool { isMicRunning }
+
+    /// Whether AVAudioEngine is currently running. It stops itself on a
+    /// hardware configuration change.
+    var isEngineRunning: Bool { audioEngine.isRunning }
+
+    /// Seconds since the mic tap last fired. Only meaningful while
+    /// `isCapturing`.
+    func secondsSinceLastMicTap(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TimeInterval {
+        now - lastMicTapUptime.withLock { $0 }
+    }
+
+    /// True when buffers are still counted as playing more than `grace`
+    /// seconds after they should all have finished. That only happens
+    /// when their completion callbacks were lost, which leaves the
+    /// half-duplex mic gate shut with nothing actually playing.
+    func playbackOverdue(grace: TimeInterval, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        guard isPlayingBack else { return false }
+        let deadline = playbackDeadlineUptime.withLock { $0 }
+        return deadline > 0 && now > deadline + grace
+    }
+
+    /// Rebuild the audio path after the engine stopped or the mic tap
+    /// went quiet: drop queued playback (its callbacks will never fire on
+    /// a stopped engine), stop the engine so iOS renegotiates the current
+    /// route, re-pin the player connection, and reinstall the tap with the
+    /// input node's current format. Throws if the engine cannot start
+    /// again; the caller then ends the session visibly instead of leaving
+    /// it silent.
+    func restartCapture() throws {
+        let wasCapturing = isMicRunning
+        if isMicRunning {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isMicRunning = false
+            hardwareInputFormat = nil
+            converter = nil
+        }
+        cancelPlayback()
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.connect(
+            playerNode,
+            to: audioEngine.mainMixerNode,
+            format: playerFormat,
+        )
+        if wasCapturing {
+            try startCapture()
+        }
     }
 
     // MARK: - Internals
